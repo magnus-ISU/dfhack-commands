@@ -36,7 +36,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `dfhack-stocks` | overlay+menu | 🔨 planned | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, focus/melt/forbid/dump) — see spec |
-| statue-description | overlay | 📋 spec | Show a statue's description beneath its name — see spec |
+| `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | creature-health-description | overlay | 📋 spec | Creature's Health description, scrollable, bottom-left — see spec |
 | `auto-pasture` | overlay+service | 📋 spec | (graze)/(scavenge) pasture buttons; auto-assign new tame animals — see spec |
 
@@ -208,14 +208,17 @@ Verified mechanics: `flags.melt/forbid/dump/foreign/artifact`;
 **Needs live UI:** the bottom toolbar viewscreen + Stocks-button position (for
 the overlay button); exotic-detection method; the exact focus-on-sheet call.
 
-### 📋 statue-description overlay (do AFTER dfhack-stocks)
+### ✅ statue-description (DONE)
 
-When a statue is clicked/selected, render an overlay of **its description,
-beneath the statue's name**. Statue = `df.building_statuest`, which references a
-generated art image; the description comes from that image (find the path:
-building → image id → `world.art_image_chunks` caption / DF's image-description
-generator). **Needs live UI:** select a statue (user can provide one) to find the
-viewscreen focus, where the name renders, and the description data path.
+Overlay on `dwarfmode/ViewSheets/BUILDING/Statue` showing the statue's **exact
+prose description + value**. Key finding: DF generates the prose on the fly (not
+stored on the item) and caches it in the single global buffer
+`df.global.game.main_interface.view_sheets.raw_description`. On the statue's own
+building sheet DF populates that buffer for the displayed statue, so the overlay
+just reads it (no assembling). Value via `dfhack.items.getValue` on the contained
+STATUE item (`building.contained_items`). `overlay_onupdate_max_freq_seconds = 0`
+avoids a 1-frame stale flash when switching statues (the buffer updates a frame
+after selection). Same buffer approach should work for other ViewSheets prose.
 
 ### 📋 creature-health-description overlay
 

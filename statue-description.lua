@@ -31,18 +31,16 @@ local function selected_statue_item()
     end
 end
 
+-- DF's exact prose description lives in view_sheets.raw_description, which DF
+-- populates for the statue while its info sheet is showing (same text as the
+-- item sheet). We just read it -- no assembling/approximating.
 local function statue_description()
     local it = selected_statue_item()
     if not it then return end
-    local quality = df.item_quality[it:getQuality()]            -- e.g. Exceptional
-    local depiction = dfhack.items.getDescription(it, 0)        -- diorite statue of X
-    local lines = {cap(('%s %s'):format(quality, depiction))}
-    if #it.improvements > 0 then
-        lines[#lines + 1] = ('Decorated (%d improvement%s).'):format(
-            #it.improvements, #it.improvements == 1 and '' or 's')
-    end
-    lines[#lines + 1] = ('Value: %d%s'):format(dfhack.items.getValue(it), DWARF_BUCK)
-    return table.concat(lines, '\n')
+    local prose = df.global.game.main_interface.view_sheets.raw_description
+    if not prose or #prose == 0 then return end
+    prose = prose:gsub('%s+$', '')        -- trim trailing spaces
+    return ('%s\nValue: %d%s'):format(prose, dfhack.items.getValue(it), DWARF_BUCK)
 end
 
 StatueDescOverlay = defclass(StatueDescOverlay, overlay.OverlayWidget)
@@ -51,8 +49,8 @@ StatueDescOverlay.ATTRS{
     default_pos = {x = 8, y = 11},          -- ~100px right/down from the corner
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/BUILDING/Statue',
-    frame = {w = 26, h = 12},               -- ~400px wrap width
-    version = 2,
+    frame = {w = 78, h = 12},               -- 3x wider
+    version = 3,
     overlay_onupdate_max_freq_seconds = 0,  -- update every cycle (less stale-text lag)
 }
 
