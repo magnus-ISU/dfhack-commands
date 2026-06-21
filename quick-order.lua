@@ -15,6 +15,10 @@ Grammar (see README "work-orders quick text input" plan):
   * item: fuzzy, may be abbreviated (short s -> short sword)
 ]]
 
+local overlay = require('plugins.overlay')
+local widgets = require('gui.widgets')
+local gui = require('gui')
+
 local MAGMA_TEMP = 12000
 
 -- ---- vocab: items --------------------------------------------------------
@@ -332,7 +336,126 @@ function dry_run(input)
             material = mat, material_error = merr}
 end
 
+-- ---- order creation -----------------------------------------------------
+
+-- create a manager order from freeform text. Returns description, or nil+reason.
+-- (one-time; repeating + suggested conditions still TODO -- see README plan.)
+function create_order(input)
+    local p, err = parse(input)
+    if not p then return nil, err end
+    local mat, merr = resolve_material(p.left, p.item, most_in_stock)
+    if merr then return nil, merr end
+
+    local o = df.manager_order:new()
+    o.job_type = p.item.job
+    o.item_type = -1                      -- the job implies the item
+    o.item_subtype = p.item.item_subtype  -- weapon/armor subtype, or -1
+    o.mat_type, o.mat_index = -1, -1      -- default: any material
+    local matname = 'any material'
+    if mat.kind == 'specific' then
+        o.mat_type, o.mat_index = mat.mat_type, mat.mat_index
+        matname = mat.name
+    elseif mat.kind == 'category' then
+        o.material_category[mat.category] = true
+        matname = 'any ' .. mat.category
+    elseif mat.kind == 'class' then
+        if not mat.picked then
+            o:delete()
+            return nil, ('no %s%s in stock'):format(mat.constraint and (mat.constraint .. '-safe ') or '', mat.class)
+        end
+        o.mat_type, o.mat_index = mat.picked.mat_type, mat.picked.mat_index
+        matname = mat.picked.name
+    end
+    o.amount_total, o.amount_left = p.amount, p.amount
+    o.frequency = 0                       -- one-time
+    o.status.validated = true
+    o.status.active = true
+
+    local mo = df.global.world.manager_orders
+    o.id = mo.manager_order_next_id
+    mo.manager_order_next_id = o.id + 1
+    mo.all:insert('#', o)
+
+    return ('%dx %s %s'):format(p.amount, matname, p.item.name)
+        .. (p.repeating and '  [NOTE: created one-time; repeating+conditions not built yet]' or '')
+end
+
+-- ---- overlay: text box on the Work Orders screen -------------------------
+
+local function is_mouse_key(keys)
+    return keys._MOUSE_L or keys._MOUSE_R or keys._MOUSE_M
+        or keys.CONTEXT_SCROLL_UP or keys.CONTEXT_SCROLL_DOWN
+end
+
+QuickOrderOverlay = defclass(QuickOrderOverlay, overlay.OverlayWidget)
+QuickOrderOverlay.ATTRS{
+    desc = 'Type "3 steel swords" to create a manager order by freeform text.',
+    default_pos = {x = 113, y = -6},   -- just right of the DFHack order search (x=85,w=26)
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Info/WORK_ORDERS/Default',
+    frame = {w = 40, h = 4},
+}
+
+function QuickOrderOverlay:init()
+    self:addviews{
+        widgets.Panel{
+            frame = {t = 0, l = 0, r = 0, h = 4},
+            frame_style = gui.MEDIUM_FRAME,
+            frame_background = gui.CLEAR_PEN,
+            frame_title = 'new order',
+            subviews = {
+                widgets.EditField{
+                    view_id = 'edit',
+                    frame = {t = 0, l = 0, r = 0},
+                    label_text = '',
+                    on_submit = self:callback('submit'),
+                },
+                widgets.Label{
+                    view_id = 'status',
+                    frame = {t = 1, l = 0, r = 0},
+                    text = {{text = 'e.g. "3 steel swords", "r2 gabbro mechanism"', pen = COLOR_GRAY}},
+                },
+            },
+        },
+    }
+end
+
+-- auto-focus the text box whenever the Work Orders screen opens
+function QuickOrderOverlay:render(dc)
+    if not self._focused then
+        self._focused = true
+        self.subviews.edit:setFocus(true)
+    end
+    QuickOrderOverlay.super.render(self, dc)
+end
+
+function QuickOrderOverlay:submit(text)
+    local desc, err = create_order(text)
+    if desc then
+        self.subviews.status:setText({{text = '+ ' .. desc, pen = COLOR_GREEN}})
+        self.subviews.edit:setText('')
+    else
+        self.subviews.status:setText({{text = 'x ' .. (err or 'failed'), pen = COLOR_LIGHTRED}})
+    end
+end
+
+function QuickOrderOverlay:onInput(keys)
+    local edit = self.subviews.edit
+    if keys._MOUSE_R and edit.focus then edit:setFocus(false); return true end
+    if QuickOrderOverlay.super.onInput(self, keys) then return true end
+    if keys._MOUSE_L and edit.focus then edit:setFocus(false); return false end
+    if edit.focus and not is_mouse_key(keys) then return true end  -- capture typing
+end
+
+OVERLAY_WIDGETS = {entry = QuickOrderOverlay}
+
 if dfhack_flags.module then return end
+
+if create then
+    local desc, err = create_order(input)
+    if desc then print('created: ' .. desc) else dfhack.printerr('failed: ' .. tostring(err)) end
+    return
+end
 
 -- command: dry-run print
 local args = {...}
