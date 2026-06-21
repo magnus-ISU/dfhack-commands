@@ -211,14 +211,22 @@ the overlay button); exotic-detection method; the exact focus-on-sheet call.
 ### ✅ statue-description (DONE)
 
 Overlay on `dwarfmode/ViewSheets/BUILDING/Statue` showing the statue's **exact
-prose description + value**. Key finding: DF generates the prose on the fly (not
-stored on the item) and caches it in the single global buffer
-`df.global.game.main_interface.view_sheets.raw_description`. On the statue's own
-building sheet DF populates that buffer for the displayed statue, so the overlay
-just reads it (no assembling). Value via `dfhack.items.getValue` on the contained
-STATUE item (`building.contained_items`). `overlay_onupdate_max_freq_seconds = 0`
-avoids a 1-frame stale flash when switching statues (the buffer updates a frame
-after selection). Same buffer approach should work for other ViewSheets prose.
+prose description + value**. DF generates the prose on the fly (not stored on the
+item) into the single global buffer
+`view_sheets.raw_description`, and ONLY while an *item* sheet is showing -- the
+building sheet does NOT populate it for the statue (it's left stale from the last
+item sheet viewed).
+
+So the overlay fetches it itself: the first time a statue is selected, it flips
+`view_sheets` to the contained item (`active_sheet=ITEM`, `active_id=item.id`,
+push `viewing_itid`), waits a frame or two for DF to regenerate
+`raw_description`, reads it, then flips back (`active_sheet=BUILDING`,
+`active_id=bld.id`). Driven by `dfhack.timeout(n,'frames',...)` so it works while
+the item sheet is briefly shown. Results are cached by item id -- **the cache is
+the loop guard** (each statue fetched once; a `fetching` flag prevents
+re-entry). Brief 1-2 frame flash on first view of each statue. Value via
+`dfhack.items.getValue` on the contained STATUE item. Cache cleared on
+`SC_MAP_UNLOADED`. This fetch-and-cache trick generalises to any ViewSheets prose.
 
 ### 📋 creature-health-description overlay
 
