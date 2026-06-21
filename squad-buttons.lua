@@ -54,11 +54,11 @@ end
 KillTargetsOverlay = defclass(KillTargetsOverlay, overlay.OverlayWidget)
 KillTargetsOverlay.ATTRS{
     desc = 'Buttons to target all invaders / hostiles when giving a squad a kill order.',
-    default_pos = {x = 2, y = -7},
+    default_pos = {x = 1, y = 1},
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Default',
     frame = {w = 30, h = 2},
-    version = 1,
+    version = 2,
 }
 
 function KillTargetsOverlay:init()
