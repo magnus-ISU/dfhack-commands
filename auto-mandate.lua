@@ -223,7 +223,8 @@ function isEnabled()
 end
 
 -- a background cycle: queue silently, but report anything newly queued
-local function do_cycle()
+-- global (exported on the module) so the scheduled wrapper below can re-fetch it
+function do_cycle()
     if not dfhack.world.isFortressMode() then return end
     local queued = scan_and_queue()
     if #queued > 0 then
@@ -239,7 +240,15 @@ end
 
 local function start()
     enabled = true
-    repeatUtil.scheduleEvery(GLOBAL_KEY, CYCLE_DAYS, 'days', do_cycle)
+    -- Schedule a thin wrapper that re-fetches the current module each run instead
+    -- of capturing do_cycle directly. repeat-util stores the callback by value, so
+    -- a direct reference would keep running the version of the code that was loaded
+    -- when the schedule was created (at fort-load / enable) even after the script
+    -- is updated -- which silently kept queuing nothing. The reqscript indirection
+    -- makes the background cycle self-heal on any reload/update.
+    repeatUtil.scheduleEvery(GLOBAL_KEY, CYCLE_DAYS, 'days', function()
+        reqscript(GLOBAL_KEY).do_cycle()
+    end)
     do_cycle()   -- act immediately on enable
 end
 
