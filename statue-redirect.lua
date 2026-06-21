@@ -123,7 +123,7 @@ end
 RemoveOverlay = defclass(RemoveOverlay, overlay.OverlayWidget)
 RemoveOverlay.ATTRS{
     desc = 'Adds a Remove (deconstruct) button on a built item sheet.',
-    default_pos = {x = -53, y = 9},   -- top-right area
+    default_pos = {x = -48, y = 9},   -- top-right area
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
     frame = {w = 14, h = 1},
@@ -137,7 +137,6 @@ function RemoveOverlay:init()
             view_id = 'btn',
             frame = {t = 0, l = 0, w = 14, h = 1},
             label = 'Remove',
-            key = 'CUSTOM_CTRL_R',
             on_activate = self:callback('do_remove'),
         },
     }
