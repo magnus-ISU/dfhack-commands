@@ -39,7 +39,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `dfhack-stocks` | overlay+menu | 🔨 planned | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, focus/melt/forbid/dump) — see spec |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
-| `auto-pasture` | overlay+service | 📋 spec | (graze)/(scavenge) pasture buttons; auto-assign new tame animals — see spec |
+| `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
 
 ---
 
@@ -245,21 +245,36 @@ caste description instead, which is what's accessible and is the useful part for
 beasts. (Attribute-traits like "incredibly quick to heal, susceptible to disease"
 could be reconstructed from `unit` attributes if wanted.)
 
-### 📋 auto-pasture
+### ✅ auto-pasture (DONE)
 
-On the pen/pasture zone UI, render **(graze)** and **(scavenge)** buttons
-**below DFHack's existing "DFHack assign" button** (from the `zone.pasturepond`
-overlay). Clicking marks the current pasture as the grazing and/or scavenger
-pasture (both allowed, even the same zone). A background service then
-auto-assigns **new tame animals**: grazers → the graze pasture, non-grazers →
-the scavenge pasture.
+Overlay `auto-pasture.pasture` on `dwarfmode/Zone/Some/Pen` with two
+`ToggleHotkeyLabel`s — **Graze pasture** (Ctrl+G) and **Scavenge pasture**
+(Ctrl+R) — rendered at default pos `{x=7,y=17}`, **directly below** the
+`zone.pasturepond` overlay (which sits at `{x=7,y=13}`, h=4, holding "DFHack
+assign" + "DFHack autobutcher"). Toggling marks the current pen as the
+graze and/or scavenge pasture (both allowed, even the same pen); the overlay
+`render()` reflects each pen's current designation. A background service then
+pens **new** tame fort animals: grazers → the graze pen, non-grazers → the
+scavenge pen.
 
-- Grazer test: `world.raws.creatures.all[u.race].caste[u.caste].flags.GRAZER`
-  (verified). Tame fort animal: `isTame` + `civ_id == plotinfo.civ_id`.
-- New-animal hook: `repeat-util` scan (or `onStateChange`) for tame animals not
-  yet pastured; assign to the stored zone.
-- Persist the graze/scavenge civzone ids with the fort
-  (`dfhack.persistent.saveSiteData`); enableable service.
-- **Needs live UI:** the pen/pasture zone viewscreen + "DFHack assign" button
-  position (to place the buttons below it); the pasture-assignment API
-  (assign a unit to a pen/pasture civzone).
+**Verified mechanics (live):**
+- Current pen = `df.global.game.main_interface.civzone.cur_bld`
+  (a `building_civzonest`, `.type == df.civzone_type.Pen`).
+- Grazer test: `dfhack.units.isGrazer(unit)` (matches `caste.flags.GRAZER`).
+  Pasturable: `isFortControlled` + `isAlive` + `isAnimal` + not `isMerchant`.
+- "Unpastured" = no `BUILDING_CIVZONE_ASSIGNED`, `CONTAINED_IN_ITEM`, or
+  `BUILDING_CHAIN` general_ref.
+- **Assignment API** (mirrors `plugins.zone` `attach_to_zone`, verified with a
+  live assign+rollback): `df.new(df.general_ref_building_civzone_assignedst)`,
+  set `.building_id = pen.id`, `unit.general_refs:insert('#', ref)`, then
+  `utils.insert_sorted(pen.assigned_units, unit.id)`. Both the ref and the
+  pen's `assigned_units` list update.
+- **Respects manual removal:** a session `known` set marks every animal once
+  it's been seen pastured or auto-assigned, so an animal you deliberately
+  unpasture is not re-grabbed. First enable does an initial sweep of all
+  currently-roaming animals.
+- Designated pen ids + enabled state persist via
+  `dfhack.persistent.saveSiteData('auto-pasture', ...)`. Setting a pen via the
+  overlay auto-starts the service; `enable/disable auto-pasture` also works.
+  Stale (deleted) pen ids are forgotten on the next cycle. `repeat-util`
+  `scheduleEvery(1,'days')` drives the watcher.
