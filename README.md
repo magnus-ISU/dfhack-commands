@@ -343,6 +343,10 @@ manager order.
 - `four gabbro rock mechanisms` → **one-time** order, 4× mechanisms made
   specifically of **gabbro** (a *specific* stone, not generic "stone"); "four"
   parses as 4, the filler word "rock" is tolerated.
+- `magma safe rock mechanism` → 1× mechanism of a **magma-safe stone**. Here the
+  material part is a multi-word **property constraint** ("magma safe"), not a
+  material name — the resolver must (a) split the property+category descriptor
+  from the item name, and (b) pick a concrete material satisfying the constraint.
 - Ambiguous or unresolvable → **fail**, create nothing, report why.
 
 **Implementation approach — UI automation is allowed and is the recommended path
@@ -376,6 +380,15 @@ resolve → create or report. Register like dfhack-stocks/squad-buttons.
 description tokens; normalize plural→singular (`swords`→`sword`,
 `mechanisms`→`mechanism`); drop filler words (`rock`, `made`, `of`).
 
+**Phase 1b — split material descriptor from item name (the hard split).** Don't
+guess the boundary by position — **anchor on the item**: find the **longest
+suffix** of the tokens that matches an item-vocab name (`mechanism`, `short
+sword`, `war hammer` …). Everything to the left is the **material descriptor**
+(which may be empty, a name, a category, and/or property words). This handles
+multi-word on both sides: `magma safe rock | mechanism`, `gabbro rock | short
+sword`, `steel | short sword`. If two different item lengths both match, prefer
+the longest; still tied → ambiguous → fail.
+
 **Phase 2 — vocabularies (built once, cached).**
 - *Items:* name → `{job_type, item_type, item_subtype}`. Weapons+diggers from
   `world.raws.itemdefs.weapons` (`name`/`name_plural` → `MakeWeapon`+subtype);
@@ -388,14 +401,38 @@ description tokens; normalize plural→singular (`swords`→`sword`,
   (needs the loaded world: inorganic raws are empty at the title screen). Plus
   generic categories `wood / stone(any) / leather / cloth / bone / shell / glass`.
   A specific material (gabbro) beats a generic one (stone) when both appear.
+- *Material properties (constraints, not names):* a small phrase table —
+  `magma safe`/`magma-safe`, `fire safe`/`fireproof`, maybe `noneconomic`. These
+  filter the candidate material set rather than name one. Magma-safe = the
+  material's heat points are above magma temp (`material.heat.melting_point`,
+  `boiling_point`, `ignite_point`, `heatdam_point` all `> 12000`, the `NO_MELT`/
+  unset sentinel counts as safe); fire-safe = above ignite (`> ~11000`). (Confirm
+  the exact magma-temp constant + field names live; `dfhack.matinfo` may expose a
+  helper.)
 
-**Phase 3 — fuzzy resolve.** Classify tokens into item vs material; match item
-tokens against the item vocab (exact → substring → edit-distance); same for
-material, **preferring a specific inorganic over a generic category**. 0 item
-matches → fail "unknown item"; >1 → fail "ambiguous: a/b/c" (prefer
-civ-producible subtypes to break ties). Validate the item+material combo with
-`material_can_make` (a mechanism wants a hard stone/metal; reject e.g. cloth) —
-bad combo → fail.
+**Phase 3 — resolve the material descriptor** (item already matched in 1b).
+1. Pull any **property phrases** out of the descriptor first (`magma safe`,
+   `fire safe` …) → a set of constraints; remove those tokens.
+2. From what remains, match a **specific material** (gabbro) or a **category**
+   (stone/wood…), preferring specific over category (exact → substring →
+   edit-distance).
+3. **Apply constraints to pick a concrete material:**
+   - specific material given → keep it, but if it violates a constraint (e.g.
+     `magma safe microcline` but microcline weren't magma-safe) → fail.
+   - only a category (+ constraints) → take the category's candidate materials,
+     filter by the constraint(s), and choose one concretely — **default to the
+     stone the fort has the most of in stock** (boulders/bars), so the order is
+     immediately workable; if none satisfy → fail "no magma-safe stone".
+   - Most stone *is* magma-safe, so `magma safe rock mechanism` usually just
+     picks your most abundant stone; the constraint mainly excludes the rare
+     unsafe ones.
+4. Validate the item+material combo with `material_can_make` (a mechanism wants a
+   hard stone/metal; reject e.g. cloth) — bad combo → fail.
+
+Note: DF's add-order material picker has no "magma-safe" filter, so the
+**constraint case generally needs the direct/specific-material resolution above**
+(pick a concrete magma-safe stone) rather than pure UI automation; UI automation
+still works once a concrete material is chosen.
 
 **Phase 4 — create order.** Build `df.manager_order` exactly like auto-mandate
 (job_type, item_type/subtype per kind, mat_type/mat_index or material_category,
