@@ -333,15 +333,70 @@ labor(s) enabled. Work Details live in
 `df.global.plotinfo.labor_info.work_details` (verify); create one per type with
 its `allowed_labors` set.
 
-### work-orders quick text input ("3 steel swords")
-A text field on the Work Orders screen that parses freeform input into a manager
-order:
-- `3 steel swords` → fuzzy-match item + material → a **one-time** order for 3
-  **steel short swords** (sword→short sword, steel→STEEL).
-- `r3 steel sword` (leading `r`) → a **repeating** order for 3 steel short
-  swords, with **all suggested/default conditions** added.
-- Ambiguous match or no match → **fail** (create nothing, report why).
-- Reuse auto-mandate's item/material/job mapping for the fuzzy resolution.
+### work-orders quick text input ("3 steel swords") — IMPLEMENTATION PLAN
+
+**Goal:** a text field on the Work Orders screen that turns freeform text into a
+manager order.
+- `3 steel swords` → **one-time** order, 3× steel short sword.
+- `r3 steel sword` (leading `r`) → **repeating** order, 3× steel short sword,
+  with **all suggested conditions** added.
+- Ambiguous or unresolvable → **fail**, create nothing, report why.
+
+**Reuse:** `auto-mandate.lua` (order construction + job/material `MAP`),
+`dfhack-stocks.lua` (`material_can_make`, civ metals), DFHack `orders.lua`
+(item_conditions construction in its JSON import = the model for conditions).
+
+**Verified data:** `df.manager_order` fields = `job_type, item_type,
+item_subtype, mat_type, mat_index, material_category, amount_total, amount_left,
+frequency, item_conditions, order_conditions, status, id, reaction_name, …`.
+Conditions live in `item_conditions`. (auto-mandate already builds & inserts
+orders; this extends it with parsing + conditions.)
+
+**Phase 0 — UI (needs fort loaded to confirm).** Overlay on the Work Orders
+screen (focus `dwarfmode/Info/WORK_ORDERS`, verify `/Default`): an `EditField`
+for the text + a status line for the parse result / error. Enter = parse →
+resolve → create or report. Register like dfhack-stocks/squad-buttons.
+
+**Phase 1 — parse.** Trim; leading `r`/`R` → repeating; first integer = amount
+(default 1); rest = description tokens; normalize plural→singular
+(`swords`→`sword`).
+
+**Phase 2 — vocabularies (built once, cached).**
+- *Items:* name → `{job_type, item_type, item_subtype}`. Weapons+diggers from
+  `world.raws.itemdefs.weapons` (`name`/`name_plural` → `MakeWeapon`+subtype);
+  armor/helm/pants/gloves/shoes/shield from their itemdefs; ammo, tools,
+  trapcomps, instruments likewise; fixed-job furniture/crafts (door→ConstructDoor
+  …) from auto-mandate's `RAW`.
+- *Materials:* name → `{mat_type, mat_index}` or `material_category`. Metals from
+  inorganics (`steel`→`{0, idx}`); generic categories `wood/stone/leather/cloth/
+  bone/shell/glass`. Optionally bias to the civ's `resources.metals`.
+
+**Phase 3 — fuzzy resolve.** Classify tokens into item vs material; match item
+tokens against the item vocab (exact → substring → edit-distance); same for
+material. 0 item matches → fail "unknown item"; >1 → fail "ambiguous: a/b/c"
+(prefer civ-producible subtypes to break ties). Validate the item+material combo
+with `material_can_make`; bad combo → fail.
+
+**Phase 4 — create order.** Build `df.manager_order` exactly like auto-mandate
+(job_type, item_type/subtype per kind, mat_type/mat_index or material_category,
+amount_total=amount_left=N, status.validated+active=true), assign id from
+`manager_orders.manager_order_next_id`, insert into `.all`. `frequency`: one-time
+vs repeating (confirm the enum value live; auto-mandate uses 0 for one-time).
+
+**Phase 5 — suggested conditions (repeating; the hard part).** Add DF's
+"suggested conditions" into `order.item_conditions`.
+- *Live verification first:* in-game, create an order, click DF's add/suggest
+  conditions, then dump `order.item_conditions` to learn the exact struct
+  (`item_type/mat/flags/compare_type/condition`) DF emits — then replicate,
+  modelling the build on `orders.lua`'s import (it constructs item_conditions
+  from JSON).
+- *MVP fallback:* ship repeating orders WITHOUT conditions first (fully
+  functional, just ungated), add the suggested-conditions builder once the struct
+  is confirmed.
+
+**Open questions (need the loaded fort):** Work Orders focus string + overlay
+slot; `frequency` enum for repeating; exact `item_conditions` DF's suggest emits;
+tie-break aggressiveness.
 
 ### military uniform button + auto-orders
 A button (general military screen or squad equipment assignment) that:
@@ -357,3 +412,17 @@ A button (general military screen or squad equipment assignment) that:
 - Live UI needed: uniform templates (`df.global.world.*uniforms*` / entity
   uniform list) + the squad/military screen focus; reuse auto-mandate for the
   manager-order side.
+
+**Second toggle — auto-upgrade steel gear to masterwork:** when on, continuously
+churns inferior steel arms/armor into (eventually) masterwork:
+- Scan for **non-masterwork, "extra" steel weapons/armor** (steel item, quality <
+  Masterful, not currently equipped/assigned/reserved) and **mark them for
+  melting** (`markForMelting`) — recycling the steel and giving the re-forge a
+  fresh shot at masterwork.
+- For each melted inferior item, **add or bump a manager work order** to re-make
+  one of that exact item type+material (so the stock is replaced, not just lost).
+  Reuse auto-mandate's job/material mapping + the #3 order-creation/condition
+  code.
+- Idempotent: don't re-mark an item already flagged, and don't pile up duplicate
+  replacement orders (increment an existing matching order instead). Stop once
+  everything steel is masterwork. Toggle persists with the fort.
