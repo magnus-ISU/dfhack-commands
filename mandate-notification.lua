@@ -166,7 +166,7 @@ local function mandates_message()
             if m.mode == df.mandate_type.Make and not handled(m) then all_handled = false end
         end
         if all_make and all_handled then
-            text = ('dealing with %d production mandates'):format(count)
+            text = ('dealing with %d mandates'):format(count)
         elseif all_make then
             text = ('%d production mandates'):format(count)
         elseif all_export then
