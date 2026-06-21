@@ -1,24 +1,28 @@
--- Melt-focused, searchable/filterable stocks menu (+ a toolbar button).
+-- Searchable/filterable stocks menu for designating items (+ a toolbar button).
 --@module = true
 --[[
-A searchable list of meltable stock items, for quickly marking gear to melt
-(or forbid / dump), filtering out your own usable equipment so foreign/exotic
-loot is easy to find.
+A searchable list of fort items for quickly marking gear to melt (or forbid /
+dump), with origin / exotic / rarity filters so foreign loot and high-quality
+pieces are easy to find.
 
     dfhack-stocks            open the menu
 
-Or click the "DFHack stocks" button the overlay adds near the vanilla Stocks
-button on the bottom toolbar.
+Or click the "DFHack stocks" button the overlay adds near the top of the screen.
 
 Menu:
-  * Search field is focused on open; the most recent artifact is shown first.
-  * Foreign filter:  all / foreign-only / local-only        (item.flags.foreign)
-  * Exotic filter:   all / only-exotic / not-exotic         (gear the fort can't
-                     equip -- subtype not in the civ's weapon/armor lists)
-  * Action:          melt / forbid / dump / focus
-      - Enter/click a row applies the action; Shift+click applies to a range.
-      - melt/forbid/dump toggle the item's flag; focus opens the item's sheet.
-  * The selected item's full description + value show at the bottom.
+  * Search field is focused on open; the most recent artifact is selected.
+  * Action (top, next to Search): view / melt / forbid / dump. Defaults to view
+    (view opens the item's sheet); melt only lists metal meltable items, so the
+    non-meltable most-recent artifact can lead only under a non-melt action.
+  * Filters: origin (all/foreign/local), exotic (all/only/not), and a rarity
+    range slider (Ordinary .. Artifact).
+  * Rows show melt/forbid/dump flags, quality, value and the detailed
+    description, sorted by origin, then quality, then item type.
+  * Click a row once to select it (full description at the bottom); click it
+    again, double-click, or shift-click to apply the current action. Shift-click
+    applies to a range; "Apply to all visible" applies to everything shown.
+  * The panel on the right counts the items currently marked for melting, by
+    type. The bottom shows the selected item's full description + value.
 ]]
 
 local gui = require('gui')
@@ -88,33 +92,44 @@ local function is_exotic(item, prod)
     return false
 end
 
--- realistic-melting expected bars (DFHack tweak: 95% of forging cost minus 10%
--- per wear level; ammo and anything unhooked falls back to vanilla 30%).
-local MELT_PROD_STACK = {
-    [df.item_type.ARMOR] = 1, [df.item_type.GLOVES] = 2, [df.item_type.SHOES] = 2,
-    [df.item_type.HELM] = 1, [df.item_type.PANTS] = 1, [df.item_type.WEAPON] = 1,
-    [df.item_type.TRAPCOMP] = 1, [df.item_type.TOOL] = 1,
+-- ---- quality / type helpers -----------------------------------------------
+
+-- short tag + pen + full name, indexed by quality rank 0..6 (6 = artifact)
+local QUALITY = {
+    [0] = {tag = 'ord',  name = 'Ordinary',     pen = COLOR_GRAY},
+    [1] = {tag = 'well', name = 'Well-crafted',  pen = COLOR_WHITE},
+    [2] = {tag = 'fine', name = 'Finely-crafted',pen = COLOR_CYAN},
+    [3] = {tag = 'sup',  name = 'Superior',      pen = COLOR_LIGHTBLUE},
+    [4] = {tag = 'exc',  name = 'Exceptional',   pen = COLOR_GREEN},
+    [5] = {tag = 'mast', name = 'Masterful',     pen = COLOR_YELLOW},
+    [6] = {tag = 'ART',  name = 'Artifact',      pen = COLOR_LIGHTMAGENTA},
 }
-local function expected_bars(item)
-    local ps = MELT_PROD_STACK[item:getType()]
-    if ps then
-        local dim = item:getTotalDimension()
-        local ir = df.inorganic_raw.find(item.mat_index)
-        local forging = (ir and ir.flags.DEEP_SPECIAL) and (dim / ps)
-            or (math.max(math.floor(dim / 3), 1) / ps)
-        return forging * (0.95 - item.wear * 0.1)
+
+-- the set of item ids that are artifacts, plus the most-recent artifact's item
+-- id, read from the authoritative artifact list (newest = last entry). Some
+-- artifacts (slabs, engravings) have no movable item, so skip those.
+local function artifact_info()
+    local ids, recent = {}, nil
+    for _, a in ipairs(df.global.world.artifacts.all) do
+        if a.item and a.item.id >= 0 then
+            ids[a.item.id] = true
+            recent = a.item.id
+        end
     end
-    return (item:getMaterialSizeForMelting() or 0) * 0.3
+    return ids, recent
 end
 
--- readable metal name for grouping, e.g. "iron"
-local function metal_name(item)
-    if item.mat_type ~= 0 then
-        local mi = dfhack.matinfo.decode(item)
-        return mi and mi:toString() or 'other'
-    end
-    local ir = df.inorganic_raw.find(item.mat_index)
-    return ir and ir.id:lower():gsub('_', ' ') or 'other'
+local function quality_rank(item, art_ids)
+    if art_ids[item.id] then return 6 end       -- artifacts outrank Masterful
+    return item:getQuality()
+end
+
+-- readable item-type name for grouping/sorting, e.g. "battle axe", "mail shirt"
+local function type_name(item)
+    local ok, def = pcall(dfhack.items.getSubtypeDef, item:getType(), item:getSubtype())
+    if ok and def and def.name and def.name ~= '' then return def.name end
+    local tn = df.item_type[item:getType()]
+    return tn and tn:lower():gsub('_', ' ') or 'item'
 end
 
 -- one-letter status flags for the row, e.g. "M.D" (melt, dump)
@@ -123,40 +138,87 @@ local function flag_tag(item)
     return ('%s%s%s'):format(f.melt and 'M' or '.', f.forbid and 'F' or '.', f.dump and 'D' or '.')
 end
 
--- focus the game's item sheet on this item (mirrors statue-redirect)
+local function comma(n)
+    local out = tostring(math.floor(n or 0)):reverse():gsub('(%d%d%d)', '%1,'):reverse()
+    return (out:gsub('^,', ''))
+end
+
+-- focus the game's item sheet on this item (mirrors statue-redirect). The
+-- viewing_itid vector must be cleared first, or a stale id keeps the old sheet.
 local function focus_item(item)
     local vs = df.global.game.main_interface.view_sheets
+    vs.viewing_itid:resize(0)
+    vs.viewing_itid:insert('#', item.id)
     vs.active_sheet = df.view_sheet_type.ITEM
     vs.active_id = item.id
-    vs.viewing_itid:insert('#', item.id)
     vs.open = true
+    -- center the map on the item too, so the focus is unmistakable
+    local ok, x, y, z = pcall(dfhack.items.getPosition, item)
+    if ok and x then pcall(dfhack.gui.revealInDwarfmodeMap, xyz2pos(x, y, z), true, true) end
 end
 
 -- ---- window ---------------------------------------------------------------
 
 StocksWindow = defclass(StocksWindow, widgets.Window)
 StocksWindow.ATTRS{
-    frame_title = 'DFHack stocks (melt)',
-    frame = {w = 80, h = 40},
+    frame_title = 'DFHack stocks',
+    frame = {w = 114, h = 48},
     resizable = true,
-    resize_min = {w = 60, h = 25},
+    resize_min = {w = 86, h = 32},
 }
 
 function StocksWindow:init()
+    -- size to (nearly) fill the screen, capped, so it's as large as it can be
+    local sw, sh = dfhack.screen.getWindowSize()
+    self.frame = {w = math.max(90, math.min(160, sw - 4)),
+                  h = math.max(34, math.min(70, sh - 4))}
+
     self.prod = civ_production()
-    self.prev_idx = nil
+    self.armed_id = nil     -- row whose next click will apply the action
+    self.anchor_id = nil    -- range anchor for shift-click
+
+    local rarity_opts = {}
+    for i = 0, 6 do rarity_opts[i + 1] = {label = QUALITY[i].name, value = i} end
 
     self:addviews{
         widgets.EditField{
             view_id = 'search',
-            frame = {t = 0, l = 0, r = 0},
+            frame = {t = 0, l = 0, w = 46},
             label_text = 'Search: ',
         },
         widgets.CycleHotkeyLabel{
-            view_id = 'foreign',
-            frame = {t = 2, l = 0, w = 22},
+            view_id = 'action',
+            frame = {t = 0, l = 48, w = 22},
+            label = 'Action:',
+            -- default to view so the (non-meltable) most-recent artifact is in
+            -- the list on open; melt restricts to metal items, so it can't lead
+            initial_option = 'view',
+            options = {
+                {label = 'view', value = 'view', pen = COLOR_LIGHTCYAN},
+                {label = 'melt', value = 'melt', pen = COLOR_LIGHTRED},
+                {label = 'forbid', value = 'forbid', pen = COLOR_YELLOW},
+                {label = 'dump', value = 'dump', pen = COLOR_LIGHTMAGENTA},
+            },
+            on_change = function() self:refresh() end,
+        },
+        widgets.Label{
+            view_id = 'totals',
+            frame = {t = 0, l = 72, r = 0},
+        },
+        widgets.Label{
+            frame = {t = 2, l = 0},
+            text = {{text = 'Filters:', pen = COLOR_LIGHTCYAN}},
+        },
+        widgets.TextButton{
+            view_id = 'apply_all',
+            frame = {t = 2, r = 0, w = 24, h = 1},
+            label = 'Apply to all visible',
+            on_activate = self:callback('apply_all_visible'),
+        },
+        widgets.CycleHotkeyLabel{
+            view_id = 'origin',
+            frame = {t = 3, l = 2, w = 20},
             label = 'Origin:',
-            key = 'CUSTOM_SHIFT_F',
             options = {
                 {label = 'all', value = 'all', pen = COLOR_GRAY},
                 {label = 'foreign', value = 'foreign', pen = COLOR_YELLOW},
@@ -166,9 +228,8 @@ function StocksWindow:init()
         },
         widgets.CycleHotkeyLabel{
             view_id = 'exotic',
-            frame = {t = 2, l = 24, w = 26},
+            frame = {t = 3, l = 24, w = 20},
             label = 'Exotic:',
-            key = 'CUSTOM_SHIFT_X',
             options = {
                 {label = 'all', value = 'all', pen = COLOR_GRAY},
                 {label = 'only', value = 'only', pen = COLOR_YELLOW},
@@ -177,47 +238,69 @@ function StocksWindow:init()
             on_change = function() self:refresh() end,
         },
         widgets.CycleHotkeyLabel{
-            view_id = 'action',
-            frame = {t = 2, r = 0, w = 20},
-            label = 'Action:',
-            key = 'CUSTOM_SHIFT_A',
-            options = {
-                {label = 'melt', value = 'melt', pen = COLOR_LIGHTRED},
-                {label = 'forbid', value = 'forbid', pen = COLOR_YELLOW},
-                {label = 'dump', value = 'dump', pen = COLOR_LIGHTMAGENTA},
-                {label = 'focus', value = 'focus', pen = COLOR_LIGHTCYAN},
-            },
+            view_id = 'min_quality',
+            frame = {t = 3, l = 46, w = 30},
+            label = 'Min rarity:',
+            options = rarity_opts,
+            on_change = function() self:refresh() end,
+        },
+        widgets.CycleHotkeyLabel{
+            view_id = 'max_quality',
+            frame = {t = 3, r = 0, w = 30},
+            label = 'Max rarity:',
+            initial_option = 6,
+            options = rarity_opts,
+            on_change = function() self:refresh() end,
+        },
+        widgets.RangeSlider{
+            frame = {t = 4, l = 46, r = 1},
+            num_stops = 7,
+            get_left_idx_fn = function()
+                return self.subviews.min_quality:getOptionValue() + 1
+            end,
+            get_right_idx_fn = function()
+                return self.subviews.max_quality:getOptionValue() + 1
+            end,
+            on_left_change = function(idx) self:set_min_rarity(idx - 1) end,
+            on_right_change = function(idx) self:set_max_rarity(idx - 1) end,
         },
         widgets.Label{
-            frame = {t = 4, l = 0},
-            text = {{text = 'M=melt F=forbid D=dump   Enter/click: apply   Shift+click: range',
+            frame = {t = 5, l = 0, r = 0},
+            text = {{text = 'Click a row to select; click again / double / shift-click applies the action.',
                      pen = COLOR_GRAY}},
+        },
+        -- three-line column header lining up with the M/F/D flag columns
+        widgets.Label{
+            frame = {t = 6, l = 0},
+            text = 'Melt\n Forbid\n  Dump',
+            text_pen = COLOR_LIGHTRED,
         },
         widgets.FilteredList{
             view_id = 'list',
-            frame = {t = 6, l = 0, r = 27, b = 7},
-            on_submit = self:callback('apply_one'),
-            on_submit2 = self:callback('apply_range'),
+            frame = {t = 9, l = 0, r = 29, b = 8},
             on_select = self:callback('on_select'),
+            on_submit = self:callback('on_submit'),
+            on_submit2 = self:callback('on_submit2'),
+            on_double_click = self:callback('on_double_click'),
+            on_double_click2 = self:callback('on_submit2'),
         },
-        -- scrollable bars-by-metal breakdown of the currently shown items
         widgets.Panel{
-            frame = {t = 6, r = 0, w = 26, b = 7},
+            frame = {t = 9, r = 0, w = 28, b = 8},
             frame_style = gui.FRAME_THIN,
-            frame_title = 'Melt yield (bars)',
+            frame_title = 'Marked for melt',
             subviews = {
                 widgets.Label{
-                    view_id = 'bars_total',
+                    view_id = 'melt_total',
                     frame = {t = 0, l = 0, r = 0},
                 },
                 widgets.List{
-                    view_id = 'bars_list',
+                    view_id = 'melt_list',
                     frame = {t = 2, l = 0, r = 0, b = 0},
                 },
             },
         },
         widgets.Panel{
-            frame = {b = 0, l = 0, r = 0, h = 6},
+            frame = {b = 0, l = 0, r = 0, h = 7},
             frame_style = gui.FRAME_THIN,
             subviews = {
                 widgets.WrappedLabel{
@@ -229,100 +312,192 @@ function StocksWindow:init()
         },
     }
 
-    -- use our search field as the list's text filter (replace its built-in edit)
-    self.subviews.list.edit.visible = false
-    self.subviews.list.edit = self.subviews.search
-    self.subviews.search.on_change = self.subviews.list:callback('onFilterChange')
+    -- drive the list's text filter from our external search field, and pull the
+    -- list rows up flush (we don't use the FilteredList's own edit field)
+    local fl = self.subviews.list
+    fl.edit.visible = false
+    fl.list.frame = {t = 0}
+    fl.not_found.frame = {l = 0, t = 0}
+    fl.edit = self.subviews.search
+    self.subviews.search.on_change = function(text) fl:onFilterChange(text) end
 
     self:build_choices()
     self:refresh()
+    self:select_default()
+
+    -- the FilteredList's hidden edit grabbed keyboard focus during addviews;
+    -- hand it back to our visible search field
+    self.subviews.search:setFocus(true)
 end
 
 function StocksWindow:build_choices()
+    local art_ids, recent_art = artifact_info()
+    self.recent_artifact_id = recent_art
     local choices = {}
     for _, item in ipairs(df.global.world.items.all) do
-        if dfhack.items.canMelt(item) and not item.flags.garbage_collect then
-            local desc = dfhack.items.getDescription(item, 0, false)
-            choices[#choices + 1] = {
-                item = item,
-                desc = desc,
-                foreign = item.flags.foreign,
-                exotic = is_exotic(item, self.prod),
-                bars = expected_bars(item),
-                metal = metal_name(item),
-                search_key = dfhack.toSearchNormalized(desc),
-            }
+        if not item.flags.garbage_collect then
+            -- guard against odd items (body parts, vermin, etc.) failing a call
+            local ok, c = pcall(function()
+                local desc = dfhack.items.getDescription(item, 0, true)
+                local q = quality_rank(item, art_ids)
+                return {
+                    item = item,
+                    desc = desc,
+                    foreign = item.flags.foreign,
+                    exotic = is_exotic(item, self.prod),
+                    meltable = dfhack.items.canMelt(item),
+                    value = dfhack.items.getValue(item),
+                    qrank = q,
+                    qtag = QUALITY[q].tag,
+                    qpen = QUALITY[q].pen,
+                    qname = QUALITY[q].name,
+                    type_name = type_name(item),
+                    search_key = dfhack.toSearchNormalized(desc),
+                }
+            end)
+            if ok then choices[#choices + 1] = c end
         end
     end
-    -- most-recent artifact first feel: keep insertion order (newest items last in
-    -- world.items.all), so reverse so newest are on top
-    local rev = {}
-    for i = #choices, 1, -1 do rev[#rev + 1] = choices[i] end
-    self.all_choices = rev
+    -- sort: origin (foreign first), then quality (high first), then item type,
+    -- then value (high first), then newest first
+    table.sort(choices, function(a, b)
+        local ao, bo = a.foreign and 0 or 1, b.foreign and 0 or 1
+        if ao ~= bo then return ao < bo end
+        if a.qrank ~= b.qrank then return a.qrank > b.qrank end
+        if a.type_name ~= b.type_name then return a.type_name < b.type_name end
+        if a.value ~= b.value then return a.value > b.value end
+        return a.item.id > b.item.id
+    end)
+    self.all_choices = choices
 end
 
 function StocksWindow:make_text(c)
     return {
         {text = flag_tag(c.item), pen = COLOR_LIGHTRED, width = 3},
+        {gap = 1, text = c.qtag, pen = c.qpen, width = 4},
+        {gap = 1, text = ('%7s'):format(comma(c.value)), pen = COLOR_GREEN},
+        {gap = 1, text = c.foreign and 'F' or ' ', pen = COLOR_LIGHTBLUE, width = 1},
         {gap = 1, text = c.exotic and 'X' or ' ', pen = COLOR_YELLOW, width = 1},
-        {gap = 1, text = c.foreign and 'f' or ' ', pen = COLOR_LIGHTBLUE, width = 1},
         {gap = 1, text = c.desc},
     }
 end
 
 function StocksWindow:refresh()
-    local ff = self.subviews.foreign:getOptionValue()
+    local act = self.subviews.action:getOptionValue()
+    local ff = self.subviews.origin:getOptionValue()
     local xf = self.subviews.exotic:getOptionValue()
-    local list = {}
-    local by_metal, total = {}, 0
+    local minq = self.subviews.min_quality:getOptionValue()
+    local maxq = self.subviews.max_quality:getOptionValue()
+    local list, total = {}, 0
     for _, c in ipairs(self.all_choices or {}) do
+        if act == 'melt' and not c.meltable then goto cont end
         if ff == 'foreign' and not c.foreign then goto cont end
         if ff == 'local' and c.foreign then goto cont end
         if xf == 'only' and not c.exotic then goto cont end
         if xf == 'not' and c.exotic then goto cont end
-        list[#list + 1] = {text = self:make_text(c), search_key = c.search_key, item = c.item, data = c}
-        by_metal[c.metal] = (by_metal[c.metal] or 0) + c.bars
-        total = total + c.bars
+        if c.qrank < minq or c.qrank > maxq then goto cont end
+        list[#list + 1] = {text = self:make_text(c), search_key = c.search_key,
+                           item = c.item, data = c}
+        total = total + c.value
         ::cont::
     end
     local saved = self.subviews.list:getFilter()
     self.subviews.list:setFilter('')
     self.subviews.list:setChoices(list)
     self.subviews.list:setFilter(saved)
-    self:update_bars(by_metal, total, #list)
+    self:update_totals(#list, total)
+    self:update_melt_panel()
 end
 
--- fill the bars-by-metal breakdown panel (sorted by amount, descending)
-function StocksWindow:update_bars(by_metal, total, n_items)
-    local rows = {}
-    for metal, bars in pairs(by_metal) do rows[#rows + 1] = {metal = metal, bars = bars} end
-    table.sort(rows, function(a, b) return a.bars > b.bars end)
-    local choices = {}
-    for _, r in ipairs(rows) do
-        choices[#choices + 1] = {text = ('%-16s %6.1f'):format(r.metal:sub(1, 16), r.bars)}
+function StocksWindow:update_totals(n, total)
+    self.subviews.totals:setText({
+        {text = ('%d shown'):format(n), pen = COLOR_GRAY},
+        {gap = 2, text = ('value %s'):format(comma(total)), pen = COLOR_GREEN},
+    })
+end
+
+-- right panel: count of items currently marked for melting, grouped by type
+function StocksWindow:update_melt_panel()
+    local counts, order = {}, {}
+    for _, c in ipairs(self.all_choices or {}) do
+        if c.item.flags.melt then
+            if not counts[c.type_name] then counts[c.type_name] = 0; order[#order + 1] = c.type_name end
+            counts[c.type_name] = counts[c.type_name] + 1
+        end
     end
-    self.subviews.bars_total:setText(
-        {{text = ('%d items'):format(n_items), pen = COLOR_GRAY},
-         {gap = 1, text = ('= ~%.0f bars'):format(total), pen = COLOR_YELLOW}})
-    self.subviews.bars_list:setChoices(choices)
+    table.sort(order, function(a, b)
+        if counts[a] ~= counts[b] then return counts[a] > counts[b] end
+        return a < b
+    end)
+    local rows, tot = {}, 0
+    for _, tn in ipairs(order) do
+        rows[#rows + 1] = {text = ('%3d  %s'):format(counts[tn], tn)}
+        tot = tot + counts[tn]
+    end
+    self.subviews.melt_total:setText(tot > 0
+        and {{text = ('%d items marked'):format(tot), pen = COLOR_YELLOW}}
+        or {{text = 'nothing marked', pen = COLOR_GRAY}})
+    self.subviews.melt_list:setChoices(rows)
 end
 
-function StocksWindow:on_select(idx, choice)
+-- ---- selection + actions --------------------------------------------------
+
+function StocksWindow:show_desc(choice)
     if not choice then return end
-    local item = choice.item
+    local c = choice.data or choice
+    local item = c.item
     local ok, readable = pcall(dfhack.items.getReadableDescription, item)
-    local val = dfhack.items.getValue(item)
-    self.subviews.desc:setText((ok and readable or choice.data.desc) ..
-        ('\nvalue: %d%s%s'):format(val,
-            choice.data.foreign and '  [foreign]' or '',
-            choice.data.exotic and '  [exotic]' or ''))
+    self.subviews.desc:setText(('%s\n%s  -  value %s%s%s'):format(
+        ok and readable or c.desc,
+        c.qname,
+        comma(c.value),
+        c.foreign and '  [foreign]' or '  [created]',
+        c.exotic and '  [exotic]' or ''))
 end
 
-function StocksWindow:do_action(item)
+-- re-render one row's text in place (no action changes filter membership, so we
+-- avoid a full rebuild of the whole list on every click)
+function StocksWindow:update_row(id)
+    for _, w in ipairs(self.subviews.list:getVisibleChoices()) do
+        if w.item.id == id then w.text = self:make_text(w.data); return end
+    end
+end
+
+-- select (and scroll to the top) the most recent artifact in the current view,
+-- falling back to the newest item if no artifact is shown
+function StocksWindow:select_default()
+    local vis = self.subviews.list:getVisibleChoices()
+    if #vis == 0 then return end
+    local pos
+    if self.recent_artifact_id then
+        for i, c in ipairs(vis) do
+            if c.item.id == self.recent_artifact_id then pos = i; break end
+        end
+    end
+    if not pos then     -- newest item in view
+        local best
+        for i, c in ipairs(vis) do
+            if not best or c.item.id > best then best, pos = c.item.id, i end
+        end
+    end
+    if pos then
+        local lst = self.subviews.list.list
+        lst.page_top = pos          -- bring the chosen row to the top of the viewport
+        lst:setSelected(pos)        -- (clamped on next layout if near the end)
+        self:show_desc(vis[pos])
+        -- arm it so a single click on the pre-selected artifact applies the
+        -- current (view) action -- i.e. focuses its sheet right away
+        self.armed_id = vis[pos].item.id
+        self.anchor_id = vis[pos].item.id
+    end
+end
+
+-- toggle the current action's designation on one item
+function StocksWindow:toggle(item)
     local act = self.subviews.action:getOptionValue()
-    if act == 'focus' then
+    if act == 'view' then
         focus_item(item)
-        if view then view:dismiss() end   -- close so the sheet is visible
+        if view then view:dismiss() end
     elseif act == 'melt' then
         if item.flags.melt then dfhack.items.cancelMelting(item)
         elseif dfhack.items.canMelt(item) then dfhack.items.markForMelting(item) end
@@ -333,27 +508,103 @@ function StocksWindow:do_action(item)
     end
 end
 
-function StocksWindow:apply_one(idx, choice)
-    if choice then self:do_action(choice.item) end
-    self.prev_idx = self.subviews.list.list:getSelected()
+-- force the current action on (used by range / select-all so they don't toggle off)
+function StocksWindow:set_on(item)
+    local act = self.subviews.action:getOptionValue()
+    if act == 'melt' then
+        if not item.flags.melt and dfhack.items.canMelt(item) then dfhack.items.markForMelting(item) end
+    elseif act == 'forbid' then
+        item.flags.forbid = true
+    elseif act == 'dump' then
+        item.flags.dump = true
+    end
 end
 
-function StocksWindow:apply_range(idx, choice)
-    local cur = self.subviews.list.list:getSelected()
-    if not self.prev_idx or self:get_action() == 'focus' then
-        self:apply_one(idx, choice)
+function StocksWindow:apply(item)
+    if self.subviews.action:getOptionValue() == 'view' then
+        self:toggle(item)   -- opens the sheet + dismisses
         return
     end
-    local choices = self.subviews.list:getVisibleChoices()
-    local a, b = self.prev_idx, cur
-    for i = math.min(a, b), math.max(a, b) do
-        if choices[i] then self:do_action(choices[i].item) end
-    end
-    self.prev_idx = cur
+    self:toggle(item)
+    self:update_row(item.id)
+    self:update_melt_panel()
+    self.armed_id = item.id
+    self.anchor_id = item.id
 end
 
-function StocksWindow:get_action()
-    return self.subviews.action:getOptionValue()
+function StocksWindow:on_select(idx, choice)
+    self:show_desc(choice)
+end
+
+-- first click on a row only selects it; clicking the armed row applies
+function StocksWindow:on_submit(idx, choice)
+    if not choice then return end
+    local id = choice.item.id
+    if self.armed_id ~= id then
+        self.armed_id = id
+        self.anchor_id = id
+        self:show_desc(choice)
+        return
+    end
+    self:apply(choice.item)
+end
+
+-- double-click applies immediately
+function StocksWindow:on_double_click(idx, choice)
+    if not choice then return end
+    self.armed_id = choice.item.id
+    self:apply(choice.item)
+end
+
+-- shift-click applies to the range from the anchor row to here
+function StocksWindow:on_submit2(idx, choice)
+    if not choice then return end
+    if self.subviews.action:getOptionValue() == 'view' then
+        self:apply(choice.item)
+        return
+    end
+    local vis = self.subviews.list:getVisibleChoices()
+    local a, b
+    for i, c in ipairs(vis) do
+        if self.anchor_id and c.item.id == self.anchor_id then a = i end
+        if c.item.id == choice.item.id then b = i end
+    end
+    if not b then return end
+    a = a or b
+    for i = math.min(a, b), math.max(a, b) do
+        if vis[i] then self:set_on(vis[i].item); vis[i].text = self:make_text(vis[i].data) end
+    end
+    self:update_melt_panel()
+    self.armed_id = choice.item.id
+    self.anchor_id = choice.item.id
+end
+
+function StocksWindow:apply_all_visible()
+    if self.subviews.action:getOptionValue() == 'view' then return end
+    for _, c in ipairs(self.subviews.list:getVisibleChoices()) do
+        self:set_on(c.item); c.text = self:make_text(c.data)
+    end
+    self:update_melt_panel()
+end
+
+-- ---- rarity slider <-> min/max cycle labels -------------------------------
+
+function StocksWindow:set_min_rarity(q)
+    q = math.max(0, math.min(6, q))
+    self.subviews.min_quality:setOption(q)
+    if self.subviews.max_quality:getOptionValue() < q then
+        self.subviews.max_quality:setOption(q)
+    end
+    self:refresh()
+end
+
+function StocksWindow:set_max_rarity(q)
+    q = math.max(0, math.min(6, q))
+    self.subviews.max_quality:setOption(q)
+    if self.subviews.min_quality:getOptionValue() > q then
+        self.subviews.min_quality:setOption(q)
+    end
+    self:refresh()
 end
 
 -- ---- screen ---------------------------------------------------------------
@@ -382,8 +633,8 @@ end
 
 StocksButton = defclass(StocksButton, overlay.OverlayWidget)
 StocksButton.ATTRS{
-    desc = 'Adds a button to open the DFHack melt-focused stocks menu.',
-    default_pos = {x = -33, y = -5},
+    desc = 'Adds a button to open the DFHack stocks designation menu.',
+    default_pos = {x = 46, y = 6},   -- fallback; updateLayout pins it to ~40% across
     default_enabled = true,
     viewscreens = 'dwarfmode/Default',
     frame = {w = 16, h = 1},
@@ -397,6 +648,17 @@ function StocksButton:init()
             on_activate = show,
         },
     }
+end
+
+-- keep the button ~40% across the screen and ~5 cells down, on any resolution
+function StocksButton:updateLayout(parent_rect)
+    if parent_rect and parent_rect.width then
+        self.frame.l = math.floor(parent_rect.width * 0.40)
+        self.frame.t = 5
+        self.frame.r = nil
+        self.frame.b = nil
+    end
+    StocksButton.super.updateLayout(self, parent_rect)
 end
 
 OVERLAY_WIDGETS = {button = StocksButton}

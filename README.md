@@ -36,7 +36,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | ✅ done | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, melt/forbid/dump/focus, multi-select) + toolbar button |
+| `dfhack-stocks` | overlay+menu | ✅ done | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible) + toolbar button |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
@@ -179,28 +179,42 @@ can be confirmed before/while building.
 ### ✅ dfhack-stocks — melt-focused stocks menu (DONE)
 
 `dfhack-stocks` (or the toolbar overlay button `dfhack-stocks.button`) opens a
-`gui.ZScreen` melt-focused item picker. **Implemented:**
-- Lists every meltable item (`dfhack.items.canMelt`), newest first; built once
-  per open (~3.7k items here, fine through `FilteredList`).
-- Search `EditField` drives the `FilteredList` text filter (zone.lua pattern).
-- **Origin** filter all/foreign/local (`item.flags.foreign`).
-- **Exotic** filter all/only/not. Exotic = the fort civ **cannot produce** it:
-  subtype not in its `resources.*_type` lists (diggers counted, so the fort's own
-  picks aren't exotic but flails/great picks are), material can't be forged into
-  that class (platinum war hammer — platinum lacks `material.flags.ITEMS_WEAPON`),
-  or a metal the civ doesn't use.
-- **Melt yield (bars)** scrollable panel: breaks the currently shown items down by
-  metal (sorted desc) with an item count + total, using the realistic-melting
-  tweak formula (0.95 × forging cost − 0.10/wear level; ammo → vanilla 30%).
-- **Action** cycle melt/forbid/dump/focus. Enter/click applies to the row;
-  Shift+click applies to a range. melt toggles via
-  `markForMelting`/`cancelMelting`; forbid/dump toggle the flag; focus opens the
-  item sheet (`view_sheets.active_sheet=ITEM, active_id=id, viewing_itid push,
-  open=true`) and dismisses the menu. Rows show `M/F/D` flag tags + `X`(exotic)
-  `f`(foreign) markers; the selected item's readable description + value show at
-  the bottom.
-- Toolbar button overlay on `dwarfmode/Default` (default pos `-33,-5`; move with
-  `gui/overlay` to sit right above the vanilla Stocks button).
+`gui.ZScreen` item designation menu. **Implemented:**
+- Lists **all** items (`world.items.all`, skipping `garbage_collect`), built once
+  per open with a per-item `pcall` guard. When **Action = melt** the list is
+  restricted to metal-meltable items (`dfhack.items.canMelt`); the other actions
+  list everything. **Action defaults to `view`** (view/melt/forbid/dump; view
+  opens the item's sheet) — artifacts can never be melted (`canMelt` excludes
+  them), so a melt-default list could never lead with the most-recent artifact.
+- Rows show `M/F/D` flag tags, a quality tag, the value, `F`(foreign)/`X`(exotic)
+  markers, and the **decorated description** (`getDescription(item,0,true)`).
+- **Sort:** origin (foreign first) → quality (artifact→ordinary) → item type
+  (alphabetical, so masterwork axes before swords) → value → newest.
+- **Search** `EditField` (top-left, focused on open) drives the `FilteredList`
+  text filter; **Action** cycle sits to its right; a totals label shows the count
+  + summed value of the shown items.
+- **Filters:** origin all/foreign/local (`item.flags.foreign`); exotic all/only/not
+  (= the fort civ **cannot produce** it — subtype not in `resources.*_type`,
+  diggers counted; material can't be forged into that class; or an unused metal);
+  and a **rarity range slider** (Ordinary..Artifact) mirroring buildingplan's
+  `RangeSlider` + min/max `CycleHotkeyLabel`s.
+- **Interaction (mouse only — the search field captures the keyboard, so there
+  are no hotkeys):** click a row once to select it (full description + value at
+  the bottom); click it again / double-click / shift-click to apply the current
+  action. Shift-click applies to the range from the anchor; **Apply to all
+  visible** applies to everything shown. melt toggles via
+  `markForMelting`/`cancelMelting`; forbid/dump toggle the flag; view opens the
+  item sheet and dismisses the menu. After each apply the row's flags re-render
+  and selection is preserved by item id.
+- A three-line `Melt / Forbid / Dump` header is staggered to line up under the
+  `M`/`F`/`D` flag columns. The right panel counts items currently marked for
+  melting, **grouped by item type** (no bar totals).
+- On open the **most recent artifact** (last entry of `world.artifacts.all` that
+  has a movable `item`) is selected and scrolled to the top of the list; falls
+  back to the newest item if no artifact is in view. Artifact rows are detected
+  from that same id set (so they rank above Masterful in the sort).
+- Toolbar button overlay on `dwarfmode/Default`; `updateLayout` pins it to ~40%
+  across the screen and 5 cells down on any resolution.
 
 Original spec (for reference):
 
