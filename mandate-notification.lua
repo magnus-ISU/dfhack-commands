@@ -135,15 +135,39 @@ local function mandates_message()
             break
         end
     end
+    -- does a manager work order already exist for this Make mandate?
+    local function handled(m)
+        local ok, am = pcall(reqscript, 'auto-mandate')
+        return ok and am and am.has_order_for and am.has_order_for(m) or false
+    end
+
     local text
     if count == 1 then
-        text = 'Mandate: ' .. mandate_demand(list[1])
-    else
-        local all_export = true
-        for _, m in ipairs(list) do
-            if m.mode ~= df.mandate_type.Export then all_export = false; break end
+        local m = list[1]
+        if m.mode == df.mandate_type.Make then
+            -- "Produce N x" -> "Producing N x" once an order is queued
+            local verb = handled(m) and 'Producing' or 'Produce'
+            text = ('%s %d %s'):format(verb, m.amount_remaining,
+                item_name(m.item_type, m.item_subtype))
+        else
+            text = 'Mandate: ' .. mandate_demand(m)
         end
-        text = ('%d %s mandates'):format(count, all_export and 'export' or 'active')
+    else
+        local all_export, all_make, all_handled = true, true, true
+        for _, m in ipairs(list) do
+            if m.mode ~= df.mandate_type.Export then all_export = false end
+            if m.mode ~= df.mandate_type.Make then all_make = false end
+            if m.mode == df.mandate_type.Make and not handled(m) then all_handled = false end
+        end
+        if all_make and all_handled then
+            text = ('manager is dealing with %d production mandates'):format(count)
+        elseif all_make then
+            text = ('%d production mandates'):format(count)
+        elseif all_export then
+            text = ('%d export mandates'):format(count)
+        else
+            text = ('%d active mandates'):format(count)
+        end
     end
     return {{text = text, pen = urgent and COLOR_LIGHTRED or COLOR_YELLOW}}
 end

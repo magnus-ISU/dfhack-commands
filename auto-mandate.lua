@@ -100,6 +100,16 @@ local function item_label(m)
     return tok and tok:lower():gsub('_', ' ') or 'goods'
 end
 
+-- exposed for other tools (e.g. the mandate notification): is there already a
+-- manager order that would fulfil this Make mandate?
+function has_order_for(m)
+    if m.mode ~= df.mandate_type.Make then return false end
+    local map = MAP[m.item_type]
+    if not map then return false end
+    local it, sub = order_target(m, map)
+    return already_queued(map.job, it, sub)
+end
+
 -- scan all Make mandates and queue orders; returns lists of {queued, existing, skipped}
 local function scan_and_queue()
     local mandates = df.global.world.mandates.all
