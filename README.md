@@ -37,7 +37,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `dfhack-stocks` | overlay+menu | 🔨 planned | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, focus/melt/forbid/dump) — see spec |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
-| creature-health-description | overlay | 📋 spec | Creature's Health description, scrollable, bottom-left — see spec |
+| `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | 📋 spec | (graze)/(scavenge) pasture buttons; auto-assign new tame animals — see spec |
 
 ---
@@ -228,14 +228,21 @@ re-entry). Brief 1-2 frame flash on first view of each statue. Value via
 `dfhack.items.getValue` on the contained STATUE item. Cache cleared on
 `SC_MAP_UNLOADED`. This fetch-and-cache trick generalises to any ViewSheets prose.
 
-### 📋 creature-health-description overlay
+### ✅ creature-description (DONE)
 
-When a creature is clicked, show its description (the text from the **Health**
-tab) in a **scrollable area, bottom-left**. `dfhack.units.getDescription` does
-NOT exist, so the source must be found (DF generates the appearance/body
-description; locate the cached string or replicate the generator). **Needs live
-UI:** select a creature to find the Health description data path + the
-unit-selected viewscreen focus.
+Overlay on `dwarfmode/ViewSheets/UNIT` showing the selected creature's
+description in a wrapping block, bottom-left. Source:
+`world.raws.creatures.all[u.race].caste[u.caste].description` (readable from any
+tab — it's creature-raw data). For forgotten beasts / titans / generated
+creatures this is the full generated flavor (body, materials, special attacks);
+for ordinary creatures it's the species blurb.
+
+Note: the Health tab's *individual* appearance text (hair styling, scars, the
+attribute-traits sentence) is generated live on render and is NOT exposed
+(no `view_sheets` buffer, no `dfhack.units` generator) -- so this uses the
+caste description instead, which is what's accessible and is the useful part for
+beasts. (Attribute-traits like "incredibly quick to heal, susceptible to disease"
+could be reconstructed from `unit` attributes if wanted.)
 
 ### 📋 auto-pasture
 
