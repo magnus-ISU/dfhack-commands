@@ -126,7 +126,7 @@ RemoveOverlay.ATTRS{
     default_pos = {x = -48, y = 9},   -- top-right area
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
-    frame = {w = 14, h = 1},
+    frame = {w = 8, h = 1},
     version = 1,
     overlay_onupdate_max_freq_seconds = 0,
 }
@@ -135,7 +135,7 @@ function RemoveOverlay:init()
     self:addviews{
         widgets.TextButton{
             view_id = 'btn',
-            frame = {t = 0, l = 0, w = 14, h = 1},
+            frame = {t = 0, l = 0, w = 8, h = 1},
             label = 'Remove',
             on_activate = self:callback('do_remove'),
         },
