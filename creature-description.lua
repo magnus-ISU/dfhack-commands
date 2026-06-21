@@ -43,7 +43,7 @@ CreatureDescOverlay.ATTRS{
     default_pos = {x = 3, y = -4},   -- bottom-left
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/UNIT',
-    frame = {w = 78, h = 12},   -- same size as the old statue display
+    frame = {w = 98, h = 12},
     version = 1,
     overlay_onupdate_max_freq_seconds = 0,
 }
