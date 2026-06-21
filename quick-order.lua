@@ -298,20 +298,28 @@ function most_in_stock(class, constraint, item)
     local list = (class == 'stone' and df.global.world.items.other.BOULDER)
         or (class == 'metal' and df.global.world.items.other.BAR) or nil
     if not list then return nil end
-    local counts = {}
+    -- the fort's reserved (economic) stones -- coal/ores/flux/gypsum/...; skip
+    -- them for stone orders, falling back only if nothing else is available
+    local econ = (class == 'stone') and df.global.plotinfo.economic_stone or nil
+    local counts, fallback = {}, {}
     for _, it in ipairs(list) do
         if it.mat_type == 0 and ((not constraint) or is_magma_safe(0, it.mat_index))
             and (not item or mat_makes(item.item_type, it.mat_index))
         then
-            counts[it.mat_index] = (counts[it.mat_index] or 0) + it.stack_size
+            fallback[it.mat_index] = (fallback[it.mat_index] or 0) + it.stack_size
+            if not (econ and econ[it.mat_index]) then
+                counts[it.mat_index] = (counts[it.mat_index] or 0) + it.stack_size
+            end
         end
     end
-    local best, bestn
-    for mi, n in pairs(counts) do if not bestn or n > bestn then best, bestn = mi, n end end
+    local function pick(t) local b, bn; for mi, n in pairs(t) do if not bn or n > bn then b, bn = mi, n end end; return b, bn end
+    local best, bestn = pick(counts)
+    if not best then best, bestn = pick(fallback) end  -- only economic stone available
     if not best then return nil end
     local ir = df.inorganic_raw.find(best)
     return {mat_type = 0, mat_index = best,
-            name = ir and ir.id:lower():gsub('_', ' ') or '?', count = bestn}
+            name = ir and ir.id:lower():gsub('_', ' ') or '?', count = bestn,
+            economic = econ and econ[best] or false}
 end
 
 -- expose for dry-run / tests / future UI
