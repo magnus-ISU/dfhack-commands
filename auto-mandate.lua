@@ -109,13 +109,15 @@ local function order_fulfillable(o)
     return true   -- no material constraint: made from whatever is available
 end
 
--- a matching order that can actually be fulfilled right now
+-- a matching order that is actually working toward the mandate right now:
+-- it must be ACTIVE (its conditions are met -- e.g. not "only while < 10 in
+-- stock" when 10 already exist) and have its input material on hand
 local function has_fulfillable_order(job, it, sub)
     local all = df.global.world.manager_orders.all
     for i = 0, #all - 1 do
         local o = all[i]
         if o.job_type == job and o.item_type == it and o.item_subtype == sub
-            and order_fulfillable(o)
+            and o.status.active and order_fulfillable(o)
         then
             return true
         end
