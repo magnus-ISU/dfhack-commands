@@ -16,7 +16,9 @@ Two pieces that work together:
          grazers   -> the graze pasture
          non-grazers -> the scavenge pasture
      Animals you deliberately remove from a pasture are remembered and are NOT
-     re-grabbed -- only genuinely new ones get assigned.
+     re-grabbed -- only genuinely new ones get assigned. Babies are left with
+     their mothers and only get penned once they grow up (a nursing baby can't
+     be hauled to a pasture and grazes nothing anyway).
 
 Usage:
     enable auto-pasture       run the watcher in the background
@@ -70,12 +72,17 @@ local function get_ref(unit, t)
     return dfhack.units.getGeneralRef(unit, t)
 end
 
--- a live, fort-owned animal we're willing to pasture
+-- a live, fort-owned animal we're willing to pasture. Babies are skipped: a
+-- nursing baby is carried by its mother and can't be hauled to a pasture on its
+-- own (assigning one only spawns pen jobs that cancel), and it grazes nothing
+-- while nursing. We don't mark skipped babies as "known", so once a baby grows
+-- into a child/adult a later scan pens it like any other new animal.
 local function is_pasturable_animal(unit)
     return dfhack.units.isFortControlled(unit)
         and dfhack.units.isAlive(unit)
         and dfhack.units.isAnimal(unit)
         and not dfhack.units.isMerchant(unit)
+        and not dfhack.units.isBaby(unit)
 end
 
 local function is_unpastured(unit)
