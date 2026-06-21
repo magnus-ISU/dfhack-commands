@@ -30,6 +30,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `clear-flows` | one-shot | ✅ done | Wipes airborne flow clouds (miasma/smoke/…) — miasma FPS fix. `clear-flows Miasma Smoke` to filter |
 | `needs-tomb-notification` | register | ✅ done | Notify-panel alert for dead dwarves with no tomb; click → list of dead + cause of death + memorial-slab button |
 | `mandate-notification` | register | ✅ done | Shows mandates the moment they exist (overrides built-in `mandates_expiring`) |
+| `raid-notification` | register | ✅ done | Notify-panel entry for squads out raiding (rough ETA / "back any minute now") + weekly auto-unstuck |
 | `auto-mandate` | enableable | ✅ done | Queues manager work orders for Make mandates using cheap renewable materials |
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |

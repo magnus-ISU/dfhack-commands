@@ -31,6 +31,7 @@ end
 print('magnus-scripts: enabling persistent helpers...')
 try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notification') end)
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
+try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 
 print('Done. One-shot commands: destroy-forbidden, clear-flows, raid-status, attack-invaders.')

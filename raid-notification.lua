@@ -1,0 +1,142 @@
+-- Notify-panel entry for squads out raiding + a weekly auto-unstuck.
+--@module = false
+--[[
+Adds a notification (in the same panel as "moody dwarf...") showing squads that
+are out on a raid/mission and roughly how long until they're back:
+
+    * one squad   -> "Urist McLeader is raiding for N days"
+    * several     -> "N squads are raiding for Z days"   (Z = soonest to return)
+    * overdue     -> "... back any minute now"            (estimate exceeded)
+
+Every week it also runs fix/retrieve-units + fix/stuck-squad so stuck raiders get
+pulled home. Click the notification to run the unstuck immediately.
+
+Run once per session to register (add to dfhack.init / magnus-scripts to persist).
+]]
+
+local repeatUtil = require('repeat-util')
+
+local NAME = 'raids'
+local TICKS_PER_DAY  = 1200
+local TICKS_PER_YEAR = 403200
+local WORLD_TILE     = 48          -- army-pos units per world tile
+
+local function now_ticks()
+    return df.global.cur_year * TICKS_PER_YEAR + df.global.cur_year_tick
+end
+
+local function leader_name(c)
+    if c.master_hf and c.master_hf >= 0 then
+        local hf = df.historical_figure.find(c.master_hf)
+        if hf then return dfhack.translation.translateName(hf.name) end
+    end
+end
+
+-- active raids = army_controllers with fort squads assigned
+local function get_raids()
+    local fort = df.global.plotinfo.group_id
+    local ac = df.global.world.army_controllers.all
+    local raids = {}
+    for i = 0, #ac - 1 do
+        local c = ac[i]
+        if c.assigned_squads and #c.assigned_squads > 0 then
+            for j = 0, #c.assigned_squads - 1 do
+                local sq = df.squad.find(c.assigned_squads[j])
+                if sq and sq.entity_id == fort then
+                    table.insert(raids, c)
+                    break
+                end
+            end
+        end
+    end
+    return raids
+end
+
+local function dist(ax, ay, bx, by)
+    local dx, dy = bx - ax, by - ay
+    return math.sqrt(dx * dx + dy * dy)
+end
+
+-- rough estimate of days until this raid returns (nil if it can't be estimated)
+local function remaining_days(c, elapsed_days)
+    if elapsed_days < 0.5 then return nil end
+    local fort = df.world_site.find(df.global.plotinfo.site_id)
+    local target = df.world_site.find(c.site_id)
+    if not (fort and target) then return nil end
+    local army
+    local armies = df.global.world.armies.all
+    for i = 0, #armies - 1 do
+        if armies[i].controller_id == c.id then army = armies[i]; break end
+    end
+    if not army then return nil end
+    local ax, ay = army.pos.x / WORLD_TILE, army.pos.y / WORLD_TILE
+    local traveled = dist(fort.pos.x, fort.pos.y, ax, ay)
+    local oneway = dist(fort.pos.x, fort.pos.y, target.pos.x, target.pos.y)
+    if traveled < 1 or oneway < 1 then return nil end
+    local speed = traveled / elapsed_days                 -- world tiles per day
+    local eta = (2 * oneway) / speed                      -- rough round-trip
+    return eta - elapsed_days
+end
+
+local function raid_message()
+    if not dfhack.world.isFortressMode() then return end
+    local raids = get_raids()
+    if #raids == 0 then return end
+    local now = now_ticks()
+    -- pick the raid soonest to return (smallest remaining; fall back to longest gone)
+    local best
+    for _, c in ipairs(raids) do
+        local elapsed = (now - (c.year * TICKS_PER_YEAR + c.year_tick)) / TICKS_PER_DAY
+        local rem = remaining_days(c, elapsed)
+        local rank = rem or -elapsed                       -- no estimate: longer gone = sooner
+        if not best or rank < best.rank then
+            best = {c = c, elapsed = elapsed, rem = rem, rank = rank}
+        end
+    end
+    local overdue = best.rem ~= nil and best.rem <= 0
+    local days = math.max(0, math.floor(best.elapsed))
+    if #raids == 1 then
+        local who = leader_name(best.c) or 'A squad'
+        if overdue then return ('%s is raiding -- back any minute now'):format(who) end
+        return ('%s is raiding for %d day%s'):format(who, days, days == 1 and '' or 's')
+    else
+        if overdue then return ('%d squads are raiding -- back any minute now'):format(#raids) end
+        return ('%d squads are raiding for %d day%s'):format(#raids, days, days == 1 and '' or 's')
+    end
+end
+
+-- weekly: pull home stuck raiders
+local function unstuck()
+    if not dfhack.world.isFortressMode() then return end
+    pcall(function() reqscript('fix/retrieve-units').retrieveUnits() end)
+    pcall(function() dfhack.run_command('fix/stuck-squad') end)
+end
+
+local function register()
+    local n = reqscript('internal/notify/notifications')
+    local entry = n.NOTIFICATIONS_BY_NAME[NAME]
+    if not entry then
+        entry = {name = NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NAME] = entry
+    end
+    entry.desc = 'Shows squads out raiding and roughly when they will return.'
+    entry.dwarf_fn = raid_message
+    entry.on_click = unstuck
+    if n.config and n.config.data and not n.config.data[NAME] then
+        n.config.data[NAME] = {enabled = true, version = 1}
+    end
+    repeatUtil.scheduleEvery('raid-notification-unstuck', 7, 'days', unstuck)
+end
+
+register()
+
+dfhack.onStateChange[NAME] = function(ev)
+    if ev == SC_MAP_LOADED then
+        register()
+    elseif ev == SC_MAP_UNLOADED then
+        repeatUtil.cancel('raid-notification-unstuck')
+    end
+end
+
+print('raid-notification: registered "raids" notification + weekly unstuck.')
