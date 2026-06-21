@@ -56,7 +56,10 @@ local function scan()
         then
             local uid = it.unit_id
             local u = uid and uid >= 0 and df.unit.find(uid)
-            if u and u.civ_id == fortciv then
+            -- require the unit to actually be dead: CORPSEPIECE items also come
+            -- from LIVING dwarves (fingers/limbs lost in combat), which must not
+            -- be counted as needing a tomb
+            if u and u.civ_id == fortciv and dfhack.units.isDead(u) then
                 local rec = info[uid]
                 if not rec then
                     rec = {unit = u, buried = false, unburied = false, pos = nil}
