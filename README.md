@@ -33,7 +33,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `auto-mandate` | enableable | ✅ done | Queues manager work orders for Make mandates using cheap renewable materials |
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
-| `squad-buttons` | overlay | ✅ done | Kill-order screen buttons: "Target all invaders" + "Target all hostiles" (uses DF's native targeting; confirm as normal) |
+| `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 
 ---
@@ -99,10 +99,11 @@ on kill orders created through its own targeting flow.
    hostiles" buttons that append unit ids to `main_interface.squads.kill_unid`
    (verified: this marks the targets; the player then hits DF's "Confirm").
    Hostiles = `isDanger` & not `isInvader` & not `isFortControlled`.
-2. **TODO — select-all-squads button at the top of the squads screen.** Need the
-   multi-select representation in `main_interface.squads` (`squad_selected`
-   vector<bool> parallel to `squad_id` vector<int32>[9]). Inspect the live
-   squads list screen to get its focus string + button placement.
+2. ✅ **DONE — "Select all/no squads"** button (always shown on the squads
+   screen, focus `dwarfmode/Squads/Default`). Toggles every entry of
+   `main_interface.squads.squad_selected` (vector<bool>[9], parallel to
+   `squad_id`). Lives in the same `squad-buttons.killtargets` widget,
+   bottom-right (`overlay position` / `gui/overlay` to move).
 
 **Overlay registration (learned):** a `--@module = true` script with
 `OVERLAY_WIDGETS = {name=Widget}` in `dfhack-config/scripts/` is auto-discovered
