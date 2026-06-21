@@ -35,6 +35,10 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
+| `dfhack-stocks` | overlay+menu | 🔨 planned | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, focus/melt/forbid/dump) — see spec |
+| statue-description | overlay | 📋 spec | Show a statue's description beneath its name — see spec |
+| creature-health-description | overlay | 📋 spec | Creature's Health description, scrollable, bottom-left — see spec |
+| `auto-pasture` | overlay+service | 📋 spec | (graze)/(scavenge) pasture buttons; auto-assign new tame animals — see spec |
 
 ---
 
@@ -155,3 +159,88 @@ while paused / in GUIs — verified).
 **Output quirk:** `dfhack-run <cmd>` / `dfhack.run_script(...)` output sometimes
 prints to the DF console, not stdout. Verify state via a follow-up
 `dfhack-run lua` read.
+
+**Overlay widgets (recap):** a `--@module = true` script with
+`OVERLAY_WIDGETS = {name=Widget}` in the scripts dir is auto-discovered on DFHack
+start. Mid-session: `require('plugins.overlay').rescan()` (the `overlay rescan`
+command does NOT work). Position: `overlay position <script>.<name> <x> <y>`
+(negative x/y = from right/bottom edge) or `gui/overlay` to drag. Model:
+`uniform-unstick.lua`.
+
+---
+
+## Planned features (full specs — mostly need live UI inspection)
+
+All of these are GUI features. Each needs the relevant viewscreen opened so the
+focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
+can be confirmed before/while building.
+
+### 🔨 dfhack-stocks — melt-focused stocks menu (in progress)
+
+A "DFHack stocks" overlay button rendered **above the vanilla Stocks button**;
+clicking it opens a searchable/filterable menu (styled like `gui/trade` /
+`gui/sitemap`) for picking items — primarily to melt.
+
+Menu behavior:
+- **On open:** the search field is immediately focused, and the **most recent
+  artifact is selected with its description shown**.
+- **Click an item row** → show its description
+  (`dfhack.items.getReadableDescription` / `getDescription`).
+- **Foreign / locally-produced** filter — `item.flags.foreign` (true = foreign;
+  false = made locally). Cycles all / foreign-only / local-only.
+- **Exotic toggle (3-state):** include (all) → **only** exotic → **not** exotic.
+  "Exotic" = weapons/armor dwarves can't normally use. *Detection TBD* (item
+  subtype not usable by the fort race / wrong size) — verify live.
+- **Action cycle toggle:** focus → melt → forbid → dump.
+  - **focus** = "Focus on Item's Sheet": `main_interface.view_sheets` —
+    set `active_sheet` to the ITEM type + `viewing_itid = item.id`
+    (`df.view_sheet_type`, -1..7; confirm exact open call live).
+  - **melt** = `dfhack.items.markForMelting(item)` (`cancelMelting`, `canMelt`).
+  - **forbid** = set `item.flags.forbid`. **dump** = set `item.flags.dump`.
+  - melt/forbid/dump support multi-select (apply to all selected; the latest
+    click wins). focus acts on the focused row only.
+
+Verified mechanics: `flags.melt/forbid/dump/foreign/artifact`;
+`dfhack.items.markForMelting/cancelMelting/canMelt`; `world.artifacts.all`
+(most-recent = last entry, id 472 now); `view_sheets.viewing_itid`;
+`items.getDescription/getReadableDescription`.
+
+**Needs live UI:** the bottom toolbar viewscreen + Stocks-button position (for
+the overlay button); exotic-detection method; the exact focus-on-sheet call.
+
+### 📋 statue-description overlay (do AFTER dfhack-stocks)
+
+When a statue is clicked/selected, render an overlay of **its description,
+beneath the statue's name**. Statue = `df.building_statuest`, which references a
+generated art image; the description comes from that image (find the path:
+building → image id → `world.art_image_chunks` caption / DF's image-description
+generator). **Needs live UI:** select a statue (user can provide one) to find the
+viewscreen focus, where the name renders, and the description data path.
+
+### 📋 creature-health-description overlay
+
+When a creature is clicked, show its description (the text from the **Health**
+tab) in a **scrollable area, bottom-left**. `dfhack.units.getDescription` does
+NOT exist, so the source must be found (DF generates the appearance/body
+description; locate the cached string or replicate the generator). **Needs live
+UI:** select a creature to find the Health description data path + the
+unit-selected viewscreen focus.
+
+### 📋 auto-pasture
+
+On the pen/pasture zone UI, render **(graze)** and **(scavenge)** buttons
+**below DFHack's existing "DFHack assign" button** (from the `zone.pasturepond`
+overlay). Clicking marks the current pasture as the grazing and/or scavenger
+pasture (both allowed, even the same zone). A background service then
+auto-assigns **new tame animals**: grazers → the graze pasture, non-grazers →
+the scavenge pasture.
+
+- Grazer test: `world.raws.creatures.all[u.race].caste[u.caste].flags.GRAZER`
+  (verified). Tame fort animal: `isTame` + `civ_id == plotinfo.civ_id`.
+- New-animal hook: `repeat-util` scan (or `onStateChange`) for tame animals not
+  yet pastured; assign to the stored zone.
+- Persist the graze/scavenge civzone ids with the fort
+  (`dfhack.persistent.saveSiteData`); enableable service.
+- **Needs live UI:** the pen/pasture zone viewscreen + "DFHack assign" button
+  position (to place the buttons below it); the pasture-assignment API
+  (assign a unit to a pen/pasture civzone).
