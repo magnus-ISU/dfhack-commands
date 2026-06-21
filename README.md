@@ -304,3 +304,52 @@ scavenge pen.
   overlay auto-starts the service; `enable/disable auto-pasture` also works.
   Stale (deleted) pen ids are forgotten on the next cycle. `repeat-util`
   `scheduleEvery(1,'days')` drives the watcher.
+
+---
+
+## 📋 Planned / TODO (requested, not yet built)
+
+These need the fort loaded + the relevant screen open to nail down the
+viewscreen focus strings and data structures before building.
+
+### labor-screen "hide military" filter button
+A button on the labor / Work Details assignment screen that filters **military
+units out** of the unit list, so you only assign labors to civilians.
+- Live UI needed: the Work Details viewscreen focus and the displayed unit list
+  (likely `df.global.game.main_interface.info.labor` and/or the `sort` plugin's
+  filtered unit list — model the overlay on DFHack's `sort` labor overlay).
+- Military test: `unit.military.squad_id ~= -1` (or `dfhack.units` military
+  helper). The button toggles excluding those rows.
+
+### auto-create labor groups (Work Details)
+One-shot/command to create Work Details (labor groups) for each of:
+stone carving, metal crafting, weaponsmithing, armorsmithing, carpentry, stone
+crafting, glass making, brewing, cooking, jewelry — each with the matching
+labor(s) enabled. Work Details live in
+`df.global.plotinfo.labor_info.work_details` (verify); create one per type with
+its `allowed_labors` set.
+
+### work-orders quick text input ("3 steel swords")
+A text field on the Work Orders screen that parses freeform input into a manager
+order:
+- `3 steel swords` → fuzzy-match item + material → a **one-time** order for 3
+  **steel short swords** (sword→short sword, steel→STEEL).
+- `r3 steel sword` (leading `r`) → a **repeating** order for 3 steel short
+  swords, with **all suggested/default conditions** added.
+- Ambiguous match or no match → **fail** (create nothing, report why).
+- Reuse auto-mandate's item/material/job mapping for the fuzzy resolution.
+
+### military uniform button + auto-orders
+A button (general military screen or squad equipment assignment) that:
+- Creates a **default uniform per typical weapon type** — one group each of:
+  short sword, war hammer, battle axe, spear, pick, mace, crossbow.
+- Each uniform = **steel**: breastplate, (chain/mail) shirt, helm, gauntlets,
+  greaves, leggings, high boots, shield, **+ a steel weapon of that type**.
+  - Exceptions: **crossbow** uniform → **copper** crossbow + steel **buckler**;
+    **war hammer** uniform → **silver** war hammer + steel shield.
+- **Deletes the existing default *metal* uniforms** (leather uniforms stay).
+- Also **creates/increases manager orders** for the steel (and other requested)
+  items by the quantity the squad orders require.
+- Live UI needed: uniform templates (`df.global.world.*uniforms*` / entity
+  uniform list) + the squad/military screen focus; reuse auto-mandate for the
+  manager-order side.
