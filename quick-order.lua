@@ -420,12 +420,16 @@ function QuickOrderOverlay:init()
     }
 end
 
--- auto-focus the text box whenever the Work Orders screen opens
+-- auto-focus the text box whenever the Work Orders screen (re)opens. render()
+-- only runs while we're shown, so a gap since the last render = the screen was
+-- closed and reopened -> grab focus again (but not while you're using it, so
+-- clicking away to use the screen still works).
 function QuickOrderOverlay:render(dc)
-    if not self._focused then
-        self._focused = true
+    local now = dfhack.getTickCount()
+    if not self._last_render or now - self._last_render > 500 then
         self.subviews.edit:setFocus(true)
     end
+    self._last_render = now
     QuickOrderOverlay.super.render(self, dc)
 end
 
