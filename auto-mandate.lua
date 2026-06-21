@@ -68,31 +68,90 @@ local function order_target(m, map)
     return it, sub
 end
 
-local function already_queued(job, it, sub)
+-- ---- material availability (cheap, via per-type item lists) ----------------
+
+local function wood_logs()
+    return #df.global.world.items.other.WOOD
+end
+
+local function bars_of(mat_type, mat_index)
+    local bars = df.global.world.items.other.BAR
+    for i = 0, #bars - 1 do
+        local it = bars[i]
+        if it.mat_type == mat_type and it.mat_index == mat_index then return true end
+    end
+    return false
+end
+
+local function any_metal_bar()
+    local bars = df.global.world.items.other.BAR
+    if #bars > 0 then return bars[0].mat_type, bars[0].mat_index end
+end
+
+-- is this material in stock as a craftable input (bar/boulder/log/block)?
+local function material_in_stock(mt, mi)
+    for _, name in ipairs({'BAR', 'BOULDER', 'WOOD', 'BLOCKS'}) do
+        local list = df.global.world.items.other[name]
+        for i = 0, #list - 1 do
+            local it = list[i]
+            if it.mat_type == mt and it.mat_index == mi then return true end
+        end
+    end
+    return false
+end
+
+-- can this order actually be worked right now (input material on hand)?
+local function order_fulfillable(o)
+    if o.material_category.wood then return wood_logs() > 0 end
+    if o.mat_type and o.mat_type >= 0 then return material_in_stock(o.mat_type, o.mat_index) end
+    return true   -- no material constraint: made from whatever is available
+end
+
+-- a matching order that can actually be fulfilled right now
+local function has_fulfillable_order(job, it, sub)
     local all = df.global.world.manager_orders.all
     for i = 0, #all - 1 do
         local o = all[i]
-        if o.job_type == job and o.item_type == it and o.item_subtype == sub then
+        if o.job_type == job and o.item_type == it and o.item_subtype == sub
+            and order_fulfillable(o)
+        then
             return true
         end
     end
     return false
 end
 
-local function set_material(o, policy, m)
+-- pick a material the order can actually be made from. Returns a description, or
+-- nil if it cannot be fulfilled at all (so the caller skips it).
+local function choose_material(o, policy, m)
+    -- a mandate that demands a specific material: honour it (no substitution)
     if m.mat_type and m.mat_type >= 0 then
         o.mat_type = m.mat_type
         o.mat_index = m.mat_index
         local mi = dfhack.matinfo.decode(m.mat_type, m.mat_index)
         return mi and mi:toString() or 'specified material'
-    elseif policy == W then
-        o.material_category.wood = true
-        return 'wood'
+    end
+    if policy == W then
+        if wood_logs() > 0 then
+            o.material_category.wood = true
+            return 'wood'
+        end
+        return 'any material'   -- no wood: leave unconstrained (stone/bone/...)
     elseif policy == C then
         local cu = dfhack.matinfo.find('COPPER')
-        if cu then o.mat_type = cu.type; o.mat_index = cu.index; return 'copper' end
+        if cu and bars_of(cu.type, cu.index) then
+            o.mat_type, o.mat_index = cu.type, cu.index
+            return 'copper'
+        end
+        local mt, mi = any_metal_bar()        -- fall back to any metal in stock
+        if mt then
+            o.mat_type, o.mat_index = mt, mi
+            local info = dfhack.matinfo.decode(mt, mi)
+            return info and info:toString() or 'metal'
+        end
+        return nil   -- no metal at all: cannot fulfil
     end
-    return 'any material'
+    return 'any material'   -- A: unconstrained (uses any available stone/etc.)
 end
 
 local function item_label(m)
@@ -107,7 +166,7 @@ function has_order_for(m)
     local map = MAP[m.item_type]
     if not map then return false end
     local it, sub = order_target(m, map)
-    return already_queued(map.job, it, sub)
+    return has_fulfillable_order(map.job, it, sub)
 end
 
 -- scan all Make mandates and queue orders; returns lists of {queued, existing, skipped}
@@ -123,13 +182,10 @@ local function scan_and_queue()
                 table.insert(skipped, label)
             else
                 local it, sub = order_target(m, map)
-                if already_queued(map.job, it, sub) then
+                if has_fulfillable_order(map.job, it, sub) then
                     table.insert(existing, label)
                 else
-                    local mo = df.global.world.manager_orders
                     local o = df.manager_order:new()
-                    o.id = mo.manager_order_next_id
-                    mo.manager_order_next_id = o.id + 1
                     o.job_type = map.job
                     o.item_type = it
                     o.item_subtype = sub
@@ -138,9 +194,17 @@ local function scan_and_queue()
                     o.frequency = 0
                     o.status.validated = true
                     o.status.active = true
-                    local matdesc = set_material(o, map.mat, m)
-                    mo.all:insert('#', o)
-                    table.insert(queued, ('%d %s (%s)'):format(m.amount_remaining, label, matdesc))
+                    local matdesc = choose_material(o, map.mat, m)
+                    if matdesc then
+                        local mo = df.global.world.manager_orders
+                        o.id = mo.manager_order_next_id
+                        mo.manager_order_next_id = o.id + 1
+                        mo.all:insert('#', o)
+                        table.insert(queued, ('%d %s (%s)'):format(m.amount_remaining, label, matdesc))
+                    else
+                        o:delete()
+                        table.insert(skipped, label .. ' (no material available)')
+                    end
                 end
             end
         end
