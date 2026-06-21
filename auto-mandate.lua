@@ -21,7 +21,6 @@ Safe to run repeatedly: it never double-queues a mandate that already has a
 matching order. The enabled state persists with the fort.
 ]]
 
-local repeatUtil = require('repeat-util')
 local GLOBAL_KEY = 'auto-mandate'
 local CYCLE_DAYS = 1
 
@@ -237,15 +236,39 @@ local function persist()
     dfhack.persistent.saveSiteData(GLOBAL_KEY, {enabled = enabled})
 end
 
+-- We drive the daily cycle off a per-frame heartbeat gated on the game calendar,
+-- NOT repeat-util's tick/day timeouts: on this build those count rendered frames
+-- (many calendar ticks each) and fire only every ~3 game-days, so "daily" never
+-- happened. A 'frames' timeout fires every frame (~sub-tick granularity, verified)
+-- so checking the calendar delta gives an accurate once-per-day trigger.
+local DAY_TICKS = 1200 * CYCLE_DAYS
+local last_run = nil
+local hb_gen = 0   -- generation guard so only the newest heartbeat loop survives
+
+local function now_abs()
+    return df.global.cur_year * 403200 + df.global.cur_year_tick
+end
+
 local function start()
     enabled = true
-    repeatUtil.scheduleEvery(GLOBAL_KEY, CYCLE_DAYS, 'days', do_cycle)
-    do_cycle()   -- act immediately on enable
+    last_run = nil               -- run on the next heartbeat
+    hb_gen = hb_gen + 1
+    local my_gen = hb_gen
+    local function heartbeat()
+        if not enabled or my_gen ~= hb_gen then return end   -- stale/stopped: end loop
+        local now = now_abs()
+        if not last_run or now - last_run >= DAY_TICKS then
+            last_run = now
+            do_cycle()
+        end
+        dfhack.timeout(1, 'frames', heartbeat)
+    end
+    heartbeat()
 end
 
 local function stop()
     enabled = false
-    repeatUtil.cancel(GLOBAL_KEY)
+    hb_gen = hb_gen + 1          -- invalidate any running heartbeat loop
 end
 
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
@@ -258,6 +281,15 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     elseif sc == SC_MAP_UNLOADED then
         stop()
     end
+end
+
+-- exported so it can be driven via reqscript (the `enable` command goes through
+-- run_script, which on this build can serve a stale cached copy)
+function set_enabled(on)
+    if on then start() else stop() end
+    enabled = on
+    dfhack.persistent.saveSiteData(GLOBAL_KEY, {enabled = enabled})
+    return enabled
 end
 
 if dfhack_flags.module then

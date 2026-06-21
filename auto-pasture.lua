@@ -32,7 +32,6 @@ The designated zones and the enabled state persist with the fort.
 
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
-local repeatUtil = require('repeat-util')
 local utils = require('utils')
 
 local GLOBAL_KEY = 'auto-pasture'
@@ -215,15 +214,34 @@ local function do_cycle()
     end
 end
 
+-- Daily cycle driven off a per-frame heartbeat gated on the game calendar, NOT
+-- repeat-util: on this build repeat-util's tick/day timeouts count rendered
+-- frames (many calendar ticks each) and fire only every ~3 game-days. A 'frames'
+-- timeout fires every frame, so a calendar-delta check gives an accurate daily run.
+local DAY_TICKS = 1200 * CYCLE_DAYS
+local last_run = nil
+local hb_gen = 0   -- generation guard so only the newest heartbeat loop survives
+
 local function start()
     enabled = true
-    repeatUtil.scheduleEvery(GLOBAL_KEY, CYCLE_DAYS, 'days', do_cycle)
-    do_cycle()   -- act immediately
+    last_run = nil
+    hb_gen = hb_gen + 1
+    local my_gen = hb_gen
+    local function heartbeat()
+        if not enabled or my_gen ~= hb_gen then return end
+        local now = df.global.cur_year * 403200 + df.global.cur_year_tick
+        if not last_run or now - last_run >= DAY_TICKS then
+            last_run = now
+            do_cycle()
+        end
+        dfhack.timeout(1, 'frames', heartbeat)
+    end
+    heartbeat()
 end
 
 local function stop()
     enabled = false
-    repeatUtil.cancel(GLOBAL_KEY)
+    hb_gen = hb_gen + 1
 end
 
 -- ---- auto-designation of newly-built pens ---------------------------------
@@ -422,6 +440,22 @@ function AutoPastureOverlay:render(dc)
 end
 
 OVERLAY_WIDGETS = {pasture = AutoPastureOverlay}
+
+-- exported so it can be driven via reqscript (the `enable` command goes through
+-- run_script, which on this build can serve a stale cached copy)
+function set_enabled(on)
+    load_state()
+    if on then
+        scan_new_pens()          -- seed existing pens (no retroactive designation)
+        register_notification()
+        start()
+    else
+        stop()
+    end
+    state.enabled = enabled
+    save_state()
+    return enabled
+end
 
 if dfhack_flags.module then
     return
