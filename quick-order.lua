@@ -74,6 +74,23 @@ local function build_item_vocab()
             end
         end
     end
+    -- raw/rough glass: job MakeRawGlass with the glass colour as the material
+    -- (e.g. "raw green glass" -> MakeRawGlass, mat GLASS_GREEN). The colour is
+    -- baked into the item entry since "glass" is shared by item and material.
+    if df.job_type.MakeRawGlass then
+        for _, g in ipairs({
+            {'raw green glass', 'GLASS_GREEN'}, {'rough green glass', 'GLASS_GREEN'},
+            {'raw clear glass', 'GLASS_CLEAR'}, {'rough clear glass', 'GLASS_CLEAR'},
+            {'raw crystal glass', 'GLASS_CRYSTAL'}, {'rough crystal glass', 'GLASS_CRYSTAL'},
+        }) do
+            local mi = dfhack.matinfo.find(g[2])
+            if mi then
+                v[#v + 1] = {name = g[1], job = df.job_type.MakeRawGlass,
+                    item_type = -1, item_subtype = -1,
+                    mat = {mat_type = mi.type, mat_index = mi.index}}
+            end
+        end
+    end
     item_vocab = v
     return v
 end
@@ -351,8 +368,10 @@ function create_order(input)
     o.item_type = -1                      -- the job implies the item
     o.item_subtype = p.item.item_subtype  -- weapon/armor subtype, or -1
     o.mat_type, o.mat_index = -1, -1      -- default: any material
-    local matname = 'any material'
-    if mat.kind == 'specific' then
+    local matname = nil
+    if p.item.mat then                    -- baked material (raw glass colour)
+        o.mat_type, o.mat_index = p.item.mat.mat_type, p.item.mat.mat_index
+    elseif mat.kind == 'specific' then
         o.mat_type, o.mat_index = mat.mat_type, mat.mat_index
         matname = mat.name
     elseif mat.kind == 'category' then
@@ -376,8 +395,9 @@ function create_order(input)
     mo.manager_order_next_id = o.id + 1
     mo.all:insert(0, o)   -- new orders go to the top of the list
 
-    return ('%dx %s %s'):format(p.amount, matname, p.item.name)
-        .. (p.repeating and '  [NOTE: created one-time; repeating+conditions not built yet]' or '')
+    local desc = matname and ('%dx %s %s'):format(p.amount, matname, p.item.name)
+        or ('%dx %s'):format(p.amount, p.item.name)
+    return desc .. (p.repeating and '  [NOTE: created one-time; repeating+conditions not built yet]' or '')
 end
 
 -- ---- overlay: text box on the Work Orders screen -------------------------
