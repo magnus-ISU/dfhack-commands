@@ -184,9 +184,14 @@ can be confirmed before/while building.
   per open (~3.7k items here, fine through `FilteredList`).
 - Search `EditField` drives the `FilteredList` text filter (zone.lua pattern).
 - **Origin** filter all/foreign/local (`item.flags.foreign`).
-- **Exotic** filter all/only/not. Exotic = equipment the fort can't use: the
-  item's subtype isn't in the civ entity's `resources.{weapon,armor,helm,shield,
-  pants,gloves,shoes}_type` (verified: 507 usable vs 496 exotic weapons here).
+- **Exotic** filter all/only/not. Exotic = the fort civ **cannot produce** it:
+  subtype not in its `resources.*_type` lists (diggers counted, so the fort's own
+  picks aren't exotic but flails/great picks are), material can't be forged into
+  that class (platinum war hammer — platinum lacks `material.flags.ITEMS_WEAPON`),
+  or a metal the civ doesn't use.
+- **Melt yield (bars)** scrollable panel: breaks the currently shown items down by
+  metal (sorted desc) with an item count + total, using the realistic-melting
+  tweak formula (0.95 × forging cost − 0.10/wear level; ammo → vanilla 30%).
 - **Action** cycle melt/forbid/dump/focus. Enter/click applies to the row;
   Shift+click applies to a range. melt toggles via
   `markForMelting`/`cancelMelting`; forbid/dump toggle the flag; focus opens the
