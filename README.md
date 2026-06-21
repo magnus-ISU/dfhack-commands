@@ -36,7 +36,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | 🔨 planned | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, focus/melt/forbid/dump) — see spec |
+| `dfhack-stocks` | overlay+menu | ✅ done | Melt-focused searchable/filterable stocks menu (foreign/exotic filters, melt/forbid/dump/focus, multi-select) + toolbar button |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
@@ -176,7 +176,28 @@ All of these are GUI features. Each needs the relevant viewscreen opened so the
 focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
 can be confirmed before/while building.
 
-### 🔨 dfhack-stocks — melt-focused stocks menu (in progress)
+### ✅ dfhack-stocks — melt-focused stocks menu (DONE)
+
+`dfhack-stocks` (or the toolbar overlay button `dfhack-stocks.button`) opens a
+`gui.ZScreen` melt-focused item picker. **Implemented:**
+- Lists every meltable item (`dfhack.items.canMelt`), newest first; built once
+  per open (~3.7k items here, fine through `FilteredList`).
+- Search `EditField` drives the `FilteredList` text filter (zone.lua pattern).
+- **Origin** filter all/foreign/local (`item.flags.foreign`).
+- **Exotic** filter all/only/not. Exotic = equipment the fort can't use: the
+  item's subtype isn't in the civ entity's `resources.{weapon,armor,helm,shield,
+  pants,gloves,shoes}_type` (verified: 507 usable vs 496 exotic weapons here).
+- **Action** cycle melt/forbid/dump/focus. Enter/click applies to the row;
+  Shift+click applies to a range. melt toggles via
+  `markForMelting`/`cancelMelting`; forbid/dump toggle the flag; focus opens the
+  item sheet (`view_sheets.active_sheet=ITEM, active_id=id, viewing_itid push,
+  open=true`) and dismisses the menu. Rows show `M/F/D` flag tags + `X`(exotic)
+  `f`(foreign) markers; the selected item's readable description + value show at
+  the bottom.
+- Toolbar button overlay on `dwarfmode/Default` (default pos `-33,-5`; move with
+  `gui/overlay` to sit right above the vanilla Stocks button).
+
+Original spec (for reference):
 
 A "DFHack stocks" overlay button rendered **above the vanilla Stocks button**;
 clicking it opens a searchable/filterable menu (styled like `gui/trade` /
