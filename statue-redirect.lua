@@ -123,7 +123,7 @@ end
 RemoveOverlay = defclass(RemoveOverlay, overlay.OverlayWidget)
 RemoveOverlay.ATTRS{
     desc = 'Adds a Remove (deconstruct) button on a built item sheet.',
-    default_pos = {x = -16, y = -4},
+    default_pos = {x = -28, y = 7},   -- top-right, 28 tiles in / 7 down
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
     frame = {w = 14, h = 1},
