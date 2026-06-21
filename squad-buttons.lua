@@ -66,6 +66,7 @@ KillTargetsOverlay.ATTRS{
     viewscreens = 'dwarfmode/Squads/Default',
     frame = {w = 30, h = 3},
     version = 4,
+    overlay_onupdate_max_freq_seconds = 0,   -- update every cycle (no stale/lagged state)
 }
 
 function KillTargetsOverlay:init()
