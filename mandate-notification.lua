@@ -139,17 +139,24 @@ local function mandates_message()
     if count == 1 then
         text = 'Mandate: ' .. mandate_demand(list[1])
     else
-        text = ('%d active mandates'):format(count)
+        local all_export = true
+        for _, m in ipairs(list) do
+            if m.mode ~= df.mandate_type.Export then all_export = false; break end
+        end
+        text = ('%d %s mandates'):format(count, all_export and 'export' or 'active')
     end
     return {{text = text, pen = urgent and COLOR_LIGHTRED or COLOR_YELLOW}}
 end
 
 -- click handler: detailed list of every active mandate
+-- the click dialog always lists every mandate, including export bans that are
+-- hidden from the one-line notification when a higher-priority demand exists
 local function show_mandates()
-    local mandates = visible_mandates()
-    if #mandates == 0 then return end
+    local all = df.global.world.mandates.all
+    if #all == 0 then return end
     local lines = {'Active noble mandates:', ''}
-    for _, m in ipairs(mandates) do
+    for i = 0, #all - 1 do
+        local m = all[i]
         local dl = days_left(m)
         local when = dl <= 0 and 'expiring now'
             or ('%d day%s left'):format(dl, dl == 1 and '' or 's')
