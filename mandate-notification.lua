@@ -70,22 +70,74 @@ local function cap(s)
     return (s:gsub('^%l', string.upper))
 end
 
+-- True if a noble assigned to a room-requiring position owns no rooms at all,
+-- i.e. has a plainly-unmet room requirement. (Conservative: it does not try to
+-- judge whether an existing room is valuable enough -- room value isn't cleanly
+-- exposed -- only whether the noble has any room when one is demanded.)
+local function room_requirement_unmet()
+    local plot = df.global.plotinfo
+    local ent
+    for _, e in pairs(df.global.world.entities.all) do
+        if e.id == plot.group_id then ent = e; break end
+    end
+    if not ent then return false end
+    local pos_by_id = {}
+    for i = 0, #ent.positions.own - 1 do
+        local p = ent.positions.own[i]
+        pos_by_id[p.id] = p
+    end
+    for i = 0, #ent.positions.assignments - 1 do
+        local asg = ent.positions.assignments[i]
+        local p = pos_by_id[asg.position_id]
+        if p and (p.required_office > 0 or p.required_bedroom > 0
+            or p.required_dining > 0 or p.required_tomb > 0)
+        then
+            local hf = asg.histfig
+            local hfig = hf and hf >= 0 and df.historical_figure.find(hf)
+            local u = hfig and hfig.unit_id and hfig.unit_id >= 0 and df.unit.find(hfig.unit_id)
+            if u and not dfhack.units.isDead(u) and #u.owned_buildings == 0 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- the mandates to display: export bans are hidden when there is a more pressing
+-- noble demand (an active production mandate, or an unmet room requirement)
+local function visible_mandates()
+    local all = df.global.world.mandates.all
+    local has_make = false
+    for i = 0, #all - 1 do
+        if all[i].mode == df.mandate_type.Make then has_make = true; break end
+    end
+    local hide_exports = has_make or room_requirement_unmet()
+    local list = {}
+    for i = 0, #all - 1 do
+        local m = all[i]
+        if not (hide_exports and m.mode == df.mandate_type.Export) then
+            list[#list + 1] = m
+        end
+    end
+    return list
+end
+
 -- notification line (runs frequently; mandates.all is tiny so no caching needed)
 local function mandates_message()
     if not dfhack.world.isFortressMode() then return end
-    local mandates = df.global.world.mandates.all
-    local count = #mandates
+    local list = visible_mandates()
+    local count = #list
     if count == 0 then return end
     local urgent = false
-    for i = 0, count - 1 do
-        if (mandates[i].timeout_limit - mandates[i].timeout_counter) < NEAR_DEADLINE_TICKS then
+    for _, m in ipairs(list) do
+        if (m.timeout_limit - m.timeout_counter) < NEAR_DEADLINE_TICKS then
             urgent = true
             break
         end
     end
     local text
     if count == 1 then
-        text = 'Mandate: ' .. mandate_demand(mandates[0])
+        text = 'Mandate: ' .. mandate_demand(list[1])
     else
         text = ('%d active mandates'):format(count)
     end
@@ -94,11 +146,10 @@ end
 
 -- click handler: detailed list of every active mandate
 local function show_mandates()
-    local mandates = df.global.world.mandates.all
+    local mandates = visible_mandates()
     if #mandates == 0 then return end
     local lines = {'Active noble mandates:', ''}
-    for i = 0, #mandates - 1 do
-        local m = mandates[i]
+    for _, m in ipairs(mandates) do
         local dl = days_left(m)
         local when = dl <= 0 and 'expiring now'
             or ('%d day%s left'):format(dl, dl == 1 and '' or 's')
