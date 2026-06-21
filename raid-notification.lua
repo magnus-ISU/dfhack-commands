@@ -2,11 +2,13 @@
 --@module = false
 --[[
 Adds a notification (in the same panel as "moody dwarf...") showing squads that
-are out on a raid/mission and roughly how long until they're back:
+are out on a raid/mission and the rough estimate of time until they're back:
 
-    * one squad   -> "Urist McLeader is raiding for N days"
-    * several     -> "N squads are raiding for Z days"   (Z = soonest to return)
+    * mustering   -> "Urist McLeader is leaving to raid"  (not departed yet)
+    * one squad   -> "Urist McLeader is raiding -- back in ~N days"
+    * several     -> "N squads are raiding -- back in ~Z days"  (Z = soonest back)
     * overdue     -> "... back any minute now"            (estimate exceeded)
+    * unknown     -> "... is raiding"                     (not yet estimable)
 
 Every week it also runs fix/retrieve-units + fix/stuck-squad so stuck raiders get
 pulled home. Click the notification to run the unstuck immediately.
@@ -93,17 +95,21 @@ local function raid_message()
             best = {c = c, elapsed = elapsed, rem = rem, rank = rank}
         end
     end
-    local overdue = best.rem ~= nil and best.rem <= 0
-    local days = math.max(0, math.floor(best.elapsed))
+    -- describe the raid purely by time left (no elapsed-time wording)
+    local function eta_phrase()
+        if best.rem == nil then return 'raiding' end           -- can't estimate yet
+        if best.rem <= 0 then return 'raiding -- back any minute now' end
+        local r = math.max(1, math.floor(best.rem + 0.5))
+        return ('raiding -- back in ~%d day%s'):format(r, r == 1 and '' or 's')
+    end
+    local leaving = best.elapsed < 1                            -- not yet departed
     if #raids == 1 then
         local who = leader_name(best.c) or 'A squad'
-        if overdue then return ('%s is raiding -- back any minute now'):format(who) end
-        if days == 0 then return ('%s is leaving to raid'):format(who) end
-        return ('%s is raiding for %d day%s'):format(who, days, days == 1 and '' or 's')
+        if leaving then return ('%s is leaving to raid'):format(who) end
+        return ('%s is %s'):format(who, eta_phrase())
     else
-        if overdue then return ('%d squads are raiding -- back any minute now'):format(#raids) end
-        if days == 0 then return ('%d squads are leaving to raid'):format(#raids) end
-        return ('%d squads are raiding for %d day%s'):format(#raids, days, days == 1 and '' or 's')
+        if leaving then return ('%d squads are leaving to raid'):format(#raids) end
+        return ('%d squads are %s'):format(#raids, eta_phrase())
     end
 end
 
