@@ -31,10 +31,12 @@ local CYCLE_DAYS = 1
 --   kind 'fixed' : the job implies the item; set neither
 local W, C, A = 'wood', 'copper', 'any'
 local RAW = {
-    {'AMULET', 'MakeCrafts', W, 'craft'}, {'RING', 'MakeCrafts', W, 'craft'},
-    {'BRACELET', 'MakeCrafts', W, 'craft'}, {'EARRING', 'MakeCrafts', W, 'craft'},
-    {'CROWN', 'MakeCrafts', W, 'craft'}, {'SCEPTER', 'MakeCrafts', W, 'craft'},
-    {'FIGURINE', 'MakeCrafts', W, 'craft'},
+    -- jewelry/craft goods: use the SPECIFIC make-job (NOT generic "make crafts",
+    -- which makes a random item and would not satisfy the mandate)
+    {'AMULET', 'MakeAmulet', W, 'fixed'}, {'RING', 'MakeRing', W, 'fixed'},
+    {'BRACELET', 'MakeBracelet', W, 'fixed'}, {'EARRING', 'MakeEarring', W, 'fixed'},
+    {'CROWN', 'MakeCrown', W, 'fixed'}, {'SCEPTER', 'MakeScepter', W, 'fixed'},
+    {'FIGURINE', 'MakeFigurine', W, 'fixed'},
     {'TOY', 'MakeToy', W, 'fixed'}, {'GOBLET', 'MakeGoblet', W, 'fixed'},
     {'FLASK', 'MakeFlask', W, 'fixed'}, {'CAGE', 'MakeCage', W, 'fixed'},
     {'BARREL', 'MakeBarrel', W, 'fixed'}, {'BUCKET', 'MakeBucket', W, 'fixed'},
