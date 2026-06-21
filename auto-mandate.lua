@@ -26,7 +26,6 @@ local GLOBAL_KEY = 'auto-mandate'
 local CYCLE_DAYS = 1
 
 -- item_type token -> { job token, material policy, kind }
---   kind 'craft' : set order.item_type (MakeCrafts targets a specific craft)
 --   kind 'sub'   : set order.item_subtype (forge jobs pick the specific gear)
 --   kind 'fixed' : the job implies the item; set neither
 local W, C, A = 'wood', 'copper', 'any'
@@ -65,8 +64,7 @@ end
 
 local function order_target(m, map)
     local it, sub = -1, -1
-    if map.kind == 'craft' then it = m.item_type
-    elseif map.kind == 'sub' then sub = m.item_subtype end
+    if map.kind == 'sub' then sub = m.item_subtype end
     return it, sub
 end
 
