@@ -340,7 +340,21 @@ manager order.
 - `3 steel swords` → **one-time** order, 3× steel short sword.
 - `r3 steel sword` (leading `r`) → **repeating** order, 3× steel short sword,
   with **all suggested conditions** added.
+- `four gabbro rock mechanisms` → **one-time** order, 4× mechanisms made
+  specifically of **gabbro** (a *specific* stone, not generic "stone"); "four"
+  parses as 4, the filler word "rock" is tolerated.
 - Ambiguous or unresolvable → **fail**, create nothing, report why.
+
+**Implementation approach — UI automation is allowed and is the recommended path
+for conditions.** Rather than hand-build `manager_order` + `item_conditions`,
+the resolver can *drive DF's own "add work order" flow* (navigate the add-order
+viewscreens via simulated key input, picking the same item → material → quantity
+→ repeat → "add suggested conditions" the player would) — fast, and it produces
+exactly what DF would, so **suggested conditions come for free**. SAFETY: only
+feed keys to DF's *native* viewscreens (`gui.simulateInput` / `feed_key`); never
+force `breakdown_level`/dismiss on a lua viewscreen (that crashes DF). Direct
+struct-building (below, proven by auto-mandate) stays the simple path for
+one-time orders where conditions aren't needed; pick per case.
 
 **Reuse:** `auto-mandate.lua` (order construction + job/material `MAP`),
 `dfhack-stocks.lua` (`material_can_make`, civ metals), DFHack `orders.lua`
@@ -357,25 +371,31 @@ screen (focus `dwarfmode/Info/WORK_ORDERS`, verify `/Default`): an `EditField`
 for the text + a status line for the parse result / error. Enter = parse →
 resolve → create or report. Register like dfhack-stocks/squad-buttons.
 
-**Phase 1 — parse.** Trim; leading `r`/`R` → repeating; first integer = amount
-(default 1); rest = description tokens; normalize plural→singular
-(`swords`→`sword`).
+**Phase 1 — parse.** Trim; leading `r`/`R` → repeating; amount = first integer
+**or spelled-out number** (`one`..`twenty`, `a`/`an`→1, default 1); rest =
+description tokens; normalize plural→singular (`swords`→`sword`,
+`mechanisms`→`mechanism`); drop filler words (`rock`, `made`, `of`).
 
 **Phase 2 — vocabularies (built once, cached).**
 - *Items:* name → `{job_type, item_type, item_subtype}`. Weapons+diggers from
   `world.raws.itemdefs.weapons` (`name`/`name_plural` → `MakeWeapon`+subtype);
   armor/helm/pants/gloves/shoes/shield from their itemdefs; ammo, tools,
-  trapcomps, instruments likewise; fixed-job furniture/crafts (door→ConstructDoor
-  …) from auto-mandate's `RAW`.
-- *Materials:* name → `{mat_type, mat_index}` or `material_category`. Metals from
-  inorganics (`steel`→`{0, idx}`); generic categories `wood/stone/leather/cloth/
-  bone/shell/glass`. Optionally bias to the civ's `resources.metals`.
+  trapcomps, instruments likewise; fixed-job furniture/crafts (door→ConstructDoor,
+  mechanism→ConstructMechanisms …) from auto-mandate's `RAW`.
+- *Materials:* name → `{mat_type, mat_index}` or `material_category`. Build from
+  **all `world.raws.inorganics`** (each `.id` → `{0, idx}`) so **specific stones
+  and minerals resolve** — `gabbro`, `granite`, `microcline`, `steel`, `iron` …
+  (needs the loaded world: inorganic raws are empty at the title screen). Plus
+  generic categories `wood / stone(any) / leather / cloth / bone / shell / glass`.
+  A specific material (gabbro) beats a generic one (stone) when both appear.
 
 **Phase 3 — fuzzy resolve.** Classify tokens into item vs material; match item
 tokens against the item vocab (exact → substring → edit-distance); same for
-material. 0 item matches → fail "unknown item"; >1 → fail "ambiguous: a/b/c"
-(prefer civ-producible subtypes to break ties). Validate the item+material combo
-with `material_can_make`; bad combo → fail.
+material, **preferring a specific inorganic over a generic category**. 0 item
+matches → fail "unknown item"; >1 → fail "ambiguous: a/b/c" (prefer
+civ-producible subtypes to break ties). Validate the item+material combo with
+`material_can_make` (a mechanism wants a hard stone/metal; reject e.g. cloth) —
+bad combo → fail.
 
 **Phase 4 — create order.** Build `df.manager_order` exactly like auto-mandate
 (job_type, item_type/subtype per kind, mat_type/mat_index or material_category,
@@ -383,20 +403,23 @@ amount_total=amount_left=N, status.validated+active=true), assign id from
 `manager_orders.manager_order_next_id`, insert into `.all`. `frequency`: one-time
 vs repeating (confirm the enum value live; auto-mandate uses 0 for one-time).
 
-**Phase 5 — suggested conditions (repeating; the hard part).** Add DF's
-"suggested conditions" into `order.item_conditions`.
-- *Live verification first:* in-game, create an order, click DF's add/suggest
-  conditions, then dump `order.item_conditions` to learn the exact struct
-  (`item_type/mat/flags/compare_type/condition`) DF emits — then replicate,
-  modelling the build on `orders.lua`'s import (it constructs item_conditions
-  from JSON).
+**Phase 5 — suggested conditions (repeating).** Two ways, pick whichever proves
+easier live:
+- *(preferred) UI automation:* let DF make the order through its own add-order
+  flow (see Implementation approach) and hit its "add suggested conditions" step
+  — the conditions are then whatever DF would produce, no struct reverse-
+  engineering. This is why UI automation is recommended for the repeating case.
+- *(direct) replicate the struct:* create an order in-game, add suggested
+  conditions, dump `order.item_conditions` to learn the exact struct, then build
+  it (model on `orders.lua`'s JSON import). More work; only if UI automation is
+  unreliable.
 - *MVP fallback:* ship repeating orders WITHOUT conditions first (fully
-  functional, just ungated), add the suggested-conditions builder once the struct
-  is confirmed.
+  functional, just ungated).
 
 **Open questions (need the loaded fort):** Work Orders focus string + overlay
-slot; `frequency` enum for repeating; exact `item_conditions` DF's suggest emits;
-tie-break aggressiveness.
+slot; the add-order viewscreen navigation (for UI automation) **or** the
+`frequency` enum + `item_conditions` struct (for direct building); tie-break
+aggressiveness.
 
 ### military uniform button + auto-orders
 A button (general military screen or squad equipment assignment) that:
