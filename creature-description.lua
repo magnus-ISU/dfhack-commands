@@ -15,20 +15,32 @@ local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local gui = require('gui')
 
-local function creature_description()
+-- named victims + anonymous kills + undead kills
+local function kill_count(u)
+    local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
+    if not (hf and hf.info and hf.info.kills) then return 0 end
+    local k = hf.info.kills
+    local total = #k.events
+    for i = 0, #k.killed_count - 1 do total = total + k.killed_count[i] end
+    if k.killed_undead then total = total + #k.killed_undead end
+    return total
+end
+
+-- returns: text (description + kills line), is_dwarf
+local function unit_info()
     local u = dfhack.gui.getSelectedUnit(true)
     if not u then return end
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
-    if caste and caste.description and #caste.description > 0 then
-        return caste.description
-    end
+    if not (caste and caste.description and #caste.description > 0) then return end
+    local text = ('%s\nKills: %d'):format(caste.description, kill_count(u))
+    return text, cr.creature_id == 'DWARF'
 end
 
 CreatureDescOverlay = defclass(CreatureDescOverlay, overlay.OverlayWidget)
 CreatureDescOverlay.ATTRS{
     desc = "Shows the selected creature's description in the bottom-left.",
-    default_pos = {x = 3, y = -3},   -- bottom-left
+    default_pos = {x = 3, y = -4},   -- bottom-left
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/UNIT',
     frame = {w = 78, h = 12},   -- same size as the old statue display
@@ -54,12 +66,17 @@ function CreatureDescOverlay:init()
 end
 
 function CreatureDescOverlay:overlay_onupdate()
-    local d = creature_description()
-    self.visible = d ~= nil
-    if d and d ~= self.subviews.desc.text_to_wrap then
-        self.subviews.desc.text_to_wrap = d
-        self:updateLayout()
+    local text, is_dwarf = unit_info()
+    self.visible = text ~= nil
+    if not text then return end
+    local changed = false
+    local h = is_dwarf and 4 or 12   -- dwarves get a short box
+    if self.frame.h ~= h then self.frame.h = h; changed = true end
+    if text ~= self.subviews.desc.text_to_wrap then
+        self.subviews.desc.text_to_wrap = text
+        changed = true
     end
+    if changed then self:updateLayout() end
 end
 
 OVERLAY_WIDGETS = {desc = CreatureDescOverlay}
