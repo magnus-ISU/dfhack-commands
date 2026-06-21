@@ -33,7 +33,8 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `auto-mandate` | enableable | ✅ done | Queues manager work orders for Make mandates using cheap renewable materials |
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
-| `attack-invaders` | one-shot | 🔴 not working | Orders all squads to kill invaders — squads don't actually engage. **Needs fix / UI buttons** |
+| `squad-buttons` | overlay | ✅ done | Kill-order screen buttons: "Target all invaders" + "Target all hostiles" (uses DF's native targeting; confirm as normal) |
+| `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 
 ---
 
@@ -91,21 +92,24 @@ Likely the squads aren't put on active duty by just adding the order (need an
 alert/schedule activation), or a required field/flag is missing, or DF only acts
 on kill orders created through its own targeting flow.
 
-**Preferred fix = UI buttons (work *with* DF's native flow):**
-1. **Button on the squad kill-target selection screen** → "target all invaders".
-   - Squad UI state: `df.global.game.main_interface.squads` with
-     `giving_kill_order`, `kill_doing_rectangle`, `kill_unid`,
-     `squad_selected`, `squad_id`, `viewing_squad_index`.
-   - Old-style state also in `df.global.plotinfo.squads`: `in_kill_list`,
-     `kill_targets`, `kill_rect_targets`, `sel_kill_targets`.
-2. **select-all-squads button at the top of the squads screen.**
-   - Same `main_interface.squads` panel; need the multi-select representation.
-- Both require a DFHack **overlay widget** (`OVERLAY_WIDGETS`, OverlayWidget
-  targeting the squads viewscreen focus string). **Must inspect the live
-  viewscreen** (open Squads screen + enter give-kill-order targeting) to get the
-  focus string and confirm button placement/actions. `dfhack.gui.getCurFocus(true)`
-  on those screens gives the focus path. Models: `gui/notify.lua` (overlay),
-  `uniform-unstick.lua`, `gui/civ-alert.lua` (squad-screen overlays).
+**Fix = UI buttons (work *with* DF's native flow):**
+1. ✅ **DONE — `squad-buttons.lua`** overlay on the kill-target screen. While
+   `main_interface.squads.giving_kill_order` is true (focus
+   `dwarfmode/Squads/Default`), it shows "Target all invaders" / "Target all
+   hostiles" buttons that append unit ids to `main_interface.squads.kill_unid`
+   (verified: this marks the targets; the player then hits DF's "Confirm").
+   Hostiles = `isDanger` & not `isInvader` & not `isFortControlled`.
+2. **TODO — select-all-squads button at the top of the squads screen.** Need the
+   multi-select representation in `main_interface.squads` (`squad_selected`
+   vector<bool> parallel to `squad_id` vector<int32>[9]). Inspect the live
+   squads list screen to get its focus string + button placement.
+
+**Overlay registration (learned):** a `--@module = true` script with
+`OVERLAY_WIDGETS = {name=Widget}` in `dfhack-config/scripts/` is auto-discovered
+on DFHack start (`script-manager.foreach_module_script` scans all script paths).
+To pick it up mid-session, call `require('plugins.overlay').rescan()` from lua —
+the `overlay rescan` *command* form does not work. Model: `uniform-unstick.lua`
+(`widgets.TextButton{label, key, on_activate}`, `overlay.OverlayWidget`).
 
 ---
 
