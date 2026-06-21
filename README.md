@@ -315,11 +315,15 @@ viewscreen focus strings and data structures before building.
 ### labor-screen "hide military" filter button
 A button on the labor / Work Details assignment screen that filters **military
 units out** of the unit list, so you only assign labors to civilians.
-- Live UI needed: the Work Details viewscreen focus and the displayed unit list
-  (likely `df.global.game.main_interface.info.labor` and/or the `sort` plugin's
-  filtered unit list — model the overlay on DFHack's `sort` labor overlay).
-- Military test: `unit.military.squad_id ~= -1` (or `dfhack.units` military
-  helper). The button toggles excluding those rows.
+- **Focus string (found):** `dwarfmode/Info/LABOR/WORK_DETAILS` (`/Default`).
+- **Model on:** DFHack `sort` plugin's `WorkDetailsOverlay`
+  (`hack/lua/plugins/sort.lua` ~line 1000–1306) — it already adds search +
+  filters (e.g. `labor_conflict only/exclude` via `has_labor_conflict(unit)` and
+  `filter_matches`) to this exact screen. Add a "hide military" cycle the same
+  way, filtering rows where `unit.military.squad_id ~= -1`. Coordinate with /
+  extend the sort overlay rather than stacking a conflicting one.
+- Still needs the fort loaded to confirm the unit-list path and that a second
+  overlay doesn't fight the sort plugin's own filtering before shipping.
 
 ### auto-create labor groups (Work Details)
 One-shot/command to create Work Details (labor groups) for each of:
