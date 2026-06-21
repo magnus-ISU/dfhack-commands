@@ -152,8 +152,11 @@ local function mandates_message()
                 text = ('producing %d %s for %s'):format(
                     m.amount_remaining, item_name(m.item_type, m.item_subtype), noble)
             else
-                text = ('Produce %d %s'):format(
-                    m.amount_remaining, item_name(m.item_type, m.item_subtype))
+                local noble = m.unit
+                    and dfhack.translation.translateName(dfhack.units.getVisibleName(m.unit))
+                    or 'A noble'
+                text = ('%s requests %d %s'):format(
+                    noble, m.amount_remaining, item_name(m.item_type, m.item_subtype))
             end
         else
             text = 'Mandate: ' .. mandate_demand(m)

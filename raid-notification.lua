@@ -98,9 +98,11 @@ local function raid_message()
     if #raids == 1 then
         local who = leader_name(best.c) or 'A squad'
         if overdue then return ('%s is raiding -- back any minute now'):format(who) end
+        if days == 0 then return ('%s is leaving to raid'):format(who) end
         return ('%s is raiding for %d day%s'):format(who, days, days == 1 and '' or 's')
     else
         if overdue then return ('%d squads are raiding -- back any minute now'):format(#raids) end
+        if days == 0 then return ('%d squads are leaving to raid'):format(#raids) end
         return ('%d squads are raiding for %d day%s'):format(#raids, days, days == 1 and '' or 's')
     end
 end
