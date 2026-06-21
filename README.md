@@ -32,38 +32,45 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `mandate-notification` | register | ✅ done | Shows mandates the moment they exist (overrides built-in `mandates_expiring`) |
 | `auto-mandate` | enableable | ✅ done | Queues manager work orders for Make mandates using cheap renewable materials |
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
-| `raid-status` | one-shot | 🟡 partial | Reports how long raiding parties have been gone; auto-retrieves stuck units. **ETA + planning overlay TODO** |
+| `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `attack-invaders` | one-shot | 🔴 not working | Orders all squads to kill invaders — squads don't actually engage. **Needs fix / UI buttons** |
 
 ---
 
 ## Status & TODO (full implementation notes)
 
-### 🟡 raid-status — add ETA and planning-screen estimate
+### 🟡 raid-status — planning-screen overlay still TODO
 
-**Done:** lists active raiding parties + how long each has been gone, and
+**Done (verified on a live raid):** detects active raids, reports leader, target
+site, goal, time-gone, and squad count; plus a rough travel estimate; and
 auto-retrieves units stuck off-map.
 
-**Data model (verified):**
-- Active raids = `df.global.world.armies.all[i]` where `flags.player == true`.
-  (Currently 0 out; most of the 600+ armies are world NPCs.)
-- Each player army has `.controller` → an `army_controller` with:
-  - `year`, `year_tick` — **departure timestamp** (use for "time gone")
-  - `goal` — mission type, `master_hf` — leader histfig, `assigned_squads`,
-    `pos_x`/`pos_y` — current world pos, `mission_report`
-  - travel fields on the army itself: `travel_count`, `travel_rate`, `watch_time`
-- Time math: 1 day = 1200 ticks, 1 month = 28 days, 1 year = 403200 ticks.
-  `elapsed = now - (controller.year*403200 + controller.year_tick)`.
+**Data model (verified — note: NOT `flags.player`):**
+- Active raids = `df.global.world.army_controllers.all[i]` where
+  `#assigned_squads > 0` and those squads belong to the fort
+  (`squad.entity_id == plotinfo.group_id`). `assigned_squads` clears when the
+  mission ends, so non-empty = active. The travelling army (`armies.all` with
+  `controller_id == c.id`) is **NOT** flagged `player`.
+- `army_controller` fields used: `year`/`year_tick` (**departure**), `goal`
+  (`df.army_controller_goal_type`, e.g. SITE_INVASION), `master_hf` (leader),
+  `site_id` (target → `df.world_site.find`), `assigned_squads`, `mission_report`
+  (has `.title` like "Raze Clutchwheels (Set out Summer 116)", `origin_x/y` =
+  target world pos, `campaigns` vector).
+- Time math: 1 day = 1200 ticks, 1 year = 403200 ticks.
+  `elapsed = now - (c.year*403200 + c.year_tick)`.
+- **Travel estimate:** `army.pos / 48` = world tiles (verified: target world pos
+  × 48 ≈ `controller.pos_x/pos_y`). Speed = distance(fort, army) / days-gone;
+  one-way trip ≈ distance(fort, target) / speed. `army.travel_rate` (=16
+  observed) units unconfirmed, so we use the empirical speed instead. The
+  estimate is rough (assumes steady outbound travel) and labelled `~`.
 
-**TODO (needs a LIVE raid or the planning screen — can't inspect with 0 raids out):**
-1. **ETA** — find where the *estimated duration / return time* lives. Candidates:
-   the army's `travel_count`/`travel_rate` (remaining distance ÷ rate) or the
-   mission-planning viewscreen's computed estimate. Read it off a live mission.
-2. **Planning-screen overlay** — identify the raid/mission planning viewscreen
-   (focus string) and its estimated-time field, then add a DFHack overlay widget
-   (see `gui/notify.lua` pattern) to display departure-based ETA there.
-3. The user wants the command to "only show the estimated time based on the time
-   the dwarves left and the estimation."
+**TODO:**
+1. **Planning-screen overlay** — show the estimate while planning a raid. Need to
+   identify the mission/raid planning viewscreen (focus string via
+   `dfhack.gui.getCurFocus(true)` *while on that screen*) and its computed
+   estimate, then add a DFHack overlay widget (see `gui/notify.lua` pattern).
+2. Optionally verify the travel estimate against a long live raid and refine
+   (direction detection: outbound vs returning — needs cross-call state).
 
 ### 🔴 attack-invaders — squads don't engage; build UI buttons instead
 

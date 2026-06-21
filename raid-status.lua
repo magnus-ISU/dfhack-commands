@@ -58,6 +58,34 @@ local function goal_label(c)
     return g and g:lower():gsub('_', ' ') or 'mission'
 end
 
+local WORLD_TILE = 48   -- army-position units per world tile
+
+-- A rough one-way travel-time estimate, derived from how far the army has got
+-- vs. how long it has been gone. Approximate (assumes steady outbound travel),
+-- so it is labelled as such. Returns '' if it can't be estimated yet.
+local function travel_estimate(c, gone_ticks)
+    local fort = df.world_site.find(df.global.plotinfo.site_id)
+    local target = df.world_site.find(c.site_id)
+    if not (fort and target) then return '' end
+    local army
+    local armies = df.global.world.armies.all
+    for i = 0, #armies - 1 do
+        if armies[i].controller_id == c.id then army = armies[i]; break end
+    end
+    if not army then return '' end
+    local function dist(ax, ay, bx, by)
+        local dx, dy = bx - ax, by - ay
+        return math.sqrt(dx * dx + dy * dy)
+    end
+    local ax, ay = army.pos.x / WORLD_TILE, army.pos.y / WORLD_TILE
+    local traveled = dist(fort.pos.x, fort.pos.y, ax, ay)
+    local oneway = dist(fort.pos.x, fort.pos.y, target.pos.x, target.pos.y)
+    local days = gone_ticks / TICKS_PER_DAY
+    if traveled < 1 or oneway < 1 or days < 0.5 then return '' end
+    local oneway_days = oneway / (traveled / days)   -- distance / (speed)
+    return (' (~%d days travel each way)'):format(math.floor(oneway_days + 0.5))
+end
+
 -- 1) raiding parties --------------------------------------------------------
 -- Raids are tracked as army_controllers that have fort squads assigned. The
 -- travelling army itself is NOT flagged player, so we key off the controller;
@@ -91,8 +119,9 @@ local function report_raids()
         local who = leader_name(c) or 'a raiding party'
         local target = site_name(c.site_id)
         local where = target and (' on ' .. target) or ''
-        print(('  - %s (%s%s): gone %s, %d squad%s'):format(
-            who, goal_label(c), where, fmt_duration(gone), r.squads, r.squads == 1 and '' or 's'))
+        print(('  - %s (%s%s): gone %s, %d squad%s%s'):format(
+            who, goal_label(c), where, fmt_duration(gone), r.squads, r.squads == 1 and '' or 's',
+            travel_estimate(c, gone)))
     end
 end
 
