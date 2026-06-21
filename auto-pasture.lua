@@ -194,58 +194,46 @@ local function cur_pen()
     return nil
 end
 
+-- is the current pen designated as the graze / scavenge pasture?
+local function is_designated(which)
+    local pen = cur_pen()
+    if not pen then return false end
+    load_state()
+    return state[which == 'graze' and 'graze_id' or 'scavenge_id'] == pen.id
+end
+
+-- toggle the current pen as the graze / scavenge pasture
+local function toggle(which)
+    local pen = cur_pen()
+    if pen then set_zone(which, pen.id) end
+end
+
 AutoPastureOverlay = defclass(AutoPastureOverlay, overlay.OverlayWidget)
 AutoPastureOverlay.ATTRS{
-    desc = 'Adds graze/scavenge pasture toggles to the pen assignment screen.',
+    desc = 'Adds graze/scavenge pasture buttons to the pen assignment screen.',
     default_pos = {x = 7, y = 17},     -- just below zone.pasturepond (y=13, h=4)
     default_enabled = true,
     viewscreens = 'dwarfmode/Zone/Some/Pen',
-    frame = {w = 31, h = 2},
-    version = 1,
+    frame = {w = 20, h = 1},
+    version = 2,
 }
 
 function AutoPastureOverlay:init()
     self:addviews{
-        widgets.ToggleHotkeyLabel{
-            view_id = 'graze',
-            frame = {t = 0, l = 0, w = 30},
-            label = 'Graze pasture',
-            key = 'CUSTOM_CTRL_G',
-            options = {
-                {label = 'No', value = false, pen = COLOR_WHITE},
-                {label = 'Yes', value = true, pen = COLOR_YELLOW},
+        widgets.Label{
+            frame = {t = 0, l = 0},
+            -- inline, green when this pen is the designated zone, white otherwise
+            text = {
+                {text = '(Graze)',
+                 pen = function() return is_designated('graze') and COLOR_GREEN or COLOR_WHITE end,
+                 on_click = function() toggle('graze') end},
+                ' ',
+                {text = '(Scavenge)',
+                 pen = function() return is_designated('scavenge') and COLOR_GREEN or COLOR_WHITE end,
+                 on_click = function() toggle('scavenge') end},
             },
-            on_change = function()
-                local pen = cur_pen()
-                if pen then set_zone('graze', pen.id) end
-            end,
-        },
-        widgets.ToggleHotkeyLabel{
-            view_id = 'scavenge',
-            frame = {t = 1, l = 0, w = 30},
-            label = 'Scavenge pasture',
-            key = 'CUSTOM_CTRL_R',
-            options = {
-                {label = 'No', value = false, pen = COLOR_WHITE},
-                {label = 'Yes', value = true, pen = COLOR_YELLOW},
-            },
-            on_change = function()
-                local pen = cur_pen()
-                if pen then set_zone('scavenge', pen.id) end
-            end,
         },
     }
-end
-
--- reflect this pen's current designation each frame
-function AutoPastureOverlay:render(dc)
-    local pen = cur_pen()
-    if pen then
-        load_state()
-        self.subviews.graze:setOption(state.graze_id == pen.id)
-        self.subviews.scavenge:setOption(state.scavenge_id == pen.id)
-    end
-    AutoPastureOverlay.super.render(self, dc)
 end
 
 OVERLAY_WIDGETS = {pasture = AutoPastureOverlay}
