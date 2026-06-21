@@ -225,14 +225,17 @@ function AutoPastureOverlay:init()
     -- not per token); text_pen is a function so each turns green while this pen
     -- is its designated zone and white otherwise
     self:addviews{
+        -- explicit widths so each button's frame is exactly its text: otherwise a
+        -- frame with no width fills the overlay and overlaps its neighbour, so
+        -- hovering/clicking one would light up (or toggle) both
         widgets.HotkeyLabel{
-            frame = {t = 0, l = 0},
+            frame = {t = 0, l = 0, w = 7},     -- '[Graze]'
             label = '[Graze]',
             text_pen = function() return is_designated('graze') and COLOR_GREEN or COLOR_WHITE end,
             on_activate = function() toggle('graze') end,
         },
         widgets.HotkeyLabel{
-            frame = {t = 0, l = 8},
+            frame = {t = 0, l = 8, w = 10},    -- '[Scavenge]'
             label = '[Scavenge]',
             text_pen = function() return is_designated('scavenge') and COLOR_GREEN or COLOR_WHITE end,
             on_activate = function() toggle('scavenge') end,
