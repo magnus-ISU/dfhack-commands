@@ -23,13 +23,14 @@ local DWARF_BUCK = string.char(15)   -- in-game value symbol
 
 local cache = {}          -- item_id -> description text
 local fetching = false
-local fetch_item, fetch_bld, pre_desc
+local fetch_item, fetch_bld
 
 local function vsheets()
     return df.global.game.main_interface.view_sheets
 end
 
--- runs a frame or two after start_fetch, once DF has regenerated raw_description
+-- runs the frame after start_fetch; we cleared raw_description, so as soon as it
+-- is non-empty again DF has regenerated it for our item -> flip back immediately
 local function finish_fetch(tries)
     local vs = vsheets()
     -- bail if the player navigated away while we were fetching
@@ -38,9 +39,9 @@ local function finish_fetch(tries)
         return
     end
     local prose = vs.raw_description
-    if prose and #prose > 0 and (prose ~= pre_desc or tries >= 6) then
+    if prose and #prose > 0 then
         cache[fetch_item] = prose:gsub('%s+$', '')
-    elseif tries < 6 then
+    elseif tries < 8 then
         dfhack.timeout(1, 'frames', function() finish_fetch(tries + 1) end)
         return
     end
@@ -55,7 +56,8 @@ end
 local function start_fetch(item_id, bld_id)
     local vs = vsheets()
     fetching = true
-    fetch_item, fetch_bld, pre_desc = item_id, bld_id, vs.raw_description
+    fetch_item, fetch_bld = item_id, bld_id
+    vs.raw_description = ''       -- clear so a non-empty value means "regenerated"
     vs.active_sheet = df.view_sheet_type.ITEM
     vs.active_id = item_id
     vs.viewing_itid:resize(0)
