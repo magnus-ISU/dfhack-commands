@@ -5,9 +5,11 @@ DFHack's built-in 'mandates_expiring' notification only fires for production
 (Make) mandates that are within ~1 month of expiring -- so export bans never
 show, and production mandates stay hidden until they are nearly due.
 
-This overrides that notification so it appears the moment ANY mandate is active
-(Make, Export ban, or Guild), giving you time to react. Clicking it lists every
-mandate with what is demanded, who demanded it, and how long is left.
+This overrides that notification so it appears the moment a production (Make) or
+guild mandate is active, giving you time to react. Export bans are omitted from
+the one-line summary -- they are passive, non-urgent "do not export X" demands --
+but still appear when you click it to see the full list of every mandate, with
+what is demanded, who demanded it, and how long is left.
 
 If the built-in notification is missing (different DFHack version), this registers
 a new 'mandates_active' notification instead.
@@ -70,52 +72,15 @@ local function cap(s)
     return (s:gsub('^%l', string.upper))
 end
 
--- True if a noble assigned to a room-requiring position owns no rooms at all,
--- i.e. has a plainly-unmet room requirement. (Conservative: it does not try to
--- judge whether an existing room is valuable enough -- room value isn't cleanly
--- exposed -- only whether the noble has any room when one is demanded.)
-local function room_requirement_unmet()
-    local plot = df.global.plotinfo
-    local ent
-    for _, e in pairs(df.global.world.entities.all) do
-        if e.id == plot.group_id then ent = e; break end
-    end
-    if not ent then return false end
-    local pos_by_id = {}
-    for i = 0, #ent.positions.own - 1 do
-        local p = ent.positions.own[i]
-        pos_by_id[p.id] = p
-    end
-    for i = 0, #ent.positions.assignments - 1 do
-        local asg = ent.positions.assignments[i]
-        local p = pos_by_id[asg.position_id]
-        if p and (p.required_office > 0 or p.required_bedroom > 0
-            or p.required_dining > 0 or p.required_tomb > 0)
-        then
-            local hf = asg.histfig
-            local hfig = hf and hf >= 0 and df.historical_figure.find(hf)
-            local u = hfig and hfig.unit_id and hfig.unit_id >= 0 and df.unit.find(hfig.unit_id)
-            if u and not dfhack.units.isDead(u) and #u.owned_buildings == 0 then
-                return true
-            end
-        end
-    end
-    return false
-end
-
--- the mandates to display: export bans are hidden when there is a more pressing
--- noble demand (an active production mandate, or an unmet room requirement)
+-- the mandates to surface in the one-line notification. Export bans are always
+-- omitted -- they are passive, non-urgent demands -- but still show in the
+-- click-through detail list (see show_mandates, which reads mandates.all directly).
 local function visible_mandates()
     local all = df.global.world.mandates.all
-    local has_make = false
-    for i = 0, #all - 1 do
-        if all[i].mode == df.mandate_type.Make then has_make = true; break end
-    end
-    local hide_exports = has_make or room_requirement_unmet()
     local list = {}
     for i = 0, #all - 1 do
         local m = all[i]
-        if not (hide_exports and m.mode == df.mandate_type.Export) then
+        if m.mode ~= df.mandate_type.Export then
             list[#list + 1] = m
         end
     end
@@ -162,9 +127,8 @@ local function mandates_message()
             text = 'Mandate: ' .. mandate_demand(m)
         end
     else
-        local all_export, all_make, all_handled = true, true, true
+        local all_make, all_handled = true, true
         for _, m in ipairs(list) do
-            if m.mode ~= df.mandate_type.Export then all_export = false end
             if m.mode ~= df.mandate_type.Make then all_make = false end
             if m.mode == df.mandate_type.Make and not handled(m) then all_handled = false end
         end
@@ -172,8 +136,6 @@ local function mandates_message()
             text = ('dealing with %d mandates'):format(count)
         elseif all_make then
             text = ('%d production mandates'):format(count)
-        elseif all_export then
-            text = ('%d export mandates'):format(count)
         else
             text = ('%d active mandates'):format(count)
         end
