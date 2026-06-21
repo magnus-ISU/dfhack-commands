@@ -137,18 +137,44 @@ function RemoveOverlay:init()
             view_id = 'btn',
             frame = {t = 0, l = 0, w = 8, h = 1},
             label = 'Remove',
-            on_activate = self:callback('do_remove'),
+            on_activate = self:callback('arm'),
+        },
+        -- armed (red) state: a second click actually deconstructs
+        widgets.TextButton{
+            view_id = 'btn_armed',
+            frame = {t = 0, l = 0, w = 8, h = 1},
+            label = 'Remove',
+            text_pen = COLOR_RED,
+            on_activate = self:callback('confirm'),
+            visible = false,
         },
     }
 end
 
-function RemoveOverlay:do_remove()
+function RemoveOverlay:arm()
+    self.armed_for = vsheets().active_id
+    self.subviews.btn.visible = false
+    self.subviews.btn_armed.visible = true
+end
+
+function RemoveOverlay:disarm()
+    self.armed_for = nil
+    self.subviews.btn.visible = true
+    self.subviews.btn_armed.visible = false
+end
+
+function RemoveOverlay:confirm()
     local b = viewed_building()
     if b then dfhack.buildings.deconstruct(b) end
+    self:disarm()
 end
 
 function RemoveOverlay:overlay_onupdate()
     self.visible = viewed_building() ~= nil
+    -- auto-disarm if the player moved to a different item
+    if self.armed_for and vsheets().active_id ~= self.armed_for then
+        self:disarm()
+    end
 end
 
 OVERLAY_WIDGETS = {remove = RemoveOverlay}
