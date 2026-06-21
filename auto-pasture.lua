@@ -211,27 +211,31 @@ end
 AutoPastureOverlay = defclass(AutoPastureOverlay, overlay.OverlayWidget)
 AutoPastureOverlay.ATTRS{
     desc = 'Adds graze/scavenge pasture buttons to the pen assignment screen.',
-    default_pos = {x = 7, y = 17},     -- just below zone.pasturepond (y=13, h=4)
+    -- row 14: directly below zone.pasturepond's "DFHack assign" (its frame is
+    -- y=13, h=4, with assign at the top row and autobutcher at the bottom row)
+    default_pos = {x = 7, y = 14},
     default_enabled = true,
     viewscreens = 'dwarfmode/Zone/Some/Pen',
-    frame = {w = 20, h = 1},
-    version = 2,
+    frame = {w = 18, h = 1},
+    version = 3,
 }
 
 function AutoPastureOverlay:init()
+    -- two separate clickable buttons (Label dispatches mouse clicks per widget,
+    -- not per token); text_pen is a function so each turns green while this pen
+    -- is its designated zone and white otherwise
     self:addviews{
-        widgets.Label{
+        widgets.HotkeyLabel{
             frame = {t = 0, l = 0},
-            -- inline, green when this pen is the designated zone, white otherwise
-            text = {
-                {text = '(Graze)',
-                 pen = function() return is_designated('graze') and COLOR_GREEN or COLOR_WHITE end,
-                 on_click = function() toggle('graze') end},
-                ' ',
-                {text = '(Scavenge)',
-                 pen = function() return is_designated('scavenge') and COLOR_GREEN or COLOR_WHITE end,
-                 on_click = function() toggle('scavenge') end},
-            },
+            label = '[Graze]',
+            text_pen = function() return is_designated('graze') and COLOR_GREEN or COLOR_WHITE end,
+            on_activate = function() toggle('graze') end,
+        },
+        widgets.HotkeyLabel{
+            frame = {t = 0, l = 8},
+            label = '[Scavenge]',
+            text_pen = function() return is_designated('scavenge') and COLOR_GREEN or COLOR_WHITE end,
+            on_activate = function() toggle('scavenge') end,
         },
     }
 end
