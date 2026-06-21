@@ -149,7 +149,7 @@ local function mandates_message()
                 local noble = m.unit
                     and dfhack.translation.translateName(dfhack.units.getVisibleName(m.unit))
                     or 'a noble'
-                text = ('manager is producing %d %s for %s'):format(
+                text = ('producing %d %s for %s'):format(
                     m.amount_remaining, item_name(m.item_type, m.item_subtype), noble)
             else
                 text = ('Produce %d %s'):format(
@@ -166,7 +166,7 @@ local function mandates_message()
             if m.mode == df.mandate_type.Make and not handled(m) then all_handled = false end
         end
         if all_make and all_handled then
-            text = ('manager is dealing with %d production mandates'):format(count)
+            text = ('dealing with %d production mandates'):format(count)
         elseif all_make then
             text = ('%d production mandates'):format(count)
         elseif all_export then
