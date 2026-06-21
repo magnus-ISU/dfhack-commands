@@ -145,10 +145,16 @@ local function mandates_message()
     if count == 1 then
         local m = list[1]
         if m.mode == df.mandate_type.Make then
-            -- "Produce N x" -> "Producing N x" once an order is queued
-            local verb = handled(m) and 'Producing' or 'Produce'
-            text = ('%s %d %s'):format(verb, m.amount_remaining,
-                item_name(m.item_type, m.item_subtype))
+            if handled(m) then
+                local noble = m.unit
+                    and dfhack.translation.translateName(dfhack.units.getVisibleName(m.unit))
+                    or 'a noble'
+                text = ('manager is producing %d %s for %s'):format(
+                    m.amount_remaining, item_name(m.item_type, m.item_subtype), noble)
+            else
+                text = ('Produce %d %s'):format(
+                    m.amount_remaining, item_name(m.item_type, m.item_subtype))
+            end
         else
             text = 'Mandate: ' .. mandate_demand(m)
         end

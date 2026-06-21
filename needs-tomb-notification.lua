@@ -238,19 +238,77 @@ local function create_slab_order(hf)
     mo.all:insert('#', o)
 end
 
--- enqueue one "engrave memorial slab" order per listed dwarf who needs a
--- tomb/slab and does not already have one pending. returns made, skipped.
+local function count_blank_slabs()
+    local n = 0
+    local vec = df.global.world.items.other.IN_PLAY
+    for i = 0, #vec - 1 do
+        local it = vec[i]
+        if it:getType() == df.item_type.SLAB
+            and it.engraving_type == df.slab_engraving_type.Slab    -- un-engraved
+            and not (it.flags.garbage_collect or it.flags.removed)
+        then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+local function count_slab_orders()
+    local engrave, make = 0, 0
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        local o = all[i]
+        if o.job_type == df.job_type.EngraveSlab then engrave = engrave + o.amount_left
+        elseif o.job_type == df.job_type.ConstructSlab then make = make + o.amount_left end
+    end
+    return engrave, make
+end
+
+local function create_make_slab_order(amount)
+    local mo = df.global.world.manager_orders
+    local o = df.manager_order:new()
+    o.id = mo.manager_order_next_id
+    mo.manager_order_next_id = o.id + 1
+    o.job_type = df.job_type.ConstructSlab     -- "make rock slab"
+    o.amount_total = amount
+    o.amount_left = amount
+    o.frequency = 0
+    o.status.validated = true
+    o.status.active = true
+    -- material left unconstrained: the mason uses any available stone
+    mo.all:insert('#', o)
+end
+
+-- Queue engrave orders for the listed dwarves, but only as many as there are
+-- blank slabs to work on; for the rest, queue a "make rock slab" order instead
+-- so blanks get produced. Returns: engraved, made (rock-slab shortfall), skipped.
 local function enqueue_memorial_slabs(list)
-    local made, skipped = 0, 0
+    local need, skipped = {}, 0
     for _, e in ipairs(list) do
         if e.hf and e.hf >= 0 and not has_pending_slab_order(e.hf) then
-            create_slab_order(e.hf)
-            made = made + 1
+            table.insert(need, e)
         else
             skipped = skipped + 1
         end
     end
-    return made, skipped
+
+    -- blanks available for NEW engrave orders: existing engrave orders will each
+    -- consume a blank; already-queued make-slab orders will each add one
+    local pending_engrave, pending_make = count_slab_orders()
+    local free = count_blank_slabs() - pending_engrave + pending_make
+    if free < 0 then free = 0 end
+
+    local engraved = math.min(#need, free)
+    for i = 1, engraved do
+        create_slab_order(need[i].hf)
+    end
+
+    local shortfall = #need - engraved
+    if shortfall > 0 then
+        create_make_slab_order(shortfall)
+    end
+
+    return engraved, shortfall, skipped
 end
 
 -- ---------------------------------------------------------------------------
@@ -308,16 +366,22 @@ function MemorialScreen:init()
 end
 
 function MemorialScreen:queue_slabs()
-    local made, skipped = enqueue_memorial_slabs(self.list or {})
-    local msg = ('Queued %d memorial slab order%s in the manager.'):format(
-        made, made == 1 and '' or 's')
-    if skipped > 0 then
-        msg = msg .. ('\n%d already had a pending slab order (skipped).'):format(skipped)
+    local engraved, made, skipped = enqueue_memorial_slabs(self.list or {})
+    local parts = {}
+    if engraved > 0 then
+        table.insert(parts, ('Queued %d memorial-slab engraving%s.'):format(
+            engraved, engraved == 1 and '' or 's'))
     end
     if made > 0 then
-        msg = msg .. '\n\nNote: each order needs an un-engraved slab to work on.'
+        table.insert(parts, ('Not enough blank slabs -- queued a "make rock slab" order for %d more.'):format(made))
     end
-    dlg.showMessage('Memorial slabs', msg, COLOR_WHITE)
+    if skipped > 0 then
+        table.insert(parts, ('%d already had a slab order pending.'):format(skipped))
+    end
+    if #parts == 0 then
+        table.insert(parts, 'Nothing to do.')
+    end
+    dlg.showMessage('Memorial slabs', table.concat(parts, '\n'), COLOR_WHITE)
 end
 
 function MemorialScreen:onDismiss()
