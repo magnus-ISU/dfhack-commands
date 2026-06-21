@@ -374,7 +374,7 @@ function create_order(input)
     local mo = df.global.world.manager_orders
     o.id = mo.manager_order_next_id
     mo.manager_order_next_id = o.id + 1
-    mo.all:insert('#', o)
+    mo.all:insert(0, o)   -- new orders go to the top of the list
 
     return ('%dx %s %s'):format(p.amount, matname, p.item.name)
         .. (p.repeating and '  [NOTE: created one-time; repeating+conditions not built yet]' or '')
