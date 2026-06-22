@@ -7,9 +7,16 @@ Activates the "always-on" helpers in this pack:
     * needs-tomb-notification   (registers the notify-panel alert)
     * mandate-notification      (registers the immediate-mandate notification)
     * auto-mandate              (enables the background work-order service)
+    * military-uniforms         (creates the steel uniform templates + registers
+                                 the Equip-screen auto-gear overlay/work-orders)
 
 The one-shot commands in the pack (destroy-forbidden, clear-flows, raid-status,
 attack-invaders) are run on demand and are not touched here.
+
+military-uniforms is safe to run every session: it refreshes its own "Steel - *"
+templates and re-removes the default metal uniforms (idempotent). The gear-order
+service stays OFF until you flip its toggles on the squad Equip screen (Shift-G
+queue, Shift-M masterwork); that choice persists with the fort.
 
 no-pausing is deliberately NOT enabled here: it stops ALL pausing, so it is left
 as a manual toggle -- run `no-pausing` (or `enable no-pausing`) when you want it.
@@ -33,6 +40,9 @@ try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notifica
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
+try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
+-- make sure the Equip-screen overlay is picked up even on a freshly-added script
+try('overlay rescan', function() require('plugins.overlay').rescan() end)
 
 print('Done. One-shot commands: destroy-forbidden, clear-flows, raid-status, attack-invaders.')
 print('Manual toggle: no-pausing (stops all pausing).')

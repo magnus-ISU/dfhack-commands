@@ -16,8 +16,11 @@ Add `magnus-scripts` to `dfhack-config/init/dfhack.init` to enable everything
 every session.
 
 `magnus-scripts` runs/enables the persistent helpers only:
-`needs-tomb-notification`, `mandate-notification`, and `enable auto-mandate`.
-It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle).
+`needs-tomb-notification`, `mandate-notification`, `raid-notification`,
+`enable auto-mandate`, and `military-uniforms` (creates the steel uniform
+templates + registers the Equip-screen auto-gear overlay; the gear-order service
+itself stays off until you toggle it on that screen). It does **not** enable
+`no-pausing` (that stops *all* pausing — manual toggle).
 
 ---
 
