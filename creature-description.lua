@@ -15,26 +15,42 @@ local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local gui = require('gui')
 
--- named victims + anonymous kills + undead kills
+-- total kills: named victims (events) + anonymous kills (killed_count, which
+-- already includes undead-group kills). killed_undead is a parallel per-group
+-- flag, NOT a count, so it must not be added.
 local function kill_count(u)
     local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
     if not (hf and hf.info and hf.info.kills) then return 0 end
     local k = hf.info.kills
     local total = #k.events
     for i = 0, #k.killed_count - 1 do total = total + k.killed_count[i] end
-    if k.killed_undead then total = total + #k.killed_undead end
     return total
 end
 
--- returns: text (description + kills line), is_dwarf
+-- description + kills line for the selected creature, or nil
 local function unit_info()
     local u = dfhack.gui.getSelectedUnit(true)
     if not u then return end
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
     if not (caste and caste.description and #caste.description > 0) then return end
-    local text = ('%s\nKills: %d'):format(caste.description, kill_count(u))
-    return text, cr.creature_id == 'DWARF'
+    return ('%s\nKills: %d'):format(caste.description, kill_count(u))
+end
+
+-- how many display rows the text needs after word-wrapping to `width`
+local function wrapped_lines(text, width)
+    local n = 0
+    for para in (text .. '\n'):gmatch('(.-)\n') do
+        local len
+        for word in para:gmatch('%S+') do
+            local wl = #word
+            if not len then len = wl
+            elseif len + 1 + wl <= width then len = len + 1 + wl
+            else n = n + 1; len = wl end
+        end
+        n = n + 1
+    end
+    return n
 end
 
 CreatureDescOverlay = defclass(CreatureDescOverlay, overlay.OverlayWidget)
@@ -66,16 +82,19 @@ function CreatureDescOverlay:init()
 end
 
 function CreatureDescOverlay:overlay_onupdate()
-    local text, is_dwarf = unit_info()
+    local text = unit_info()
     self.visible = text ~= nil
     if not text then return end
     local changed = false
-    local h = is_dwarf and 4 or 12   -- dwarves get a short box
-    if self.frame.h ~= h then self.frame.h = h; changed = true end
     if text ~= self.subviews.desc.text_to_wrap then
         self.subviews.desc.text_to_wrap = text
         changed = true
     end
+    -- grow the box to fit the wrapped text (incl. the Kills line), so nothing is
+    -- cut off; cap so it stays on screen
+    local _, sh = dfhack.screen.getWindowSize()
+    local h = math.max(4, math.min(wrapped_lines(text, self.frame.w - 2) + 2, sh - 6))
+    if self.frame.h ~= h then self.frame.h = h; changed = true end
     if changed then self:updateLayout() end
 end
 
