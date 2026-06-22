@@ -41,7 +41,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
-| `military-uniforms` | one-shot+enableable | 🟡 partial | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). `enable` runs a service that queues steel gear manager orders when soldiers are assigned a (steel) uniform (deduped). Generic per world. **TODO: masterwork auto-upgrade toggle** |
+| `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Two toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, queues a **repeating manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — conditions: rebuild while stock `< need` **and** a metal `BAR` of that material exists, **no fuel requirement**; **Upgrade to masterwork** (`Shift-M`) bumps each order to `need+1` and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge. State persisted per site; generic per world (resolves materials/subtypes by id/name within the civ's producible lists). |
 
 ---
 
@@ -554,15 +554,26 @@ A button (general military screen or squad equipment assignment) that:
   inorganic id `STEEL` (`mattype=0`). For the steel armour set: breastplate +
   mail shirt (body), helm, gauntlets, greaves+leggings (legs), high boots, shield.
 
-**Build order (proposed, fort-mutating → test reversibly each step):**
-1. Build & insert ONE steel uniform template (e.g. short-sword) into
-   `entity.uniforms`; verify it shows in the military equipment screen; rollback.
-2. Generalise to the weapon group (short sword / war hammer / battle axe / spear /
+**Build order (all ✅ done — verified live against the running fort, reversibly):**
+1. ✅ Build & insert ONE steel uniform template into `entity.uniforms`.
+2. ✅ Generalise to the weapon group (short sword / war hammer / battle axe / spear /
    pick / mace / crossbow) with the per-weapon material exceptions (copper
-   crossbow + steel buckler; silver war hammer + steel shield).
-3. Delete the metal templates; assign templates to squads.
-4. Auto manager orders for the steel/requested items (reuse auto-mandate).
-5. Second toggle: auto-melt non-masterwork steel + bump replacement orders.
+   crossbow + steel buckler; silver war hammer).
+3. ✅ Delete the metal templates (leather stays).
+4. ✅ Auto manager orders, but **per soldier's actual uniform spec, not just steel**:
+   `compute_required()` tallies every assigned squad soldier's gear by exact
+   `item_type/subtype/mattype/matindex` (so copper armour + iron sword each get
+   their own order); `ensure_order()` creates/reuses a **repeating Daily** order
+   with conditions [item `LessThan need`, `BAR` of that material `AtLeast 1`] and
+   **no fuel condition**. Verified: 9 orders for the one outfitted soldier, each
+   with the right job/material/conditions.
+5. ✅ Second (masterwork) toggle: `need` becomes `count+1` and `melt_inferior()`
+   marks non-masterwork, non-artifact, meltable copies for re-forging. Verified
+   amounts bump to 2 and melt path runs cleanly.
+
+Both toggles live on the Equip-screen overlay (`Shift-G` queue, `Shift-M`
+masterwork); a per-frame calendar-gated heartbeat (repeat-util is too coarse on
+this build) re-runs the cycle ~once a game-day; state persisted per site.
 
 **Second toggle — auto-upgrade steel gear to masterwork:** when on, continuously
 churns inferior steel arms/armor into (eventually) masterwork:
