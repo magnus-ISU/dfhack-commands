@@ -233,53 +233,53 @@ local function compute_required()
     return req
 end
 
-local function new_condition(cmp, val, item_type, subtype, mat_type, mat_index)
-    local c = df.manager_order_condition_item:new()
-    c.compare_type, c.compare_val = cmp, val
-    c.item_type, c.item_subtype = item_type or -1, subtype or -1
-    c.mat_type, c.mat_index = mat_type or -1, mat_index or -1
-    return c
-end
+local function barkey(mt, mi) return mt .. '/' .. mi end
 
-local function clear_conditions(o)
-    for i = #o.item_conditions - 1, 0, -1 do
-        local c = o.item_conditions[i]
-        o.item_conditions:erase(i)
-        c:delete()
-    end
-end
-
--- a repeating Daily order making ONE of the item at a time, re-enqueued while
--- stock < need and there is at least one metal bar of the material (NO fuel
--- condition). Only the condition threshold tracks `need`; each run makes a single
--- unit. Reuses a matching repeating order if present, else creates one on top.
-local function ensure_order(r, need)
+-- locate one of our tracked manager orders by id
+local function order_by_id(id)
     local mo = df.global.world.manager_orders
-    local job = MAKE_JOB[r.item_type]
-    local o
-    for i = 0, #mo.all - 1 do
-        local x = mo.all[i]
-        if x.job_type == job and x.item_subtype == r.subtype and x.mat_type == r.mat_type
-            and x.mat_index == r.mat_index
-            and x.frequency == df.workquota_frequency_type.Daily and #x.item_conditions > 0
-        then o = x; break end
+    for i = 0, #mo.all - 1 do if mo.all[i].id == id then return mo.all[i], i end end
+end
+
+-- delete the order we track for `key`, if it still exists
+local function drop_order(key)
+    local id = state.orders[key]
+    if not id then return end
+    local o, idx = order_by_id(id)
+    if o then df.global.world.manager_orders.all:erase(idx); o:delete() end
+    state.orders[key] = nil
+end
+
+-- DF makes the items of any order whose amount_left>0 the moment it's submitted,
+-- WITHOUT checking conditions (conditions only decide whether to re-fire an
+-- already-completed order), and it never re-arms an order sitting at amount_left=0.
+-- So leaning on DF's repeat always force-produces at least one unit you may not
+-- need. Instead we self-manage: each daily cycle we compare real stock to need and
+-- queue exactly ONE unit only when genuinely short, deleting the order outright
+-- once the need is met -- so nothing is ever made that isn't wanted.
+local function ensure_order(key, r, need, stock, bars)
+    if stock < need and bars >= BARS_PER_ITEM then
+        local o = state.orders[key] and order_by_id(state.orders[key])
+        if not o then
+            local mo = df.global.world.manager_orders
+            o = df.manager_order:new()
+            o.job_type, o.item_type, o.item_subtype = MAKE_JOB[r.item_type], -1, r.subtype
+            o.mat_type, o.mat_index = r.mat_type, r.mat_index
+            o.id = mo.manager_order_next_id
+            mo.manager_order_next_id = o.id + 1
+            o.frequency = df.workquota_frequency_type.OneTime  -- one unit, no DF auto-repeat
+            o.amount_total, o.amount_left = 1, 1
+            o.status.validated, o.status.active = true, true
+            mo.all:insert(0, o)
+            state.orders[key] = o.id
+        elseif o.amount_left < 1 then
+            o.amount_total, o.amount_left = 1, 1     -- last unit forged, still short: one more
+            o.status.active = true
+        end
+        -- else: a unit is queued and not yet forged -- leave it (one at a time)
+    else
+        drop_order(key)        -- need met (or no bars): keep no standing order
     end
-    if not o then
-        o = df.manager_order:new()
-        o.job_type, o.item_type, o.item_subtype = job, -1, r.subtype
-        o.mat_type, o.mat_index = r.mat_type, r.mat_index
-        o.id = mo.manager_order_next_id
-        mo.manager_order_next_id = o.id + 1
-        mo.all:insert(0, o)
-    end
-    o.frequency = df.workquota_frequency_type.Daily
-    o.amount_total, o.amount_left = 1, 1        -- always forge just one per enqueue
-    o.status.validated, o.status.active = true, true
-    clear_conditions(o)
-    o.item_conditions:insert('#', new_condition(df.logic_condition_type.LessThan, need,
-        r.item_type, r.subtype, r.mat_type, r.mat_index))   -- while stock < need
-    o.item_conditions:insert('#', new_condition(df.logic_condition_type.AtLeast, BARS_PER_ITEM,
-        df.item_type.BAR, -1, r.mat_type, r.mat_index))      -- and a metal bar is available
 end
 
 -- mark non-masterwork, non-artifact copies of required items for melting, so
@@ -293,7 +293,7 @@ local function melt_inferior(req)
             and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
             and dfhack.items.canMelt(it)
         then
-            local key = ('%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it.mat_type, it.mat_index)
+            local key = ('%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
             if want[key] and dfhack.items.markForMelting(it) then marked = marked + 1 end
         end
     end
@@ -309,6 +309,7 @@ local function load_state()
         state = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
         if state.queue == nil then state.queue = false end
         if state.masterwork == nil then state.masterwork = false end
+        if not state.orders then state.orders = {} end
     end
     return state
 end
@@ -321,8 +322,29 @@ local function run_cycle()
     load_state()
     if not state.queue then return end
     local req = compute_required()
-    for _, r in pairs(req) do ensure_order(r, r.count + (state.masterwork and 1 or 0)) end
+    -- one pass over items: tally gear stock by item key and bar stock by material.
+    -- items already flagged for melting don't count (they're being recycled).
+    local stock, bars = {}, {}
+    for _, it in ipairs(df.global.world.items.all) do
+        local t = it:getType()
+        if t == df.item_type.BAR then
+            local k = barkey(it:getMaterial(), it:getMaterialIndex())
+            bars[k] = (bars[k] or 0) + 1
+        elseif not it.flags.melt then
+            local k = ('%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
+            if req[k] then stock[k] = (stock[k] or 0) + 1 end
+        end
+    end
+    -- drop orders for gear no longer required (a soldier left, uniform changed)
+    for key in pairs(state.orders) do
+        if not req[key] then drop_order(key) end
+    end
+    for key, r in pairs(req) do
+        local need = r.count + (state.masterwork and 1 or 0)
+        ensure_order(key, r, need, stock[key] or 0, bars[barkey(r.mat_type, r.mat_index)] or 0)
+    end
     if state.masterwork then melt_inferior(req) end
+    save_state()        -- persist the updated order-id map
 end
 
 -- per-frame heartbeat gated on the calendar (repeat-util's tick timers fire too
@@ -350,13 +372,18 @@ local function start_heartbeat()
 end
 local function stop_heartbeat() hb_gen(hb_gen() + 1) end
 
+-- delete every standing order we created (used when the service is switched off)
+local function drop_all_orders()
+    for key in pairs(state.orders) do drop_order(key) end
+end
+
 -- set a toggle; turning Queue on starts the service; either change re-runs now
 function set_toggle(name, val)
     load_state()
     state[name] = val
     save_state()
     if name == 'queue' then
-        if val then start_heartbeat() else stop_heartbeat() end
+        if val then start_heartbeat() else stop_heartbeat(); drop_all_orders(); save_state() end
     end
     if state.queue then run_cycle() end
 end
@@ -433,12 +460,10 @@ if not dfhack.world.isFortressMode() then qerror('military-uniforms only works i
 local args = {...}
 if args[1] == 'orders' then
     load_state()
-    local req = compute_required()
+    run_cycle()        -- reconcile standing orders against current stock/need once
     local n = 0
-    for _, r in pairs(req) do ensure_order(r, r.count + (state.masterwork and 1 or 0)); n = n + 1 end
-    local melted = state.masterwork and melt_inferior(req) or 0
-    print(('military-uniforms: refreshed %d gear order(s)%s'):format(
-        n, melted > 0 and (', melted '..melted..' inferior') or ''))
+    for _ in pairs(state.orders) do n = n + 1 end
+    print(('military-uniforms: %d gear order(s) standing (short of need)'):format(n))
     return
 end
 
