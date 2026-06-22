@@ -144,6 +144,36 @@ local function comma(n)
     return (out:gsub('^,', ''))
 end
 
+-- expected metal-bar yield from melting one item (DFHack realistic-melt tweak:
+-- ~95% of forging cost minus 10% per wear level; ammo / unhooked types fall back
+-- to vanilla 30%)
+local MELT_PROD_STACK = {
+    [df.item_type.ARMOR] = 1, [df.item_type.GLOVES] = 2, [df.item_type.SHOES] = 2,
+    [df.item_type.HELM] = 1, [df.item_type.PANTS] = 1, [df.item_type.WEAPON] = 1,
+    [df.item_type.TRAPCOMP] = 1, [df.item_type.TOOL] = 1,
+}
+local function expected_bars(item)
+    local ps = MELT_PROD_STACK[item:getType()]
+    if ps then
+        local dim = item:getTotalDimension()
+        local ir = df.inorganic_raw.find(item.mat_index)
+        local forging = (ir and ir.flags.DEEP_SPECIAL) and (dim / ps)
+            or (math.max(math.floor(dim / 3), 1) / ps)
+        return forging * (0.95 - item.wear * 0.1)
+    end
+    return (item:getMaterialSizeForMelting() or 0) * 0.3
+end
+
+-- readable metal/bar name for grouping the melt yield, e.g. "iron"
+local function metal_name(item)
+    if item.mat_type ~= 0 then
+        local mi = dfhack.matinfo.decode(item)
+        return mi and mi:toString() or 'other'
+    end
+    local ir = df.inorganic_raw.find(item.mat_index)
+    return ir and ir.id:lower():gsub('_', ' ') or 'other'
+end
+
 -- focus the game's item sheet on this item (mirrors statue-redirect). The
 -- viewing_itid vector must be cleared first, or a stale id keeps the old sheet.
 local function focus_item(item)
@@ -171,7 +201,7 @@ StocksWindow.ATTRS{
 function StocksWindow:init()
     -- size to (nearly) fill the screen, capped, so it's as large as it can be
     local sw, sh = dfhack.screen.getWindowSize()
-    self.frame = {w = math.max(90, math.min(160, sw - 30)),  -- leave room for the minimap
+    self.frame = {w = math.max(90, math.min(150, sw - 40)),  -- leave room for the minimap
                   h = math.max(34, math.min(70, sh - 4))}
 
     self.prod = civ_production()
@@ -288,7 +318,7 @@ function StocksWindow:init()
         widgets.Panel{
             frame = {t = 9, r = 0, w = 28, b = 8},
             frame_style = gui.FRAME_THIN,
-            frame_title = 'Marked for melt',
+            frame_title = 'Melt yield (bars)',
             subviews = {
                 widgets.Label{
                     view_id = 'melt_total',
@@ -341,12 +371,15 @@ function StocksWindow:build_choices()
             local ok, c = pcall(function()
                 local desc = dfhack.items.getDescription(item, 0, true)
                 local q = quality_rank(item, art_ids)
+                local meltable = dfhack.items.canMelt(item)
                 return {
                     item = item,
                     desc = desc,
                     foreign = item.flags.foreign,
                     exotic = is_exotic(item, self.prod),
-                    meltable = dfhack.items.canMelt(item),
+                    meltable = meltable,
+                    bars = meltable and expected_bars(item) or 0,
+                    metal = meltable and metal_name(item) or nil,
                     value = dfhack.items.getValue(item),
                     qrank = q,
                     qtag = QUALITY[q].tag,
@@ -417,26 +450,27 @@ function StocksWindow:update_totals(n, total)
     })
 end
 
--- right panel: count of items currently marked for melting, grouped by type
+-- right panel: expected metal-bar yield from the items marked for melting,
+-- grouped by metal/bar type (sorted by yield, descending)
 function StocksWindow:update_melt_panel()
-    local counts, order = {}, {}
+    local by_metal, order, n = {}, {}, 0
     for _, c in ipairs(self.all_choices or {}) do
-        if c.item.flags.melt then
-            if not counts[c.type_name] then counts[c.type_name] = 0; order[#order + 1] = c.type_name end
-            counts[c.type_name] = counts[c.type_name] + 1
+        if c.item.flags.melt and c.metal then
+            n = n + 1
+            if not by_metal[c.metal] then by_metal[c.metal] = 0; order[#order + 1] = c.metal end
+            by_metal[c.metal] = by_metal[c.metal] + c.bars
         end
     end
     table.sort(order, function(a, b)
-        if counts[a] ~= counts[b] then return counts[a] > counts[b] end
+        if by_metal[a] ~= by_metal[b] then return by_metal[a] > by_metal[b] end
         return a < b
     end)
-    local rows, tot = {}, 0
-    for _, tn in ipairs(order) do
-        rows[#rows + 1] = {text = ('%3d  %s'):format(counts[tn], tn)}
-        tot = tot + counts[tn]
+    local rows = {}
+    for _, m in ipairs(order) do
+        rows[#rows + 1] = {text = ('%-14s %6.1f'):format(m:sub(1, 14), by_metal[m])}
     end
-    self.subviews.melt_total:setText(tot > 0
-        and {{text = ('%d items marked'):format(tot), pen = COLOR_YELLOW}}
+    self.subviews.melt_total:setText(n > 0
+        and {{text = ('%d items marked'):format(n), pen = COLOR_YELLOW}}
         or {{text = 'nothing marked', pen = COLOR_GRAY}})
     self.subviews.melt_list:setChoices(rows)
 end

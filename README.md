@@ -207,8 +207,10 @@ can be confirmed before/while building.
   item sheet and dismisses the menu. After each apply the row's flags re-render
   and selection is preserved by item id.
 - A three-line `Melt / Forbid / Dump` header is staggered to line up under the
-  `M`/`F`/`D` flag columns. The right panel counts items currently marked for
-  melting, **grouped by item type** (no bar totals).
+  `M`/`F`/`D` flag columns. The right panel shows the expected **metal-bar yield**
+  of the items currently marked for melting, grouped by metal/bar type (sorted by
+  yield), using the realistic-melt formula (0.95 × forging cost − 0.10/wear; ammo
+  → vanilla 30%).
 - On open the **most recent artifact** (last entry of `world.artifacts.all` that
   has a movable `item`) is selected and scrolled to the top of the list; falls
   back to the newest item if no artifact is in view. Artifact rows are detected
