@@ -133,24 +133,51 @@ local function remove_owned(ent)
     return removed
 end
 
+-- a default "metal armour" uniform: not one of ours, and its body armour uses the
+-- generic Armor material class (the auto-generated metal uniform) rather than a
+-- specific metal (our steel = mattype 0) or leather/cloth (material_class Leather).
+local function is_metal_default(u)
+    if u.name:sub(1, #NAME_PREFIX) == NAME_PREFIX then return false end
+    local info = u.uniform_item_info[0]
+    return #info > 0 and info[0].material_class == df.entity_material_category.Armor
+end
+
+-- delete the default metal uniforms (leather ones stay); returns their names
+local function delete_metal_defaults(ent)
+    local names = {}
+    for i = #ent.uniforms - 1, 0, -1 do
+        if is_metal_default(ent.uniforms[i]) then
+            names[#names + 1] = ent.uniforms[i].name
+            local u = ent.uniforms[i]
+            ent.uniforms:erase(i)
+            u:delete()
+        end
+    end
+    return names
+end
+
 function create_steel_uniforms()
     local ent = fort_entity()
     if not ent then qerror('no fort entity') end
     local steel = inorganic_idx('STEEL')
     if not steel then qerror('no STEEL inorganic in this world') end
-    local removed = remove_owned(ent)
+    remove_owned(ent)
     local made = {}
     for _, spec in ipairs(GROUP) do
         local u = create_template(ent, spec, steel)
         made[#made + 1] = u.name
     end
-    return made, removed
+    local deleted_metal = delete_metal_defaults(ent)
+    return made, deleted_metal
 end
 
 if dfhack_flags.module then return end
 
 if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
-local made, removed = create_steel_uniforms()
-if removed > 0 then print(('military-uniforms: refreshed (removed %d old)'):format(removed)) end
+local made, deleted = create_steel_uniforms()
 print(('military-uniforms: created %d steel uniform templates:'):format(#made))
 for _, n in ipairs(made) do print('  + ' .. n) end
+if #deleted > 0 then
+    print(('  deleted %d default metal uniform%s:'):format(#deleted, #deleted == 1 and '' or 's'))
+    for _, n in ipairs(deleted) do print('    - ' .. n) end
+end
