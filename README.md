@@ -517,9 +517,43 @@ A button (general military screen or squad equipment assignment) that:
 - **Deletes the existing default *metal* uniforms** (leather uniforms stay).
 - Also **creates/increases manager orders** for the steel (and other requested)
   items by the quantity the squad orders require.
-- Live UI needed: uniform templates (`df.global.world.*uniforms*` / entity
-  uniform list) + the squad/military screen focus; reuse auto-mandate for the
+- Live UI needed: the squad/military screen focus; reuse auto-mandate for the
   manager-order side.
+
+**Verified data model (live):**
+- **Uniform templates live on the fort entity:** `entity.uniforms` (vector of
+  `entity_uniform`) + `entity.next_uniform_id`. This fort has 4: `Melee, leather
+  armor` / `Melee, metal armor` / `Crossbows, leather armor` / `Crossbows, metal
+  armor` — so **"delete default metal uniforms" = remove the two whose material
+  is metal** (the "metal armor" ones), leaving leather.
+- An `entity_uniform` has `id`, `type`, `name`, `flags`, and **7 parallel slot
+  vectors**: `uniform_item_types[slot]` (`vector<item_type>`),
+  `uniform_item_subtypes[slot]` (`vector<int16>`), `uniform_item_info[slot]`
+  (`vector<entity_uniform_item>`). **Slots: 0=body, 1=head, 2=legs(pants),
+  3=hands(gloves), 4=feet(shoes), 5=shield, 6=weapon** (confirmed from a populated
+  squad uniform). Multiple entries per slot = layers (e.g. breastplate + mail).
+- `entity_uniform_item` = the material spec: `mattype`/`matindex` (specific, e.g.
+  `0`/steel-idx) OR `material_class` (`df.entity_material_category`: Armor=16,
+  WeaponMelee=11, WeaponRanged=12, Pick=15, Leather=1, …), plus `item_color`,
+  `random_dye`, `armorlevel`, `maker_race`, `indiv_choice`.
+- The per-squad assignment copy is `squad.positions[p].equipment.uniform[slot]`
+  (`vector<squad_uniform_spec>`); `squad_uniform_spec` =
+  `{item, item_type, item_subtype, material_class | mattype/matindex, color,
+  assigned[], indiv_choice}`.
+- Military screens: `main_interface.squad_equipment`, `main_interface.assign_uniform`.
+- Item subtypes come from `world.raws.itemdefs` (weapons/armor/helms/…); steel =
+  inorganic id `STEEL` (`mattype=0`). For the steel armour set: breastplate +
+  mail shirt (body), helm, gauntlets, greaves+leggings (legs), high boots, shield.
+
+**Build order (proposed, fort-mutating → test reversibly each step):**
+1. Build & insert ONE steel uniform template (e.g. short-sword) into
+   `entity.uniforms`; verify it shows in the military equipment screen; rollback.
+2. Generalise to the weapon group (short sword / war hammer / battle axe / spear /
+   pick / mace / crossbow) with the per-weapon material exceptions (copper
+   crossbow + steel buckler; silver war hammer + steel shield).
+3. Delete the metal templates; assign templates to squads.
+4. Auto manager orders for the steel/requested items (reuse auto-mandate).
+5. Second toggle: auto-melt non-masterwork steel + bump replacement orders.
 
 **Second toggle — auto-upgrade steel gear to masterwork:** when on, continuously
 churns inferior steel arms/armor into (eventually) masterwork:
