@@ -249,9 +249,10 @@ local function clear_conditions(o)
     end
 end
 
--- a repeating Daily order making `need` of the item while stock < need and there
--- is at least one metal bar of the material (NO fuel condition). Reuses a
--- matching repeating order if present, else creates one at the top of the list.
+-- a repeating Daily order making ONE of the item at a time, re-enqueued while
+-- stock < need and there is at least one metal bar of the material (NO fuel
+-- condition). Only the condition threshold tracks `need`; each run makes a single
+-- unit. Reuses a matching repeating order if present, else creates one on top.
 local function ensure_order(r, need)
     local mo = df.global.world.manager_orders
     local job = MAKE_JOB[r.item_type]
@@ -272,7 +273,7 @@ local function ensure_order(r, need)
         mo.all:insert(0, o)
     end
     o.frequency = df.workquota_frequency_type.Daily
-    o.amount_total, o.amount_left = need, need
+    o.amount_total, o.amount_left = 1, 1        -- always forge just one per enqueue
     o.status.validated, o.status.active = true, true
     clear_conditions(o)
     o.item_conditions:insert('#', new_condition(df.logic_condition_type.LessThan, need,
@@ -325,21 +326,29 @@ local function run_cycle()
 end
 
 -- per-frame heartbeat gated on the calendar (repeat-util's tick timers fire too
--- coarsely on this build; see auto-mandate); runs the cycle ~once a game-day
-local hb_gen, last_run = 0, nil
+-- coarsely on this build; see auto-mandate); runs the cycle ~once a game-day.
+-- The generation counter lives on dfhack.internal (NOT a module local) so it
+-- survives script reloads: reloading/re-enabling bumps it, and every previously
+-- scheduled heartbeat -- including ones closed over an older copy of this code --
+-- sees my ~= current and exits instead of leaking a second ticking loop.
+local last_run = nil
+local function hb_gen(set)
+    if set ~= nil then dfhack.internal.military_uniforms_hb_gen = set end
+    return dfhack.internal.military_uniforms_hb_gen or 0
+end
 local function start_heartbeat()
     last_run = nil
-    hb_gen = hb_gen + 1
-    local my = hb_gen
+    local my = hb_gen() + 1
+    hb_gen(my)
     local function hb()
-        if not load_state().queue or my ~= hb_gen then return end
+        if not load_state().queue or my ~= hb_gen() then return end
         local now = df.global.cur_year * 403200 + df.global.cur_year_tick
         if not last_run or now - last_run >= DAY_TICKS then last_run = now; run_cycle() end
         dfhack.timeout(1, 'frames', hb)
     end
     hb()
 end
-local function stop_heartbeat() hb_gen = hb_gen + 1 end
+local function stop_heartbeat() hb_gen(hb_gen() + 1) end
 
 -- set a toggle; turning Queue on starts the service; either change re-runs now
 function set_toggle(name, val)
@@ -366,7 +375,7 @@ end
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
     desc = 'Toggles to auto-queue squad gear orders and upgrade gear to masterwork.',
-    default_pos = {x = -36, y = 6},
+    default_pos = {x = -99, y = 4},
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Equipment/Default',
     frame = {w = 36, h = 4},
