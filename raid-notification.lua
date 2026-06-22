@@ -21,7 +21,6 @@ local repeatUtil = require('repeat-util')
 local NAME = 'raids'
 local TICKS_PER_DAY  = 1200
 local TICKS_PER_YEAR = 403200
-local WORLD_TILE     = 48          -- army-pos units per world tile
 
 local function now_ticks()
     return df.global.cur_year * TICKS_PER_YEAR + df.global.cur_year_tick
@@ -54,30 +53,22 @@ local function get_raids()
     return raids
 end
 
-local function dist(ax, ay, bx, by)
-    local dx, dy = bx - ax, by - ay
-    return math.sqrt(dx * dx + dy * dy)
-end
-
--- rough estimate of days until this raid returns (nil if it can't be estimated)
-local function remaining_days(c, elapsed_days)
-    if elapsed_days < 0.5 then return nil end
-    local fort = df.world_site.find(df.global.plotinfo.site_id)
-    local target = df.world_site.find(c.site_id)
-    if not (fort and target) then return nil end
-    local army
-    local armies = df.global.world.armies.all
-    for i = 0, #armies - 1 do
-        if armies[i].controller_id == c.id then army = armies[i]; break end
-    end
-    if not army then return nil end
-    local ax, ay = army.pos.x / WORLD_TILE, army.pos.y / WORLD_TILE
-    local traveled = dist(fort.pos.x, fort.pos.y, ax, ay)
-    local oneway = dist(fort.pos.x, fort.pos.y, target.pos.x, target.pos.y)
-    if traveled < 1 or oneway < 1 then return nil end
-    local speed = traveled / elapsed_days                 -- world tiles per day
-    local eta = (2 * oneway) / speed                      -- rough round-trip
-    return eta - elapsed_days
+-- Days until this raid returns, from DF's own scheduled return time: the army's
+-- mission_report is stamped with the year/year_tick the mission is due to wrap up
+-- (the "Mission Report" filing = squads home). This is accurate (it's DF's plan),
+-- not a speed/distance guess; the army can run a little late, in which case the
+-- value goes negative and the caller shows "back any minute now". nil if there's
+-- no schedule yet (just mustered).
+local function remaining_days(c)
+    local ok, val = pcall(function()
+        local mr = c.mission_report
+        if not mr then return nil end
+        local ret = mr.year * TICKS_PER_YEAR + mr.year_tick
+        local dep = c.year * TICKS_PER_YEAR + c.year_tick
+        if ret <= dep then return nil end      -- no sane scheduled return yet
+        return (ret - now_ticks()) / TICKS_PER_DAY
+    end)
+    return ok and val or nil
 end
 
 local function raid_message()
@@ -89,7 +80,7 @@ local function raid_message()
     local best
     for _, c in ipairs(raids) do
         local elapsed = (now - (c.year * TICKS_PER_YEAR + c.year_tick)) / TICKS_PER_DAY
-        local rem = remaining_days(c, elapsed)
+        local rem = remaining_days(c)
         local rank = rem or -elapsed                       -- no estimate: longer gone = sooner
         if not best or rank < best.rank then
             best = {c = c, elapsed = elapsed, rem = rem, rank = rank}
