@@ -36,7 +36,8 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | ✅ done | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss) |
+| `dfhack-stocks` | overlay+menu | 🟡 partial | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). Core works; further polish/features ongoing |
+| `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
@@ -176,7 +177,9 @@ All of these are GUI features. Each needs the relevant viewscreen opened so the
 focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
 can be confirmed before/while building.
 
-### ✅ dfhack-stocks — melt-focused stocks menu (DONE)
+### 🟡 dfhack-stocks — melt-focused stocks menu (PARTIAL)
+
+Core is functional and in use; further polish/features ongoing.
 
 `dfhack-stocks` (or the toolbar overlay button `dfhack-stocks.button`) opens a
 `gui.ZScreen` item designation menu. **Implemented:**
@@ -356,7 +359,15 @@ labor(s) enabled. Work Details live in
 `df.global.plotinfo.labor_info.work_details` (verify); create one per type with
 its `allowed_labors` set.
 
-### work-orders quick text input ("3 steel swords") — IMPLEMENTATION PLAN
+### 🟡 work-orders quick text input ("3 steel swords") — PARTIAL (`quick-order.lua`)
+
+**Built (one-time orders):** the `quick-order.entry` overlay "new order" box on
+`dwarfmode/Info/WORK_ORDERS/Default` (auto-focused, right of the DFHack search);
+parse (digits/spelled/rN, fuzzy item+material split), all three material kinds
+(category/concrete-class/specific), magma-safe + most-in-stock (non-economic,
+capability-filtered) picks, raw-glass colour items, and `create_order` inserting
+a one-time `manager_order` at the **top** of the list. Verified live.
+**Still TODO:** repeating orders (`r3 …`) + suggested conditions (Phase 5 below).
 
 **Goal:** a text field on the Work Orders screen that turns freeform text into a
 manager order.
