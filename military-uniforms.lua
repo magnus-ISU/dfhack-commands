@@ -385,6 +385,7 @@ function MilitaryUniformOverlay:init()
                     frame = {t = 0, l = 0},
                     label = 'Queue gear orders',
                     key = 'CUSTOM_SHIFT_G',
+                    initial_option = false,
                     on_change = function(v) set_toggle('queue', v) end,
                 },
                 widgets.ToggleHotkeyLabel{
@@ -392,6 +393,7 @@ function MilitaryUniformOverlay:init()
                     frame = {t = 1, l = 0},
                     label = 'Upgrade to masterwork',
                     key = 'CUSTOM_SHIFT_M',
+                    initial_option = false,
                     on_change = function(v) set_toggle('masterwork', v) end,
                 },
             },
