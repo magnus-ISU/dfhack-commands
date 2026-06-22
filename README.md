@@ -36,7 +36,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | 🟡 partial | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). Core works; further polish/features ongoing |
+| `dfhack-stocks` | overlay+menu | 🟡 on hold | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). **Currently disabled & not deployed — revisiting implementation** (source kept in repo) |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
@@ -178,9 +178,17 @@ All of these are GUI features. Each needs the relevant viewscreen opened so the
 focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
 can be confirmed before/while building.
 
-### 🟡 dfhack-stocks — melt-focused stocks menu (PARTIAL)
+### 🟡 dfhack-stocks — melt-focused stocks menu (ON HOLD)
 
-Core is functional and in use; further polish/features ongoing.
+**Currently disabled and NOT deployed** — the `dfhack-stocks.redirect` overlay was
+disabled (`overlay disable dfhack-stocks.redirect`) and the copy in
+`dfhack-config/scripts/` was deleted, so it no longer loads or intercepts the
+vanilla Stocks screen. Source is kept here pending a rework of the implementation.
+To bring it back: copy `dfhack-stocks.lua` to `dfhack-config/scripts/` and
+`overlay enable dfhack-stocks.redirect`.
+
+Core is functional; further polish/features (and a revisit of the redirect
+approach) ongoing.
 
 `dfhack-stocks` (or the toolbar overlay button `dfhack-stocks.button`) opens a
 `gui.ZScreen` item designation menu. **Implemented:**
