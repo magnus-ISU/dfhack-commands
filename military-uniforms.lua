@@ -1,7 +1,12 @@
 -- Create steel military uniform templates, one per typical weapon type.
 --@module = true
+--@enable = true
 --[[
     military-uniforms            create/refresh the steel uniform set
+    military-uniforms orders     queue gear orders for outfitted soldiers, once
+    enable military-uniforms     background: queue gear orders as soldiers are
+                                 assigned (steel) uniforms
+    disable military-uniforms    stop the background order service
 
 Creates a "Steel - <weapon>" uniform template on the fort entity for each of the
 typical weapons (short sword, war hammer, battle axe, spear, pick, mace,
@@ -171,9 +176,159 @@ function create_steel_uniforms()
     return made, deleted_metal
 end
 
+-- ---- order service: queue gear when soldiers get a (steel) uniform ----------
+
+local MAKE_JOB = {
+    [df.item_type.ARMOR]  = df.job_type.MakeArmor,
+    [df.item_type.HELM]   = df.job_type.MakeHelm,
+    [df.item_type.PANTS]  = df.job_type.MakePants,
+    [df.item_type.GLOVES] = df.job_type.MakeGloves,
+    [df.item_type.SHOES]  = df.job_type.MakeShoes,
+    [df.item_type.SHIELD] = df.job_type.MakeShield,
+    [df.item_type.WEAPON] = df.job_type.MakeWeapon,
+}
+
+-- bump a matching active order by 1, else create a new one (amount 1) at the top
+local function bump_order(job, subtype, mattype, matindex)
+    local mo = df.global.world.manager_orders
+    for i = 0, #mo.all - 1 do
+        local o = mo.all[i]
+        if o.job_type == job and o.item_subtype == subtype and o.mat_type == mattype
+            and o.mat_index == matindex and o.status.active
+        then
+            o.amount_total = o.amount_total + 1
+            o.amount_left = o.amount_left + 1
+            return
+        end
+    end
+    local o = df.manager_order:new()
+    o.job_type, o.item_type, o.item_subtype = job, -1, subtype
+    o.mat_type, o.mat_index = mattype, matindex
+    o.amount_total, o.amount_left = 1, 1
+    o.frequency = 0
+    o.status.validated, o.status.active = true, true
+    o.id = mo.manager_order_next_id
+    mo.manager_order_next_id = o.id + 1
+    mo.all:insert(0, o)
+end
+
+-- the makeable, specific-material (steel) gear items of a filled position; or nil
+local function position_gear(pos)
+    if pos.occupant < 0 then return nil end
+    local items = {}
+    for slot = 0, 6 do
+        local v = pos.equipment.uniform[slot]
+        for j = 0, #v - 1 do
+            local s = v[j]
+            if MAKE_JOB[s.item_type] and s.item_subtype >= 0 and s.mattype >= 0 then
+                items[#items + 1] = {job = MAKE_JOB[s.item_type], sub = s.item_subtype,
+                                     mt = s.mattype, mi = s.matindex}
+            end
+        end
+    end
+    return #items > 0 and items or nil
+end
+
+local function gear_sig(pos, items)
+    local p = {tostring(pos.occupant)}
+    for _, it in ipairs(items) do p[#p + 1] = it.job .. '/' .. it.sub .. '/' .. it.mt .. '/' .. it.mi end
+    return table.concat(p, ';')
+end
+
+processed = processed or nil   -- "squad:pos" -> last-ordered signature (dedup)
+
+-- queue gear for newly-outfitted soldiers (once per soldier+uniform); count made
+function queue_gear()
+    if not dfhack.world.isFortressMode() then return 0 end
+    if not processed then processed = {} end
+    local fort = df.global.plotinfo.group_id
+    local made = 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local items = position_gear(sq.positions[p])
+                if items then
+                    local key = sq.id .. ':' .. p
+                    local sig = gear_sig(sq.positions[p], items)
+                    if processed[key] ~= sig then
+                        for _, it in ipairs(items) do bump_order(it.job, it.sub, it.mt, it.mi); made = made + 1 end
+                        processed[key] = sig
+                    end
+                end
+            end
+        end
+    end
+    return made
+end
+
+-- ---- enable / background service --------------------------------------------
+
+local GLOBAL_KEY = 'military-uniforms'
+local DAY_TICKS = 1200
+enabled = enabled or false
+local last_run, hb_gen = nil, 0
+
+function isEnabled() return enabled end
+
+local function do_cycle()
+    local n = queue_gear()
+    if n > 0 then print(('military-uniforms: queued %d gear order(s) for newly-outfitted soldiers'):format(n)) end
+end
+
+-- per-frame heartbeat gated on the calendar (repeat-util's tick timers are
+-- unreliable on this build; see auto-mandate), runs the cycle ~once a game-day
+local function start()
+    enabled = true
+    last_run = nil
+    hb_gen = hb_gen + 1
+    local my = hb_gen
+    local function hb()
+        if not enabled or my ~= hb_gen then return end
+        local now = df.global.cur_year * 403200 + df.global.cur_year_tick
+        if not last_run or now - last_run >= DAY_TICKS then last_run = now; do_cycle() end
+        dfhack.timeout(1, 'frames', hb)
+    end
+    hb()
+end
+
+local function stop() enabled = false; hb_gen = hb_gen + 1 end
+
+function set_enabled(on)
+    if on then start() else stop() end
+    enabled = on
+    dfhack.persistent.saveSiteData(GLOBAL_KEY, {enabled = enabled})
+    return enabled
+end
+
+dfhack.onStateChange[GLOBAL_KEY] = function(sc)
+    if sc == SC_MAP_LOADED then
+        processed = nil
+        if dfhack.world.isFortressMode()
+            and dfhack.persistent.getSiteData(GLOBAL_KEY, {enabled = false}).enabled then start() end
+    elseif sc == SC_MAP_UNLOADED then
+        stop(); processed = nil
+    end
+end
+
 if dfhack_flags.module then return end
 
+if dfhack_flags and dfhack_flags.enable ~= nil then
+    if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
+    set_enabled(dfhack_flags.enable_state)
+    print('military-uniforms: order service ' .. (enabled and 'enabled (background)' or 'disabled'))
+    return
+end
+
 if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
+
+local args = {...}
+if args[1] == 'orders' then
+    local n = queue_gear()
+    print(('military-uniforms: queued %d gear order(s) for outfitted soldiers'):format(n))
+    return
+end
+
 local made, deleted = create_steel_uniforms()
 print(('military-uniforms: created %d steel uniform templates:'):format(#made))
 for _, n in ipairs(made) do print('  + ' .. n) end

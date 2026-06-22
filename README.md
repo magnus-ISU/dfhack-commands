@@ -41,7 +41,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
-| `military-uniforms` | one-shot+module | 🟡 partial | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Generic per world. **TODO: delete metal uniforms, squad assignment, manager orders on assignment** |
+| `military-uniforms` | one-shot+enableable | 🟡 partial | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). `enable` runs a service that queues steel gear manager orders when soldiers are assigned a (steel) uniform (deduped). Generic per world. **TODO: masterwork auto-upgrade toggle** |
 
 ---
 
