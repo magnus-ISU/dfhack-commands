@@ -36,7 +36,7 @@ It does **not** enable `no-pausing` (that stops *all* pausing — manual toggle)
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | ✅ done | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible) + toolbar button |
+| `dfhack-stocks` | overlay+menu | ✅ done | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss) |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
@@ -213,8 +213,15 @@ can be confirmed before/while building.
   has a movable `item`) is selected and scrolled to the top of the list; falls
   back to the newest item if no artifact is in view. Artifact rows are detected
   from that same id set (so they rank above Masterful in the sort).
-- Toolbar button overlay on `dwarfmode/Default`; `updateLayout` pins it to ~40%
-  across the screen and 5 cells down on any resolution.
+- No custom toolbar button. Instead an invisible overlay (`dfhack-stocks.redirect`,
+  `viewscreens='dwarfmode/Stocks'`, `overlay_onupdate_max_freq_seconds=0`) fires
+  the instant the player opens the **vanilla Stocks screen**: it sets
+  `main_interface.stocks.open=false` (the safe close idiom DFHack itself uses) and
+  pops our window on the next frame via `dfhack.timeout`. Esc dismisses our window
+  back to normal play — it does not reopen the vanilla screen.
+  - NB: never force `stocks.open=true` from a script to *open* it — that bypasses
+    DF's initialization of the stocks lists and crashes the game. The redirect
+    only ever closes it, in response to DF legitimately opening it.
 
 Original spec (for reference):
 

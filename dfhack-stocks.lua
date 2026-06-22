@@ -1,4 +1,4 @@
--- Searchable/filterable stocks menu for designating items (+ a toolbar button).
+-- Searchable/filterable stocks menu for designating items (replaces vanilla Stocks).
 --@module = true
 --[[
 A searchable list of fort items for quickly marking gear to melt (or forbid /
@@ -7,7 +7,8 @@ pieces are easy to find.
 
     dfhack-stocks            open the menu
 
-Or click the "DFHack stocks" button the overlay adds near the top of the screen.
+Or just click the vanilla Stocks button on the bottom toolbar -- this script
+replaces that screen with the menu (press Esc to dismiss it back to play).
 
 Menu:
   * Search field is focused on open; the most recent artifact is selected.
@@ -629,39 +630,27 @@ local function show()
     return view
 end
 
--- ---- toolbar overlay button -----------------------------------------------
+-- ---- redirect: replace the vanilla Stocks screen with our window ----------
 
-StocksButton = defclass(StocksButton, overlay.OverlayWidget)
-StocksButton.ATTRS{
-    desc = 'Adds a button to open the DFHack stocks designation menu.',
-    default_pos = {x = 46, y = 6},   -- fallback; updateLayout pins it to ~40% across
+-- An invisible overlay attached to the vanilla Stocks screen. The instant the
+-- player opens it (bottom-toolbar Stocks button), we close it and pop our own
+-- window instead -- which is freely dismissable with Esc, returning to play.
+StocksRedirect = defclass(StocksRedirect, overlay.OverlayWidget)
+StocksRedirect.ATTRS{
+    desc = 'Opens the DFHack stocks designation window in place of the vanilla Stocks screen.',
     default_enabled = true,
-    viewscreens = 'dwarfmode/Default',
-    frame = {w = 16, h = 1},
+    viewscreens = 'dwarfmode/Stocks',
+    overlay_onupdate_max_freq_seconds = 0,   -- react on the very first frame
+    frame = {w = 1, h = 1},
 }
 
-function StocksButton:init()
-    self:addviews{
-        widgets.TextButton{
-            frame = {t = 0, l = 0, w = 16, h = 1},
-            label = 'DFHack stocks',
-            on_activate = show,
-        },
-    }
+function StocksRedirect:overlay_onupdate()
+    if view then return end                              -- our window is already up
+    df.global.game.main_interface.stocks.open = false    -- dismiss the vanilla screen
+    dfhack.timeout(1, 'frames', show)                    -- pop ours next frame
 end
 
--- keep the button ~40% across the screen and ~5 cells down, on any resolution
-function StocksButton:updateLayout(parent_rect)
-    if parent_rect and parent_rect.width then
-        self.frame.l = math.floor(parent_rect.width * 0.40)
-        self.frame.t = 5
-        self.frame.r = nil
-        self.frame.b = nil
-    end
-    StocksButton.super.updateLayout(self, parent_rect)
-end
-
-OVERLAY_WIDGETS = {button = StocksButton}
+OVERLAY_WIDGETS = {redirect = StocksRedirect}
 
 if dfhack_flags.module then
     return
