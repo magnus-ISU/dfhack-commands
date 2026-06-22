@@ -170,7 +170,7 @@ StocksWindow.ATTRS{
 function StocksWindow:init()
     -- size to (nearly) fill the screen, capped, so it's as large as it can be
     local sw, sh = dfhack.screen.getWindowSize()
-    self.frame = {w = math.max(90, math.min(160, sw - 9)),  -- leave room for the minimap
+    self.frame = {w = math.max(90, math.min(160, sw - 15)),  -- leave room for the minimap
                   h = math.max(34, math.min(70, sh - 4))}
 
     self.prod = civ_production()
