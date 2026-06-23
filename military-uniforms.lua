@@ -458,16 +458,16 @@ end
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
     desc = 'Toggles to auto-queue squad gear orders, upgrade to masterwork, and train war dogs.',
-    default_pos = {x = -40, y = 25},
+    default_pos = {x = -80, y = 12},
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Equipment/Default',
-    frame = {w = 36, h = 5},
+    frame = {w = 36, h = 6},
 }
 
 function MilitaryUniformOverlay:init()
     self:addviews{
         widgets.Panel{
-            frame = {t = 0, l = 0, r = 0, h = 5},
+            frame = {t = 0, l = 0, r = 0, h = 6},
             frame_style = gui.MEDIUM_FRAME,
             frame_background = gui.CLEAR_PEN,
             frame_title = 'auto gear',
