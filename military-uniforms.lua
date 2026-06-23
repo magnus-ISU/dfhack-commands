@@ -288,22 +288,82 @@ local function ensure_order(key, r, need, stock, bars)
     end
 end
 
--- mark non-masterwork, non-artifact copies of required items for melting, so
--- they get re-forged for another shot at masterwork
-local function melt_inferior(req)
-    local want = {}
-    for k in pairs(req) do want[k] = true end
-    local marked = 0
+local function item_wear(it)
+    local ok, w = pcall(function() return it.wear end)
+    return (ok and w) or 0
+end
+
+-- Masterwork recycling: when there isn't enough raw metal to forge the masterwork
+-- replacements we still owe, melt the least-valuable matching gear back into bars.
+-- Per material we melt only the shortfall the existing bars (and in-flight melts)
+-- don't already cover -- damaged pieces first, then ascending quality, NEVER
+-- masterwork or artifact -- and only item types our own orders produce.
+local function melt_for_masterwork(req, mwstock, bars)
+    local short, inbound, cands = {}, {}, {}
+    for key, r in pairs(req) do
+        local mk = barkey(r.mat_type, r.mat_index)
+        short[mk] = (short[mk] or 0) + math.max(0, r.count - (mwstock[key] or 0))
+    end
+    for mk, b in pairs(bars) do inbound[mk] = b end
     for _, it in ipairs(df.global.world.items.all) do
-        if not it.flags.melt and it:getQuality() < df.item_quality.Masterful
-            and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
-            and dfhack.items.canMelt(it)
-        then
-            local key = ('%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
-            if want[key] and dfhack.items.markForMelting(it) then marked = marked + 1 end
+        local key = ('%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
+        if req[key] then
+            local mk = barkey(it:getMaterial(), it:getMaterialIndex())
+            if it.flags.melt then
+                inbound[mk] = (inbound[mk] or 0) + 1          -- metal already on the way
+            elseif it:getQuality() < df.item_quality.Masterful
+                and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
+                and dfhack.items.canMelt(it)
+            then
+                cands[mk] = cands[mk] or {}
+                cands[mk][#cands[mk] + 1] = it
+            end
+        end
+    end
+    local marked = 0
+    for mk, need in pairs(short) do
+        local deficit = need - (inbound[mk] or 0)
+        local list = cands[mk]
+        if deficit > 0 and list then
+            table.sort(list, function(a, b)
+                local wa, wb = item_wear(a), item_wear(b)
+                if wa ~= wb then return wa > wb end           -- most-damaged first
+                return a:getQuality() < b:getQuality()         -- then lowest quality
+            end)
+            for i = 1, math.min(deficit, #list) do
+                if dfhack.items.markForMelting(list[i]) then marked = marked + 1 end
+            end
         end
     end
     return marked
+end
+
+-- A leather-category supply order (backpack / waterskin) tracked like a gear
+-- order: queue ONE while soldiers lack the item and a tanned hide is on hand;
+-- delete it once everyone is covered. (A waterskin is just a leather FLASK.)
+local function ensure_supply(key, job, want, have, hides)
+    if want > 0 and have < want and hides >= 1 then
+        local o = state.orders[key] and order_by_id(state.orders[key])
+        if not o then
+            local mo = df.global.world.manager_orders
+            o = df.manager_order:new()
+            o.job_type, o.item_type, o.item_subtype = job, -1, -1
+            o.mat_type, o.mat_index = -1, -1
+            o.material_category.leather = true     -- from any tanned hide
+            o.id = mo.manager_order_next_id
+            mo.manager_order_next_id = o.id + 1
+            o.frequency = df.workquota_frequency_type.OneTime
+            o.amount_total, o.amount_left = 1, 1
+            o.status.validated, o.status.active = true, true
+            mo.all:insert(0, o)
+            state.orders[key] = o.id
+        elseif o.amount_left < 1 then
+            o.amount_total, o.amount_left = 1, 1
+            o.status.active = true
+        end
+    else
+        drop_order(key)
+    end
 end
 
 -- ---- war-dog training: train surplus adult males beyond the breeders --------
@@ -378,28 +438,53 @@ local function run_cycle()
     if state.wardogs then train_surplus_war_dogs() end
     if not state.queue then return end
     local req = compute_required()
-    -- one pass over items: tally gear stock by item key and bar stock by material.
-    -- items already flagged for melting don't count (they're being recycled).
-    local stock, bars = {}, {}
+    -- one pass over items: tally gear stock (total + masterwork) by item key, bar
+    -- stock by material, and the leather-supply counts. Items already flagged for
+    -- melting don't count (they're being recycled).
+    local stock, mwstock, bars = {}, {}, {}
+    local hides, flasks, backpacks = 0, 0, 0
     for _, it in ipairs(df.global.world.items.all) do
         local t = it:getType()
         if t == df.item_type.BAR then
-            local k = barkey(it:getMaterial(), it:getMaterialIndex())
-            bars[k] = (bars[k] or 0) + 1
+            bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
+        elseif t == df.item_type.SKIN_TANNED then
+            hides = hides + 1
+        elseif not it.flags.melt and t == df.item_type.FLASK then
+            flasks = flasks + 1
+        elseif not it.flags.melt and t == df.item_type.BACKPACK then
+            backpacks = backpacks + 1
         elseif not it.flags.melt then
             local k = ('%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
-            if req[k] then stock[k] = (stock[k] or 0) + 1 end
+            if req[k] then
+                stock[k] = (stock[k] or 0) + 1
+                if it:getQuality() >= df.item_quality.Masterful then mwstock[k] = (mwstock[k] or 0) + 1 end
+            end
         end
     end
-    -- drop orders for gear no longer required (a soldier left, uniform changed)
+    -- count soldiers (occupied fort squad positions)
+    local fort = df.global.plotinfo.group_id
+    local soldiers = 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then soldiers = soldiers + 1 end end
+        end
+    end
+    -- drop gear orders no longer required (soldier left / uniform changed); leave
+    -- the leather-supply orders (keys "supply/*") to ensure_supply below
     for key in pairs(state.orders) do
-        if not req[key] then drop_order(key) end
+        if not req[key] and key:sub(1, 7) ~= 'supply/' then drop_order(key) end
     end
+    -- gear: in masterwork mode the "have" we measure against is the masterwork
+    -- count (keep forging until each soldier has a masterful piece), else total
     for key, r in pairs(req) do
-        local need = r.count + (state.masterwork and 1 or 0)
-        ensure_order(key, r, need, stock[key] or 0, bars[barkey(r.mat_type, r.mat_index)] or 0)
+        local have = state.masterwork and (mwstock[key] or 0) or (stock[key] or 0)
+        ensure_order(key, r, r.count, have, bars[barkey(r.mat_type, r.mat_index)] or 0)
     end
-    if state.masterwork then melt_inferior(req) end
+    if state.masterwork then melt_for_masterwork(req, mwstock, bars) end
+    -- leather field kit: a backpack (food) and a waterskin/flask (water) per soldier
+    ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
+    ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
     save_state()        -- persist the updated order-id map
 end
 
@@ -458,7 +543,7 @@ end
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
     desc = 'Toggles to auto-queue squad gear orders, upgrade to masterwork, and train war dogs.',
-    default_pos = {x = -93, y = 13},
+    default_pos = {x = 7, y = 12},   -- left-anchored like uniform-unstick's button (stable on resize)
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Equipment/Default',
     frame = {w = 36, h = 6},
