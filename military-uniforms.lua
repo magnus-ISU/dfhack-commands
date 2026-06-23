@@ -564,7 +564,8 @@ end
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
     desc = 'Toggles to auto-queue squad gear orders, upgrade to masterwork, and train war dogs.',
-    default_pos = {x = 7, y = 12},   -- left-anchored like uniform-unstick's button (stable on resize)
+    default_pos = {x = -93, y = 13},   -- right-anchored: the equip screen is flush to the
+                                       -- screen's right edge, so track that edge to slide with it
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Equipment/Default',
     frame = {w = 36, h = 6},
