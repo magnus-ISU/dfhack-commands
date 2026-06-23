@@ -8,12 +8,17 @@ DF's move-order UI (`giving_move_order`) pauses the game and stays open until yo
 place or cancel an order, so auto-arming it on open just froze the fort. Instead,
 this leaves the screen alone on open, and on a map click it flicks move mode on
 for the single frame DF needs to register the move, then immediately drops back
-out -- so a click commands the squads but the game isn't left paused. If nothing
-is selected, it selects all squads first, so a click always commands someone.
+out -- so a click commands the squads but the game isn't left paused.
 
-It is inert (passes input straight through) whenever you're actually giving a
+It only acts when a squad is selected and the cursor is on the map (not on a
+command-menu button -- guarded via main_interface.current_hover, since getMousePos
+returns a map tile under the buttons too). It is inert whenever you're giving a
 kill / patrol / burrow order, or in another squad sub-screen (equip / schedule
 have their own focus, so the overlay isn't even active there).
+
+Planned (not yet built): right-click while the squad menu is open -> close the
+menu and cancel the station/move order. Deferred in case step 3 (click-enemy ->
+attack) forces a unified left/right click handler.
 
 Map clicks are read with dfhack.gui.getMousePos, intercepted via the overlay's
 onInput (works regardless of the tiny frame, like DFHack's burrow-paint overlay).
@@ -47,13 +52,20 @@ function DwarfRtsClickMove:onInput(keys)
     if not keys._MOUSE_L then return false end
     local sq = squads_ui()
     if not sq.open or busy(sq) then return false end   -- another order/mode owns the click
-    local pos = dfhack.gui.getMousePos(true)
-    if not pos then return false end                   -- click wasn't on the map
 
-    -- nothing selected? select every squad so the click always commands someone
+    -- the command-menu buttons (Station/Kill/Patrol/Disband/...) sit over the map,
+    -- and getMousePos returns a tile under them too, so guard on the hovered UI
+    -- element: anything other than -1 means the cursor is on a button, not the map
+    if df.global.game.main_interface.current_hover ~= -1 then return false end
+
+    -- only act when a squad is actually selected; with nothing selected we leave
+    -- the click entirely alone (normal handling)
     local any = false
     for i = 0, #sq.squad_selected - 1 do if sq.squad_selected[i] then any = true; break end end
-    if not any then for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end end
+    if not any then return false end
+
+    local pos = dfhack.gui.getMousePos(true)
+    if not pos then return false end                   -- click wasn't on the map
 
     -- flick move mode on so DF's native handler registers THIS click as the move
     -- target, then drop straight back out a couple frames later so the game is

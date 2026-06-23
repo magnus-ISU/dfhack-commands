@@ -231,6 +231,16 @@ behaviours:
 4. **Click leader portrait / unit camera → follow.** Clicking a squad leader's
    portrait (which already selects them) also makes the camera follow them;
    clicking a unit's camera icon selects that unit and follows it too.
+5. **Right-click → close menu + cancel station/move order.** While the squad menu
+   is open, a right-click closes the menu *and* removes the squad's station/move
+   order (recall). Deferred — likely needs a unified left/right `onInput` handler,
+   which may shake out of how #3 (click-enemy → attack) is built.
+
+**Gotchas learned:** `getMousePos` returns a map tile *under the command-menu
+buttons too*, so click-to-move must guard on `main_interface.current_hover ~= -1`
+(cursor is on a UI button, not the map) or it hijacks the Station/Kill/Patrol/etc.
+buttons. And only act when a squad is selected — with nothing selected, leave the
+click alone.
 
 **Data model (`df.global.game.main_interface.squads`):** mode flags
 `giving_move_order` / `giving_kill_order` / `giving_patrol_order` /
