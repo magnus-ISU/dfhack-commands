@@ -45,7 +45,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
-| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control. **Done:** open Squads → select-all + movement mode; map-click in move mode chains moves; click a hostile → switch to attack mode + target it (Shift appends), confirm to engage. **TODO:** click leader/unit → camera-follow. See spec below |
+| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control. **Done:** on the Squads screen, left-clicking the map moves the selected squads there (selects all if none selected) **without** leaving the game stuck in the paused move UI — it flicks `giving_move_order` on for the one frame DF needs, then clears it. Inert while giving a kill/patrol/burrow order. **TODO:** click-enemy → attack, camera-follow. See spec below. **NOTE:** auto-arming move mode on open was abandoned — `giving_move_order` pauses the game inherently |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `dfhack-stocks` | overlay+menu | 🟡 on hold | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). **Currently disabled & not deployed — revisiting implementation** (source kept in repo) |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
@@ -210,12 +210,19 @@ can be confirmed before/while building.
 The DF squad UI is clunky; this makes commanding squads feel like an RTS. Four
 behaviours:
 
-1. **Open Squads → select all + movement mode.** Opening the Squads screen
-   auto-selects every squad and arms movement mode, so you're immediately ready
-   to click a destination. **(IMPLEMENTED.)**
-2. **Click map in movement mode → move + re-arm.** Left-clicking the ground while
-   in movement mode issues the move order, then re-enters movement mode so you
-   can keep clicking destinations without re-selecting. **(IMPLEMENTED.)**
+1. **~~Open Squads → select all + movement mode.~~ ABANDONED.** `giving_move_order`
+   *pauses the game inherently* and stays open until an order is placed/cancelled,
+   so auto-arming it on open froze the fort. Replaced by click-to-move (below).
+2. **Click map → move the selected squads, no paused UI. (IMPLEMENTED.)**
+   On the Squads screen, a left-click on the map flicks `giving_move_order` on for
+   the single frame DF needs to register the click as a move target, then a
+   `dfhack.timeout(2,'frames',...)` clears it unconditionally — so the click
+   commands the squads but the game is never left paused (and a closed menu can't
+   strand the flag). If nothing is selected it selects all squads first. It is
+   inert (`busy()`) while a kill/patrol/burrow order is being given. KEY LESSON:
+   do NOT drive this from the overlay's `overlay_onupdate` — that clock stalls
+   while the order-giving sub-mode steals focus, which re-fires logic and traps
+   the player; use `onInput` (event-driven) and a self-clearing one-shot only.
 3. **Click enemy in movement mode → attack.** Left-clicking a hostile unit while
    in movement mode switches to attack (kill) mode and targets that unit instead
    of moving. Holding **Shift** appends to the existing kill list rather than
