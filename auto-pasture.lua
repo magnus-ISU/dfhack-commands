@@ -310,25 +310,27 @@ local function overcrowded_pastures()
     if graze then
         local cap = math.floor(pen_metrics(graze).grass / 4)
         local n = #graze.assigned_units
-        if n > cap then out[#out + 1] = {zone = graze, label = ('graze %d/%d'):format(n, cap)} end
+        if n > cap then out[#out + 1] = {zone = graze, label = ('graze pasture %d'):format(n - cap)} end
     end
     local scav = valid_pasture(state.scavenge_id)
     if scav and state.scavenge_id ~= state.graze_id then
         local cap = math.floor(pen_metrics(scav).tiles / 4)
         local n = #scav.assigned_units
-        if n > cap then out[#out + 1] = {zone = scav, label = ('scavenge %d/%d'):format(n, cap)} end
+        if n > cap then out[#out + 1] = {zone = scav, label = ('scavenge %d'):format(n - cap)} end
     end
     return out
 end
 
+-- e.g. "Graze pasture 3, scavenge 15 over comfortable capacity" -- each number is
+-- how many animals the pen holds beyond its (estimated) comfortable capacity
 local function pasture_overcrowd_msg()
     if not dfhack.world.isFortressMode() then return end
     local list = overcrowded_pastures()
     if #list == 0 then return end
-    local warns = {}
-    for _, e in ipairs(list) do warns[#warns + 1] = e.label end
-    return {{text = 'Pasture overcrowded (' .. table.concat(warns, ', ') .. ')',
-             pen = COLOR_LIGHTRED}}
+    local frags = {}
+    for _, e in ipairs(list) do frags[#frags + 1] = e.label end
+    local text = table.concat(frags, ', ') .. ' over comfortable capacity'
+    return {{text = text:sub(1, 1):upper() .. text:sub(2), pen = COLOR_LIGHTRED}}
 end
 
 -- clicking the warning cycles through the overcrowded pastures: each click zooms

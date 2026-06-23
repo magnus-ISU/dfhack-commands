@@ -434,7 +434,9 @@ scavenge pen.
   `scheduleEvery(1,'days')` drives the watcher.
 - **Overcrowding warning** (notify panel, `pasture_overcrowd`): fires when a
   designated pen holds more than ~1 animal per 4 grass tiles (graze) / 4 tiles
-  (scavenge). **Clicking it** (`entry.on_click`) cycles through the overcrowded
+  (scavenge). Wording reports the **overflow** (animals beyond comfortable
+  capacity), e.g. `Graze pasture 3, scavenge 15 over comfortable capacity`.
+  **Clicking it** (`entry.on_click`) cycles through the overcrowded
   pens — each click zooms to the next one (`revealInDwarfmodeMap` on the pen
   centre), selects it (`civzone.cur_bld = pen`,
   `bottom_mode_selected = main_bottom_mode_type.ZONE`), then 3 frames later opens
