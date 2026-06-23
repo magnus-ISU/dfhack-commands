@@ -126,6 +126,22 @@ the `overlay rescan` *command* form does not work. Model: `uniform-unstick.lua`
 
 ## Reference notes (shared mechanics discovered)
 
+**⚠️ FOOTGUN — `df.global.world.items.all` is NOT "items the fort owns".** It also
+lists **named artifacts and gear carried by units that aren't yours** — offsite
+historical figures (their unit isn't even loaded, so `df.unit.find(holder)` returns
+nil), visitors, and enemies. On one test fort that was **64 steel gear items + 95
+artifacts** that don't physically exist in the fort. Naively counting stock off
+`items.all` over-counts, so a "make until stock ≥ N" tool **under-produces** (it
+thought 5 masterwork battle axes existed — all artifacts held by offsite figures —
+and skipped forging a real one the soldier could equip). When you need "what the
+fort actually has", filter each item: walk `item.general_refs`, and if there's a
+`UNIT_HOLDER` whose `df.unit.find(unit_id)` is missing or `not isOwnCiv`, **skip
+it** (it's carried by someone not ours). Items with no unit holder
+(stockpile/building/ground) or held by your own loaded dwarves are real stock.
+Separately, artifacts (`item.flags.artifact`) are quality 5 but never auto-equip
+and can't be melted, so exclude them from any "masterwork available" count too.
+See `military-uniforms.lua` `not_fort_stock()`.
+
 **DFHack notify framework** (`hack/scripts/internal/notify/notifications.lua` +
 `gui/notify.lua`): the notify panel (where "stranded civilians" etc. appear)
 iterates `NOTIFICATIONS_BY_IDX`, gates each on `config.data[name].enabled`, calls
