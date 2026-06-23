@@ -37,10 +37,25 @@ dwarf-rts -- on the Squads screen:
     a deliberate "are you sure" step. Press again with nothing armed and it closes,
     standing every squad down (all move/attack/patrol/burrow-defense orders are
     dismissed on the close that actually goes through).
+  * Drag a box over your own CIVILIANS (no hostiles in it) to conscript them into
+    temporary "Conscription N" squads -- one per 10 (a captain in pos 0 + 9). Each
+    is a real squad: a fresh militia-captain assignment with one conscript properly
+    appointed (entity-link) and hand-seated in pos 0, named via `alias`, the rest
+    in pos 1-9. The new squads are then selected, after a REAL list refresh: we feed
+    DF the `D_SQUADS` key twice (close+reopen) via simulateInput so it rebuilds the
+    squad list -- flag-toggling sq.open does NOT run that logic. Closing the squads
+    screen disbands every Conscription squad (found by alias, so it survives a
+    reload), returning the conscripts to civilian life.
 
 It only acts with a squad selected and the cursor on the map, not on a command
 button (guarded via `main_interface.current_hover`). Registered automatically as
 overlay `dwarf-rts.clickmove`.
+
+NOTE/TODO: "No Uniform" for conscripts is not done -- a fresh makeSquad squad gets a
+default 7-slot uniform; clearing it means emptying each position's
+`equipment.uniform` (a vector OF vectors -- erase the inner specs, do NOT :delete()
+the sub-vectors, which crashes). The drag/refresh/select/disband cycle is verified
+end-to-end via the remote API; the in-game drag path still wants a live test.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -288,6 +303,184 @@ local function box_attack(ui, p1, p2, append)
     return #ids
 end
 
+-- ---- conscription: drag civilians (squad screen open) into temporary squads -----
+
+local CONSCRIPTS_PER_SQUAD = 10  -- 1 captain (pos 0) + 9 members (pos 1-9)
+local CONSCRIPT_TAG = 'Conscription '   -- squad alias prefix; also how we find them to disband
+local conscript_count = 0        -- running "Conscription N" number (reset when all disband)
+local pending_select             -- new squad ids to select once the panel lists them
+
+local function fort_entity() return df.historical_entity.find(df.global.plotinfo.group_id) end
+
+-- the unlimited squad-leader position (militia captain: squad_size>0, number<0)
+local function militia_captain_position(ent)
+    for j = 0, #ent.positions.own - 1 do
+        local p = ent.positions.own[j]
+        if p.squad_size > 0 and p.number < 0 then return p.id, j end
+    end
+end
+
+-- adult fort citizens standing in the box who aren't already in a squad. NOTE: exact
+-- box z-range only -- unlike attacking, conscription does NOT reach +/-3 z.
+local function civilians_in_box(p1, p2)
+    local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
+    local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
+    local z1, z2 = math.min(p1.z, p2.z), math.max(p1.z, p2.z)
+    local ids = {}
+    local U = df.global.world.units.active
+    for i = 0, #U - 1 do
+        local u = U[i]
+        local p = u.pos
+        if p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 and p.z >= z1 and p.z <= z2
+            and u.military.squad_id == -1
+            and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
+            and not dfhack.units.isDead(u) and dfhack.units.isAdult(u)
+        then ids[#ids + 1] = u.id end
+    end
+    return ids
+end
+
+-- appoint a histfig to a position assignment (the embark-nobles pattern: set histfig
+-- AND add the position entity-link -- without the link DF won't list the squad)
+local function appoint(ent, a, aidx, figid)
+    a.histfig, a.histfig2 = figid, figid
+    df.historical_figure.find(figid).entity_links:insert('#', {
+        new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
+        assignment_id = a.id, assignment_vector_idx = aidx, start_year = df.global.cur_year})
+end
+
+-- inverse of appoint: drop the position entity-link and vacate the slot
+local function vacate(ent, a)
+    if a.histfig == -1 then return end
+    local f = df.historical_figure.find(a.histfig)
+    if f then
+        for k, v in ipairs(f.entity_links) do
+            if df.histfig_entity_link_positionst:is_instance(v)
+                and v.assignment_id == a.id and v.entity_id == ent.id then
+                f.entity_links:erase(k); break
+            end
+        end
+    end
+    a.histfig, a.histfig2 = -1, -1
+end
+
+-- one "Conscription N" squad: a fresh militia-captain assignment with `captain_unit`
+-- appointed + seated in pos 0, and `member_ids` filling pos 1-9. (makeSquad/addToSquad
+-- won't touch pos 0, so we seat the leader by hand; the appointment is what lists it.)
+local function make_conscription_squad(ent, captain_unit, member_ids)
+    local pos_id, pidx = militia_captain_position(ent)
+    if not pos_id then return nil end
+    local aid = ent.positions.next_assignment_id
+    ent.positions.next_assignment_id = aid + 1
+    ent.positions.assignments:insert('#', {new = df.entity_position_assignment,
+        id = aid, position_id = pos_id, position_vector_idx = pidx,
+        histfig = -1, histfig2 = -1, squad_id = -1, st_id = -1, ab_id = -1,
+        vassal_of_entity_id = -1, vassal_of_position_profile_id = -1,
+        assigned_army_controller_id = -1, temp = 0})
+    local aidx
+    for i = 0, #ent.positions.assignments - 1 do
+        if ent.positions.assignments[i].id == aid then aidx = i; break end
+    end
+    appoint(ent, ent.positions.assignments[aidx], aidx, captain_unit.hist_figure_id)
+    local sq = dfhack.military.makeSquad(aid)
+    if not sq then    -- couldn't make it: undo the appointment + assignment
+        vacate(ent, ent.positions.assignments[aidx])
+        for i = #ent.positions.assignments - 1, 0, -1 do
+            if ent.positions.assignments[i].id == aid then ent.positions.assignments:erase(i) end
+        end
+        return nil
+    end
+    conscript_count = conscript_count + 1
+    sq.alias = CONSCRIPT_TAG .. conscript_count           -- the player-visible name
+    sq.positions[0].occupant = captain_unit.hist_figure_id   -- seat the captain by hand
+    captain_unit.military.squad_id = sq.id
+    captain_unit.military.squad_position = 0
+    for i, uid in ipairs(member_ids) do
+        dfhack.military.addToSquad(uid, sq.id, i)         -- pos 1..9
+    end
+    return sq
+end
+
+-- drag a box over civilians: draft them into new Conscription squads (one per 10 -- a
+-- captain plus 9), then queue those squads to be selected. Returns the new squad ids.
+local function conscript_box(p1, p2)
+    local civs = civilians_in_box(p1, p2)
+    if #civs == 0 then return false end
+    local ent = fort_entity()
+    local made = {}
+    local idx = 1
+    while idx <= #civs do
+        local captain = df.unit.find(civs[idx]); idx = idx + 1
+        local members = {}
+        while idx <= #civs and #members < CONSCRIPTS_PER_SQUAD - 1 do
+            members[#members + 1] = civs[idx]; idx = idx + 1
+        end
+        local sq = make_conscription_squad(ent, captain, members)
+        if not sq then break end
+        made[#made + 1] = sq.id
+    end
+    if #made > 0 then pending_select = made end
+    return #made > 0
+end
+
+-- select exactly the just-conscripted squads, once the panel lists them (we trigger
+-- the rebuild with refresh_squad_list, which can take a frame to land)
+local function apply_pending_select(SQ)
+    if not pending_select then return end
+    local present = {}
+    for i = 0, #SQ.squad_id - 1 do present[SQ.squad_id[i]] = true end
+    for _, id in ipairs(pending_select) do if not present[id] then return end end
+    local want = {}
+    for _, id in ipairs(pending_select) do want[id] = true end
+    local n = math.min(#SQ.squad_id, #SQ.squad_selected)   -- never read past either array
+    for i = 0, n - 1 do SQ.squad_selected[i] = want[SQ.squad_id[i]] or false end
+    pending_select = nil
+end
+
+-- feed DF the real squads-panel key twice (close+reopen) so it rebuilds the squad list
+-- -- flag-toggling sq.open does NOT run that logic. Synchronous, so onupdate never sees
+-- the close (no spurious disband).
+local function refresh_squad_list()
+    local scr = dfhack.gui.getDFViewscreen(true)
+    gui.simulateInput(scr, 'D_SQUADS')
+    gui.simulateInput(scr, 'D_SQUADS')
+end
+
+-- disband every Conscription squad (found by alias, so it survives a script reload):
+-- free the members, vacate + drop the minted captain assignment, delete the squad.
+local function disband_conscription_squads()
+    local ent = fort_entity()
+    local all = df.global.world.squads.all
+    for i = #all - 1, 0, -1 do
+        local s = all[i]
+        if s.entity_id == ent.id and tostring(s.alias):find(CONSCRIPT_TAG, 1, true) then
+            local sid = s.id
+            for p = 0, #s.positions - 1 do
+                local occ = s.positions[p].occupant
+                if occ ~= -1 then
+                    local hf = df.historical_figure.find(occ)
+                    if hf and hf.unit_id >= 0 then
+                        local u = df.unit.find(hf.unit_id)
+                        if u then u.military.squad_id, u.military.squad_position = -1, -1 end
+                    end
+                    s.positions[p].occupant = -1
+                end
+            end
+            for k = 0, #ent.positions.assignments - 1 do
+                if ent.positions.assignments[k].squad_id == sid then vacate(ent, ent.positions.assignments[k]) end
+            end
+            for k = #ent.squads - 1, 0, -1 do if ent.squads[k] == sid then ent.squads:erase(k) end end
+            for k = #all - 1, 0, -1 do if all[k].id == sid then all:erase(k) end end
+            for k = #ent.positions.assignments - 1, 0, -1 do
+                if ent.positions.assignments[k].squad_id == sid then ent.positions.assignments:erase(k) end
+            end
+            s:delete()
+        end
+    end
+    conscript_count = 0
+    pending_select = nil
+end
+
 DwarfRtsClickMove = defclass(DwarfRtsClickMove, overlay.OverlayWidget)
 DwarfRtsClickMove.ATTRS{
     desc = 'Squads screen: click to move/attack, right-click to cycle squads, select-all on open.',
@@ -326,8 +519,10 @@ function DwarfRtsClickMove:overlay_onupdate()
     local open = sq.open
 
     if open and not self.prev_open then
-        -- panel just opened: RTS select-all
-        for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
+        -- panel just opened: RTS select-all, unless a conscription selection is pending
+        if not pending_select then
+            for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
+        end
     elseif (not open) and self.prev_open then
         -- panel just closed: if a selected squad is mid-command, veto the close and
         -- drop the selection instead (a second close, now unarmed, goes through)
@@ -336,11 +531,13 @@ function DwarfRtsClickMove:overlay_onupdate()
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
             open = true
         else
-            clear_all_orders(sq)    -- close goes through: stand every squad down
+            clear_all_orders(sq)            -- close goes through: stand every squad down
+            disband_conscription_squads()   -- ...and disband any temp Conscription squads
         end
     end
 
     if open then
+        apply_pending_select(sq)
         self.armed_close = selected_has_orders(sq)
     else
         self.armed_close = false
@@ -357,6 +554,9 @@ function DwarfRtsClickMove:overlay_onupdate()
     if down == 1 and self.lbut_down ~= 1 then              -- press
         self.press = dfhack.gui.getMousePos(true)
         self.press_ok = open and not busy(sq) and has_selection(sq)
+            -- ONLY the main squads screen -- never the equip/schedule sub-screens,
+            -- whose buttons would otherwise queue station/attack commands
+            and dfhack.gui.getCurFocus(true)[1] == 'dwarfmode/Squads/Default'
             and df.global.game.main_interface.current_hover == -1
             and df.global.gps.mouse_x < df.global.gps.dimx - WINDOW_COLS
             and not over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y)
@@ -366,8 +566,13 @@ function DwarfRtsClickMove:overlay_onupdate()
             local shift = dfhack.internal.getModifiers().shift
             if same_tile(self.press, rel) then
                 single_command(sq, rel, shift)
-            else
-                box_attack(sq, self.press, rel, shift)
+            elseif box_attack(sq, self.press, rel, shift) == 0 then
+                -- a drag that hit no hostiles, over civilians -> conscript them into
+                -- temporary Conscription squads, then (deferred, to avoid feeding input
+                -- mid-update) trigger the real list refresh; apply_pending_select selects
+                if conscript_box(self.press, rel) then
+                    dfhack.timeout(1, 'frames', refresh_squad_list)
+                end
             end
         end
         self.press = nil
