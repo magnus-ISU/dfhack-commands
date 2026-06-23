@@ -432,6 +432,21 @@ function isEnabled() return load_state().queue end
 -- any background service on? (gear queueing or war-dog training)
 local function service_on() load_state(); return state.queue or state.wardogs end
 
+-- df.global.world.items.all also lists items the fort doesn't possess -- e.g. named
+-- artifacts and gear carried by offsite historical figures (UNIT_HOLDER to a unit
+-- not loaded here, or a non-civ unit). Those would inflate our stock counts and
+-- make us under-produce, so a "fort stock" item is one with no unit holder
+-- (stockpile/building/ground) OR held by one of our own loaded dwarves.
+local function not_fort_stock(it)
+    for _, r in ipairs(it.general_refs) do
+        if r:getType() == df.general_ref_type.UNIT_HOLDER then
+            local u = df.unit.find(r.unit_id)
+            return not (u and dfhack.units.isOwnCiv(u))
+        end
+    end
+    return false
+end
+
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
@@ -444,6 +459,7 @@ local function run_cycle()
     local stock, mwstock, bars = {}, {}, {}
     local hides, flasks, backpacks = 0, 0, 0
     for _, it in ipairs(df.global.world.items.all) do
+        if not_fort_stock(it) then goto next_item end
         local t = it:getType()
         if t == df.item_type.BAR then
             bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
@@ -464,6 +480,7 @@ local function run_cycle()
                 then mwstock[k] = (mwstock[k] or 0) + 1 end
             end
         end
+        ::next_item::
     end
     -- count soldiers (occupied fort squad positions)
     local fort = df.global.plotinfo.group_id
