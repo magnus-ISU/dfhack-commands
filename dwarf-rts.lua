@@ -3,36 +3,35 @@
 --[[
 dwarf-rts -- on the Squads screen:
 
-  * Opening the Squads screen (or selecting any single squad) auto-selects them
-    all, RTS "select all" style. Deselecting back to none is left alone, so you
-    can still pick a squad and order individual members.
-  * Left-clicking the map MOVES the selected squads there, without leaving the
-    game stuck in the paused move UI: it flicks `giving_move_order` on for the one
-    frame DF needs to register the move, then a self-clearing one-shot drops it.
-  * Left-clicking a visible non-fort creature ATTACKS it immediately -- a kill
-    order is built and handed straight to every selected squad (no confirm step,
-    no pause). Hold Shift to add the target to the current kill order instead of
-    replacing it.
+  * Opening the Squads screen auto-selects every squad (RTS "select all"). After
+    that you control the selection yourself: click squad buttons to toggle, or
+    right-click the map to cycle through the squads one at a time (first, second,
+    ... wrapping around). Deselecting is no longer fought -- nothing re-selects
+    behind your back.
+  * Left-clicking the map MOVES the selected squads there. It flicks
+    `giving_move_order` on for the one frame DF needs to register the move, then a
+    self-clearing one-shot drops it (that UI otherwise pauses and persists).
+  * Left-clicking a visible hostile ATTACKS it -- the move DF registers on that
+    tile is converted to a kill order the next frame. Because the attack rides on
+    DF's own move handling, clicks on panels/banners (which DF never turns into a
+    move) can't become stray attacks on the terrain behind them. Shift+click adds
+    a target to the current kill order instead of retargeting.
+  * Trying to close the screen (q or the bottom-right banner) while a selected
+    squad still has orders doesn't close it -- it deselects all squads instead, as
+    a deliberate "are you sure" step. Press again with nothing armed and it closes,
+    standing every squad down (all move/attack/patrol/burrow-defense orders are
+    dismissed on the close that actually goes through).
 
-It only acts with a squad selected and the cursor on the map (not on a command
-button -- guarded via `main_interface.current_hover`, since getMousePos returns a
-map tile under the buttons too), and is inert while you're mid-way through giving
-some other squad order or in another sub-screen (equip/schedule have their own
-focus). Move mode (`giving_move_order`) pauses the game by DF's own design and
-persists until an order is placed, which is why it is only flicked momentarily;
-the attack path sidesteps that entirely by writing the order struct directly.
-
-Planned (not yet built): right-click while the squad menu is open -> close it and
-cancel the station/move order. Deferred pending a unified left/right handler.
-
-Registered automatically as overlay `dwarf-rts.clickmove`.
+It only acts with a squad selected and the cursor on the map, not on a command
+button (guarded via `main_interface.current_hover`). Registered automatically as
+overlay `dwarf-rts.clickmove`.
 ]]
 
 local overlay = require('plugins.overlay')
 
 local function squads_ui() return df.global.game.main_interface.squads end
 
--- mid-way through giving some other squad order: leave the click alone
+-- mid-way through giving some other squad order: leave the input alone
 local function busy(sq)
     return sq.giving_kill_order or sq.giving_patrol_order
         or sq.giving_burrow_order or sq.giving_move_order
@@ -41,8 +40,8 @@ end
 -- A live, clickable enemy on a map tile, if any. RTS targeting: anything visible
 -- and alive that isn't ours or an obvious friendly is fair game. (We can't gate
 -- on isDanger/isInvader -- plenty of real threats here, e.g. magma crabs and wild
--- beasts, report neither; and hidden ambushers are excluded so a move-click onto
--- an unseen tile can't accidentally become an attack.)
+-- beasts, report neither; and hidden ambushers are excluded so a move onto an
+-- unseen tile can't silently become an attack.)
 local function enemy_at(pos)
     local U = df.global.world.units.active
     for i = 0, #U - 1 do
@@ -65,80 +64,142 @@ local function leader_hf(sq)
     return -1
 end
 
--- clear a squad's standing orders (erase only -- DF owns/frees these on its own
--- cancel path, so we don't delete and risk a dangling military target ref)
+-- erase a squad's orders (no delete: DF frees these on its own cancel path, so we
+-- avoid leaving a dangling military target ref -- a tiny leak beats a crash)
 local function clear_orders(sq)
     for i = #sq.orders - 1, 0, -1 do sq.orders:erase(i) end
 end
 
--- direct engage: hand each selected squad a kill order on `enemy`, no confirm.
--- Shift appends the target to an existing kill order; otherwise it replaces the
--- squad's orders so a fresh click retargets cleanly.
-local function order_kill(enemy, append)
+local function new_kill_order(sq, enemy_id)
+    local ko = df.squad_order_kill_listst:new()
+    ko.issuer_hf = leader_hf(sq)
+    ko.recipient_hf = -1
+    ko.year = df.global.cur_year
+    ko.year_tick = df.global.cur_year_tick
+    ko.units:insert('#', enemy_id)
+    return ko
+end
+
+-- shift+click: append a target to the current kill order (or start one), per squad
+local function append_kill(enemy)
     local SQ = squads_ui()
-    for i = 0, #SQ.squad_id - 1 do
+    for i = 0, #SQ.squad_selected - 1 do
         if SQ.squad_selected[i] then
             local sq = df.squad.find(SQ.squad_id[i])
             if sq then
-                local ko
                 local last = #sq.orders > 0 and sq.orders[#sq.orders - 1] or nil
-                if append and last and df.squad_order_kill_listst:is_instance(last) then
-                    ko = last
+                if last and df.squad_order_kill_listst:is_instance(last) then
+                    local dup = false
+                    for j = 0, #last.units - 1 do if last.units[j] == enemy.id then dup = true; break end end
+                    if not dup then last.units:insert('#', enemy.id) end
                 else
-                    if not append then clear_orders(sq) end
-                    ko = df.squad_order_kill_listst:new()
-                    ko.issuer_hf = leader_hf(sq)
-                    ko.recipient_hf = -1
-                    ko.year = df.global.cur_year
-                    ko.year_tick = df.global.cur_year_tick
-                    sq.orders:insert('#', ko)
+                    sq.orders:insert('#', new_kill_order(sq, enemy.id))
                 end
-                local dup = false
-                for j = 0, #ko.units - 1 do if ko.units[j] == enemy.id then dup = true; break end end
-                if not dup then ko.units:insert('#', enemy.id) end
             end
         end
     end
 end
 
+-- panel-safe attack: DF only writes a squad_order_movest for a genuine map click,
+-- so any selected squad whose newest order is a move landing on a hostile gets
+-- that move swapped for a kill order. Clicks on banners/panels never create a
+-- move, so they can never turn into an attack on the terrain behind them.
+local function convert_moves_to_kills(sq)
+    for i = 0, #sq.squad_selected - 1 do
+        if sq.squad_selected[i] then
+            local s = df.squad.find(sq.squad_id[i])
+            if s and #s.orders > 0 then
+                local last = s.orders[#s.orders - 1]
+                if df.squad_order_movest:is_instance(last) then
+                    local enemy = enemy_at(last.pos)
+                    if enemy then
+                        clear_orders(s)            -- a fresh click is a fresh command
+                        s.orders:insert('#', new_kill_order(s, enemy.id))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- stand every squad down: wipe all move/attack/patrol/burrow-defense orders. Used
+-- when the close-guard finally lets the screen close. squad_id survives the close,
+-- so we can read the fort's squads straight off the (closing) panel.
+local function clear_all_orders(sq)
+    for i = 0, #sq.squad_id - 1 do
+        local s = df.squad.find(sq.squad_id[i])
+        if s then clear_orders(s) end
+    end
+end
+
+-- does any currently-selected squad have standing orders? (close-guard arming)
+local function selected_has_orders(sq)
+    for i = 0, #sq.squad_selected - 1 do
+        if sq.squad_selected[i] then
+            local s = df.squad.find(sq.squad_id[i])
+            if s and #s.orders > 0 then return true end
+        end
+    end
+    return false
+end
+
 DwarfRtsClickMove = defclass(DwarfRtsClickMove, overlay.OverlayWidget)
 DwarfRtsClickMove.ATTRS{
-    desc = 'Squads screen: click the map to move selected squads / attack hostiles; select-all on open.',
+    desc = 'Squads screen: click to move/attack, right-click to cycle squads, select-all on open.',
     default_pos = {x = 1, y = 1},
     default_enabled = true,
-    -- whole fort mode, so onupdate can see the panel open AND close (a Squads-only
-    -- binding stalls the moment focus shifts, which is what trapped earlier builds)
+    -- whole fort mode, so onupdate sees the panel both open AND close (a
+    -- Squads-only binding stalls the instant focus shifts off it)
     viewscreens = 'dwarfmode',
     frame = {w = 1, h = 1},
     overlay_onupdate_max_freq_seconds = 0,
 }
 
--- Auto-select-all: on the rising edge of the panel opening, select every squad;
--- thereafter, selecting any one squad expands to all. Deselecting to none is left
--- as-is (a valid resting state for per-member orders) -- we only force-select on
--- the open edge, never just because zero are selected.
 function DwarfRtsClickMove:overlay_onupdate()
     local sq = squads_ui()
     local open = sq.open
+
     if open and not self.prev_open then
+        -- panel just opened: RTS select-all
         for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
-    elseif open then
-        local any, all = false, true
-        for i = 0, #sq.squad_selected - 1 do
-            if sq.squad_selected[i] then any = true else all = false end
+    elseif (not open) and self.prev_open then
+        -- panel just closed: if a selected squad is mid-command, veto the close and
+        -- drop the selection instead (a second close, now unarmed, goes through)
+        if self.armed_close then
+            sq.open = true
+            for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
+            open = true
+        else
+            clear_all_orders(sq)    -- close goes through: stand every squad down
         end
-        if any and not all then
-            for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
-        end
+    end
+
+    if open then
+        convert_moves_to_kills(sq)
+        self.armed_close = selected_has_orders(sq)
+    else
+        self.armed_close = false
     end
     self.prev_open = open
 end
 
 function DwarfRtsClickMove:onInput(keys)
-    if not keys._MOUSE_L then return false end
     local sq = squads_ui()
-    if not sq.open or busy(sq) then return false end   -- another order/mode owns the click
+    if not sq.open or busy(sq) then return false end
     if df.global.game.main_interface.current_hover ~= -1 then return false end  -- on a UI button
+
+    -- right-click the map: cycle the selection to the next single squad, wrapping
+    if keys._MOUSE_R then
+        local n = #sq.squad_selected
+        if n == 0 then return false end
+        local cnt, idx = 0, -1
+        for i = 0, n - 1 do if sq.squad_selected[i] then cnt = cnt + 1; idx = i end end
+        local nextidx = (cnt == 1) and ((idx + 1) % n) or 0
+        for i = 0, n - 1 do sq.squad_selected[i] = (i == nextidx) end
+        return true                                    -- consume: don't let DF exit on it
+    end
+
+    if not keys._MOUSE_L then return false end
 
     local any = false
     for i = 0, #sq.squad_selected - 1 do if sq.squad_selected[i] then any = true; break end end
@@ -147,14 +208,16 @@ function DwarfRtsClickMove:onInput(keys)
     local pos = dfhack.gui.getMousePos(true)
     if not pos then return false end                   -- click wasn't on the map
 
-    local enemy = enemy_at(pos)
-    if enemy then
-        order_kill(enemy, dfhack.internal.getModifiers().shift)   -- attack now, no confirm
-        return true                                    -- consume: don't also move onto it
+    -- shift+click a hostile: add it to the kill order (immediate; conversion can't
+    -- accumulate multiple targets since each move replaces the last)
+    if dfhack.internal.getModifiers().shift then
+        local enemy = enemy_at(pos)
+        if enemy then append_kill(enemy); return true end
     end
 
-    -- move: flick move mode on so DF registers THIS click as the target, then drop
-    -- straight back out (cleared unconditionally so a closed menu can't strand it)
+    -- otherwise flick move mode so DF registers THIS click as a move target, then
+    -- drop straight back out. onupdate converts the move to a kill if it landed on
+    -- a hostile; a click on a panel never becomes a move, so it stays inert.
     sq.giving_move_order = true
     dfhack.timeout(2, 'frames', function() squads_ui().giving_move_order = false end)
     return false                                       -- pass the click to DF's move handler
@@ -165,4 +228,4 @@ OVERLAY_WIDGETS = {clickmove = DwarfRtsClickMove}
 if dfhack_flags.module then return end
 
 require('plugins.overlay').rescan()
-print('dwarf-rts: click-to-move/attack + select-all active on the Squads screen')
+print('dwarf-rts: click move/attack, right-click cycle, select-all + close-guard active')
