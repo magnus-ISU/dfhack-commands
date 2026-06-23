@@ -20,8 +20,13 @@ id, and every item subtype by name within the fort civ's producible lists (so it
 picks the dwarf-makeable breastplate, not a modded look-alike). Re-running
 refreshes the "Steel - *" templates it owns (it won't touch your own uniforms).
 
-(Coming next: delete the default metal uniforms, assign to squads, and create the
-steel/masterwork manager orders when a uniform is assigned to a soldier.)
+The Equip screen overlay (dwarfmode/Squads/Equipment/Default) has three toggles:
+  Queue gear orders (Shift-G)      per-soldier, per-material work orders: one
+                                   unit queued only when stock < need and a bar
+                                   of that material exists (no over-production)
+  Upgrade to masterwork (Shift-M)  also melt inferior copies and remake them
+  Train surplus war dogs (Shift-D) war-train adult male dogs beyond BREEDER_MALES
+                                   breeders (Pets/Livestock training, not squads)
 ]]
 
 local NAME_PREFIX = 'Steel - '
@@ -185,6 +190,7 @@ local gui = require('gui')
 local GLOBAL_KEY = 'military-uniforms'
 local DAY_TICKS = 1200
 local BARS_PER_ITEM = 1   -- metal gear (armour/weapon) = ~1 bar each
+local BREEDER_MALES = 2   -- adult male dogs kept untrained for breeding
 
 -- makeable equipment item_type -> Make job
 local MAKE_JOB = {
@@ -300,7 +306,52 @@ local function melt_inferior(req)
     return marked
 end
 
--- ---- enable state: two toggles, persisted -----------------------------------
+-- ---- war-dog training: train surplus adult males beyond the breeders --------
+--
+-- War training is the Pets/Livestock system, NOT the military: add a
+-- training_assignment to plotinfo.training with flags.train_war, and any dwarf
+-- with the Animal Trainer skill turns the dog into a war dog (profession
+-- TRAINED_WAR) over time. We keep BREEDER_MALES untrained adult males for
+-- breeding and queue the rest; females and pups are left alone.
+local function dog_race()
+    local all = df.global.world.raws.creatures.all
+    for i = 0, #all - 1 do
+        if all[i].creature_id == 'DOG' then return i end
+    end
+end
+
+local function is_war_dog(u) return u.profession == df.profession.TRAINED_WAR end
+
+-- returns newly-queued count; keeps BREEDER_MALES untrained adult males
+local function train_surplus_war_dogs()
+    local race = dog_race()
+    if not race then return 0 end
+    local tr = df.global.plotinfo.training.training_assignments
+    local assigned = {}
+    for i = 0, #tr - 1 do assigned[tr[i].animal_id] = true end
+    -- untrained, unassigned, living, tame, adult male dogs = breeder/train pool
+    local pool = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        if u.race == race and u.sex == 1 and dfhack.units.isOwnCiv(u) and dfhack.units.isTame(u)
+            and dfhack.units.isAlive(u) and not dfhack.units.isBaby(u) and not dfhack.units.isChild(u)
+            and not is_war_dog(u) and not assigned[u.id]
+        then pool[#pool + 1] = u end
+    end
+    -- keep the first BREEDER_MALES as breeders; war-train the remainder
+    local queued = 0
+    for i = BREEDER_MALES + 1, #pool do
+        local ta = df.training_assignment:new()
+        ta.animal_id = pool[i].id
+        ta.trainer_id = -1
+        ta.flags.train_war = true
+        ta.flags.any_trainer = true
+        tr:insert('#', ta)
+        queued = queued + 1
+    end
+    return queued
+end
+
+-- ---- enable state: toggles, persisted ---------------------------------------
 
 state = state or nil
 
@@ -309,6 +360,7 @@ local function load_state()
         state = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
         if state.queue == nil then state.queue = false end
         if state.masterwork == nil then state.masterwork = false end
+        if state.wardogs == nil then state.wardogs = false end
         if not state.orders then state.orders = {} end
     end
     return state
@@ -317,9 +369,13 @@ local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) en
 
 function isEnabled() return load_state().queue end
 
+-- any background service on? (gear queueing or war-dog training)
+local function service_on() load_state(); return state.queue or state.wardogs end
+
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
+    if state.wardogs then train_surplus_war_dogs() end
     if not state.queue then return end
     local req = compute_required()
     -- one pass over items: tally gear stock by item key and bar stock by material.
@@ -363,7 +419,7 @@ local function start_heartbeat()
     local my = hb_gen() + 1
     hb_gen(my)
     local function hb()
-        if not load_state().queue or my ~= hb_gen() then return end
+        if not service_on() or my ~= hb_gen() then return end
         local now = df.global.cur_year * 403200 + df.global.cur_year_tick
         if not last_run or now - last_run >= DAY_TICKS then last_run = now; run_cycle() end
         dfhack.timeout(1, 'frames', hb)
@@ -377,21 +433,21 @@ local function drop_all_orders()
     for key in pairs(state.orders) do drop_order(key) end
 end
 
--- set a toggle; turning Queue on starts the service; either change re-runs now
+-- set a toggle; runs the cycle now and (re)starts/stops the shared heartbeat so
+-- it ticks whenever either service (gear queueing or war-dog training) is on
 function set_toggle(name, val)
     load_state()
     state[name] = val
     save_state()
-    if name == 'queue' then
-        if val then start_heartbeat() else stop_heartbeat(); drop_all_orders(); save_state() end
-    end
-    if state.queue then run_cycle() end
+    if name == 'queue' and not val then drop_all_orders(); save_state() end
+    if service_on() then start_heartbeat() else stop_heartbeat() end
+    run_cycle()
 end
 
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
-        if dfhack.world.isFortressMode() and load_state().queue then start_heartbeat() end
+        if dfhack.world.isFortressMode() and service_on() then start_heartbeat() end
     elseif sc == SC_MAP_UNLOADED then
         stop_heartbeat(); state = nil
     end
@@ -401,17 +457,17 @@ end
 
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
-    desc = 'Toggles to auto-queue squad gear orders and upgrade gear to masterwork.',
+    desc = 'Toggles to auto-queue squad gear orders, upgrade to masterwork, and train war dogs.',
     default_pos = {x = -99, y = 4},
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Equipment/Default',
-    frame = {w = 36, h = 4},
+    frame = {w = 36, h = 5},
 }
 
 function MilitaryUniformOverlay:init()
     self:addviews{
         widgets.Panel{
-            frame = {t = 0, l = 0, r = 0, h = 4},
+            frame = {t = 0, l = 0, r = 0, h = 5},
             frame_style = gui.MEDIUM_FRAME,
             frame_background = gui.CLEAR_PEN,
             frame_title = 'auto gear',
@@ -432,6 +488,14 @@ function MilitaryUniformOverlay:init()
                     initial_option = false,
                     on_change = function(v) set_toggle('masterwork', v) end,
                 },
+                widgets.ToggleHotkeyLabel{
+                    view_id = 'wardogs',
+                    frame = {t = 2, l = 0},
+                    label = 'Train surplus war dogs',
+                    key = 'CUSTOM_SHIFT_D',
+                    initial_option = false,
+                    on_change = function(v) set_toggle('wardogs', v) end,
+                },
             },
         },
     }
@@ -441,6 +505,7 @@ function MilitaryUniformOverlay:render(dc)
     load_state()
     self.subviews.queue:setOption(state.queue)
     self.subviews.masterwork:setOption(state.masterwork)
+    self.subviews.wardogs:setOption(state.wardogs)
     MilitaryUniformOverlay.super.render(self, dc)
 end
 
