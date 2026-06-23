@@ -2,29 +2,29 @@
 --@module = true
 --[[
 dwarf-rts -- make the squad screen behave like an RTS (see the README "dwarf-rts"
-spec for the full design). Implemented so far:
+spec for the full design). Implemented:
 
   1. Opening the Squads screen auto-selects every squad and arms movement mode.
   2. Left-clicking the map in movement mode issues the move and re-arms movement
      mode, so you can chain destinations without re-selecting.
   3. Left-clicking a hostile in movement mode switches to attack (kill) mode and
-     targets it instead of moving; hold Shift to add to the existing target list
-     rather than replacing it. (Engage with DF's normal confirm, as for any kill
-     order -- we set up the targeting, we don't forge the order ourselves.)
+     targets it instead of moving; hold Shift to add to the existing target list.
+     (Engage with DF's normal confirm.)
 
   4. (TODO) clicking a leader portrait / unit camera -> follow with the camera.
 
 The squad UI state lives in `df.global.game.main_interface.squads`: the mode
 flags `giving_move_order` / `giving_kill_order` / `giving_patrol_order` /
-`giving_burrow_order`, the `squad_selected[]` vector (parallel to `squad_id[]`),
-and `kill_unid[]` for kill targets.
+`giving_burrow_order`, `squad_selected[]` (parallel to `squad_id[]`), `kill_unid[]`
+for kill targets. NOTE: an `giving_*_order` flag pauses the game and persists even
+after the menu closes, so it must be cleared on close or the fort stays frozen.
 
-Registered automatically as overlay `dwarf-rts.control`.
+Registered automatically as overlay `dwarf-rts.control`; #1 runs from a frame poll
+started by running the script (magnus-scripts does this) and on map load.
 ]]
 
 local overlay = require('plugins.overlay')
-
-local REOPEN_GAP_MS = 500   -- a longer gap in our update clock => screen was closed
+local GLOBAL_KEY = 'dwarf-rts'
 
 local function squads_ui() return df.global.game.main_interface.squads end
 
@@ -64,28 +64,8 @@ local function target_enemy(enemy, append)
     sq.kill_unid:insert('#', enemy.id)
 end
 
-DwarfRtsControl = defclass(DwarfRtsControl, overlay.OverlayWidget)
-DwarfRtsControl.ATTRS{
-    desc = 'RTS squad control: auto select+move on open, chain-move, click-enemy attack.',
-    default_pos = {x = 1, y = 1},
-    default_enabled = true,
-    viewscreens = 'dwarfmode/Squads/Default',
-    frame = {w = 1, h = 1},
-    overlay_onupdate_max_freq_seconds = 0,
-}
-
-function DwarfRtsControl:overlay_onupdate()
-    local now = dfhack.getTickCount()
-    if not self.last or now - self.last > REOPEN_GAP_MS then
-        select_all_and_move()                        -- #1: fresh open
-    end
-    self.last = now
-end
-
--- #2: re-arm movement mode ONCE, a couple frames after the move is let through
--- (DF needs the intervening frames to issue it). This is deliberately a one-shot
--- timeout, never a persistent flag: a sticky re-arm re-applies move mode the
--- instant the player presses Esc, trapping them in the paused order-giving mode.
+-- #2: re-arm movement mode once, a couple frames after a move is let through.
+-- One-shot, never a sticky flag (a sticky re-arm fights the player's Esc).
 local function rearm_move_once()
     dfhack.timeout(2, 'frames', function()
         local sq = squads_ui()
@@ -93,8 +73,48 @@ local function rearm_move_once()
     end)
 end
 
--- onInput sees all input on the Squads screen regardless of our tiny frame, so we
--- can intercept map clicks (same approach as DFHack's burrow-paint overlay).
+-- #1 runs from a single frame poll keyed off the Squads screen opening/closing,
+-- NOT the overlay's own update clock: that clock stalls while the game is in the
+-- order-giving sub-mode (its focus moves off the Squads screen), so a gap-based
+-- re-detect re-fired #1 and re-applied move mode the instant the player pressed
+-- Esc -- trapping them in the paused mode. Frame timers keep ticking while paused,
+-- so an edge-triggered poll is reliable. The generation counter lives on
+-- dfhack.internal so a reload bumps it and any older poll exits.
+local function poll_gen(set)
+    if set ~= nil then dfhack.internal.dwarf_rts_gen = set end
+    return dfhack.internal.dwarf_rts_gen or 0
+end
+
+function start_poll()
+    local my = poll_gen() + 1
+    poll_gen(my)
+    local was_open = squads_ui().open
+    local function tick()
+        if my ~= poll_gen() then return end
+        local sq = squads_ui()
+        if sq.open and not was_open then
+            select_all_and_move()                    -- #1: fire once, on open
+        elseif was_open and not sq.open then
+            sq.giving_move_order = false             -- closed: don't leave the fort paused
+        end
+        was_open = sq.open
+        dfhack.timeout(1, 'frames', tick)
+    end
+    tick()
+end
+
+-- the overlay exists only to intercept map clicks (#2/#3); #1 is the poll above
+DwarfRtsControl = defclass(DwarfRtsControl, overlay.OverlayWidget)
+DwarfRtsControl.ATTRS{
+    desc = 'RTS squad control: chain-move and click-enemy attack on the Squads map.',
+    default_pos = {x = 1, y = 1},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Squads/Default',
+    frame = {w = 1, h = 1},
+}
+
+-- onInput sees all input on the Squads screen regardless of our tiny frame (same
+-- approach as DFHack's burrow-paint overlay).
 function DwarfRtsControl:onInput(keys)
     local sq = squads_ui()
     if not (keys._MOUSE_L and sq.open and sq.giving_move_order) then return false end
@@ -105,13 +125,18 @@ function DwarfRtsControl:onInput(keys)
         target_enemy(enemy, dfhack.internal.getModifiers().shift)   -- #3
         return true                                  -- consume: attack, don't move
     end
-    rearm_move_once()                                -- #2: let the move through, re-arm once after
+    rearm_move_once()                                -- #2: let the move through, re-arm once
     return false
 end
 
 OVERLAY_WIDGETS = {control = DwarfRtsControl}
 
+dfhack.onStateChange[GLOBAL_KEY] = function(sc)
+    if sc == SC_MAP_LOADED then start_poll() end
+end
+
 if dfhack_flags.module then return end
 
+start_poll()
 require('plugins.overlay').rescan()
-print('dwarf-rts: registered overlay dwarf-rts.control (select+move on open, chain-move, click-enemy attack)')
+print('dwarf-rts: poll + overlay active (select+move on open, chain-move, click-enemy attack)')
