@@ -11,7 +11,7 @@
 Creates a "Steel - <weapon>" uniform template on the fort entity for each of the
 typical weapons (short sword, war hammer, battle axe, spear, pick, mace,
 crossbow). Each is the full steel set -- breastplate + mail shirt, helm,
-gauntlets, greaves + leggings, high boots, and a shield -- plus a steel weapon of
+gauntlets, greaves, high boots, and a shield -- plus a steel weapon of
 that type, with "replace clothing" on. Exceptions: the crossbow uniform uses a
 COPPER crossbow + steel buckler; the war hammer uniform uses a SILVER war hammer.
 
@@ -49,8 +49,8 @@ local function armour_slots(r, R, IT)
         [0] = {{IT.ARMOR, R.armor, r.armor_type, 'breastplate'},
                {IT.ARMOR, R.armor, r.armor_type, 'mail shirt'}},
         [1] = {{IT.HELM, R.helms, r.helm_type, 'helm'}},
-        [2] = {{IT.PANTS, R.pants, r.pants_type, 'greaves'},
-               {IT.PANTS, R.pants, r.pants_type, 'leggings'}},
+        [2] = {{IT.PANTS, R.pants, r.pants_type, 'greaves'}},   -- no leggings: they
+                                                                -- conflict with greaves and never equip
         [3] = {{IT.GLOVES, R.gloves, r.gloves_type, 'gauntlet'}},
         [4] = {{IT.SHOES, R.shoes, r.shoes_type, 'high boot'}},
     }
@@ -457,7 +457,11 @@ local function run_cycle()
             local k = ('%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
             if req[k] then
                 stock[k] = (stock[k] or 0) + 1
-                if it:getQuality() >= df.item_quality.Masterful then mwstock[k] = (mwstock[k] or 0) + 1 end
+                -- artifacts are quality 5 but never auto-equip (and can't be melted),
+                -- so they must NOT count toward the masterwork goal
+                if it:getQuality() >= df.item_quality.Masterful
+                    and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
+                then mwstock[k] = (mwstock[k] or 0) + 1 end
             end
         end
     end
