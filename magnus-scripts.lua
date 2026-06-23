@@ -10,6 +10,14 @@ Activates the "always-on" helpers in this pack:
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
 
+Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
+weaving, no automatic web collection) and enable a batch of stock DFHack tools:
+    enable: autobutcher, autoclothing, autonestbox, autotraining, prioritize,
+            seedwatch, suspendmanager, timestream
+    tweak:  fast-heat, realistic-melting
+(The timer-driven tools -- autocheese, automilk, autoshear, cleanowned,
+orders-reevaluate -- aren't plain enables; turn those on in gui/control-panel.)
+
 The one-shot commands in the pack (destroy-forbidden, clear-flows, raid-status,
 attack-invaders) are run on demand and are not touched here.
 
@@ -43,6 +51,20 @@ try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-m
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
+
+-- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
+if ({...})[1] == 'lovely' then
+    -- standing orders (1 = on/auto, 0 = off): enforce off every session
+    df.global.standing_orders_auto_loom = 0
+    df.global.standing_orders_auto_collect_webs = 0
+    print('  [ok] standing orders: no automatic weaving, no automatic web collection')
+
+    local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
+    local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
+    for _, c in ipairs({'autobutcher', 'autoclothing', 'autonestbox', 'autotraining',
+                        'prioritize', 'seedwatch', 'suspendmanager', 'timestream'}) do enable_tool(c) end
+    for _, c in ipairs({'fast-heat', 'realistic-melting'}) do tweak_tool(c) end
+end
 
 print('Done. One-shot commands: destroy-forbidden, clear-flows, raid-status, attack-invaders.')
 print('Manual toggle: no-pausing (stops all pausing).')

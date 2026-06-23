@@ -22,6 +22,13 @@ templates + registers the Equip-screen auto-gear overlay; the gear-order service
 itself stays off until you toggle it on that screen). It does **not** enable
 `no-pausing` (that stops *all* pausing — manual toggle).
 
+`magnus-scripts lovely` *also* sets two standing orders (no automatic weaving, no
+automatic web collection) and enables a batch of stock DFHack tools —
+`enable`: autobutcher, autoclothing, autonestbox, autotraining, prioritize,
+seedwatch, suspendmanager, timestream; `tweak`: fast-heat, realistic-melting. The
+timer-driven ones (autocheese/automilk/autoshear/cleanowned/orders-reevaluate)
+aren't plain enables — turn those on in `gui/control-panel`.
+
 ---
 
 ## Commands
