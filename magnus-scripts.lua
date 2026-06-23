@@ -9,6 +9,7 @@ Activates the "always-on" helpers in this pack:
     * auto-mandate              (enables the background work-order service)
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
+    * dwarf-rts                 (registers the RTS-style squad-screen overlay)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -49,6 +50,7 @@ try('mandate-notification', function() dfhack.run_script('mandate-notification')
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
+try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 

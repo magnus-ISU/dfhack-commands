@@ -45,6 +45,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
+| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control. **Done:** opening the Squads screen auto-selects all squads + arms movement mode. **TODO:** chain-move on map click, click-enemy → attack (Shift=append), click leader/unit → camera-follow. See spec below |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `dfhack-stocks` | overlay+menu | 🟡 on hold | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). **Currently disabled & not deployed — revisiting implementation** (source kept in repo) |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
@@ -203,6 +204,47 @@ command does NOT work). Position: `overlay position <script>.<name> <x> <y>`
 All of these are GUI features. Each needs the relevant viewscreen opened so the
 focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
 can be confirmed before/while building.
+
+### 🟡 dwarf-rts — RTS-style squad control (`dwarf-rts.lua`)
+
+The DF squad UI is clunky; this makes commanding squads feel like an RTS. Four
+behaviours:
+
+1. **Open Squads → select all + movement mode.** Opening the Squads screen
+   auto-selects every squad and arms movement mode, so you're immediately ready
+   to click a destination. **(IMPLEMENTED.)**
+2. **Click map in movement mode → move + re-arm.** Left-clicking the ground while
+   in movement mode issues the move order, then re-enters movement mode so you
+   can keep clicking destinations without re-selecting.
+3. **Click enemy in movement mode → attack.** Left-clicking a hostile unit while
+   in movement mode switches to attack (kill) mode and targets that unit instead
+   of moving. Holding **Shift** appends to the existing kill list rather than
+   replacing it.
+4. **Click leader portrait / unit camera → follow.** Clicking a squad leader's
+   portrait (which already selects them) also makes the camera follow them;
+   clicking a unit's camera icon selects that unit and follows it too.
+
+**Data model (`df.global.game.main_interface.squads`):** mode flags
+`giving_move_order` / `giving_kill_order` / `giving_patrol_order` /
+`giving_burrow_order` (booleans — settable directly); `squad_selected[]` (parallel
+to `squad_id[]`) is the per-squad selection; `kill_unid[]` holds kill-order
+targets. Camera follow is `df.global.plotinfo.follow_unit` (= unit id, or -1).
+Map tile under the cursor: `dfhack.gui.getMousePos()`; the unit on a tile:
+`dfhack.units.getUnitsInBox`/iterate `units.active` by `pos`; hostile test:
+`dfhack.units.isDanger` / `isInvader` / enemy check.
+
+**Implementation notes / TODO:**
+- #1 is an overlay on `dwarfmode/Squads/Default` whose `overlay_onupdate` fires
+  `select_all_and_move()` once per screen open (detected by a >500 ms gap in its
+  update clock, since the overlay only ticks while that screen is focused).
+- #2/#3 need **map-click interception** (overlay `onInput` on `_MOUSE_L`): read
+  the clicked tile, decide move-vs-attack by whether a hostile is there, issue the
+  order, then for #2 re-set `giving_move_order=true`; for #3 set
+  `giving_kill_order=true` + push the target onto `kill_unid` (clear it first
+  unless Shift is held). Confirm whether the order must go through the native
+  click handler (`gui.simulateInput`) or can be written to the data directly.
+- #4 needs to detect a portrait/camera-icon click in the squads panel (find the
+  clickable rects / the selected leader histfig) and set `plotinfo.follow_unit`.
 
 ### 🟡 dfhack-stocks — melt-focused stocks menu (ON HOLD)
 
