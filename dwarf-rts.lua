@@ -7,8 +7,9 @@ dwarf-rts -- on the Squads screen:
     that you control the selection yourself: click squad buttons to toggle, or
     right-click the map to cycle through the squads one at a time (first, second,
     ... wrapping around). Right-clicking the military window itself instead tries
-    to close it (same path as q/the banner). Deselecting is no longer fought --
-    nothing re-selects behind your back.
+    to close it (same path as q/the banner); right-clicking the right edge of the
+    screen while it's closed opens it. Deselecting is no longer fought -- nothing
+    re-selects behind your back.
   * Left-clicking the map MOVES the selected squads there. It flicks
     `giving_move_order` on for the one frame DF needs to register the move, then a
     self-clearing one-shot drops it (that UI otherwise pauses and persists).
@@ -17,6 +18,14 @@ dwarf-rts -- on the Squads screen:
     DF's own move handling, clicks on panels/banners (which DF never turns into a
     move) can't become stray attacks on the terrain behind them. Shift+click adds
     a target to the current kill order instead of retargeting.
+  * Left-clicking a unit's portrait (any "View ... sheet" button -- the squad
+    leader's image or a member's) works in two stages, like the close-guard: the
+    first click starts the camera following that unit and immediately closes the
+    info page DF opened (so it reads as "follow", not "open sheet"); a second click
+    on a unit you're already following opens its info page and leaves it up while
+    still following the unit. Right-
+    clicking that page (or any menu over the squads screen) closes the menu rather
+    than toggling the squad window. Scrolling the map releases the follow natively.
   * Trying to close the screen (q or the bottom-right banner) while a selected
     squad still has orders doesn't close it -- it deselects all squads instead, as
     a deliberate "are you sure" step. Press again with nothing armed and it closes,
@@ -29,6 +38,7 @@ overlay `dwarf-rts.clickmove`.
 ]]
 
 local overlay = require('plugins.overlay')
+local gui = require('gui')
 
 -- The military window is right-anchored and overlays the map (so getMousePos can't
 -- tell window from map -- it returns the tile underneath either way). It occupies
@@ -70,6 +80,26 @@ local function leader_hf(sq)
         if occ ~= -1 then return occ end
     end
     return -1
+end
+
+-- close the unit info page DF opens off a portrait click, but only if it is the
+-- topmost screen right now (never yank away anything else the player opened since)
+local function close_unit_sheet()
+    local f1 = dfhack.gui.getCurFocus(true)[1]
+    if f1 and f1:find('ViewSheets') then
+        gui.simulateInput(dfhack.gui.getDFViewscreen(true), 'LEAVESCREEN')
+    end
+end
+
+-- the minimap tooltip text for a hovered button id (its "what does this do" hint)
+local function hover_tooltip(id)
+    if id < 0 then return nil end
+    local h = df.global.game.main_interface.hover_instruction
+    if id >= #h then return nil end
+    local b = h[id]
+    if b and b.text and #b.text > 0 then
+        return tostring(b.text[0].value or b.text[0])
+    end
 end
 
 -- erase a squad's orders (no delete: DF frees these on its own cancel path, so we
@@ -164,6 +194,27 @@ DwarfRtsClickMove.ATTRS{
 }
 
 function DwarfRtsClickMove:overlay_onupdate()
+    -- a portrait was clicked last frame: DF has now set the sheet's active unit, so
+    -- follow it (DF's own follow mechanism; manual scrolling releases it natively)
+    if self.follow_pending then
+        self.follow_pending = nil
+        -- DF has now opened the portrait's unit info page and set its active unit.
+        -- (DF also zeroes follow_unit whenever it opens the sheet, which is why we
+        -- compare against follow_before -- captured in onInput, pre-click.)
+        local uid = df.global.game.main_interface.view_sheets.active_id
+        local u = uid and uid >= 0 and df.unit.find(uid)
+        if u and not dfhack.units.isDead(u) then
+            df.global.plotinfo.follow_unit = uid       -- follow in both cases (DF zeroed it on open)
+            if self.follow_before ~= uid then
+                -- first click: close the page back out, so the click reads as
+                -- "follow", not "open sheet"
+                dfhack.timeout(1, 'frames', close_unit_sheet)
+            end
+            -- second click (already following this unit): leave the info page open
+            -- AND keep following it
+        end
+    end
+
     local sq = squads_ui()
     local open = sq.open
 
@@ -193,7 +244,27 @@ end
 
 function DwarfRtsClickMove:onInput(keys)
     local sq = squads_ui()
-    if not sq.open or busy(sq) then return false end
+    local top = dfhack.gui.getCurFocus(true)[1] or ''
+
+    -- window closed: a right-click in the right-edge band opens it. Gated to plain
+    -- map view so we don't swallow right-clicks meant for some other open panel.
+    if not sq.open then
+        if keys._MOUSE_R and not busy(sq)
+            and df.global.gps.mouse_x >= df.global.gps.dimx - WINDOW_COLS
+            and top == 'dwarfmode/Default'
+        then
+            sq.open = true                             -- onupdate's open edge selects all
+            return true
+        end
+        return false
+    end
+
+    -- the squads panel is open but another menu sits on top of it (e.g. the unit
+    -- info page from a portrait click): stay out of the way, so a right-click closes
+    -- THAT menu rather than toggling the squad window.
+    if top ~= 'dwarfmode/Squads/Default' then return false end
+
+    if busy(sq) then return false end
     local on_ui = df.global.game.main_interface.current_hover ~= -1
 
     if keys._MOUSE_R then
@@ -211,6 +282,17 @@ function DwarfRtsClickMove:onInput(keys)
         local nextidx = (cnt == 1) and ((idx + 1) % n) or 0
         for i = 0, n - 1 do sq.squad_selected[i] = (i == nextidx) end
         return true                                    -- consume: don't let DF exit on it
+    end
+
+    -- left-click a unit-portrait ("View ... sheet.") button -> camera-follow that
+    -- unit. We let the click through so DF sets view_sheets.active_id to the
+    -- portrait's unit, then pick it up next frame (see overlay_onupdate).
+    if keys._MOUSE_L and on_ui then
+        local tip = hover_tooltip(df.global.game.main_interface.current_hover)
+        if tip and tip:match('^View .* sheet') then
+            self.follow_pending = true
+            self.follow_before = df.global.plotinfo.follow_unit  -- pre-click follow state
+        end
     end
 
     if on_ui then return false end                     -- left-click on a button: leave alone

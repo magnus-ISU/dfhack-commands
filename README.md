@@ -236,6 +236,25 @@ behaviours:
    is open, a right-click closes the menu *and* removes the squad's station/move
    order (recall). Deferred — likely needs a unified left/right `onInput` handler,
    which may shake out of how #3 (click-enemy → attack) is built.
+6. **Drag-to-select — area command (left-drag a box). LARGE, TODO.** Left-click
+   and drag a rectangle on the map; the action is decided by what the box contains,
+   checked in this order:
+   - **Offensive:** if the box contains hostiles within **±3 Z-levels** of the
+     drag, the **presently selected squad** attacks them.
+   - **Select / conscript dwarves:** else if the area contains dwarves, **open +
+     select their squads**. *Secret:* any boxed dwarf **not in a squad** is drafted
+     (only as many as needed) into a new **temporary militia "Conscription N"** (N
+     increments each use); those squads are then selected. When the squads screen
+     is **closed, all Conscription militia are auto-disbanded**.
+   - **Mining:** else if the box selects no one and lands **fully on stone tiles**,
+     designate it for **digging** instead of any military action.
+   - **Tree-chopping:** else a **3×3 drag around a single tree** designates that
+     tree for **chopping**.
+   The **select/conscript + defensive path must work even when the squads screen is
+   closed** (box dwarves to raise a militia straight from plain map view). Data:
+   box units via `dfhack.units.getUnitsInBox`; temp squads via
+   `dfhack.military.makeSquad` + `addToSquad` (disband on close); dig/chop via the
+   designation APIs.
 
 **Gotchas learned:** `getMousePos` returns a map tile *under the command-menu
 buttons too*, so click-to-move must guard on `main_interface.current_hover ~= -1`
