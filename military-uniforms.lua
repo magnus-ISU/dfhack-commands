@@ -241,6 +241,21 @@ end
 
 local function barkey(mt, mi) return mt .. '/' .. mi end
 
+-- df.global.world.items.all also lists items the fort doesn't possess -- e.g. named
+-- artifacts and gear carried by offsite historical figures (UNIT_HOLDER to a unit
+-- not loaded here, or a non-civ unit). Those would inflate our stock counts and
+-- make us under-produce, so a "fort stock" item is one with no unit holder
+-- (stockpile/building/ground) OR held by one of our own loaded dwarves.
+local function not_fort_stock(it)
+    for _, r in ipairs(it.general_refs) do
+        if r:getType() == df.general_ref_type.UNIT_HOLDER then
+            local u = df.unit.find(r.unit_id)
+            return not (u and dfhack.units.isOwnCiv(u))
+        end
+    end
+    return false
+end
+
 -- locate one of our tracked manager orders by id
 local function order_by_id(id)
     local mo = df.global.world.manager_orders
@@ -293,12 +308,14 @@ local function item_wear(it)
     return (ok and w) or 0
 end
 
--- Masterwork recycling: when there isn't enough raw metal to forge the masterwork
--- replacements we still owe, melt the least-valuable matching gear back into bars.
--- Per material we melt only the shortfall the existing bars (and in-flight melts)
--- don't already cover -- damaged pieces first, then ascending quality, NEVER
--- masterwork or artifact -- and only item types our own orders produce.
-local function melt_for_masterwork(req, mwstock, bars)
+-- Masterwork recycling: to re-forge a masterwork we must recycle an inferior copy
+-- into metal -- but NEVER below the count needed to keep every soldier geared. So
+-- per material, while we still owe masterwork pieces and the bars/in-flight melts
+-- don't cover that, we melt at most ONE surplus piece per cycle (the worst:
+-- most-damaged, then lowest quality, never masterwork/artifact), and only from an
+-- item type that has more than `need` equippable copies -- so the soldiers always
+-- keep a full set and we drift toward masterwork one melt+forge at a time.
+local function melt_for_masterwork(req, mwstock, stock, bars)
     local short, inbound, cands = {}, {}, {}
     for key, r in pairs(req) do
         local mk = barkey(r.mat_type, r.mat_index)
@@ -306,33 +323,34 @@ local function melt_for_masterwork(req, mwstock, bars)
     end
     for mk, b in pairs(bars) do inbound[mk] = b end
     for _, it in ipairs(df.global.world.items.all) do
+        if not_fort_stock(it) then goto next_item end
         local key = ('%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it:getMaterial(), it:getMaterialIndex())
         if req[key] then
             local mk = barkey(it:getMaterial(), it:getMaterialIndex())
             if it.flags.melt then
                 inbound[mk] = (inbound[mk] or 0) + 1          -- metal already on the way
             elseif it:getQuality() < df.item_quality.Masterful
-                and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
+                and not it.flags.artifact
                 and dfhack.items.canMelt(it)
+                and (stock[key] or 0) > req[key].count        -- surplus only: keep a full set
             then
                 cands[mk] = cands[mk] or {}
                 cands[mk][#cands[mk] + 1] = it
             end
         end
+        ::next_item::
     end
     local marked = 0
-    for mk, need in pairs(short) do
-        local deficit = need - (inbound[mk] or 0)
+    for mk, owed in pairs(short) do
         local list = cands[mk]
-        if deficit > 0 and list then
+        -- still owe masterwork here, and bars+in-flight don't cover it: melt ONE
+        if owed > 0 and (inbound[mk] or 0) < owed and list and #list > 0 then
             table.sort(list, function(a, b)
                 local wa, wb = item_wear(a), item_wear(b)
                 if wa ~= wb then return wa > wb end           -- most-damaged first
                 return a:getQuality() < b:getQuality()         -- then lowest quality
             end)
-            for i = 1, math.min(deficit, #list) do
-                if dfhack.items.markForMelting(list[i]) then marked = marked + 1 end
-            end
+            if dfhack.items.markForMelting(list[1]) then marked = marked + 1 end
         end
     end
     return marked
@@ -432,21 +450,6 @@ function isEnabled() return load_state().queue end
 -- any background service on? (gear queueing or war-dog training)
 local function service_on() load_state(); return state.queue or state.wardogs end
 
--- df.global.world.items.all also lists items the fort doesn't possess -- e.g. named
--- artifacts and gear carried by offsite historical figures (UNIT_HOLDER to a unit
--- not loaded here, or a non-civ unit). Those would inflate our stock counts and
--- make us under-produce, so a "fort stock" item is one with no unit holder
--- (stockpile/building/ground) OR held by one of our own loaded dwarves.
-local function not_fort_stock(it)
-    for _, r in ipairs(it.general_refs) do
-        if r:getType() == df.general_ref_type.UNIT_HOLDER then
-            local u = df.unit.find(r.unit_id)
-            return not (u and dfhack.units.isOwnCiv(u))
-        end
-    end
-    return false
-end
-
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
@@ -502,7 +505,7 @@ local function run_cycle()
         local have = state.masterwork and (mwstock[key] or 0) or (stock[key] or 0)
         ensure_order(key, r, r.count, have, bars[barkey(r.mat_type, r.mat_index)] or 0)
     end
-    if state.masterwork then melt_for_masterwork(req, mwstock, bars) end
+    if state.masterwork then melt_for_masterwork(req, mwstock, stock, bars) end
     -- leather field kit: a backpack (food) and a waterskin/flask (water) per soldier
     ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
     ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
