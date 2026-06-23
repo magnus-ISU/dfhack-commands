@@ -32,11 +32,12 @@ dwarf-rts -- on the Squads screen:
     still following the unit. Right-
     clicking that page (or any menu over the squads screen) closes the menu rather
     than toggling the squad window. Scrolling the map releases the follow natively.
-  * Trying to close the screen (q or the bottom-right banner) while a selected
-    squad still has orders doesn't close it -- it deselects all squads instead, as
-    a deliberate "are you sure" step. Press again with nothing armed and it closes,
-    standing every squad down (all move/attack/patrol/burrow-defense orders are
-    dismissed on the close that actually goes through).
+  * Trying to close the screen (q or the bottom-right banner) while ANY squad is
+    selected doesn't close it -- it deselects all squads instead, as a deliberate
+    "are you sure" step (the screen opens with everything selected, so the first
+    close always just clears the selection). Press again with nothing selected and
+    it closes, standing every squad down (all move/attack/patrol/burrow-defense
+    orders are dismissed on the close that actually goes through).
   * Drag a box over your own CIVILIANS (no hostiles in it) to conscript them into
     temporary "Conscription N" squads -- one per 10 (a captain in pos 0 + 9). Each
     is a real squad: a fresh militia-captain assignment with one conscript properly
@@ -46,16 +47,19 @@ dwarf-rts -- on the Squads screen:
     squad list -- flag-toggling sq.open does NOT run that logic. Closing the squads
     screen disbands every Conscription squad (found by alias, so it survives a
     reload), returning the conscripts to civilian life.
+  * Each conscript's uniform is rewritten to EXACTLY match what they already wear and
+    wield (one already-satisfied spec per equipped item), replacing the generic metal
+    uniform a fresh squad gets, and the squad carries no food/water so no backpack or
+    flask is sought either. So they answer orders instantly -- a miner keeps fighting
+    with his pick, everyone keeps their clothes -- instead of trooping off to a
+    stockpile to equip gear they don't have. See `match_uniform_to_inventory`.
 
 It only acts with a squad selected and the cursor on the map, not on a command
 button (guarded via `main_interface.current_hover`). Registered automatically as
 overlay `dwarf-rts.clickmove`.
 
-NOTE/TODO: "No Uniform" for conscripts is not done -- a fresh makeSquad squad gets a
-default 7-slot uniform; clearing it means emptying each position's
-`equipment.uniform` (a vector OF vectors -- erase the inner specs, do NOT :delete()
-the sub-vectors, which crashes). The drag/refresh/select/disband cycle is verified
-end-to-end via the remote API; the in-game drag path still wants a live test.
+The drag/refresh/select/disband cycle is verified end-to-end via the remote API;
+the in-game drag path still wants a live test.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -256,17 +260,6 @@ local function clear_all_orders(sq)
     end
 end
 
--- does any currently-selected squad have standing orders? (close-guard arming)
-local function selected_has_orders(sq)
-    for i = 0, #sq.squad_selected - 1 do
-        if sq.squad_selected[i] then
-            local s = df.squad.find(sq.squad_id[i])
-            if s and #s.orders > 0 then return true end
-        end
-    end
-    return false
-end
-
 local function has_selection(ui)
     for i = 0, #ui.squad_selected - 1 do if ui.squad_selected[i] then return true end end
     return false
@@ -364,6 +357,58 @@ local function vacate(ent, a)
     a.histfig, a.histfig2 = -1, -1
 end
 
+-- item_type -> uniform slot (0=body 1=head 2=legs 3=hands 4=feet 5=shield 6=weapon)
+local UNIFORM_SLOT = {
+    [df.item_type.WEAPON] = 6,
+    [df.item_type.SHIELD] = 5,
+    [df.item_type.ARMOR]  = 0,
+    [df.item_type.HELM]   = 1,
+    [df.item_type.PANTS]  = 2,
+    [df.item_type.GLOVES] = 3,
+    [df.item_type.SHOES]  = 4,
+}
+-- only items the unit is actually wearing/wielding count as "equipped" (skip Hauled
+-- cargo, mounts, things stuck in wounds, etc.)
+local EQUIPPED_MODE = {
+    [df.inv_item_role_type.Weapon] = true,   -- grasped: weapon, shield, crutch
+    [df.inv_item_role_type.Worn] = true,
+    [df.inv_item_role_type.Strapped] = true,
+    [df.inv_item_role_type.SewnInto] = true,
+}
+
+-- Make a squad position's uniform an EXACT match of what its occupant already wears
+-- and wields, so the conscript is "fully equipped" the instant they're drafted and
+-- never runs off to a stockpile: a fresh makeSquad squad gets a generic 7-slot metal
+-- uniform, and on any order DF would send them to fetch that gear. We replace it with
+-- one spec per currently-equipped item -- a type/subtype/material requirement with the
+-- exact item already recorded in `assigned`, mirroring how DF marks a uniform fully
+-- satisfied (item(req)=-1 + the held item in the assigned list), so nothing is fetched.
+-- Clearing the default: empty each slot vector (resize 0) -- do NOT :delete() the old
+-- specs (DF owns them; deleting crashes), a small leak that dies with the temp squad.
+local function match_uniform_to_inventory(pos, unit)
+    local eq = pos.equipment
+    for slot = 0, 6 do eq.uniform[slot]:resize(0) end
+    eq.assigned_items:resize(0)
+    eq.backpack, eq.flask, eq.quiver = -1, -1, -1   -- no field kit (see supplies below)
+    for _, inv in ipairs(unit.inventory) do
+        local slot = EQUIPPED_MODE[inv.mode] and UNIFORM_SLOT[inv.item:getType()]
+        if slot then
+            local it = inv.item
+            local spec = df.squad_uniform_spec:new()
+            spec.item = -1                          -- not a specific-item request...
+            spec.item_type = it:getType()
+            spec.item_subtype = it:getSubtype()
+            spec.material_class = -1
+            spec.mattype = it:getMaterial()
+            spec.matindex = it:getMaterialIndex()
+            spec.color = -1
+            spec.assigned:insert('#', it.id)        -- ...the held item already satisfies it
+            eq.uniform[slot]:insert('#', spec)
+            eq.assigned_items:insert('#', it.id)
+        end
+    end
+end
+
 -- one "Conscription N" squad: a fresh militia-captain assignment with `captain_unit`
 -- appointed + seated in pos 0, and `member_ids` filling pos 1-9. (makeSquad/addToSquad
 -- won't touch pos 0, so we seat the leader by hand; the appointment is what lists it.)
@@ -392,11 +437,17 @@ local function make_conscription_squad(ent, captain_unit, member_ids)
     end
     conscript_count = conscript_count + 1
     sq.alias = CONSCRIPT_TAG .. conscript_count           -- the player-visible name
+    -- no field kit: carry no food/water, so conscripts never fetch a backpack or flask
+    sq.supplies.carry_food = 0
+    sq.supplies.carry_water = df.squad_water_level_type.NoWater
     sq.positions[0].occupant = captain_unit.hist_figure_id   -- seat the captain by hand
     captain_unit.military.squad_id = sq.id
     captain_unit.military.squad_position = 0
+    match_uniform_to_inventory(sq.positions[0], captain_unit)
     for i, uid in ipairs(member_ids) do
         dfhack.military.addToSquad(uid, sq.id, i)         -- pos 1..9
+        local u = df.unit.find(uid)
+        if u then match_uniform_to_inventory(sq.positions[i], u) end
     end
     return sq
 end
@@ -524,8 +575,8 @@ function DwarfRtsClickMove:overlay_onupdate()
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
         end
     elseif (not open) and self.prev_open then
-        -- panel just closed: if a selected squad is mid-command, veto the close and
-        -- drop the selection instead (a second close, now unarmed, goes through)
+        -- panel just closed: if any squad is still selected, veto the close and drop
+        -- the selection instead (a second close, nothing selected now, goes through)
         if self.armed_close then
             sq.open = true
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
@@ -538,7 +589,7 @@ function DwarfRtsClickMove:overlay_onupdate()
 
     if open then
         apply_pending_select(sq)
-        self.armed_close = selected_has_orders(sq)
+        self.armed_close = has_selection(sq)   -- any selection vetoes the first close
     else
         self.armed_close = false
     end
