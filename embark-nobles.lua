@@ -12,10 +12,10 @@ Assigns the key fort positions in one go -- handy right after embark:
   * bookkeeper           -- best at Record Keeping / Organization
   * expedition leader    -- a *different* dwarf from the five above
 
-The five skill roles are filled greedily by skill, each to a distinct dwarf, then
-the expedition leader is chosen from whoever is left (preferring social skill), so
-all six end up on six different dwarves. (DF has no dedicated bookkeeping/manager
-skill, so those use Record Keeping / Organization as the closest proxy.)
+The five skill roles each go to the best-skilled dwarf (a dwarf MAY hold more than
+one of them). Only the expedition leader is forced to be a *different* dwarf from
+those five. (DF has no dedicated bookkeeping/manager skill, so those use Record
+Keeping / Organization as the closest proxy.)
 
     embark-nobles            assign the six positions
     embark-nobles dry        preview the picks without changing anything
@@ -166,14 +166,14 @@ function plan()
         return best, score
     end
     for _, role in ipairs(ROLES) do
-        local u, sc = best_for(role, false)
-        if not u then u, sc = best_for(role, true) end   -- fewer dwarves than roles
+        -- best-skilled dwarf for each; a dwarf MAY hold several of the five
+        local u, sc = best_for(role, true)
         if u then
             used[u.id] = true
             picks[#picks + 1] = {role = role, unit = u, score = sc}
         end
     end
-    -- expedition leader: a different dwarf (unused); fall back to anyone if tiny fort
+    -- expedition leader: a different dwarf from the five; fall back to anyone if tiny fort
     local u, sc = best_for(EXPEDITION, false)
     if not u then u, sc = best_for(EXPEDITION, true) end
     if u then picks[#picks + 1] = {role = EXPEDITION, unit = u, score = sc} end
