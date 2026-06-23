@@ -51,7 +51,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
-| `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen) |
+| `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
 | `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, **self-manages a manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — queues **one** unit only when total stock `< need` **and** a metal `BAR` of that material exists, deleting the order once the need is met so **nothing is force-produced** (DF makes an order's items on submit regardless of conditions, so we don't lean on repeating conditional orders); **Upgrade to masterwork** (`Shift-M`) makes one extra and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge; **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
@@ -421,6 +421,15 @@ scavenge pen.
   overlay auto-starts the service; `enable/disable auto-pasture` also works.
   Stale (deleted) pen ids are forgotten on the next cycle. `repeat-util`
   `scheduleEvery(1,'days')` drives the watcher.
+- **Overcrowding warning** (notify panel, `pasture_overcrowd`): fires when a
+  designated pen holds more than ~1 animal per 4 grass tiles (graze) / 4 tiles
+  (scavenge). **Clicking it** (`entry.on_click`) cycles through the overcrowded
+  pens — each click zooms to the next one (`revealInDwarfmodeMap` on the pen
+  centre), selects it (`civzone.cur_bld = pen`,
+  `bottom_mode_selected = main_bottom_mode_type.ZONE`), then 3 frames later opens
+  its repaint UI (`bottom_mode_selected = ZONE_PAINT`, `civzone.repainting=true`).
+  The frame delay lets DF settle the selection first. Verified live: cycles
+  between both overcrowded pens and lands in `dwarfmode/Zone/Paint`.
 
 ---
 

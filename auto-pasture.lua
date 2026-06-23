@@ -20,7 +20,9 @@ Pieces that work together so you usually never think about pasturing:
      re-grabbed. Chained/restrained animals are left alone.
 
   4. A notify-panel warning when a pasture is overcrowded: more than ~1 animal
-     per 4 grass tiles (graze) or per 4 tiles (scavenge).
+     per 4 grass tiles (graze) or per 4 tiles (scavenge). Clicking it cycles
+     through the overcrowded pastures -- zooming to each, selecting it, and
+     opening its "repaint this zone" UI so you can resize it on the spot.
 
 Usage:
     enable auto-pasture       run the watcher in the background
@@ -299,27 +301,63 @@ end
 
 -- ---- overcrowding notification --------------------------------------------
 
--- a designated pasture is overcrowded past ~1 animal per 4 grass tiles (graze)
--- or per 4 tiles (scavenge)
-local function pasture_overcrowd_msg()
-    if not dfhack.world.isFortressMode() then return end
+-- the designated pastures overcrowded past ~1 animal per 4 grass tiles (graze)
+-- or per 4 tiles (scavenge); graze first, then scavenge
+local function overcrowded_pastures()
     load_state()
-    local warns = {}
+    local out = {}
     local graze = valid_pasture(state.graze_id)
     if graze then
         local cap = math.floor(pen_metrics(graze).grass / 4)
         local n = #graze.assigned_units
-        if n > cap then warns[#warns + 1] = ('graze %d/%d'):format(n, cap) end
+        if n > cap then out[#out + 1] = {zone = graze, label = ('graze %d/%d'):format(n, cap)} end
     end
     local scav = valid_pasture(state.scavenge_id)
     if scav and state.scavenge_id ~= state.graze_id then
         local cap = math.floor(pen_metrics(scav).tiles / 4)
         local n = #scav.assigned_units
-        if n > cap then warns[#warns + 1] = ('scavenge %d/%d'):format(n, cap) end
+        if n > cap then out[#out + 1] = {zone = scav, label = ('scavenge %d/%d'):format(n, cap)} end
     end
-    if #warns == 0 then return end
+    return out
+end
+
+local function pasture_overcrowd_msg()
+    if not dfhack.world.isFortressMode() then return end
+    local list = overcrowded_pastures()
+    if #list == 0 then return end
+    local warns = {}
+    for _, e in ipairs(list) do warns[#warns + 1] = e.label end
     return {{text = 'Pasture overcrowded (' .. table.concat(warns, ', ') .. ')',
              pen = COLOR_LIGHTRED}}
+end
+
+-- clicking the warning cycles through the overcrowded pastures: each click zooms
+-- to the next one and selects it, then -- a few frames later, so DF settles the
+-- selection first -- opens its "repaint this zone" UI.
+local overcrowd_cycle = 0
+
+local function open_zone_repaint(zone)
+    local mi = df.global.game.main_interface
+    local zid = zone.id
+    pcall(dfhack.gui.revealInDwarfmodeMap,
+        xyz2pos(zone.centerx, zone.centery, zone.z), true, true)
+    mi.civzone.cur_bld = zone
+    mi.bottom_mode_selected = df.main_bottom_mode_type.ZONE          -- select the zone
+    dfhack.timeout(3, 'frames', function()
+        local cur = mi.civzone.cur_bld
+        if cur and cur.id == zid then                               -- still our zone? paint it
+            mi.bottom_mode_selected = df.main_bottom_mode_type.ZONE_PAINT
+            mi.civzone.repainting = true
+        end
+    end)
+end
+
+local function pasture_overcrowd_click()
+    if not dfhack.world.isFortressMode() then return end
+    local list = overcrowded_pastures()
+    if #list == 0 then return end
+    overcrowd_cycle = overcrowd_cycle % #list + 1                   -- advance + wrap
+    open_zone_repaint(list[overcrowd_cycle].zone)
 end
 
 local function register_notification()
@@ -334,6 +372,7 @@ local function register_notification()
     end
     entry.desc = 'Warns when a designated graze/scavenge pasture is overcrowded.'
     entry.dwarf_fn = pasture_overcrowd_msg
+    entry.on_click = pasture_overcrowd_click
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
     end
