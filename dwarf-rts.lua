@@ -80,12 +80,17 @@ function DwarfRtsControl:overlay_onupdate()
         select_all_and_move()                        -- #1: fresh open
     end
     self.last = now
-    -- #2: the move we let through has cleared movement mode -> re-arm it
-    local sq = squads_ui()
-    if self.rearm and not sq.giving_move_order then
-        sq.giving_move_order = true
-        self.rearm = false
-    end
+end
+
+-- #2: re-arm movement mode ONCE, a couple frames after the move is let through
+-- (DF needs the intervening frames to issue it). This is deliberately a one-shot
+-- timeout, never a persistent flag: a sticky re-arm re-applies move mode the
+-- instant the player presses Esc, trapping them in the paused order-giving mode.
+local function rearm_move_once()
+    dfhack.timeout(2, 'frames', function()
+        local sq = squads_ui()
+        if sq.open and #sq.squad_id > 0 then sq.giving_move_order = true end
+    end)
 end
 
 -- onInput sees all input on the Squads screen regardless of our tiny frame, so we
@@ -100,7 +105,7 @@ function DwarfRtsControl:onInput(keys)
         target_enemy(enemy, dfhack.internal.getModifiers().shift)   -- #3
         return true                                  -- consume: attack, don't move
     end
-    self.rearm = true                                -- #2: let the move through, re-arm after
+    rearm_move_once()                                -- #2: let the move through, re-arm once after
     return false
 end
 
