@@ -45,7 +45,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
-| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control. **Done:** on the Squads screen, left-clicking the map moves the selected squads there (selects all if none selected) **without** leaving the game stuck in the paused move UI — it flicks `giving_move_order` on for the one frame DF needs, then clears it. Inert while giving a kill/patrol/burrow order. **TODO:** click-enemy → attack, camera-follow. See spec below. **NOTE:** auto-arming move mode on open was abandoned — `giving_move_order` pauses the game inherently |
+| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control on the Squads screen. **Done:** selecting any squad auto-selects all; left-clicking the map moves the selected squads there **without** leaving the game stuck in the paused move UI (flicks `giving_move_order` on for one frame, then clears it); left-clicking a hostile switches to kill mode + targets it (Shift appends), confirm to engage. Guards on `current_hover`/selection so command buttons and empty-selection clicks pass through. **TODO:** camera-follow; right-click → close + cancel order. See spec below. **NOTE:** auto-arming *move* mode on open was abandoned — `giving_move_order` pauses the game inherently |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `dfhack-stocks` | overlay+menu | 🟡 on hold | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). **Currently disabled & not deployed — revisiting implementation** (source kept in repo) |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
@@ -223,11 +223,12 @@ behaviours:
    do NOT drive this from the overlay's `overlay_onupdate` — that clock stalls
    while the order-giving sub-mode steals focus, which re-fires logic and traps
    the player; use `onInput` (event-driven) and a self-clearing one-shot only.
-3. **Click enemy in movement mode → attack.** Left-clicking a hostile unit while
-   in movement mode switches to attack (kill) mode and targets that unit instead
-   of moving. Holding **Shift** appends to the existing kill list rather than
-   replacing it. **(IMPLEMENTED — sets up the targeting via DF's flow; engage with
-   the normal confirm, like `squad-buttons`.)**
+3. **Click a hostile → attack.** A left-click on a hostile (with a squad selected,
+   on the map) switches to kill mode and targets that unit instead of moving;
+   **Shift** appends to the target list. **(IMPLEMENTED — sets `giving_kill_order`
+   + pushes onto `kill_unid`; engage with DF's normal confirm. Entering kill mode
+   pauses by DF design, unlike the flicked move mode. If closing the menu mid-
+   targeting ever leaves the fort paused, add a falling-edge cleanup.)**
 4. **Click leader portrait / unit camera → follow.** Clicking a squad leader's
    portrait (which already selects them) also makes the camera follow them;
    clicking a unit's camera icon selects that unit and follows it too.
