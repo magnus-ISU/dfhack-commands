@@ -10,6 +10,7 @@ Activates the "always-on" helpers in this pack:
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
     * dwarf-rts                 (registers the RTS-style squad-screen overlay)
+    * embark-nobles             (assigns the key fort positions by skill)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -26,6 +27,11 @@ military-uniforms is safe to run every session: it refreshes its own "Steel - *"
 templates and re-removes the default metal uniforms (idempotent). The gear-order
 service stays OFF until you flip its toggles on the squad Equip screen (Shift-G
 queue, Shift-M masterwork); that choice persists with the fort.
+
+embark-nobles is also safe every session: it (re)assigns each role to the
+best-skilled dwarf, which is stable, so re-runs are effectively idempotent. Note
+this means a manual noble change gets overwritten the next time magnus-scripts
+runs -- run `embark-nobles dry` first if you want to preview.
 
 no-pausing is deliberately NOT enabled here: it stops ALL pausing, so it is left
 as a manual toggle -- run `no-pausing` (or `enable no-pausing`) when you want it.
@@ -51,6 +57,7 @@ try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
+try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 
