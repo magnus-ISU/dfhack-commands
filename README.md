@@ -52,7 +52,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
-| `embark-nobles` | one-shot | ✅ done | Auto-assigns the key fort positions by skill: chief medical dwarf, militia commander, broker, manager, bookkeeper (best-skilled; a dwarf may hold several), + expedition leader forced to be a separate dwarf. `embark-nobles dry` previews without changing anything |
+| `embark-nobles` | one-shot | ✅ done | Fills **vacant** key fort positions by skill (leaves already-assigned nobles alone; safe to re-run / auto-run via magnus-scripts): chief medical dwarf, militia commander, broker, manager, bookkeeper (best-skilled; a dwarf may hold several), + expedition leader forced to be a separate dwarf. `embark-nobles dry` previews |
 | `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, **self-manages a manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — queues **one** unit only when total stock `< need` **and** a metal `BAR` of that material exists, deleting the order once the need is met so **nothing is force-produced** (DF makes an order's items on submit regardless of conditions, so we don't lean on repeating conditional orders); **Upgrade to masterwork** (`Shift-M`) makes one extra and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge; **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
@@ -388,9 +388,11 @@ the overlay button); exotic-detection method; the exact focus-on-sheet call.
 `embark-nobles` assigns the six key fort positions in one shot (handy right after
 embark). `embark-nobles dry` previews the picks without changing anything.
 
-- **Selection:** five roles each go to the best-skilled dwarf (by summed skill; a
-  dwarf MAY hold several of them); only the expedition leader is forced to be a
-  different dwarf from those five:
+- **Only vacant positions are filled** — already-assigned nobles are left
+  untouched, so it's safe to re-run and to auto-run from magnus-scripts.
+- **Selection (for the vacant ones):** five roles each go to the best-skilled
+  dwarf (by summed skill; a dwarf MAY hold several of them); only the expedition
+  leader is forced to be a different dwarf from whoever holds those five:
   - chief medical dwarf → Diagnosis/Surgery/Set Bone/Suture/Dress Wounds/Crutch
   - militia commander → weapon skills + Melee Combat/Discipline/Leadership/Teaching
   - broker → Appraisal/Negotiation/Judging Intent/Console/Pacify/Intimidation/Lying

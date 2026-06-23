@@ -3,7 +3,8 @@
 --[[
 embark-nobles
 =============
-Assigns the key fort positions in one go -- handy right after embark:
+Fills any VACANT key fort positions (already-assigned ones are left untouched) --
+handy right after embark, and safe to re-run:
 
   * chief medical dwarf  -- best at the medical skills (Diagnosis, Surgery, ...)
   * militia commander    -- best at weapon / military-leadership skills
@@ -12,13 +13,14 @@ Assigns the key fort positions in one go -- handy right after embark:
   * bookkeeper           -- best at Record Keeping / Organization
   * expedition leader    -- a *different* dwarf from the five above
 
-The five skill roles each go to the best-skilled dwarf (a dwarf MAY hold more than
-one of them). Only the expedition leader is forced to be a *different* dwarf from
-those five. (DF has no dedicated bookkeeping/manager skill, so those use Record
-Keeping / Organization as the closest proxy.)
+Only vacant positions are filled. The five skill roles each go to the best-skilled
+dwarf (a dwarf MAY hold more than one of them). The expedition leader is forced to
+be a *different* dwarf from whoever holds those five. (DF has no dedicated
+bookkeeping/manager skill, so those use Record Keeping / Organization as the
+closest proxy.)
 
-    embark-nobles            assign the six positions
-    embark-nobles dry        preview the picks without changing anything
+    embark-nobles            fill the vacant positions
+    embark-nobles dry        preview without changing anything
 
 Positions live on the fortress group entity (plotinfo.group_id); each already has
 an assignment slot, so we reuse it (set histfig + fix the position entity-link),
@@ -152,13 +154,17 @@ end
 -- ---- selection ------------------------------------------------------------
 
 -- choose the six dwarves; returns an ordered list of {role, unit, score}
+-- Only VACANT positions are filled; already-held ones are left alone. Returns an
+-- ordered list of {role, unit, score, action} where action is 'kept' (already
+-- held), 'fill' (vacant -> assign this unit), or 'none' (vacant, no candidate).
 function plan()
     local cands = candidates()
-    local used, picks = {}, {}
-    local function best_for(role, allow_used)
+    local picks = {}
+    local five_ids = {}   -- unit ids holding the five skill roles (held or to-fill)
+    local function best_for(role, exclude)
         local best, score
         for _, u in ipairs(cands) do
-            if allow_used or not used[u.id] then
+            if not (exclude and exclude[u.id]) then
                 local sc = role_score(u, role)
                 if not best or sc > score then best, score = u, sc end
             end
@@ -166,17 +172,34 @@ function plan()
         return best, score
     end
     for _, role in ipairs(ROLES) do
-        -- best-skilled dwarf for each; a dwarf MAY hold several of the five
-        local u, sc = best_for(role, true)
-        if u then
-            used[u.id] = true
-            picks[#picks + 1] = {role = role, unit = u, score = sc}
+        local held = current_holder(role.code)
+        if held then
+            five_ids[held.id] = true
+            picks[#picks + 1] = {role = role, unit = held, action = 'kept'}
+        else
+            -- best-skilled dwarf; a dwarf MAY hold several of the five
+            local u, sc = best_for(role)
+            if u then
+                five_ids[u.id] = true
+                picks[#picks + 1] = {role = role, unit = u, score = sc, action = 'fill'}
+            else
+                picks[#picks + 1] = {role = role, action = 'none'}
+            end
         end
     end
-    -- expedition leader: a different dwarf from the five; fall back to anyone if tiny fort
-    local u, sc = best_for(EXPEDITION, false)
-    if not u then u, sc = best_for(EXPEDITION, true) end
-    if u then picks[#picks + 1] = {role = EXPEDITION, unit = u, score = sc} end
+    -- expedition leader: only if vacant, and a different dwarf from the five
+    local held = current_holder(EXPEDITION.code)
+    if held then
+        picks[#picks + 1] = {role = EXPEDITION, unit = held, action = 'kept'}
+    else
+        local u, sc = best_for(EXPEDITION, five_ids)     -- distinct from the five
+        if not u then u, sc = best_for(EXPEDITION) end   -- tiny-fort fallback
+        if u then
+            picks[#picks + 1] = {role = EXPEDITION, unit = u, score = sc, action = 'fill'}
+        else
+            picks[#picks + 1] = {role = EXPEDITION, action = 'none'}
+        end
+    end
     return picks
 end
 
@@ -194,16 +217,21 @@ local args = {...}
 local dry = args[1] == 'dry' or args[1] == 'list' or args[1] == '-n'
 
 local picks = plan()
-if #picks == 0 then
-    qerror('no adult citizens available to assign')
-end
-
-print(dry and 'embark-nobles (dry run -- nothing changed):' or 'embark-nobles: assigning fort positions')
+print(dry and 'embark-nobles (dry run -- nothing changed):' or 'embark-nobles: filling vacant fort positions')
+local filled = 0
 for _, p in ipairs(picks) do
-    local name = dfhack.units.getReadableName(p.unit)
-    local ok, msg = true, nil
-    if not dry then ok, msg = assign_position(p.role.code, p.unit) end
-    print(('  %-20s -> %-28s (skill score %d)%s'):format(
-        p.role.label, name, p.score or 0, ok and '' or ('  ! ' .. tostring(msg))))
+    if p.action == 'kept' then
+        print(('  %-20s -- kept %s'):format(p.role.label, dfhack.units.getReadableName(p.unit)))
+    elseif p.action == 'fill' then
+        local ok, msg = true, nil
+        if not dry then ok, msg = assign_position(p.role.code, p.unit) end
+        if ok then filled = filled + 1 end
+        print(('  %-20s -> %-28s (skill score %d)%s'):format(
+            p.role.label, dfhack.units.getReadableName(p.unit), p.score or 0,
+            ok and '' or ('  ! ' .. tostring(msg))))
+    else
+        print(('  %-20s -- vacant, no candidate'):format(p.role.label))
+    end
 end
-if dry then print('  run `embark-nobles` (no args) to apply.') end
+if dry then print('  run `embark-nobles` (no args) to fill the vacant ones.')
+elseif filled == 0 then print('  all positions already assigned -- nothing to do.') end

@@ -28,10 +28,9 @@ templates and re-removes the default metal uniforms (idempotent). The gear-order
 service stays OFF until you flip its toggles on the squad Equip screen (Shift-G
 queue, Shift-M masterwork); that choice persists with the fort.
 
-embark-nobles is also safe every session: it (re)assigns each role to the
-best-skilled dwarf, which is stable, so re-runs are effectively idempotent. Note
-this means a manual noble change gets overwritten the next time magnus-scripts
-runs -- run `embark-nobles dry` first if you want to preview.
+embark-nobles is safe every session: it only fills VACANT positions and leaves
+already-assigned nobles untouched, so your manual noble choices are respected.
+`embark-nobles dry` previews what (if anything) it would fill.
 
 no-pausing is deliberately NOT enabled here: it stops ALL pausing, so it is left
 as a manual toggle -- run `no-pausing` (or `enable no-pausing`) when you want it.
