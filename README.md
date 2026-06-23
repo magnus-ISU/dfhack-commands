@@ -52,6 +52,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
+| `embark-nobles` | one-shot | ✅ done | Auto-assigns the key fort positions by skill: chief medical dwarf, militia commander, broker, manager, bookkeeper (best-skilled, each a distinct dwarf), + expedition leader as a separate dwarf. `embark-nobles dry` previews without changing anything |
 | `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, **self-manages a manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — queues **one** unit only when total stock `< need` **and** a metal `BAR` of that material exists, deleting the order once the need is met so **nothing is force-produced** (DF makes an order's items on submit regardless of conditions, so we don't lean on repeating conditional orders); **Upgrade to masterwork** (`Shift-M`) makes one extra and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge; **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
@@ -381,6 +382,35 @@ Verified mechanics: `flags.melt/forbid/dump/foreign/artifact`;
 
 **Needs live UI:** the bottom toolbar viewscreen + Stocks-button position (for
 the overlay button); exotic-detection method; the exact focus-on-sheet call.
+
+### ✅ embark-nobles (DONE)
+
+`embark-nobles` assigns the six key fort positions in one shot (handy right after
+embark). `embark-nobles dry` previews the picks without changing anything.
+
+- **Selection:** five roles filled greedily by summed skill, each to a *distinct*
+  dwarf, then expedition leader from whoever's left (so all six differ):
+  - chief medical dwarf → Diagnosis/Surgery/Set Bone/Suture/Dress Wounds/Crutch
+  - militia commander → weapon skills + Melee Combat/Discipline/Leadership/Teaching
+  - broker → Appraisal/Negotiation/Judging Intent/Console/Pacify/Intimidation/Lying
+  - manager → Organization/Record Keeping (+Appraisal/Negotiation)
+  - bookkeeper → Record Keeping/Organization (+Appraisal)
+  - expedition leader → a different dwarf, by Leadership/social skill
+  - DF has no dedicated manager/bookkeeper skill, so those use Record Keeping /
+    Organization as the closest proxy.
+- **Assignment mechanics (verified live):** positions live on the **fortress
+  group entity** (`df.global.plotinfo.group_id`, == `plotinfo.main.fortress_entity`),
+  *not* the civ. Every position already has an assignment slot in
+  `entity.positions.assignments` (vacant = `histfig == -1`), so we reuse it —
+  no creation needed. To assign (mirrors `make-monarch`): set
+  `assignment.histfig = unit.hist_figure_id`, remove the previous holder's
+  `histfig_entity_link_positionst` for that `assignment_id`/`entity_id`, then
+  insert a fresh one on the new holder (`entity_id`, `link_strength=100`,
+  `assignment_id`, `assignment_vector_idx`, `start_year`). To vacate: clear that
+  link and set `histfig = histfig2 = -1`. Verified by assigning Sheriff +
+  Hammerer (titles updated, links landed) then removing them (slots back to -1).
+- Module exports `assign_position(code, unit)`, `unassign_position(code)`,
+  `current_holder(code)`, `plan()` for reuse/testing.
 
 ### ✅ statue-description (DONE)
 
