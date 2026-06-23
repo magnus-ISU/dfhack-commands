@@ -6,8 +6,9 @@ dwarf-rts -- on the Squads screen:
   * Opening the Squads screen auto-selects every squad (RTS "select all"). After
     that you control the selection yourself: click squad buttons to toggle, or
     right-click the map to cycle through the squads one at a time (first, second,
-    ... wrapping around). Deselecting is no longer fought -- nothing re-selects
-    behind your back.
+    ... wrapping around). Right-clicking the military window itself instead tries
+    to close it (same path as q/the banner). Deselecting is no longer fought --
+    nothing re-selects behind your back.
   * Left-clicking the map MOVES the selected squads there. It flicks
     `giving_move_order` on for the one frame DF needs to register the move, then a
     self-clearing one-shot drops it (that UI otherwise pauses and persists).
@@ -28,6 +29,13 @@ overlay `dwarf-rts.clickmove`.
 ]]
 
 local overlay = require('plugins.overlay')
+
+-- The military window is right-anchored and overlays the map (so getMousePos can't
+-- tell window from map -- it returns the tile underneath either way). It occupies
+-- this many columns at the right screen edge; a right-click inside that band closes
+-- the window, a right-click left of it falls on the map. Measured from the right
+-- edge so it holds up when the window is resized.
+local WINDOW_COLS = 28
 
 local function squads_ui() return df.global.game.main_interface.squads end
 
@@ -186,10 +194,16 @@ end
 function DwarfRtsClickMove:onInput(keys)
     local sq = squads_ui()
     if not sq.open or busy(sq) then return false end
-    if df.global.game.main_interface.current_hover ~= -1 then return false end  -- on a UI button
+    local on_ui = df.global.game.main_interface.current_hover ~= -1
 
-    -- right-click the map: cycle the selection to the next single squad, wrapping
     if keys._MOUSE_R then
+        -- right-click inside the right-anchored military window: attempt to close it
+        -- (the close-guard in onupdate then vetoes/deselects or closes+stands down)
+        if df.global.gps.mouse_x >= df.global.gps.dimx - WINDOW_COLS then
+            sq.open = false
+            return true
+        end
+        -- right-click the map: cycle the selection to the next single squad, wrapping
         local n = #sq.squad_selected
         if n == 0 then return false end
         local cnt, idx = 0, -1
@@ -199,6 +213,7 @@ function DwarfRtsClickMove:onInput(keys)
         return true                                    -- consume: don't let DF exit on it
     end
 
+    if on_ui then return false end                     -- left-click on a button: leave alone
     if not keys._MOUSE_L then return false end
 
     local any = false
