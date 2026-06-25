@@ -26,10 +26,15 @@ for its table/mechanism/chain, each handled on its own.
 Items with no make-job are listed as unmakeable and skipped.
 
 When the fort has a hospital, it ALSO offers orders for the supplies a hospital needs --
-splints, crutches, buckets, thread, cloth, soap, and plaster powder -- each with its
-options laid out (e.g. soap from tallow vs oil, and it queues the ash->lye chain; plaster
-needs gypsum). Item supplies keep a target stock; soap/plaster are queued as one-time
-batches (their outputs can't be counted cleanly by material) you can set to repeat.
+splints, crutches, buckets, thread, cloth, soap, and plaster powder. Every choice names
+the item it makes. Soap options are spelled out ("from tallow [animal fat]" / "from oil
+[plants]") and queue their prerequisites -- the ash->lye chain, plus a render-fat order
+when you pick tallow. Item supplies keep a target stock; soap/plaster are one-time batches
+(their outputs can't be counted cleanly by material) you can set to repeat.
+
+For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
+Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, or the right
+forge/mason's/carpenter's for the chosen material), it warns you which to build.
 
 Run `planner-orders` to register the notification (idempotent; add to dfhack.init or
 magnus-scripts to load each session). `planner-orders list` prints the gaps; `planner-orders
@@ -112,18 +117,20 @@ local HOSPITAL_SUPPLIES = {
         note = 'Processed from farmable plants (e.g. pig tails) at a Farmer\'s Workshop.'},
     {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
         note = 'Woven from thread at a Loom.'},
-    {supply = 'Soap', kind = 'reaction', target = 5,
-        note = 'Cleans wounds (prevents infection). Needs LYE + rendered TALLOW (or oil);\n'
-            .. 'this also queues the ash->lye chain. Make sure a soap maker is built and\n'
-            .. 'fat is being rendered at a kitchen.',
+    {supply = 'Soap', kind = 'reaction', target = 5, makes = 'soap (a bar)',
+        note = 'Cleans wounds (prevents infection). Needs LYE + a fat source; each option\n'
+            .. 'also queues its prerequisites (ash->lye, and rendering fat for tallow).',
         options = {
-            {label = 'Soap from tallow (rendered animal fat)', reaction = 'MAKE_SOAP_FROM_TALLOW'},
-            {label = 'Soap from oil (pressed seeds/nuts)',      reaction = 'MAKE_SOAP_FROM_OIL'},
-        },
-        chain = {'MakeAsh', 'MakeLye'}},
-    {supply = 'Plaster powder', kind = 'reaction', target = 5,
+            -- `also` entries are prerequisite job_types (MakeAsh/MakeLye) or reaction codes
+            -- (RENDER_FAT); each gets its own one-time batch order if not already present.
+            {label = 'Soap from tallow [animal fat]', reaction = 'MAKE_SOAP_FROM_TALLOW',
+                also = {'MakeAsh', 'MakeLye', 'RENDER_FAT'}},
+            {label = 'Soap from oil [plants]', reaction = 'MAKE_SOAP_FROM_OIL',
+                also = {'MakeAsh', 'MakeLye'}},
+        }},
+    {supply = 'Plaster powder', kind = 'reaction', target = 5, makes = 'plaster powder',
         note = 'For casts on broken bones. Needs GYPSUM stone (alabaster / selenite /\n'
-            .. 'gypsum). Made at a Kiln.',
+            .. 'gypsum).',
         options = {
             {label = 'Plaster powder from gypsum', reaction = 'MAKE_PLASTER_POWDER'},
         }},
@@ -201,10 +208,11 @@ local function material_choices(gap)
     local jobname = df.job_type[gap.job_type]
     local classes = JOB_CLASSES[jobname] or DEFAULT_CLASSES
     local out, seen_metal = {}, {}
+    -- each choice names the item being made, e.g. "Cabinet: Steel [magma-safe]"
     local function add(label, mt, mi, wood)
         if gap.magma_required and not is_magma_safe(mt, mi) then return end
         local safe = is_magma_safe(mt, mi)
-        out[#out + 1] = {text = label .. (safe and ' [magma-safe]' or ''),
+        out[#out + 1] = {text = gap.name .. ': ' .. label .. (safe and ' [magma-safe]' or ''),
                          mat_type = mt, mat_index = mi, wood = wood}
     end
     -- a job restricted to specific materials (e.g. anvils = iron/steel only): offer just
@@ -220,10 +228,10 @@ local function material_choices(gap)
     -- generics first (Rock can't be promised magma-safe: it varies by stone, so it is
     -- dropped when the building requires magma safety)
     if classes.stone and not gap.magma_required then
-        out[#out + 1] = {text = 'Rock (any stone)', mat_type = 0, mat_index = -1}
+        out[#out + 1] = {text = gap.name .. ': Rock (any stone)', mat_type = 0, mat_index = -1}
     end
     if classes.wood and not gap.magma_required then
-        out[#out + 1] = {text = 'Wooden', mat_type = -1, mat_index = -1, wood = true}
+        out[#out + 1] = {text = gap.name .. ': Wooden', mat_type = -1, mat_index = -1, wood = true}
     end
     if classes.metal then
         for _, id in ipairs({'COPPER', 'IRON', 'STEEL'}) do
@@ -242,6 +250,66 @@ local function material_choices(gap)
         end
     end
     return out
+end
+
+-- ---- workshop requirements (warn if the needed shop isn't built) ------------
+
+-- jobs/reactions with a fixed workshop, keyed by job_type name OR reaction code.
+-- {label, ws=workshop_type} | {fu=furnace_type} | {def=building_def code}.
+local FIXED_WS = {
+    MakeAsh               = {label = 'a Wood Furnace',         fu = df.furnace_type.WoodFurnace},
+    MakeLye               = {label = 'an Ashery',              ws = df.workshop_type.Ashery},
+    ProcessPlants         = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
+    WeaveCloth            = {label = 'a Loom',                 ws = df.workshop_type.Loom},
+    ConstructMechanisms   = {label = "a Mechanic's Workshop",  ws = df.workshop_type.Mechanics},
+    RENDER_FAT            = {label = 'a Kitchen',              ws = df.workshop_type.Kitchen},
+    MAKE_SOAP_FROM_TALLOW = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
+    MAKE_SOAP_FROM_OIL    = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
+    MAKE_PLASTER_POWDER   = {label = 'a Kiln',                 fu = df.furnace_type.Kiln},
+}
+
+-- is a workshop/furnace satisfying `req` built? (req may be nil -> "no requirement")
+local function ws_exists(req)
+    if not req then return true end
+    for _, b in ipairs(df.global.world.buildings.all) do
+        local t = b:getType()
+        if req.ws and t == df.building_type.Workshop and b:getSubtype() == req.ws then return true end
+        if req.fu and t == df.building_type.Furnace and b:getSubtype() == req.fu then return true end
+        if req.def and t == df.building_type.Workshop and b:getSubtype() == df.workshop_type.Custom then
+            local d = df.building_def.find(b:getCustomType())
+            if d and d.code == req.def then return true end
+        end
+    end
+    return false
+end
+
+-- the workshop a (job-name or reaction-code) `name` runs at, given the chosen material.
+-- Fixed-shop jobs/reactions use FIXED_WS; everything else routes by material class.
+local function workshop_for(name, choice)
+    if FIXED_WS[name] then return FIXED_WS[name] end
+    if not choice then return nil end
+    if name == 'MakeTool' then          -- tools: metal at the forge, else craftsdwarf's
+        if not choice.wood and choice.mat_type == 0 and choice.mat_index >= 0 then
+            local info = dfhack.matinfo.decode(0, choice.mat_index)
+            if info and info.material.flags.IS_METAL then
+                return {label = "a Metalsmith's Forge", ws = df.workshop_type.MetalsmithsForge}
+            end
+        end
+        return {label = "a Craftsdwarf's Workshop", ws = df.workshop_type.Craftsdwarfs}
+    end
+    if choice.wood then return {label = "a Carpenter's Workshop", ws = df.workshop_type.Carpenters} end
+    if choice.mat_type == 0 then        -- inorganic: metal -> forge, otherwise stone -> mason
+        if choice.mat_index >= 0 then
+            local info = dfhack.matinfo.decode(0, choice.mat_index)
+            if info and info.material.flags.IS_METAL then
+                return {label = "a Metalsmith's Forge", ws = df.workshop_type.MetalsmithsForge}
+            end
+        end
+        return {label = "a Mason's Workshop", ws = df.workshop_type.Masons}
+    end
+    if choice.mat_type and choice.mat_type > 0 then     -- builtin glass
+        return {label = 'a Glass Furnace', fu = df.furnace_type.GlassFurnace}
+    end
 end
 
 -- ---- scanning planned buildings --------------------------------------------
@@ -409,7 +477,17 @@ local function add_order(p)
     return o
 end
 
--- item/job gap (planned buildings: make 5 at exactly 0; hospital item/job: keep `target`)
+-- is there already a manager order for this reaction code?
+local function reaction_ordered(code)
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        if all[i].job_type == df.job_type.CustomReaction and all[i].reaction_name == code then return true end
+    end
+    return false
+end
+
+-- item/job gap (planned buildings: make 5 at exactly 0; hospital item/job: keep `target`).
+-- Returns a list of missing-workshop labels for the order just created.
 local function create_order(gap, choice)
     add_order{
         job_type = gap.job_type, item_subtype = gap.order_subtype,
@@ -418,41 +496,79 @@ local function create_order(gap, choice)
         cond = {compare = gap.cond_compare or df.logic_condition_type.Exactly,
                 val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype},
     }
+    local req = workshop_for(df.job_type[gap.job_type], choice)
+    if req and not ws_exists(req) then return {req.label} end
+    return {}
 end
 
--- reaction gap (soap/plaster): a one-time batch of the chosen reaction, plus any
--- prerequisite chain orders not already present. No count condition (the outputs can't be
--- counted cleanly by material) -- it's a batch you can set to repeat.
+-- reaction gap (soap/plaster): a one-time batch of the chosen reaction, plus the option's
+-- prerequisites (`also`: job_types like MakeAsh/MakeLye, or reaction codes like RENDER_FAT),
+-- each queued once if not already present. No count condition (outputs can't be counted
+-- cleanly by material) -- it's a batch you can set to repeat. Returns missing-workshop labels.
 local function create_reaction(gap, opt)
-    local n = 1
+    local missing = {}
+    local function note_ws(name)
+        local req = FIXED_WS[name]
+        if req and not ws_exists(req) then missing[req.label] = true end
+    end
+    -- the chosen soap/plaster reaction
     add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
               amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
-    for _, jn in ipairs(gap.chain or {}) do
-        local jt = df.job_type[jn]
-        if jt and not has_order(jt, -1) then
-            add_order{job_type = jt, amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
-            n = n + 1
+    note_ws(opt.reaction)
+    -- its prerequisites
+    for _, name in ipairs(opt.also or {}) do
+        local jt = df.job_type[name]
+        if jt then                                      -- a job_type (MakeAsh / MakeLye)
+            if not has_order(jt, -1) then
+                add_order{job_type = jt, amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+            end
+        elseif not reaction_ordered(name) then          -- a reaction code (RENDER_FAT)
+            add_order{job_type = df.job_type.CustomReaction, reaction_name = name,
+                      amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
         end
+        note_ws(name)
     end
-    return n
+    local list = {}
+    for label in pairs(missing) do list[#list + 1] = label end
+    return list
 end
 
 -- ---- dialog -----------------------------------------------------------------
+
+-- the missing workshops a reaction gap's options would need (union over options + their
+-- prerequisites), as a "not built: a, b" string, or '' if all present
+local function reaction_ws_warning(gap)
+    local miss = {}
+    for _, o in ipairs(gap.options) do
+        for _, name in ipairs({o.reaction, table.unpack(o.also or {})}) do
+            local req = FIXED_WS[name]
+            if req and not ws_exists(req) then miss[req.label] = true end
+        end
+    end
+    local list = {}
+    for label in pairs(miss) do list[#list + 1] = label end
+    table.sort(list)
+    return #list > 0 and ('\n\n!! Not built yet: ' .. table.concat(list, ', ')) or ''
+end
 
 -- the choices + title + body text for a gap, by kind
 local function gap_prompt(gap, i, total)
     local kind = gap.kind or 'build'
     if kind == 'reaction' then
         local choices = {}
-        for _, o in ipairs(gap.options) do choices[#choices + 1] = {text = o.label, reaction = o.reaction} end
+        for _, o in ipairs(gap.options) do choices[#choices + 1] = {text = o.label, reaction = o.reaction, also = o.also} end
         return choices, ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
-            (gap.note or '') .. ('\n\nQueues a one-time batch of %d (set it to repeat for a steady supply):'):format(gap.amount)
+            (gap.note or '')
+                .. ('\n\nMakes: %s. Queues a one-time batch of %d (set it to repeat for a steady supply):'):format(gap.makes or gap.name:lower(), gap.amount)
+                .. reaction_ws_warning(gap)
     elseif kind == 'job' then
-        return {{text = ('Create order: keep ~%d %s in stock'):format(gap.amount, gap.name:lower()), mat_type = -1, mat_index = -1}},
-            ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total), gap.note or ''
+        local req = FIXED_WS[df.job_type[gap.job_type]]
+        local warn = (req and not ws_exists(req)) and ('\n\n!! Not built yet: ' .. req.label) or ''
+        return {{text = ('Make %s: keep ~%d in stock'):format(gap.name:lower(), gap.amount), mat_type = -1, mat_index = -1}},
+            ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total), (gap.note or '') .. warn
     elseif kind == 'item' then  -- hospital item (pick material)
         return material_choices(gap), ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
-            ('Pick a material; keeps ~%d in stock.'):format(gap.amount)
+            ('Makes %s; pick a material; keeps ~%d in stock.'):format(gap.name:lower(), gap.amount)
     else  -- planned-building gap
         return material_choices(gap), ('Missing: %s  (%d/%d)'):format(gap.name, i, total),
             ('%d planned building(s) need a %s but no order makes one.\nPick a material to make %d (repeats when you hit 0):')
@@ -461,12 +577,22 @@ local function gap_prompt(gap, i, total)
     end
 end
 
--- walk the gaps one at a time, each with its picker + Skip/Cancel
-local function process(gaps, i, made)
-    made = made or {}
+-- walk the gaps one at a time, each with its picker + Skip/Cancel. `made` collects what
+-- was created; `warns` collects missing-workshop labels across all created orders.
+local function process(gaps, i, made, warns)
+    made, warns = made or {}, warns or {}
     if i > #gaps then
         if #made > 0 then
             dfhack.println('planner-orders: created ' .. #made .. ' order(s): ' .. table.concat(made, ', '))
+        end
+        local wl = {}
+        for label in pairs(warns) do wl[#wl + 1] = label end
+        table.sort(wl)
+        if #wl > 0 then
+            local msg = 'These orders are queued, but the workshop to make them ISN\'T BUILT yet:\n  '
+                .. table.concat(wl, '\n  ') .. '\n\nBuild them and the orders will run.'
+            dfhack.printerr('planner-orders: missing workshops -> ' .. table.concat(wl, ', '))
+            dlg.showMessage('planner-orders: build these workshops', msg)
         end
         return
     end
@@ -479,15 +605,17 @@ local function process(gaps, i, made)
         on_select = function(_, choice)
             if choice.action == 'cancel' then return end
             if choice.action ~= 'skip' then
+                local missing
                 if (gap.kind or 'build') == 'reaction' then
-                    create_reaction(gap, choice)
-                    made[#made + 1] = gap.name .. ' (' .. choice.text .. ')'
+                    missing = create_reaction(gap, choice)
+                    made[#made + 1] = choice.text
                 else
-                    create_order(gap, choice)
-                    made[#made + 1] = ('%s %s'):format((choice.text or 'make'):gsub(' %[magma%-safe%]', ''), gap.name:lower())
+                    missing = create_order(gap, choice)
+                    made[#made + 1] = (choice.text or gap.name):gsub(' %[magma%-safe%]', '')
                 end
+                for _, label in ipairs(missing or {}) do warns[label] = true end
             end
-            process(gaps, i + 1, made)
+            process(gaps, i + 1, made, warns)
         end,
         on_cancel = function() end,   -- Esc = stop the whole walk
     }:show()
