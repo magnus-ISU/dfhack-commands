@@ -312,6 +312,36 @@ local function workshop_for(name, choice)
     end
 end
 
+-- make-jobs this tool understands, for checking EXISTING orders' workshops. FIXED_WS
+-- handles fixed-shop jobs/reactions; these are the material-routed make-jobs.
+local MANAGED_JOBS = {MakeTool = true, ConstructSplint = true, ConstructCrutch = true}
+for _, jn in pairs(ITEM_JOB) do MANAGED_JOBS[jn] = true end
+
+-- the workshop an existing manager order runs at (nil if it's not one we understand)
+local function order_workshop(o)
+    local jn = df.job_type[o.job_type]
+    if jn == 'CustomReaction' then return FIXED_WS[o.reaction_name] end   -- only our reactions
+    if FIXED_WS[jn] then return FIXED_WS[jn] end
+    if MANAGED_JOBS[jn] then
+        return workshop_for(jn, {mat_type = o.mat_type, mat_index = o.mat_index, wood = o.material_category.wood})
+    end
+end
+
+-- workshops that existing orders need but which aren't built yet (sorted labels). Lets the
+-- notification stay up after orders are queued until the player builds the shops to run them.
+local function missing_workshops()
+    local miss = {}
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        local req = order_workshop(all[i])
+        if req and not ws_exists(req) then miss[req.label] = true end
+    end
+    local list = {}
+    for label in pairs(miss) do list[#list + 1] = label end
+    table.sort(list)
+    return list
+end
+
 -- ---- scanning planned buildings --------------------------------------------
 
 -- does a manager order already produce this? Match job_type, and for tools the specific
@@ -437,7 +467,7 @@ local function scan()
         end
     end
     table.sort(unmakeable)
-    return {gaps = gaps, unmakeable = unmakeable}
+    return {gaps = gaps, unmakeable = unmakeable, missing = missing_workshops()}
 end
 
 -- light per-frame cache (the notify message runs often)
@@ -626,22 +656,32 @@ end
 local function show_dialog()
     local result = get_scan()
     if #result.gaps == 0 then
-        local extra = #result.unmakeable > 0
-            and ('\n\nUnmakeable (no make-job): ' .. table.concat(result.unmakeable, ', ')) or ''
-        dlg.showMessage('', 'planner-orders\n\nNo planned items are missing a manager order.' .. extra)
+        -- no gaps left, but maybe orders are queued whose workshop isn't built
+        if #result.missing > 0 then
+            dlg.showMessage('', 'planner-orders\n\nAll items have orders, but these workshops aren\'t built'
+                .. ' yet -- the orders can\'t run until they are:\n  ' .. table.concat(result.missing, '\n  '))
+        else
+            local extra = #result.unmakeable > 0
+                and ('\n\nUnmakeable (no make-job): ' .. table.concat(result.unmakeable, ', ')) or ''
+            dlg.showMessage('', 'planner-orders\n\nNo planned items are missing a manager order.' .. extra)
+        end
         return
     end
     process(result.gaps, 1)
 end
 
 -- ---- notification message ---------------------------------------------------
+-- Stays up while there are gaps OR while a queued order's workshop isn't built.
 
 local function message()
     if not dfhack.world.isFortressMode() then return end
-    local gaps = get_scan().gaps
-    if #gaps == 0 then return end
-    if #gaps == 1 then return ('%s needs a manager order'):format(gaps[1].name) end
-    return ('%d items/supplies need manager orders'):format(#gaps)
+    local r = get_scan()
+    local parts = {}
+    if #r.gaps == 1 then parts[#parts + 1] = r.gaps[1].name .. ' needs a manager order'
+    elseif #r.gaps > 1 then parts[#parts + 1] = ('%d items/supplies need manager orders'):format(#r.gaps) end
+    if #r.missing > 0 then parts[#parts + 1] = 'build ' .. table.concat(r.missing, ', ') end
+    if #parts == 0 then return end
+    return table.concat(parts, '; ')
 end
 
 -- ---- registration (mirrors needs-tomb-notification) -------------------------
@@ -680,6 +720,7 @@ if arg == 'list' then
         end
     end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
+    if #r.missing > 0 then print('  workshops needed but NOT built: ' .. table.concat(r.missing, ', ')) end
     return
 elseif arg == 'now' then
     if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
