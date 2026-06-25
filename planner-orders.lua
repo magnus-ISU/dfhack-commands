@@ -589,10 +589,11 @@ local function process(gaps, i, made, warns)
         for label in pairs(warns) do wl[#wl + 1] = label end
         table.sort(wl)
         if #wl > 0 then
-            local msg = 'These orders are queued, but the workshop to make them ISN\'T BUILT yet:\n  '
+            local msg = 'planner-orders: build these workshops\n\n'
+                .. 'These orders are queued, but the workshop to make them ISN\'T BUILT yet:\n  '
                 .. table.concat(wl, '\n  ') .. '\n\nBuild them and the orders will run.'
             dfhack.printerr('planner-orders: missing workshops -> ' .. table.concat(wl, ', '))
-            dlg.showMessage('planner-orders: build these workshops', msg)
+            dlg.showMessage('', msg)
         end
         return
     end
@@ -601,7 +602,8 @@ local function process(gaps, i, made, warns)
     choices[#choices + 1] = {text = '-- Skip this item --', action = 'skip'}
     choices[#choices + 1] = {text = '-- Cancel (stop) --', action = 'cancel'}
     dlg.ListBox{
-        frame_title = title, text = text, with_filter = true, choices = choices,
+        -- header goes in the window body, not on the top border
+        text = title .. '\n\n' .. text, with_filter = true, choices = choices,
         on_select = function(_, choice)
             if choice.action == 'cancel' then return end
             if choice.action ~= 'skip' then
@@ -626,7 +628,7 @@ local function show_dialog()
     if #result.gaps == 0 then
         local extra = #result.unmakeable > 0
             and ('\n\nUnmakeable (no make-job): ' .. table.concat(result.unmakeable, ', ')) or ''
-        dlg.showMessage('planner-orders', 'No planned items are missing a manager order.' .. extra)
+        dlg.showMessage('', 'planner-orders\n\nNo planned items are missing a manager order.' .. extra)
         return
     end
     process(result.gaps, 1)
