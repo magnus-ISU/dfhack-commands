@@ -26,7 +26,12 @@ The Equip screen overlay (dwarfmode/Squads/Equipment/Default) has three toggles:
                                    of that material exists (no over-production)
   Upgrade to masterwork (Shift-M)  also melt inferior copies and remake them
   Train surplus war dogs (Shift-D) war-train adult male dogs beyond BREEDER_MALES
-                                   breeders (Pets/Livestock training, not squads)
+                                   breeders (Pets/Livestock training, done by an Animal
+                                   Trainer -- not the soldiers). A male PUPPY counts toward
+                                   the breeder reserve (it'll grow into one), so 2 adults +
+                                   1 male pup trains one adult. Finished war dogs are then
+                                   auto-assigned (owner link) to squad members, spread
+                                   evenly across the military.
 ]]
 
 local NAME_PREFIX = 'Steel - '
@@ -400,24 +405,35 @@ end
 
 local function is_war_dog(u) return u.profession == df.profession.TRAINED_WAR end
 
--- returns newly-queued count; keeps BREEDER_MALES untrained adult males
+-- a male dog pup (baby or child) of our civ, alive and tame
+local function is_male_puppy(u, race)
+    return u.race == race and u.sex == 1 and dfhack.units.isOwnCiv(u) and dfhack.units.isTame(u)
+        and dfhack.units.isAlive(u) and (dfhack.units.isBaby(u) or dfhack.units.isChild(u))
+end
+
+-- returns newly-queued count. Keeps BREEDER_MALES males as the breeding stock, but a male
+-- PUPPY counts toward that reserve (it'll grow into a breeder), so e.g. 2 adults + 1 male
+-- pup reserves only 1 adult and trains the other. Females and pups are never trained.
 local function train_surplus_war_dogs()
     local race = dog_race()
     if not race then return 0 end
     local tr = df.global.plotinfo.training.training_assignments
     local assigned = {}
     for i = 0, #tr - 1 do assigned[tr[i].animal_id] = true end
-    -- untrained, unassigned, living, tame, adult male dogs = breeder/train pool
-    local pool = {}
+    -- untrained, unassigned, living, tame, adult male dogs = the train pool
+    local pool, male_pups = {}, 0
     for _, u in ipairs(df.global.world.units.active) do
-        if u.race == race and u.sex == 1 and dfhack.units.isOwnCiv(u) and dfhack.units.isTame(u)
+        if is_male_puppy(u, race) then
+            male_pups = male_pups + 1
+        elseif u.race == race and u.sex == 1 and dfhack.units.isOwnCiv(u) and dfhack.units.isTame(u)
             and dfhack.units.isAlive(u) and not dfhack.units.isBaby(u) and not dfhack.units.isChild(u)
             and not is_war_dog(u) and not assigned[u.id]
         then pool[#pool + 1] = u end
     end
-    -- keep the first BREEDER_MALES as breeders; war-train the remainder
+    -- reserve adult males as breeders, but male pups fill that reserve first
+    local reserve = math.max(0, BREEDER_MALES - male_pups)
     local queued = 0
-    for i = BREEDER_MALES + 1, #pool do
+    for i = reserve + 1, #pool do
         local ta = df.training_assignment:new()
         ta.animal_id = pool[i].id
         ta.trainer_id = -1
@@ -427,6 +443,49 @@ local function train_surplus_war_dogs()
         queued = queued + 1
     end
     return queued
+end
+
+-- fort citizens currently in a squad (war dogs get spread across them)
+local function squad_members()
+    local out = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        if u.military.squad_id >= 0 and dfhack.units.isCitizen(u)
+            and dfhack.units.isActive(u) and not dfhack.units.isDead(u)
+        then out[#out + 1] = u end
+    end
+    return out
+end
+
+-- assign every trained war dog that has no owner to the squad member with the fewest war
+-- dogs (so they spread evenly across the military). The owner link is the animal's
+-- relationship_ids.PetOwner -- the same field the game's "assign animal" sets. Returns the
+-- number newly assigned.
+local function assign_war_dogs()
+    local race = dog_race()
+    if not race then return 0 end
+    local members = squad_members()
+    if #members == 0 then return 0 end
+    local count, unowned = {}, {}
+    for _, m in ipairs(members) do count[m.id] = 0 end
+    for _, u in ipairs(df.global.world.units.active) do
+        if u.race == race and is_war_dog(u) and dfhack.units.isOwnCiv(u) and dfhack.units.isAlive(u) then
+            local owner = u.relationship_ids.PetOwner
+            if owner >= 0 then
+                if count[owner] ~= nil then count[owner] = count[owner] + 1 end   -- already on a soldier
+            else
+                unowned[#unowned + 1] = u
+            end
+        end
+    end
+    local assigned = 0
+    for _, dog in ipairs(unowned) do
+        local best = members[1]
+        for _, m in ipairs(members) do if count[m.id] < count[best.id] then best = m end end
+        dog.relationship_ids.PetOwner = best.id
+        count[best.id] = count[best.id] + 1
+        assigned = assigned + 1
+    end
+    return assigned
 end
 
 -- ---- enable state: toggles, persisted ---------------------------------------
@@ -453,7 +512,7 @@ local function service_on() load_state(); return state.queue or state.wardogs en
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
-    if state.wardogs then train_surplus_war_dogs() end
+    if state.wardogs then train_surplus_war_dogs(); assign_war_dogs() end
     if not state.queue then return end
     local req = compute_required()
     -- one pass over items: tally gear stock (total + masterwork) by item key, bar
