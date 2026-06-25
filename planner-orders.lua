@@ -504,6 +504,7 @@ local function add_order(p)
             item_type = p.cond.item_type, item_subtype = p.cond.item_subtype or -1,
             mat_type = -1, mat_index = -1})
     end
+    mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
 end
 
