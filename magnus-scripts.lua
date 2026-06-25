@@ -12,6 +12,7 @@ Enable all of magnus's persistent DFHack helpers at once.
 Activates the "always-on" helpers in this pack:
     * needs-tomb-notification   (registers the notify-panel alert)
     * mandate-notification      (registers the immediate-mandate notification)
+    * planner-orders            (notify + 1-click orders for planned-building items)
     * auto-mandate              (enables the background work-order service)
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
@@ -20,6 +21,7 @@ Activates the "always-on" helpers in this pack:
     * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
     * labor-groups once         (builds the ordered crafting Work Details -- once per
                                  fort; a re-run is a no-op so manual tweaks survive)
+    * military-labor            (daily-syncs the "Military" work detail to your squads)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -59,6 +61,10 @@ Usage
 
     magnus-scripts lovely
         Also set the two standing orders and enable the stock-tool batch.
+
+    magnus-scripts disable
+        Turn off everything this pack switched on (services, the dwarf-rts overlay, and
+        the notifications). One-shot results and the `lovely` stock tools are left alone.
 ]====]
 
 if not dfhack.world.isFortressMode() then
@@ -71,16 +77,41 @@ local function try(label, fn)
     if not ok then print('       ' .. tostring(err)) end
 end
 
+-- ---- `magnus-scripts disable`: turn off everything this pack switched on ------
+if ({...})[1] == 'disable' then
+    print('magnus-scripts: disabling all helpers...')
+    -- background services + the one enableable overlays
+    try('disable auto-mandate', function() dfhack.run_command('disable', 'auto-mandate') end)
+    try('disable military-uniforms (gear service)', function() dfhack.run_command('disable', 'military-uniforms') end)
+    try('disable inside-burrow', function() dfhack.run_command('disable', 'inside-burrow') end)
+    try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
+    try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
+    -- notifications (turn off + persist the notify config)
+    try('disable notifications', function()
+        local n = reqscript('internal/notify/notifications')
+        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders'}) do
+            if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
+        end
+        if n.config and n.config.write then n.config:write() end
+    end)
+    print('Done. Pack helpers disabled. (One-shots already applied -- embark-nobles,')
+    print('labor-groups, the steel uniform templates -- are left as-is. The `lovely`')
+    print('stock tools, if you enabled them, stay on -- toggle those in gui/control-panel.)')
+    return
+end
+
 print('magnus-scripts: enabling persistent helpers...')
 try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notification') end)
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
+try('planner-orders', function() dfhack.run_script('planner-orders') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
 try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
 try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
+try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 
