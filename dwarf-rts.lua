@@ -4,21 +4,31 @@
 dwarf-rts -- on the Squads screen:
 
   * Opening the Squads screen auto-selects every squad (RTS "select all"). After
-    that you control the selection yourself: click squad buttons to toggle, or
-    right-click the map to cycle through the squads one at a time (first, second,
-    ... wrapping around). Right-clicking the military window itself instead tries
-    to close it (same path as q/the banner); right-clicking the right edge of the
-    screen while it's closed opens it. Deselecting is no longer fought -- nothing
-    re-selects behind your back.
+    that you control the selection yourself: click squad buttons to toggle, or press
+    keyboard 1-9 to select that squad in the list (1 = first). The FIRST press of a
+    squad's key just selects it; pressing the same key again centers the camera on and
+    follows its leader, and each further press follows the next member (wrapping). Every
+    selected member (individual or whole-squad) is outlined on the map in the selection
+    art. Right-clicking the
+    military window tries to close it (same path as q/the banner); a right-click on
+    the map is left to DF (backs out the member view / closes the panel); right-
+    clicking the right edge of the screen while it's closed opens it. Deselecting is
+    no longer fought -- nothing re-selects behind your back.
   * All left-button map commands resolve on mouse-UP (the raw button is polled each
     frame), so a click is cleanly told apart from a drag and nothing fires on press:
-      - A plain click MOVES the selected squads to that tile, or, if a hostile is on
-        it, ATTACKS that unit (a direct kill order -- no paused move UI). Shift on a
-        hostile appends it to the current kill order instead of retargeting.
-      - A drag (a box) orders the selected squads to attack every hostile inside it,
-        within +/-3 z-levels of the drag; Shift+drag folds the box's hostiles into
-        the current kill order instead of replacing it. An empty box (no hostiles)
-        does nothing -- it leaves each squad's existing order untouched.
+      - A plain click ATTACKS a hostile on that tile (a direct kill order -- no paused
+        move UI; Shift appends it to the current kill order), else SELECTS one of your
+        own dwarves under the cursor (same rules as the drag-box below), else MOVES the
+        current selection to that tile.
+      - A drag (a box) with hostiles inside it orders the selection to attack every
+        hostile within +/-3 z-levels of the drag; Shift+drag folds the box's hostiles
+        into the current kill order instead of replacing it. A drag with NO hostiles is
+        a selection/conscription gesture instead (below) -- it never disturbs orders.
+    Clicks and box-attacks act on the highlighted MEMBERS when one squad is expanded
+    into its member view (per-position orders), otherwise on the selected squads.
+    A live box with a WxH readout tracks the drag, its corners marked with a CURSORS
+    graphic for what it will do: attack cursor over enemies, friendly cursor over your
+    own dwarves, empty cursor over nothing. Selected members are marked the same way.
     The press is gated to a genuine map press (a squad is selected, the cursor is
     not on a command button, and it's left of the right-side window), so panels and
     banners can never command squads. While a squad is selected these map clicks are
@@ -37,9 +47,18 @@ dwarf-rts -- on the Squads screen:
     "are you sure" step (the screen opens with everything selected, so the first
     close always just clears the selection). Press again with nothing selected and
     it closes, standing every squad down (all move/attack/patrol/burrow-defense
-    orders are dismissed on the close that actually goes through).
-  * Drag a box over your own CIVILIANS (no hostiles in it) to conscript them into
-    temporary "Conscription N" squads -- one per 10 (a captain in pos 0 + 9). Each
+    orders are dismissed on the close that actually goes through -- BOTH squad-level and
+    per-member individual orders).
+  * Drag a box over your own DWARVES (no hostiles in it) to select them (`box_select`):
+      - members of several squads -> select those whole squads
+      - members of one squad: the WHOLE squad if every member is boxed, else just the
+        boxed members (expands that squad into its member view -- map clicks then issue
+        per-member orders via squad_position.orders, exactly as DF's own member view does)
+      - only un-squadded civilians -> conscript them (below)
+  * Drag a box over your own un-squadded CIVILIANS to conscript them into temporary
+    "Conscripts" squads -- one per 10 (a captain in pos 0 + 9). Each squad's name is
+    prefixed with its 1-based slot in the list (e.g. "3. Conscripts") so it matches its
+    1-9 hotkey. Each
     is a real squad: a fresh militia-captain assignment with one conscript properly
     appointed (entity-link) and hand-seated in pos 0, named via `alias`, the rest
     in pos 1-9. The new squads are then selected, after a REAL list refresh: we feed
@@ -55,8 +74,13 @@ dwarf-rts -- on the Squads screen:
     stockpile to equip gear they don't have. See `match_uniform_to_inventory`.
 
 It only acts with a squad selected and the cursor on the map, not on a command
-button (guarded via `main_interface.current_hover`). Registered automatically as
-overlay `dwarf-rts.clickmove`.
+button (guarded via `main_interface.current_hover`). It also stands fully aside
+whenever a squads SUB-dialog is up -- the squad equipment (uniform/ammo) or schedule
+viewscreen, or the "assign uniform" picker -- so those work normally. This matters most
+for assign_uniform, which is drawn over the map but keeps the squads focus: without the
+guard its clicks were swallowed (no uniform assigned) and the mouse-up poller fired
+stray station orders, which is why a new squad couldn't be equipped. See
+`squad_subscreen_open`. Registered automatically as overlay `dwarf-rts.clickmove`.
 
 The drag/refresh/select/disband cycle is verified end-to-end via the remote API;
 the in-game drag path still wants a live test.
@@ -64,6 +88,7 @@ the in-game drag path still wants a live test.
 
 local overlay = require('plugins.overlay')
 local gui = require('gui')
+local guidm = require('gui.dwarfmode')
 local utils = require('utils')
 
 -- The military window is right-anchored and overlays the map (so getMousePos can't
@@ -74,6 +99,24 @@ local utils = require('utils')
 local WINDOW_COLS = 28
 
 local function squads_ui() return df.global.game.main_interface.squads end
+
+-- Squad sub-dialogs that sit ON TOP of the squads screen, where dwarf-rts must stand
+-- fully aside. Two distinct hazards:
+--   * squad_equipment / squad_schedule are separate viewscreens that hide the squads
+--     panel (squads.open flips to false). Without this guard the close-guard in
+--     overlay_onupdate reads that flip as the player closing the squads screen, vetoes
+--     it (reopens the panel + deselects the squad) and breaks the screen.
+--   * assign_uniform is the "pick a uniform" dialog. It is drawn over the MAP area but
+--     leaves the focus at 'dwarfmode/Squads/Default' and its list rows report
+--     current_hover == -1 -- so without this guard onInput swallows the clicks (the
+--     uniform never gets assigned) AND the mouse-up poller fires stray station/move
+--     orders on the selected squads. This is THE reason you couldn't equip a new squad.
+-- Detected via each dialog's own open flag, so it's independent of focus strings (and
+-- harmless for the viewscreen cases if squads.open happens to stay true -- no edge fires).
+local function squad_subscreen_open()
+    local mi = df.global.game.main_interface
+    return mi.squad_equipment.open or mi.squad_schedule.open or mi.assign_uniform.open
+end
 
 -- does this widget belong to the screen we're actually on right now? (matchFocusString
 -- is the same test the overlay framework uses; it safely says "no" for the many
@@ -182,6 +225,74 @@ local function clear_orders(sq)
     for i = #sq.orders - 1, 0, -1 do sq.orders:erase(i) end
 end
 
+-- ---- individual-member orders ---------------------------------------------------
+-- When one squad is expanded into its member view (viewing_squad_index >= 0) with
+-- members highlighted (squad_hfid_selected), DF commands per POSITION, not per squad:
+-- a fresh order on squad_position.orders, issuer/recipient -1 (the order lives on the
+-- member's own slot, alongside any stale squad-level order). We mirror that exactly so
+-- a map click moves/attacks only the highlighted dwarves. Verified against a live squad
+-- whose members each carried their own squad_order_movest in pos.orders.
+
+-- individual-member selection active? (a squad expanded, with members highlighted)
+local function has_indiv_selection(ui)
+    return ui.viewing_squad_index >= 0 and #ui.squad_hfid_selected > 0
+end
+
+-- the squad_position objects of the currently highlighted members of the viewed squad
+local function selected_positions(ui)
+    local out = {}
+    if ui.viewing_squad_index < 0 then return out end
+    local sq = df.squad.find(ui.squad_id[ui.viewing_squad_index])
+    if not sq then return out end
+    local want = {}
+    for i = 0, #ui.squad_hfid_selected - 1 do want[ui.squad_hfid_selected[i]] = true end
+    for p = 0, #sq.positions - 1 do
+        if want[sq.positions[p].occupant] then out[#out + 1] = sq.positions[p] end
+    end
+    return out
+end
+
+-- erase one member's own orders (no :delete(), same reasoning as clear_orders)
+local function clear_pos_orders(pos)
+    for i = #pos.orders - 1, 0, -1 do pos.orders:erase(i) end
+end
+
+-- drop every member's individual order in a squad (a squad-wide order supersedes them)
+local function clear_member_orders(s)
+    for p = 0, #s.positions - 1 do clear_pos_orders(s.positions[p]) end
+end
+
+-- order one member (its position) to move to a tile -- replaces that member's order
+local function pos_move(pos, target)
+    clear_pos_orders(pos)
+    local mo = df.squad_order_movest:new()
+    mo.issuer_hf, mo.recipient_hf = -1, -1
+    mo.year, mo.year_tick = df.global.cur_year, df.global.cur_year_tick
+    mo.pos.x, mo.pos.y, mo.pos.z = target.x, target.y, target.z
+    mo.point_id = -1
+    pos.orders:insert('#', mo)
+end
+
+-- order one member to kill `ids`. append folds into its current kill order; otherwise
+-- replaces. Built fresh (DF only recomputes targeting when an order is newly given).
+local function pos_kill(pos, ids, append)
+    local all, seen = {}, {}
+    local function add(id) if not seen[id] then seen[id] = true; all[#all + 1] = id end end
+    if append then
+        local last = #pos.orders > 0 and pos.orders[#pos.orders - 1] or nil
+        if last and df.squad_order_kill_listst:is_instance(last) then
+            for j = 0, #last.units - 1 do add(last.units[j]) end
+        end
+    end
+    for _, id in ipairs(ids) do add(id) end
+    clear_pos_orders(pos)
+    local ko = df.squad_order_kill_listst:new()
+    ko.issuer_hf, ko.recipient_hf = -1, -1
+    ko.year, ko.year_tick = df.global.cur_year, df.global.cur_year_tick
+    for _, id in ipairs(all) do ko.units:insert('#', id) end
+    pos.orders:insert('#', ko)
+end
+
 -- give squad `s` a kill order on the unit ids in `ids`. append=true folds them into
 -- its current kill order (multi-target / additive selection); otherwise it replaces
 -- the squad's orders. Either way the order is built FRESH (and duplicate targets are
@@ -199,6 +310,7 @@ local function squad_kill(s, ids, append)
     end
     for _, id in ipairs(ids) do add(id) end
     clear_orders(s)
+    clear_member_orders(s)          -- squad-wide order: drop any individual member orders
     local ko = df.squad_order_kill_listst:new()
     ko.issuer_hf = leader_hf(s)
     ko.recipient_hf = -1
@@ -226,6 +338,7 @@ local function move_selected(ui, pos)
             local s = df.squad.find(ui.squad_id[i])
             if s then
                 clear_orders(s)
+                clear_member_orders(s)   -- squad-wide order: drop any individual member orders
                 local mo = df.squad_order_movest:new()
                 mo.issuer_hf = leader_hf(s)
                 mo.recipient_hf = -1
@@ -239,12 +352,28 @@ local function move_selected(ui, pos)
     end
 end
 
--- a plain click on the map (resolved on mouse-up): attack the enemy on that tile,
--- else move there. Shift on an enemy appends to the kill order rather than replacing.
+local box_select   -- forward decl (defined after conscription): single_command selects
+                   -- the own dwarf under a click via a 1-tile box_select
+
+-- a plain click on the map (resolved on mouse-up): attack the enemy on that tile; else,
+-- if one of your own dwarves is under the cursor, SELECT it (a 1-tile box_select, so the
+-- same squad/member rules apply); else move the current selection there. Orders route to
+-- the highlighted members in member view, else to the selected squads. Shift on an enemy
+-- appends to the kill order. Returns box_select's result when the click selected.
 local function single_command(ui, pos, shift)
     local enemy = enemy_at(pos)
     if enemy then
-        order_kill_single(ui, enemy, shift)
+        if has_indiv_selection(ui) then
+            for _, p in ipairs(selected_positions(ui)) do pos_kill(p, {enemy.id}, shift) end
+        else
+            order_kill_single(ui, enemy, shift)
+        end
+        return
+    end
+    local sel = box_select(ui, pos, pos)        -- own dwarf under the cursor -> select it
+    if sel then return sel end
+    if has_indiv_selection(ui) then
+        for _, p in ipairs(selected_positions(ui)) do pos_move(p, pos) end
     else
         move_selected(ui, pos)
     end
@@ -256,13 +385,27 @@ end
 local function clear_all_orders(sq)
     for i = 0, #sq.squad_id - 1 do
         local s = df.squad.find(sq.squad_id[i])
-        if s then clear_orders(s) end
+        if s then
+            clear_orders(s)             -- squad-level orders
+            clear_member_orders(s)      -- and every member's individual orders
+        end
     end
 end
 
 local function has_selection(ui)
     for i = 0, #ui.squad_selected - 1 do if ui.squad_selected[i] then return true end end
     return false
+end
+
+-- list index of the SINGLE selected squad (nil if zero, several, or in member view) --
+-- used to tell "this squad is the active selection" from "select-all / something else"
+local function only_selected_squad(ui)
+    if has_indiv_selection(ui) then return nil end
+    local idx, cnt = nil, 0
+    for i = 0, #ui.squad_selected - 1 do
+        if ui.squad_selected[i] then idx = i; cnt = cnt + 1 end
+    end
+    if cnt == 1 then return idx end
 end
 
 local function same_tile(a, b)
@@ -287,10 +430,14 @@ local function box_attack(ui, p1, p2, append)
         then ids[#ids + 1] = u.id end
     end
     if #ids == 0 then return 0 end          -- nothing in the box: keep the prior order
-    for i = 0, #ui.squad_selected - 1 do
-        if ui.squad_selected[i] then
-            local s = df.squad.find(ui.squad_id[i])
-            if s then squad_kill(s, ids, append) end
+    if has_indiv_selection(ui) then
+        for _, p in ipairs(selected_positions(ui)) do pos_kill(p, ids, append) end
+    else
+        for i = 0, #ui.squad_selected - 1 do
+            if ui.squad_selected[i] then
+                local s = df.squad.find(ui.squad_id[i])
+                if s then squad_kill(s, ids, append) end
+            end
         end
     end
     return #ids
@@ -299,8 +446,8 @@ end
 -- ---- conscription: drag civilians (squad screen open) into temporary squads -----
 
 local CONSCRIPTS_PER_SQUAD = 10  -- 1 captain (pos 0) + 9 members (pos 1-9)
-local CONSCRIPT_TAG = 'Conscription '   -- squad alias prefix; also how we find them to disband
-local conscript_count = 0        -- running "Conscription N" number (reset when all disband)
+local CONSCRIPT_TAG = 'Conscripts'   -- base squad alias; also how we find them to disband
+                                     -- (an index prefix is added once the panel lists them)
 local pending_select             -- new squad ids to select once the panel lists them
 
 local function fort_entity() return df.historical_entity.find(df.global.plotinfo.group_id) end
@@ -331,6 +478,68 @@ local function civilians_in_box(p1, p2)
         then ids[#ids + 1] = u.id end
     end
     return ids
+end
+
+-- scan a box for fort dwarves (exact box z-range, like civilians_in_box): the squadded
+-- ones grouped by squad id -> their histfig ids, plus the loose (un-squadded) ones as
+-- unit ids. Drives drag-to-select: squads vs members vs conscription.
+local function dwarves_in_box(p1, p2)
+    local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
+    local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
+    local z1, z2 = math.min(p1.z, p2.z), math.max(p1.z, p2.z)
+    local by_squad, loose = {}, {}
+    local U = df.global.world.units.active
+    for i = 0, #U - 1 do
+        local u = U[i]
+        local p = u.pos
+        if p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 and p.z >= z1 and p.z <= z2
+            and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
+            and not dfhack.units.isDead(u) and dfhack.units.isAdult(u)
+        then
+            local sid = u.military.squad_id
+            if sid >= 0 and u.hist_figure_id >= 0 then
+                by_squad[sid] = by_squad[sid] or {}
+                by_squad[sid][#by_squad[sid] + 1] = u.hist_figure_id
+            elseif sid == -1 then
+                loose[#loose + 1] = u.id
+            end
+        end
+    end
+    return by_squad, loose
+end
+
+-- occupied positions in a squad (its real member count)
+local function squad_member_count(sq)
+    local n = 0
+    for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then n = n + 1 end end
+    return n
+end
+
+-- list index of a squad id within the panel's squad list (for viewing_squad_index)
+local function squad_list_index(ui, sid)
+    for i = 0, #ui.squad_id - 1 do if ui.squad_id[i] == sid then return i end end
+end
+
+-- whole-squad selection: pick exactly the squads in `want` (a set of squad ids),
+-- leaving the individual-member view (back to the top-level squad list)
+local function select_squads(ui, want)
+    ui.viewing_squad_index = -1
+    ui.squad_hfid_selected:resize(0)
+    for i = 0, #ui.squad_id - 1 do
+        ui.squad_selected[i] = want[ui.squad_id[i]] or false
+    end
+end
+
+-- individual-member selection: expand squad `sid` into its member view with exactly
+-- `hfids` highlighted (clears the top-level squad selection so commands route per member)
+local function select_individuals(ui, sid, hfids)
+    local idx = squad_list_index(ui, sid)
+    if not idx then return false end
+    for i = 0, #ui.squad_selected - 1 do ui.squad_selected[i] = false end
+    ui.viewing_squad_index = idx
+    ui.squad_hfid_selected:resize(0)
+    for _, hf in ipairs(hfids) do ui.squad_hfid_selected:insert('#', hf) end
+    return true
 end
 
 -- appoint a histfig to a position assignment (the embark-nobles pattern: set histfig
@@ -435,11 +644,18 @@ local function make_conscription_squad(ent, captain_unit, member_ids)
         end
         return nil
     end
-    conscript_count = conscript_count + 1
-    sq.alias = CONSCRIPT_TAG .. conscript_count           -- the player-visible name
+    sq.alias = CONSCRIPT_TAG     -- index prefix added by apply_pending_select once listed
     -- no field kit: carry no food/water, so conscripts never fetch a backpack or flask
     sq.supplies.carry_food = 0
     sq.supplies.carry_water = df.squad_water_level_type.NoWater
+    -- put them on the fort's "Ready" schedule immediately (its index is shared by every
+    -- squad's routine list), so they stand ready instead of defaulting to off-duty/training
+    local routines = df.global.plotinfo.alerts.routines
+    for i = 0, #routines - 1 do
+        if routines[i].name == 'Ready' and i < #sq.schedule.routine then
+            sq.cur_routine_idx = i; break
+        end
+    end
     sq.positions[0].occupant = captain_unit.hist_figure_id   -- seat the captain by hand
     captain_unit.military.squad_id = sq.id
     captain_unit.military.squad_position = 0
@@ -474,6 +690,36 @@ local function conscript_box(p1, p2)
     return #made > 0
 end
 
+-- a drag-box over dwarves (no hostiles): decide what it selects.
+--   * several squads represented -> select those whole squads (top-level)
+--   * exactly one squad -> the WHOLE squad if every member is boxed (DF's squad view),
+--     else just the boxed members (the individual-order member view)
+--   * no squadded dwarves at all -> draft the loose civilians (the conscription gesture)
+-- Returns 'select' (pure selection) or 'conscript' (drafted civilians) or nil (nothing).
+function box_select(ui, p1, p2)
+    local by_squad = dwarves_in_box(p1, p2)
+    local sids = {}
+    for sid in pairs(by_squad) do sids[#sids + 1] = sid end
+    if #sids == 0 then
+        return conscript_box(p1, p2) and 'conscript' or nil
+    end
+    if #sids > 1 then
+        local want = {}
+        for _, sid in ipairs(sids) do want[sid] = true end
+        select_squads(ui, want)
+        return 'select'
+    end
+    local sid = sids[1]
+    local sq = df.squad.find(sid)
+    if not sq then return nil end
+    if #by_squad[sid] >= squad_member_count(sq) then   -- whole squad boxed
+        select_squads(ui, {[sid] = true})
+    else
+        select_individuals(ui, sid, by_squad[sid])
+    end
+    return 'select'
+end
+
 -- select exactly the just-conscripted squads, once the panel lists them (we trigger
 -- the rebuild with refresh_squad_list, which can take a frame to land)
 local function apply_pending_select(SQ)
@@ -485,6 +731,14 @@ local function apply_pending_select(SQ)
     for _, id in ipairs(pending_select) do want[id] = true end
     local n = math.min(#SQ.squad_id, #SQ.squad_selected)   -- never read past either array
     for i = 0, n - 1 do SQ.squad_selected[i] = want[SQ.squad_id[i]] or false end
+    -- prefix each new squad's name with its 1-based slot in the list (matches its 1-9
+    -- hotkey); idempotent via stripping any existing "N. " so a re-run won't stack numbers
+    for i = 0, #SQ.squad_id - 1 do
+        if want[SQ.squad_id[i]] then
+            local s = df.squad.find(SQ.squad_id[i])
+            if s then s.alias = (i + 1) .. '. ' .. (tostring(s.alias):gsub('^%d+%. ', '')) end
+        end
+    end
     pending_select = nil
 end
 
@@ -528,13 +782,12 @@ local function disband_conscription_squads()
             s:delete()
         end
     end
-    conscript_count = 0
     pending_select = nil
 end
 
 DwarfRtsClickMove = defclass(DwarfRtsClickMove, overlay.OverlayWidget)
 DwarfRtsClickMove.ATTRS{
-    desc = 'Squads screen: click to move/attack, right-click to cycle squads, select-all on open.',
+    desc = 'Squads screen: click to move/attack/select, drag to select squads/members, keys 1-9 pick a squad, select-all on open.',
     default_pos = {x = 1, y = 1},
     default_enabled = true,
     -- whole fort mode, so onupdate sees the panel both open AND close (a
@@ -566,6 +819,16 @@ function DwarfRtsClickMove:overlay_onupdate()
         end
     end
 
+    -- a squads sub-screen (equipment / schedule) is up: disable all handling. Drop any
+    -- in-flight drag and resync the button poller so nothing fires when it closes, then
+    -- leave prev_open untouched -- when the sub-screen closes, squads.open returns to its
+    -- prior value with no spurious open/close edge.
+    if squad_subscreen_open() then
+        self.press, self.press_ok = nil, false
+        self.lbut_down = df.global.enabler.mouse_lbut_down
+        return
+    end
+
     local sq = squads_ui()
     local open = sq.open
 
@@ -575,11 +838,14 @@ function DwarfRtsClickMove:overlay_onupdate()
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
         end
     elseif (not open) and self.prev_open then
-        -- panel just closed: if any squad is still selected, veto the close and drop
-        -- the selection instead (a second close, nothing selected now, goes through)
+        -- panel just closed: if anything is still selected (a squad, or members in the
+        -- expanded member view), veto the close and drop the selection instead (a second
+        -- close, nothing selected now, goes through)
         if self.armed_close then
             sq.open = true
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
+            sq.viewing_squad_index = -1            -- collapse the member view too
+            sq.squad_hfid_selected:resize(0)
             open = true
         else
             clear_all_orders(sq)            -- close goes through: stand every squad down
@@ -589,7 +855,8 @@ function DwarfRtsClickMove:overlay_onupdate()
 
     if open then
         apply_pending_select(sq)
-        self.armed_close = has_selection(sq)   -- any selection vetoes the first close
+        -- any selection (whole-squad or individual members) vetoes the first close
+        self.armed_close = has_selection(sq) or has_indiv_selection(sq)
     else
         self.armed_close = false
     end
@@ -604,7 +871,9 @@ function DwarfRtsClickMove:overlay_onupdate()
     local down = df.global.enabler.mouse_lbut_down
     if down == 1 and self.lbut_down ~= 1 then              -- press
         self.press = dfhack.gui.getMousePos(true)
-        self.press_ok = open and not busy(sq) and has_selection(sq)
+        self.press_ok = open and not busy(sq)
+            -- a selection is NOT required: a drag still selects/conscripts, and a click
+            -- dispatches the normal action (move/attack/select-own-unit) on mouse-up
             -- ONLY the main squads screen -- never the equip/schedule sub-screens,
             -- whose buttons would otherwise queue station/attack commands
             and dfhack.gui.getCurFocus(true)[1] == 'dwarfmode/Squads/Default'
@@ -615,15 +884,18 @@ function DwarfRtsClickMove:overlay_onupdate()
         local rel = dfhack.gui.getMousePos(true)
         if self.press_ok and self.press and rel then
             local shift = dfhack.internal.getModifiers().shift
+            local acted   -- 'conscript' if a civilian was drafted (needs a list refresh)
             if same_tile(self.press, rel) then
-                single_command(sq, rel, shift)
+                acted = single_command(sq, rel, shift)
             elseif box_attack(sq, self.press, rel, shift) == 0 then
-                -- a drag that hit no hostiles, over civilians -> conscript them into
-                -- temporary Conscription squads, then (deferred, to avoid feeding input
-                -- mid-update) trigger the real list refresh; apply_pending_select selects
-                if conscript_box(self.press, rel) then
-                    dfhack.timeout(1, 'frames', refresh_squad_list)
-                end
+                -- a drag that hit no hostiles is a SELECTION gesture: pick the boxed
+                -- squads / members (box_select), or -- if it covers only loose civilians
+                -- -- draft them, then (deferred) trigger the real list refresh so
+                -- apply_pending_select can select the new Conscription squads.
+                acted = box_select(sq, self.press, rel)
+            end
+            if acted == 'conscript' then
+                dfhack.timeout(1, 'frames', refresh_squad_list)
             end
         end
         self.press = nil
@@ -632,6 +904,10 @@ function DwarfRtsClickMove:overlay_onupdate()
 end
 
 function DwarfRtsClickMove:onInput(keys)
+    -- a squads sub-screen (equipment / schedule) is up: stay out of it entirely so its
+    -- buttons and the uniform/schedule editors work normally
+    if squad_subscreen_open() then return false end
+
     local sq = squads_ui()
     local top = dfhack.gui.getCurFocus(true)[1] or ''
 
@@ -656,6 +932,43 @@ function DwarfRtsClickMove:onInput(keys)
     if busy(sq) then return false end
     local on_ui = df.global.game.main_interface.current_hover ~= -1
 
+    -- keyboard 1-9: select that squad in the panel's list (1 = first). If the squad was
+    -- ALREADY the sole selection, the press instead centers + camera-follows its members
+    -- (leader on the first such press, the next member on each subsequent one, wrapping).
+    -- So pressing the key of an unselected squad only selects it -- it never recenters.
+    for n = 1, 9 do
+        if keys[('STRING_A%03d'):format(48 + n)] then
+            local idx = n - 1
+            if idx < #sq.squad_id then
+                local sid = sq.squad_id[idx]
+                if only_selected_squad(sq) == idx then
+                    -- already the active selection: cycle the camera through its members
+                    local s = df.squad.find(sid)
+                    local members = {}
+                    for p = 0, s and #s.positions - 1 or -1 do
+                        local hf = df.historical_figure.find(s.positions[p].occupant)
+                        local u = hf and df.unit.find(hf.unit_id)
+                        if u and not dfhack.units.isDead(u) then members[#members + 1] = u end
+                    end
+                    if #members > 0 then
+                        if self.follow_sid == sid then
+                            self.follow_i = (self.follow_i % #members) + 1   -- next, wrapping
+                        else
+                            self.follow_sid, self.follow_i = sid, 1           -- start at leader
+                        end
+                        local u = members[self.follow_i]
+                        df.global.plotinfo.follow_unit = u.id                 -- keep following
+                        guidm.Viewport.get():centerOn(u.pos):set()           -- center now
+                    end
+                else
+                    select_squads(sq, {[sid] = true})   -- not selected yet: just select it
+                    self.follow_sid = nil               -- next press (now sole) starts at leader
+                end
+            end
+            return true                                -- consume the digit either way
+        end
+    end
+
     if keys._MOUSE_R then
         -- right-click inside the right-anchored military window: attempt to close it
         -- (the close-guard in onupdate then vetoes/deselects or closes+stands down)
@@ -663,14 +976,9 @@ function DwarfRtsClickMove:onInput(keys)
             sq.open = false
             return true
         end
-        -- right-click the map: cycle the selection to the next single squad, wrapping
-        local n = #sq.squad_selected
-        if n == 0 then return false end
-        local cnt, idx = 0, -1
-        for i = 0, n - 1 do if sq.squad_selected[i] then cnt = cnt + 1; idx = i end end
-        local nextidx = (cnt == 1) and ((idx + 1) % n) or 0
-        for i = 0, n - 1 do sq.squad_selected[i] = (i == nextidx) end
-        return true                                    -- consume: don't let DF exit on it
+        -- right-click on the map: leave it to DF (backs out the member view / closes the
+        -- panel via the close-guard). It no longer cycles the squad selection.
+        return false
     end
 
     -- left-click a unit-portrait ("View ... sheet.") button -> camera-follow that
@@ -685,13 +993,13 @@ function DwarfRtsClickMove:onInput(keys)
         return false                                   -- UI button: let DF handle the click
     end
 
-    -- Map left-clicks (move/attack/drag) resolve on mouse-UP via overlay_onupdate's
-    -- button poller. While a squad is selected, swallow the press so DF doesn't act
-    -- on whatever is under the cursor (open a stockpile/pedestal/building menu); the
-    -- raw button state we poll is unaffected by consuming here. We do NOT swallow
-    -- clicks landing on another visible overlay (e.g. the notifications list), so
-    -- those stay clickable. With nothing selected we leave clicks alone entirely.
-    if keys._MOUSE_L and has_selection(sq)
+    -- Map left-clicks (move/attack/drag/select) resolve on mouse-UP via the button
+    -- poller in overlay_onupdate. Swallow the press so DF doesn't act on whatever is
+    -- under the cursor (open a stockpile/pedestal/building menu); the raw button state
+    -- we poll is unaffected by consuming here. No selection is required (a drag selects;
+    -- a click selects the dwarf under it). We do NOT swallow clicks landing on another
+    -- visible overlay (e.g. the notifications list), so those stay clickable.
+    if keys._MOUSE_L
         and df.global.gps.mouse_x < df.global.gps.dimx - WINDOW_COLS
         and not over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y)
     then
@@ -700,9 +1008,128 @@ function DwarfRtsClickMove:onInput(keys)
     return false
 end
 
+-- ---- drag selection box (visual feedback) ---------------------------------------
+-- We must draw on the MAP grid, not the text/UI grid: graphical map tiles are a
+-- different size, so a text-grid paint comes out scaled. The map-aware path is the
+-- Viewport (map tile -> on-map screen tile) plus paintTile(..., map=true), exactly as
+-- guidm.renderMapOverlay does. The WxH readout stays on the text grid by the cursor.
+-- The outline is colored by what the drag will do, mirroring the action precedence:
+-- red = enemies in the box (attack), blue = own dwarves (select/conscript), white = no
+-- valid target.
+local BOX_CH = 250   -- CP437 small centered dot (the ASCII-mode fallback glyph)
+-- Per-outcome graphics so the drag self-describes: friendly CURSORS(4,22) for selecting
+-- your dwarves, attack STOCKPILE_ICONS_SIGNLESS(0,16) for hostiles, empty CURSORS(1,22);
+-- selected units use CURSORS(4,23). fg is only the ASCII-mode glyph color (the tile
+-- carries its own art); keep_lower leaves the map tile visible underneath.
+local function marker_pen(color, page, tx, ty)
+    return dfhack.pen.parse{ch = BOX_CH, fg = color, keep_lower = true,
+                            tile = dfhack.screen.findGraphicsTile(page, tx, ty)}
+end
+local SELECT_PEN = marker_pen(COLOR_LIGHTGREEN, 'CURSORS', 4, 23)        -- selected units
+local BOX_PENS = {
+    enemy = marker_pen(COLOR_LIGHTRED,  'STOCKPILE_ICONS_SIGNLESS', 0, 16),  -- attack
+    ally  = marker_pen(COLOR_LIGHTBLUE, 'CURSORS', 4, 22),               -- friendly
+    none  = marker_pen(COLOR_WHITE,     'CURSORS', 1, 22),               -- empty
+}
+local DIM_PEN = {fg = COLOR_WHITE, bg = COLOR_BLACK}
+
+-- what would this box act on? enemies (within +/-3 z, as box_attack) win over our own
+-- adult dwarves (exact z, as the select/conscript scans); neither -> nothing.
+local function classify_box(p1, p2)
+    local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
+    local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
+    local ze1, ze2 = p1.z - 3, p1.z + 3
+    local za1, za2 = math.min(p1.z, p2.z), math.max(p1.z, p2.z)
+    local ally = false
+    for _, u in ipairs(df.global.world.units.active) do
+        local p = u.pos
+        if p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 then
+            if p.z >= ze1 and p.z <= ze2 and is_enemy(u) then
+                return 'enemy'                  -- attack takes priority over selection
+            end
+            if not ally and p.z >= za1 and p.z <= za2
+                and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
+                and not dfhack.units.isDead(u) and dfhack.units.isAdult(u)
+            then ally = true end
+        end
+    end
+    return ally and 'ally' or 'none'
+end
+
+local function draw_drag_box(p1, p2, pen)
+    local vp = guidm.Viewport.get()
+    local z = df.global.window_z
+    local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
+    local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
+    local function paint(mx, my)
+        local pos = xyz2pos(mx, my, z)
+        if vp:isVisible(pos) then
+            local s = vp:tileToScreen(pos)
+            dfhack.screen.paintTile(pen, s.x, s.y, nil, nil, true)
+        end
+    end
+    paint(x1, y1); paint(x2, y1); paint(x1, y2); paint(x2, y2)   -- 4 corners only
+    local label = ('%dx%d'):format(x2 - x1 + 1, y2 - y1 + 1)
+    local lx = math.max(0, math.min(df.global.gps.mouse_x + 2, df.global.gps.dimx - #label))
+    dfhack.screen.paintString(DIM_PEN, lx, df.global.gps.mouse_y, label)
+end
+
+-- units currently selected on the squads screen: the highlighted members in member
+-- view, else every member of every selected squad
+local function selected_units(ui)
+    local out = {}
+    local function add(occ)
+        if occ and occ >= 0 then
+            local hf = df.historical_figure.find(occ)
+            local u = hf and df.unit.find(hf.unit_id)
+            if u then out[#out + 1] = u end
+        end
+    end
+    if has_indiv_selection(ui) then
+        for _, pos in ipairs(selected_positions(ui)) do add(pos.occupant) end
+    else
+        for i = 0, #ui.squad_selected - 1 do
+            if ui.squad_selected[i] then
+                local s = df.squad.find(ui.squad_id[i])
+                if s then for p = 0, #s.positions - 1 do add(s.positions[p].occupant) end end
+            end
+        end
+    end
+    return out
+end
+
+function DwarfRtsClickMove:render(dc)
+    DwarfRtsClickMove.super.render(self, dc)
+    if squad_subscreen_open() then return end   -- don't paint over the equipment/schedule screen
+    local sq = squads_ui()
+    if not sq.open then return end
+    local vp = guidm.Viewport.get()
+    local z = df.global.window_z
+    -- outline every currently-selected member (the existing selection art), so you can
+    -- see your selection on the map at a glance
+    for _, u in ipairs(selected_units(sq)) do
+        local p = u.pos
+        if p.z == z then
+            local pos = xyz2pos(p.x, p.y, p.z)
+            if vp:isVisible(pos) then
+                local s = vp:tileToScreen(pos)
+                dfhack.screen.paintTile(SELECT_PEN, s.x, s.y, nil, nil, true)
+            end
+        end
+    end
+    -- the live drag box (press recorded, button still held); press_ok already confined
+    -- the press to the squads map area
+    if self.press_ok and self.press and self.lbut_down == 1 then
+        local cur = dfhack.gui.getMousePos(true)
+        if cur and cur.z == self.press.z and not same_tile(self.press, cur) then
+            draw_drag_box(self.press, cur, BOX_PENS[classify_box(self.press, cur)])
+        end
+    end
+end
+
 OVERLAY_WIDGETS = {clickmove = DwarfRtsClickMove}
 
 if dfhack_flags.module then return end
 
 require('plugins.overlay').rescan()
-print('dwarf-rts: click move/attack, right-click cycle, select-all + close-guard active')
+print('dwarf-rts: click move/attack/select, drag-select, keys 1-9, select-all + close-guard active')
