@@ -47,12 +47,12 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
 | `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control on the Squads screen. **Done:** selecting any squad auto-selects all; left-clicking the map moves the selected squads there **without** leaving the game stuck in the paused move UI (flicks `giving_move_order` on for one frame, then clears it); left-clicking a hostile switches to kill mode + targets it (Shift appends), confirm to engage. Guards on `current_hover`/selection so command buttons and empty-selection clicks pass through. **TODO:** camera-follow; right-click → close + cancel order. See spec below. **NOTE:** auto-arming *move* mode on open was abandoned — `giving_move_order` pauses the game inherently |
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `dfhack-stocks` | overlay+menu | 🟡 on hold | Searchable/filterable item designation menu (origin/exotic/rarity filters, sorted by origin→quality→type, view/melt/forbid/dump, click-to-apply, select-all-visible); replaces the vanilla Stocks screen (Esc to dismiss). **Currently disabled & not deployed — revisiting implementation** (source kept in repo) |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
 | `embark-nobles` | one-shot | ✅ done | Fills **vacant** key fort positions by skill (leaves already-assigned nobles alone; safe to re-run / auto-run via magnus-scripts): chief medical dwarf, militia commander, broker, manager, bookkeeper (best-skilled; a dwarf may hold several), + expedition leader forced to be a separate dwarf. `embark-nobles dry` previews |
+| `inside-burrow` | enableable | ✅ done | Armed at embark (via magnus-scripts): when the fort has **no burrows yet**, watches for the **first tile any miner digs out** and seeds a one-tile burrow named `inside+` there, then disables itself. The trailing `+` makes DFHack's `burrow` plugin auto-expand it as you keep digging, so it grows to cover the whole fort interior. Does nothing if any burrow already exists. `inside-burrow status` reports state |
 | `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, **self-manages a manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — queues **one** unit only when total stock `< need` **and** a metal `BAR` of that material exists, deleting the order once the need is met so **nothing is force-produced** (DF makes an order's items on submit regardless of conditions, so we don't lean on repeating conditional orders); **Upgrade to masterwork** (`Shift-M`) makes one extra and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge; **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
@@ -415,6 +415,29 @@ embark). `embark-nobles dry` previews the picks without changing anything.
 - Module exports `assign_position(code, unit)`, `unassign_position(code)`,
   `current_holder(code)`, `plan()` for reuse/testing.
 
+### ✅ inside-burrow (DONE)
+
+`inside-burrow` auto-seeds the self-expanding `inside+` burrow on the first tile a
+miner digs. Armed at embark via magnus-scripts (`enable inside-burrow`); persists
+with the fort and re-arms on load. One-time seeder — disables itself after it
+fires (or if a burrow already exists).
+
+- **Trigger:** a per-frame heartbeat (this pack's house style — no eventful)
+  records every wall a miner takes a dig job on (`utils.listpairs` over
+  `world.jobs.list`, filtered to `Dig`/`Carve*Staircase`/`CarveRamp` whose target
+  is currently a `WALL`). When a watched wall becomes any passable (non-`WALL`)
+  tile, that's the first dig-out — interior or not, anything triggers it.
+- **"if no burrow exists":** acts only when `#plotinfo.burrows.list == 0`. If any
+  burrow appears first (player-made, or a second run), it stands down and disables.
+- **Seeding (mirrors quickfort's `create_burrow`):** `df.burrow:new()` with
+  `id = burrows.next_id` (bumped), name `inside+`, random `symbol_index`/texture,
+  inserted into `plotinfo.burrows.list`; the tile is added via
+  `dfhack.burrows.setAssignedTile(b, pos, true)`. Then it runs `enable burrow` so
+  the plugin's `+`-suffix auto-expansion is live and the burrow grows as you dig
+  (it absorbs dug-out walls bordering the burrow; open cavern space is excluded).
+- `inside-burrow status` reports armed / idle. `enable`/`disable`/bare-toggle as
+  usual; state persisted per site via `dfhack.persistent`.
+
 ### ✅ statue-description (DONE)
 
 Overlay on `dwarfmode/ViewSheets/BUILDING/Statue` showing the statue's **exact
@@ -513,8 +536,18 @@ units out** of the unit list, so you only assign labors to civilians.
   `filter_matches`) to this exact screen. Add a "hide military" cycle the same
   way, filtering rows where `unit.military.squad_id ~= -1`. Coordinate with /
   extend the sort overlay rather than stacking a conflicting one.
-- Still needs the fort loaded to confirm the unit-list path and that a second
-  overlay doesn't fight the sort plugin's own filtering before shipping.
+- **BLOCKED (investigated 2026-06-24):** the vanilla Work Details screen's unit
+  list is **not reachable from lua**. `info.labor.work_details` is a
+  `shared_ptr<labor_work_details_interfacest>` that df-structures defines only as an
+  opaque `widget_container` — with the screen open it exposes **no fields** (no
+  `:get()`, `labor.children` is empty), so there's no rows vector to filter. The
+  sort plugin's `work_details_search` exists but is **never registered** for the
+  same reason (so there's nothing to coordinate with, but also no hook). Hiding rows
+  would need raw-memory hacking of the widget — too fragile to ship.
+- **Feasible alternative (meets the goal "only civilians do these labors"):**
+  `work_detail.assigned_units` IS accessible, so a one-shot or background service
+  could keep military units out of work details (un-assign + clear those labors).
+  Not the same as a visual filter, but achieves the intent. Awaiting a decision.
 
 ### auto-create labor groups (Work Details)
 One-shot/command to create Work Details (labor groups) for each of:
