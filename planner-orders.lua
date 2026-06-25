@@ -50,6 +50,11 @@ local ITEM_JOB = {
     BALLISTAPARTS = 'ConstructBallistaParts', CATAPULTPARTS = 'ConstructCatapultParts',
     BALLISTAARROWHEAD = 'MakeBallistaArrowHead', TRAPPARTS = 'ConstructMechanisms',
     TRAPCOMP = 'MakeTrapComponent', PIPE_SECTION = 'MakePipeSection',
+    ANVIL = 'ForgeAnvil', ANIMALTRAP = 'MakeAnimalTrap', BLOCKS = 'ConstructBlocks',
+    BOLT_THROWER_PARTS = 'ConstructBoltThrowerParts',
+    -- intentionally unmapped (no single make-job): WOOD (chopped), BAR (smelted per ore),
+    -- SMALLGEM (gem-specific), INSTRUMENT (custom reactions/parts), TRACTION_BENCH
+    -- (assembled in place from a table + mechanism + chain).
 }
 
 -- which material classes each job can be made from. Default (most furniture) is any of
@@ -73,6 +78,15 @@ local JOB_CLASSES = {
     MakeTrapComponent       = {metal = true, wood = true},
     MakeChain               = {metal = true},
     MakeTool                = {stone = true, wood = true, metal = true},  -- nest boxes, jugs, pots, ...
+    MakeAnimalTrap          = {wood = true, metal = true},
+    ConstructBlocks         = {stone = true, wood = true, metal = true, glass = true},
+    ConstructBoltThrowerParts = {wood = true, metal = true},
+}
+
+-- jobs restricted to SPECIFIC materials (by inorganic raw id), overriding the class list:
+-- anvils can only be forged from iron or steel. Each is offered as its own choice.
+local JOB_MATERIALS = {
+    ForgeAnvil = {'IRON', 'STEEL'},
 }
 
 -- ---- materials --------------------------------------------------------------
@@ -134,13 +148,24 @@ end
 
 -- the ordered material choices for a gap (respecting allowed classes + magma requirement)
 local function material_choices(gap)
-    local classes = JOB_CLASSES[df.job_type[gap.job_type]] or DEFAULT_CLASSES
+    local jobname = df.job_type[gap.job_type]
+    local classes = JOB_CLASSES[jobname] or DEFAULT_CLASSES
     local out, seen_metal = {}, {}
     local function add(label, mt, mi, wood)
         if gap.magma_required and not is_magma_safe(mt, mi) then return end
         local safe = is_magma_safe(mt, mi)
         out[#out + 1] = {text = label .. (safe and ' [magma-safe]' or ''),
                          mat_type = mt, mat_index = mi, wood = wood}
+    end
+    -- a job restricted to specific materials (e.g. anvils = iron/steel only): offer just
+    -- those, nothing else.
+    local specific = JOB_MATERIALS[jobname]
+    if specific then
+        for _, id in ipairs(specific) do
+            local idx = inorg(id)
+            if idx then add(id:sub(1, 1) .. id:sub(2):lower(), 0, idx) end
+        end
+        return out
     end
     -- generics first (Rock can't be promised magma-safe: it varies by stone, so it is
     -- dropped when the building requires magma safety)
