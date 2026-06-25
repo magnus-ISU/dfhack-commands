@@ -37,12 +37,16 @@ end
 local function make_tomb(pos)
     local extents = df.reinterpret_cast(df.building_extents_type, df.new('uint8_t', 1))
     extents[0] = 1
-    return dfhack.buildings.constructBuilding{
+    local bld = dfhack.buildings.constructBuilding{
         type = df.building_type.Civzone, subtype = df.civzone_type.Tomb, abstract = true,
         pos = pos, width = 1, height = 1,
         fields = {assigned_unit_id = -1,
                   room = {x = pos.x, y = pos.y, width = 1, height = 1, extents = extents}},
     }
+    -- a Tomb zone is only a real, assignable tomb when its `whole` flag is set (it applies
+    -- to the whole zone, i.e. the coffin in it). Without this the zone is non-functional.
+    if bld then bld.zone_settings.tomb.flags.whole = 1 end
+    return bld
 end
 
 -- place a tomb on every coffin that lacks one; returns how many were added
