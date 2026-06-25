@@ -436,7 +436,7 @@ state = state or nil
 local function load_state()
     if not state then
         state = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
-        if state.queue == nil then state.queue = false end
+        if state.queue == nil then state.queue = true end       -- gear queueing defaults ON
         if state.masterwork == nil then state.masterwork = false end
         if state.wardogs == nil then state.wardogs = false end
         if not state.orders then state.orders = {} end
@@ -648,4 +648,18 @@ for _, n in ipairs(made) do print('  + ' .. n) end
 if #deleted > 0 then
     print(('  deleted %d default metal uniform%s:'):format(#deleted, #deleted == 1 and '' or 's'))
     for _, n in ipairs(deleted) do print('    - ' .. n) end
+end
+
+-- Queue gear orders defaults ON. The heartbeat normally starts on map load via
+-- onStateChange, but that already fired before this module loaded (e.g. when run from
+-- magnus-scripts), so start it here too if the service is on. Persist the resolved state
+-- (so the default sticks) -- a fort where you turned it OFF stays off (load_state only
+-- defaults when unset).
+load_state()
+save_state()
+if service_on() then
+    start_heartbeat()
+    print('  gear-order service ON (Queue gear orders), running daily.')
+else
+    print('  gear-order service is OFF (enable on the Equip screen with Shift-G).')
 end
