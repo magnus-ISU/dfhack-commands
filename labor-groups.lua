@@ -1,49 +1,37 @@
--- labor-groups: (re)build & order the crafting Work Details, and tidy the default ones.
+-- labor-groups: order the Labor screen + keep the standard crafting details, NON-destructively.
 --[[
-    labor-groups        rebuild the crafting Work Details and reorder the whole list.
-    labor-groups dry    preview only -- change nothing.
-    labor-groups once   run only if not yet applied to this fort (used by magnus-scripts,
-                        so re-running that won't reshuffle later manual edits). A plain
-                        `labor-groups` always re-applies.
+    labor-groups        update icons + order the Labor list; create any missing detail.
+    labor-groups dry    preview the planned order -- change nothing.
+    labor-groups once   run only if not yet applied to this fort (used by magnus-scripts).
 
-Lays out the Labor screen as:
+Lays the Labor screen out as:
+    1. dig/grow defaults first -- Miners, Woodcutters, Planters, Stonecutters, Engravers
+    2. the crafting set, in a fixed order (the twelve priority crafts, then a group for
+       every remaining moodable skill)
+    3. the other defaults -- Hunters, Fisherdwarves, Plant gatherers, Haulers, Orderlies,
+       Siege operators, plus anything else you added
+    4. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
+       your squads by the separate `military-labor` script)
 
-    1. the dig/grow defaults first -- Miners, Woodcutters, Planters, Stonecutters,
-       Engravers (left exactly as they are: their modes and assigned dwarves are kept);
-    2. then the crafting set, in a fixed order -- the twelve priority crafts
-       (Weaponsmithing, Armorsmithing, Metal crafting, Metalsmithing, Stone carving,
-       Carpentry, Glassmaker, Mechanic, Wood crafter, Stone crafter, Furnace operator,
-       Wood burner) followed by a group for every remaining MOODABLE skill so a strange
-       mood can always claim the right workshop (Mason, Bone carver, Bowyer, Clothier,
-       Gem cutter, Gem setter, Leatherworker, Tanner, Weaver);
-    3. then the rest of the defaults at the end -- Hunters, Fisherdwarves, Plant
-       gatherers, Haulers, Orderlies, Siege operators, and any other detail you added.
+NON-DESTRUCTIVE: existing details are reordered (and their icons updated), never deleted
+and never recreated, so your manual assignments and modes are preserved. Only details that
+don't exist yet are created (the crafting ones default to "Everyone does this"; "Military"
+to "Only selected", with no labor -- add labors to it yourself if you want). Hunters and
+Fisherdwarves are set to "Nobody does this", and the Engravers default borrows the
+stonecutters icon -- neither touches assignments. Idempotent.
 
-Every crafting detail is created as "Everyone does this" (mode), so no per-dwarf
-assignment is needed -- everyone pitches in on the craft. Hunters and Fisherdwarves are
-forced to "Nobody does this". All other default details keep whatever mode/assignments
-they already have.
-
-The crafting details are rebuilt from scratch each run (any detail whose labors are ALL
-crafting labors is removed and recreated); the default details are only reordered, never
-recreated, so their assignments are safe. Idempotent.
-
-ICONS: DF has no dedicated craft icons, so each craft borrows a recognizable built-in
-glyph (the `icon` field on GROUPS, e.g. the smithing crafts use the engravers icon, the
-furnace/burner/mason use haulers). The Engravers default is also re-iconned to the
-stonecutters glyph (DEFAULT_ICON). The CUSTOM_1..CUSTOM_8 art slots (only 8) remain a
-later option for truly custom art.
+Each craft borrows a recognizable built-in icon (smithing -> engravers; furnace/burner/
+mason -> haulers; gem cutter/setter + mechanic -> orderlies; ...). DF has no dedicated
+craft icons; the CUSTOM_1..CUSTOM_8 art slots remain a later option for true custom art.
 
 Data: Work Details live in `df.global.plotinfo.labor_info.work_details`; each has `name`,
 `allowed_labors` (a unit_labor bitfield), `flags.mode` (a `work_detail_mode`),
 `assigned_units`, and `icon` (a `work_detail_icon_type`).
 ]]
 
--- ordered crafting set: the twelve priority crafts first, then the missing moodables.
--- icon = a built-in work_detail_icon_type borrowed to give each craft a recognizable
--- glyph (DF has no dedicated craft icons; these are hand-picked stand-ins).
+-- ordered crafting set: priority crafts first, then the missing moodables.
+-- icon = a built-in work_detail_icon_type borrowed as a recognizable glyph.
 local GROUPS = {
-    -- priority order (these must lead the crafting block, in exactly this order)
     {name = 'Weaponsmithing',   labors = {'FORGE_WEAPON'},    icon = 'ENGRAVERS'},
     {name = 'Armorsmithing',    labors = {'FORGE_ARMOR'},     icon = 'ENGRAVERS'},
     {name = 'Metal crafting',   labors = {'METAL_CRAFT'},     icon = 'ENGRAVERS'},
@@ -51,57 +39,47 @@ local GROUPS = {
     {name = 'Stone carving',    labors = {'STONE_CARVER'},    icon = 'STONECUTTERS'},
     {name = 'Carpentry',        labors = {'CARPENTER'},       icon = 'WOODCUTTERS'},
     {name = 'Glassmaker',       labors = {'GLASSMAKER'},      icon = 'ORDERLIES'},
-    {name = 'Mechanic',         labors = {'MECHANIC'},        icon = 'SIEGE_OPERATORS'},
+    {name = 'Mechanic',         labors = {'MECHANIC'},        icon = 'ORDERLIES'},   -- was siege operators
     {name = 'Wood crafter',     labors = {'WOOD_CRAFT'},      icon = 'WOODCUTTERS'},
     {name = 'Stone crafter',    labors = {'STONE_CRAFT'},     icon = 'STONECUTTERS'},
     {name = 'Furnace operator', labors = {'SMELT'},           icon = 'HAULERS'},
     {name = 'Wood burner',      labors = {'BURN_WOOD'},       icon = 'HAULERS'},
-    -- remaining moodable skills not covered above or by a kept DF default
     {name = 'Mason',            labors = {'MASON'},           icon = 'HAULERS'},
     {name = 'Bone carver',      labors = {'BONE_CARVE'},      icon = 'FISHERMEN'},
     {name = 'Bowyer',           labors = {'BOWYER'},          icon = 'HUNTERS'},
     {name = 'Clothier',         labors = {'CLOTHESMAKER'},    icon = 'PLANT_GATHERERS'},
-    {name = 'Gem cutter',       labors = {'CUT_GEM'},         icon = 'ENGRAVERS'},
-    {name = 'Gem setter',       labors = {'ENCRUST_GEM'},     icon = 'ENGRAVERS'},
+    {name = 'Gem cutter',       labors = {'CUT_GEM'},         icon = 'ORDERLIES'},   -- was engravers
+    {name = 'Gem setter',       labors = {'ENCRUST_GEM'},     icon = 'ORDERLIES'},   -- was engravers
     {name = 'Leatherworker',    labors = {'LEATHER'},         icon = 'HUNTERS'},
     {name = 'Tanner',           labors = {'TANNER'},          icon = 'HUNTERS'},
     {name = 'Weaver',           labors = {'WEAVER'},          icon = 'PLANT_GATHERERS'},
 }
 
--- icon overrides for KEPT default details, by a representative labor (cosmetic only)
-local DEFAULT_ICON = {ENGRAVER = 'STONECUTTERS'}   -- the Engravers detail borrows the stonecutters glyph
+-- the military grouping detail (no labor; membership synced by military-labor). Last.
+local MILITARY_NAME = 'Military'
+local MILITARY_ICON = 'SIEGE_OPERATORS'
 
 -- every moodable skill -> its labor, for the coverage check (Miner/Stonecutter/Engraver
--- ride on kept DF defaults; <none> has no labor). Used only to report representation.
+-- ride on kept DF defaults; <none> has no labor). Reporting only.
 local MOODABLE = {
-    {skill = 'Armorsmith',    labor = 'FORGE_ARMOR'},
-    {skill = 'Bone carver',   labor = 'BONE_CARVE'},
-    {skill = 'Bowyer',        labor = 'BOWYER'},
-    {skill = 'Carpenter',     labor = 'CARPENTER'},
-    {skill = 'Clothier',      labor = 'CLOTHESMAKER'},
-    {skill = 'Engraver',      labor = 'ENGRAVER'},
-    {skill = 'Gem cutter',    labor = 'CUT_GEM'},
-    {skill = 'Gem setter',    labor = 'ENCRUST_GEM'},
-    {skill = 'Glassmaker',    labor = 'GLASSMAKER'},
-    {skill = 'Leatherworker', labor = 'LEATHER'},
-    {skill = 'Mason',         labor = 'MASON'},
-    {skill = 'Mechanic',      labor = 'MECHANIC'},
-    {skill = 'Metal crafter', labor = 'METAL_CRAFT'},
-    {skill = 'Metalsmith',    labor = 'FORGE_FURNITURE'},
-    {skill = 'Miner',         labor = 'MINE'},
-    {skill = 'Stone carver',  labor = 'STONE_CARVER'},
-    {skill = 'Stone crafter', labor = 'STONE_CRAFT'},
-    {skill = 'Stonecutter',   labor = 'STONECUTTER'},
-    {skill = 'Tanner',        labor = 'TANNER'},
-    {skill = 'Weaponsmith',   labor = 'FORGE_WEAPON'},
-    {skill = 'Weaver',        labor = 'WEAVER'},
-    {skill = 'Wood crafter',  labor = 'WOOD_CRAFT'},
+    {skill = 'Armorsmith', labor = 'FORGE_ARMOR'}, {skill = 'Bone carver', labor = 'BONE_CARVE'},
+    {skill = 'Bowyer', labor = 'BOWYER'}, {skill = 'Carpenter', labor = 'CARPENTER'},
+    {skill = 'Clothier', labor = 'CLOTHESMAKER'}, {skill = 'Engraver', labor = 'ENGRAVER'},
+    {skill = 'Gem cutter', labor = 'CUT_GEM'}, {skill = 'Gem setter', labor = 'ENCRUST_GEM'},
+    {skill = 'Glassmaker', labor = 'GLASSMAKER'}, {skill = 'Leatherworker', labor = 'LEATHER'},
+    {skill = 'Mason', labor = 'MASON'}, {skill = 'Mechanic', labor = 'MECHANIC'},
+    {skill = 'Metal crafter', labor = 'METAL_CRAFT'}, {skill = 'Metalsmith', labor = 'FORGE_FURNITURE'},
+    {skill = 'Miner', labor = 'MINE'}, {skill = 'Stone carver', labor = 'STONE_CARVER'},
+    {skill = 'Stone crafter', labor = 'STONE_CRAFT'}, {skill = 'Stonecutter', labor = 'STONECUTTER'},
+    {skill = 'Tanner', labor = 'TANNER'}, {skill = 'Weaponsmith', labor = 'FORGE_WEAPON'},
+    {skill = 'Weaver', labor = 'WEAVER'}, {skill = 'Wood crafter', labor = 'WOOD_CRAFT'},
 }
 
 -- default details, by a representative non-crafting labor, in the order we want them:
 local FRONT = {'MINE', 'CUTWOOD', 'PLANT', 'STONECUTTER', 'ENGRAVER'}            -- before crafts
 local TAIL  = {'HUNT', 'FISH', 'HERBALIST', 'HAUL_STONE', 'RECOVER_WOUNDED', 'SIEGEOPERATE'}  -- after
 local FORCE_NOBODY = {HUNT = true, FISH = true}   -- these defaults -> "Nobody does this"
+local DEFAULT_ICON = {ENGRAVER = 'STONECUTTERS'}  -- the Engravers default borrows this glyph
 
 if not dfhack.world.isFortressMode() then qerror('labor-groups only works in fortress mode') end
 
@@ -109,8 +87,6 @@ local arg = ({...})[1]
 local dry = arg == 'dry'
 local once = arg == 'once'
 
--- `once` gate: skip entirely if this fort already had the layout applied (flag persisted
--- per-site below, so it survives save/reload).
 local PERSIST_KEY = 'labor-groups'
 if once then
     local st = dfhack.persistent.getSiteData(PERSIST_KEY)
@@ -122,10 +98,7 @@ end
 
 local wd = df.global.plotinfo.labor_info.work_details
 
--- labors this script owns (union of every group's labors). A detail is "ours" (a crafting
--- detail to rebuild) only if it has labors and they ALL fall in this set -- so DF defaults
--- (MINE / CUTWOOD / STONECUTTER / ENGRAVER / hauling / ...) and your empty custom details
--- are never touched.
+-- labors the crafting set owns; a detail is "a craft" only if all its labors are managed.
 local managed = {}
 for _, g in ipairs(GROUPS) do for _, l in ipairs(g.labors) do managed[l] = true end end
 
@@ -137,101 +110,126 @@ local function labors_of(w)
     end
     return out
 end
-
-local function is_ours(w)
+local function is_craft(w)
     local labs = labors_of(w)
     if #labs == 0 then return false end
     for _, l in ipairs(labs) do if not managed[l] then return false end end
     return true
 end
 
--- first not-yet-placed kept (non-crafting) detail enabling labor L, by INDEX. We track
--- by index, not by handle: DFHack hands back a fresh Lua wrapper on every wd[i], so
--- handles can't be used as identity keys (that was a double-listing bug).
-local placed = {}
-local function find_default(L)
-    for i = 0, #wd - 1 do
-        if not placed[i] and wd[i].allowed_labors[L] and not is_ours(wd[i]) then return i end
-    end
-end
-
--- gather kept default indices in the desired front / tail order; the rest go in "other"
--- (placed after the tail). Then grab one handle each -- handles survive erase (erase
--- doesn't delete), so we can pull them from the vector and re-insert them in new order.
-local front_idx, tail_idx, other_idx = {}, {}, {}
-for _, L in ipairs(FRONT) do local i = find_default(L); if i then placed[i] = true; front_idx[#front_idx + 1] = i end end
-for _, L in ipairs(TAIL)  do local i = find_default(L); if i then placed[i] = true; tail_idx[#tail_idx + 1]  = i end end
-for i = 0, #wd - 1 do if not placed[i] and not is_ours(wd[i]) then placed[i] = true; other_idx[#other_idx + 1] = i end end
-
-local function handles(idxs) local h = {}; for _, i in ipairs(idxs) do h[#h + 1] = wd[i] end; return h end
-local front_h, tail_h, other_h = handles(front_idx), handles(tail_idx), handles(other_idx)
-
--- the mode a default detail should end up with (Hunters/Fisherdwarves -> Nobody)
+-- the mode/icon a kept DEFAULT detail should end up with (no assignment changes)
 local function planned_mode(w)
     for L in pairs(FORCE_NOBODY) do if w.allowed_labors[L] then return df.work_detail_mode.NobodyDoesThis end end
     return w.flags.mode
 end
-
--- names of the crafting details being replaced (for the report)
-local removed = {}
-for i = 0, #wd - 1 do if is_ours(wd[i]) then removed[#removed + 1] = wd[i].name end end
-
--- the icon a kept default should end up with (an override, or its current icon)
 local function default_icon(w)
     for L, ic in pairs(DEFAULT_ICON) do if w.allowed_labors[L] then return df.work_detail_icon_type[ic] end end
     return w.icon
 end
 
-if not dry then
-    -- force default modes (Hunters / Fisherdwarves -> Nobody) and icon overrides
-    for _, list in ipairs({front_h, tail_h, other_h}) do
-        for _, w in ipairs(list) do w.flags.mode = planned_mode(w); w.icon = default_icon(w) end
+-- Resolve the final order as a list of indices into wd (existing) plus "new" specs,
+-- WITHOUT mutating. Each entry: {idx=<int> | nil, name, icon_name, mode_name, status}.
+-- Shared by the dry preview and the live apply so both agree.
+local function plan()
+    local by_name = {}
+    for i = 0, #wd - 1 do by_name[wd[i].name] = i end
+    local placed, rows = {}, {}
+    local function take_by_labor(L)
+        for i = 0, #wd - 1 do
+            if not placed[i] and not is_craft(wd[i]) and wd[i].allowed_labors[L] then placed[i] = true; return i end
+        end
     end
-
-    -- build the new crafting details (Everyone does this), held aside
-    local craft_h = {}
-    for _, g in ipairs(GROUPS) do
-        local w = df.work_detail:new()
-        w.name = g.name
-        for _, l in ipairs(g.labors) do w.allowed_labors[l] = true end
-        w.flags.mode = df.work_detail_mode.EverybodyDoesThis   -- everyone pitches in
-        w.icon = df.work_detail_icon_type[g.icon]              -- borrowed built-in glyph
-        craft_h[#craft_h + 1] = w
-    end
-
-    -- empty the vector: delete the owned crafting details, KEEP (don't delete) the rest
-    for i = #wd - 1, 0, -1 do
+    local function add_default(i)
         local w = wd[i]
-        wd:erase(i)
-        if is_ours(w) then w:delete() end
+        rows[#rows + 1] = {idx = i, name = w.name, icon_name = df.work_detail_icon_type[default_icon(w)],
+                           mode_name = df.work_detail_mode[planned_mode(w)], status = 'kept'}
     end
+    for _, L in ipairs(FRONT) do local i = take_by_labor(L); if i then add_default(i) end end
+    for _, g in ipairs(GROUPS) do
+        local i = by_name[g.name]
+        if i and not placed[i] then
+            placed[i] = true
+            rows[#rows + 1] = {idx = i, name = g.name, icon_name = g.icon,
+                               mode_name = df.work_detail_mode[wd[i].flags.mode], status = 'kept'}
+        else
+            rows[#rows + 1] = {name = g.name, icon_name = g.icon, mode_name = 'EverybodyDoesThis', status = 'NEW'}
+        end
+    end
+    for _, L in ipairs(TAIL) do local i = take_by_labor(L); if i then add_default(i) end end
+    local mil_idx = by_name[MILITARY_NAME]
+    if mil_idx then placed[mil_idx] = true end                  -- reserve military for last
+    for i = 0, #wd - 1 do                                       -- any other details
+        if not placed[i] then placed[i] = true
+            local w = wd[i]
+            rows[#rows + 1] = {idx = i, name = w.name, icon_name = df.work_detail_icon_type[w.icon],
+                               mode_name = df.work_detail_mode[w.flags.mode], status = 'kept'}
+        end
+    end
+    if mil_idx then
+        rows[#rows + 1] = {idx = mil_idx, name = MILITARY_NAME, icon_name = MILITARY_ICON,
+                           mode_name = df.work_detail_mode[wd[mil_idx].flags.mode], status = 'kept', military = true}
+    else
+        rows[#rows + 1] = {name = MILITARY_NAME, icon_name = MILITARY_ICON,
+                           mode_name = 'OnlySelectedDoesThis', status = 'NEW', military = true}
+    end
+    return rows
+end
 
-    -- re-insert in the final order: front defaults, crafts, tail defaults, other details
-    for _, w in ipairs(front_h) do wd:insert('#', w) end
-    for _, w in ipairs(craft_h) do wd:insert('#', w) end
-    for _, w in ipairs(tail_h)  do wd:insert('#', w) end
-    for _, w in ipairs(other_h) do wd:insert('#', w) end
+local rows = plan()
 
+if not dry then
+    -- build the ordered list of handles (existing kept; create only the NEW ones),
+    -- applying icon/mode tweaks in place. assigned_units is never touched.
+    local order = {}
+    for _, r in ipairs(rows) do
+        local h
+        if r.idx then
+            h = wd[r.idx]
+            h.icon = df.work_detail_icon_type[r.icon_name]
+            if not r.military then h.flags.mode = df.work_detail_mode[r.mode_name] end
+        else
+            h = df.work_detail:new()
+            h.name = r.name
+            if r.military then
+                h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- members synced by military-labor
+            else
+                h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- new craft
+                for _, g in ipairs(GROUPS) do
+                    if g.name == r.name then for _, l in ipairs(g.labors) do h.allowed_labors[l] = true end end
+                end
+            end
+            h.icon = df.work_detail_icon_type[r.icon_name]
+        end
+        order[#order + 1] = h
+    end
+    -- ensure each existing craft has its labor enabled (idempotent; additive, no clearing)
+    for _, g in ipairs(GROUPS) do
+        for i = 0, #wd - 1 do
+            if wd[i].name == g.name then for _, l in ipairs(g.labors) do wd[i].allowed_labors[l] = true end end
+        end
+    end
+    -- rewrite the vector in the new order: erase every slot (erase does NOT delete the
+    -- object -- we hold each handle), then reinsert. Nothing is freed, nothing is reset.
+    for i = #wd - 1, 0, -1 do wd:erase(i) end
+    for _, h in ipairs(order) do wd:insert('#', h) end
     dfhack.persistent.saveSiteData(PERSIST_KEY, {applied = true})
 end
 
 -- ---- report -----------------------------------------------------------------
 print(('labor-groups: %s'):format(dry and 'DRY RUN -- planned layout (no changes made)'
-    or 'rebuilt crafting details + reordered the Labor screen'))
-print(('  removed %d crafting detail(s): %s'):format(#removed, table.concat(removed, ', ')))
+    or 'ordered the Labor screen (assignments preserved)'))
 local pos = 0
-local function show(name, mode, icon)
+for _, r in ipairs(rows) do
     pos = pos + 1
-    print(('    %2d. %-20s [%-20s] icon=%s'):format(pos, name, df.work_detail_mode[mode], df.work_detail_icon_type[icon]))
+    print(('  %2d. %-18s [%-20s] icon=%-15s%s'):format(pos, r.name, r.mode_name, r.icon_name,
+        r.status == 'NEW' and '  (new)' or ''))
 end
-for _, w in ipairs(front_h) do show(w.name, planned_mode(w), default_icon(w)) end
-for _, g in ipairs(GROUPS)  do show(g.name, df.work_detail_mode.EverybodyDoesThis, df.work_detail_icon_type[g.icon]) end
-for _, w in ipairs(tail_h)  do show(w.name, planned_mode(w), default_icon(w)) end
-for _, w in ipairs(other_h) do show(w.name, planned_mode(w), default_icon(w)) end
 
--- moodable coverage: every moodable labor must be enabled by some kept default or a craft
+-- moodable coverage (informational): every moodable labor covered by a kept default or craft
 local covers = {}
-for i = 0, #wd - 1 do if not is_ours(wd[i]) then for _, l in ipairs(labors_of(wd[i])) do covers[l] = covers[l] or wd[i].name end end end
+for i = 0, #wd - 1 do
+    if not is_craft(wd[i]) then for _, l in ipairs(labors_of(wd[i])) do covers[l] = covers[l] or wd[i].name end end
+end
 for _, g in ipairs(GROUPS) do for _, l in ipairs(g.labors) do covers[l] = covers[l] or g.name end end
 local missing = {}
 for _, m in ipairs(MOODABLE) do if not covers[m.labor] then missing[#missing + 1] = m.skill end end
