@@ -1,7 +1,13 @@
 -- Enable all of magnus's persistent DFHack helpers at once.
 --@module = false
---[[
-    magnus-scripts
+local help = [====[
+
+magnus-scripts
+==============
+
+Tags: fort | auto
+
+Enable all of magnus's persistent DFHack helpers at once.
 
 Activates the "always-on" helpers in this pack:
     * needs-tomb-notification   (registers the notify-panel alert)
@@ -11,6 +17,9 @@ Activates the "always-on" helpers in this pack:
                                  the Equip-screen auto-gear overlay/work-orders)
     * dwarf-rts                 (registers the RTS-style squad-screen overlay)
     * embark-nobles             (assigns the key fort positions by skill)
+    * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
+    * labor-groups once         (builds the ordered crafting Work Details -- once per
+                                 fort; a re-run is a no-op so manual tweaks survive)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -32,12 +41,25 @@ embark-nobles is safe every session: it only fills VACANT positions and leaves
 already-assigned nobles untouched, so your manual noble choices are respected.
 `embark-nobles dry` previews what (if anything) it would fill.
 
+inside-burrow is safe every session: it only acts when the fort has NO burrows
+yet, seeding a self-expanding `inside+` burrow on the first interior tile a miner
+digs, then disabling itself. Once you have any burrow it does nothing.
+
 no-pausing is deliberately NOT enabled here: it stops ALL pausing, so it is left
 as a manual toggle -- run `no-pausing` (or `enable no-pausing`) when you want it.
 
 Add `magnus-scripts` to dfhack-config/init/dfhack.init to turn everything on each
 session.
-]]
+
+Usage
+-----
+
+    magnus-scripts
+        Enable the always-on helper set (the list above).
+
+    magnus-scripts lovely
+        Also set the two standing orders and enable the stock-tool batch.
+]====]
 
 if not dfhack.world.isFortressMode() then
     qerror('magnus-scripts: load a fort first (fortress mode only)')
@@ -57,6 +79,8 @@ try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-m
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
+try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
+try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 
