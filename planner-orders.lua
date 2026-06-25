@@ -23,7 +23,13 @@ item (any material). Components work the same way: a ballista's planned slot ask
 "ballista parts", so you get a ConstructBallistaParts order; a traction bench's slots ask
 for its table/mechanism/chain, each handled on its own.
 
-Items with no make-job (e.g. anvils) are listed as unmakeable and skipped.
+Items with no make-job are listed as unmakeable and skipped.
+
+When the fort has a hospital, it ALSO offers orders for the supplies a hospital needs --
+splints, crutches, buckets, thread, cloth, soap, and plaster powder -- each with its
+options laid out (e.g. soap from tallow vs oil, and it queues the ash->lye chain; plaster
+needs gypsum). Item supplies keep a target stock; soap/plaster are queued as one-time
+batches (their outputs can't be counted cleanly by material) you can set to repeat.
 
 Run `planner-orders` to register the notification (idempotent; add to dfhack.init or
 magnus-scripts to load each session). `planner-orders list` prints the gaps; `planner-orders
@@ -81,6 +87,8 @@ local JOB_CLASSES = {
     MakeAnimalTrap          = {wood = true, metal = true},
     ConstructBlocks         = {stone = true, wood = true, metal = true, glass = true},
     ConstructBoltThrowerParts = {wood = true, metal = true},
+    ConstructSplint         = {wood = true, metal = true},   -- hospital supply
+    ConstructCrutch         = {wood = true, metal = true},   -- hospital supply
 }
 
 -- jobs restricted to SPECIFIC materials (by inorganic raw id), overriding the class list:
@@ -88,6 +96,48 @@ local JOB_CLASSES = {
 local JOB_MATERIALS = {
     ForgeAnvil = {'IRON', 'STEEL'},
 }
+
+-- Supplies a hospital wants kept stocked. When the fort has a hospital, planner-orders
+-- offers an order for each of these that has none yet. Three kinds:
+--   item     -- pick a material (wood/metal), keep `target` in stock
+--   job      -- one production method, no material choice, keep `target` in stock
+--   reaction -- a workshop reaction; choose among `options`. Reactions whose output can't
+--               be counted cleanly by material (soap, plaster) are queued as a one-time
+--               batch (you can set them to repeat). `chain` queues prerequisite orders.
+local HOSPITAL_SUPPLIES = {
+    {supply = 'Splints',  kind = 'item', job = 'ConstructSplint', cond_item = 'SPLINT', target = 5},
+    {supply = 'Crutches', kind = 'item', job = 'ConstructCrutch', cond_item = 'CRUTCH', target = 5},
+    {supply = 'Buckets',  kind = 'item', job = 'MakeBucket',      cond_item = 'BUCKET', target = 3},
+    {supply = 'Thread',   kind = 'job',  job = 'ProcessPlants',   cond_item = 'THREAD', target = 10,
+        note = 'Processed from farmable plants (e.g. pig tails) at a Farmer\'s Workshop.'},
+    {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
+        note = 'Woven from thread at a Loom.'},
+    {supply = 'Soap', kind = 'reaction', target = 5,
+        note = 'Cleans wounds (prevents infection). Needs LYE + rendered TALLOW (or oil);\n'
+            .. 'this also queues the ash->lye chain. Make sure a soap maker is built and\n'
+            .. 'fat is being rendered at a kitchen.',
+        options = {
+            {label = 'Soap from tallow (rendered animal fat)', reaction = 'MAKE_SOAP_FROM_TALLOW'},
+            {label = 'Soap from oil (pressed seeds/nuts)',      reaction = 'MAKE_SOAP_FROM_OIL'},
+        },
+        chain = {'MakeAsh', 'MakeLye'}},
+    {supply = 'Plaster powder', kind = 'reaction', target = 5,
+        note = 'For casts on broken bones. Needs GYPSUM stone (alabaster / selenite /\n'
+            .. 'gypsum). Made at a Kiln.',
+        options = {
+            {label = 'Plaster powder from gypsum', reaction = 'MAKE_PLASTER_POWDER'},
+        }},
+}
+
+-- does the fort have a hospital? (hospitals are LOCATIONS, not zones)
+local function hospital_exists()
+    local site = dfhack.world.getCurrentSite()
+    if not site then return false end
+    for _, loc in ipairs(site.buildings) do
+        if df.abstract_building_hospitalst:is_instance(loc) then return true end
+    end
+    return false
+end
 
 -- ---- materials --------------------------------------------------------------
 
@@ -231,6 +281,36 @@ local function resolve_tool(f)
     end
 end
 
+-- has the fort already got an order for this hospital supply?
+local function hospital_has_order(spec)
+    if spec.kind == 'reaction' then
+        local want = {}
+        for _, o in ipairs(spec.options) do want[o.reaction] = true end
+        local all = df.global.world.manager_orders.all
+        for i = 0, #all - 1 do
+            if all[i].job_type == df.job_type.CustomReaction and want[all[i].reaction_name] then return true end
+        end
+        return false
+    end
+    return has_order(df.job_type[spec.job], -1)
+end
+
+-- turn a HOSPITAL_SUPPLIES spec into a gap the dialog understands
+local function make_hospital_gap(spec)
+    local g = {name = spec.supply, kind = spec.kind, note = spec.note, amount = spec.target}
+    if spec.kind == 'reaction' then
+        g.options, g.chain = spec.options, spec.chain
+    else
+        g.job_type = df.job_type[spec.job]
+        g.order_subtype = -1
+        g.cond_item_type = df.item_type[spec.cond_item]
+        g.cond_subtype = -1
+        g.cond_compare = df.logic_condition_type.LessThan   -- keep `target` in stock
+        g.cond_val = spec.target
+    end
+    return g
+end
+
 -- find every needed-but-unordered planned item. Returns {gaps=..., unmakeable=...}.
 -- Each gap: {name, count, job_type, order_subtype, cond_item_type, cond_subtype,
 --            magma_required}. order_subtype is the item_subtype to put on the order
@@ -279,9 +359,15 @@ local function scan()
     end
     local gaps = {}
     for _, e in pairs(need) do
-        if not has_order(e.job_type, e.order_subtype) then gaps[#gaps + 1] = e end
+        if not has_order(e.job_type, e.order_subtype) then e.kind = 'build'; gaps[#gaps + 1] = e end
     end
     table.sort(gaps, function(a, b) return a.name < b.name end)
+    -- when the fort has a hospital, also offer orders for the supplies it needs
+    if hospital_exists() then
+        for _, spec in ipairs(HOSPITAL_SUPPLIES) do
+            if not hospital_has_order(spec) then gaps[#gaps + 1] = make_hospital_gap(spec) end
+        end
+    end
     table.sort(unmakeable)
     return {gaps = gaps, unmakeable = unmakeable}
 end
@@ -296,33 +382,86 @@ end
 
 -- ---- order creation ---------------------------------------------------------
 
-local function create_order(gap, choice)
+-- general manager-order builder. p: job_type, [reaction_name], [item_subtype], [mat_type,
+-- mat_index, wood], amount, [frequency], [cond={compare,val,item_type,item_subtype}]
+local function add_order(p)
     local mo = df.global.world.manager_orders
     local o = df.manager_order:new()
     o.id = mo.manager_order_next_id
     mo.manager_order_next_id = o.id + 1
-    o.job_type = gap.job_type
-    o.item_type = df.item_type.NONE             -- product is set by job_type (+ subtype)
-    o.item_subtype = gap.order_subtype          -- tooldef idx for tools, else -1
-    o.mat_type = choice.mat_type
-    o.mat_index = choice.mat_index
-    if choice.wood then o.material_category.wood = true end
-    o.amount_total = ORDER_AMOUNT
-    o.amount_left = ORDER_AMOUNT
-    o.frequency = df.workquota_frequency_type.Daily
+    o.job_type = p.job_type
+    if p.reaction_name then o.reaction_name = p.reaction_name end
+    o.item_type = df.item_type.NONE             -- product is set by job_type (+ subtype/reaction)
+    o.item_subtype = p.item_subtype or -1
+    o.mat_type = p.mat_type or -1
+    o.mat_index = p.mat_index or -1
+    if p.wood then o.material_category.wood = true end
+    o.amount_total, o.amount_left = p.amount, p.amount
+    o.frequency = p.frequency or df.workquota_frequency_type.Daily
     o.workshop_id = -1
-    o.status.validated = true
-    o.status.active = true
-    -- only run while we have EXACTLY 0 of this item (any material)
-    o.item_conditions:insert('#', {new = df.manager_order_condition_item,
-        compare_type = df.logic_condition_type.Exactly, compare_val = 0,
-        item_type = gap.cond_item_type, item_subtype = gap.cond_subtype, mat_type = -1, mat_index = -1})
-    mo.all:insert('#', o)
+    o.status.validated, o.status.active = true, true
+    if p.cond then
+        o.item_conditions:insert('#', {new = df.manager_order_condition_item,
+            compare_type = p.cond.compare, compare_val = p.cond.val,
+            item_type = p.cond.item_type, item_subtype = p.cond.item_subtype or -1,
+            mat_type = -1, mat_index = -1})
+    end
+    return o
+end
+
+-- item/job gap (planned buildings: make 5 at exactly 0; hospital item/job: keep `target`)
+local function create_order(gap, choice)
+    add_order{
+        job_type = gap.job_type, item_subtype = gap.order_subtype,
+        mat_type = choice.mat_type, mat_index = choice.mat_index, wood = choice.wood,
+        amount = gap.amount or ORDER_AMOUNT, frequency = df.workquota_frequency_type.Daily,
+        cond = {compare = gap.cond_compare or df.logic_condition_type.Exactly,
+                val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype},
+    }
+end
+
+-- reaction gap (soap/plaster): a one-time batch of the chosen reaction, plus any
+-- prerequisite chain orders not already present. No count condition (the outputs can't be
+-- counted cleanly by material) -- it's a batch you can set to repeat.
+local function create_reaction(gap, opt)
+    local n = 1
+    add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
+              amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+    for _, jn in ipairs(gap.chain or {}) do
+        local jt = df.job_type[jn]
+        if jt and not has_order(jt, -1) then
+            add_order{job_type = jt, amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+            n = n + 1
+        end
+    end
+    return n
 end
 
 -- ---- dialog -----------------------------------------------------------------
 
--- walk the gaps one at a time, each with its material picker + Skip/Cancel
+-- the choices + title + body text for a gap, by kind
+local function gap_prompt(gap, i, total)
+    local kind = gap.kind or 'build'
+    if kind == 'reaction' then
+        local choices = {}
+        for _, o in ipairs(gap.options) do choices[#choices + 1] = {text = o.label, reaction = o.reaction} end
+        return choices, ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
+            (gap.note or '') .. ('\n\nQueues a one-time batch of %d (set it to repeat for a steady supply):'):format(gap.amount)
+    elseif kind == 'job' then
+        return {{text = ('Create order: keep ~%d %s in stock'):format(gap.amount, gap.name:lower()), mat_type = -1, mat_index = -1}},
+            ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total), gap.note or ''
+    elseif kind == 'item' then  -- hospital item (pick material)
+        return material_choices(gap), ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
+            ('Pick a material; keeps ~%d in stock.'):format(gap.amount)
+    else  -- planned-building gap
+        return material_choices(gap), ('Missing: %s  (%d/%d)'):format(gap.name, i, total),
+            ('%d planned building(s) need a %s but no order makes one.\nPick a material to make %d (repeats when you hit 0):')
+                :format(gap.count, gap.name, ORDER_AMOUNT)
+                .. (gap.magma_required and '\nThis building requires a MAGMA-SAFE item.' or '')
+    end
+end
+
+-- walk the gaps one at a time, each with its picker + Skip/Cancel
 local function process(gaps, i, made)
     made = made or {}
     if i > #gaps then
@@ -332,21 +471,21 @@ local function process(gaps, i, made)
         return
     end
     local gap = gaps[i]
-    local choices = material_choices(gap)
+    local choices, title, text = gap_prompt(gap, i, #gaps)
     choices[#choices + 1] = {text = '-- Skip this item --', action = 'skip'}
     choices[#choices + 1] = {text = '-- Cancel (stop) --', action = 'cancel'}
     dlg.ListBox{
-        frame_title = ('Missing: %s  (%d/%d)'):format(gap.name, i, #gaps),
-        text = ('%d planned building(s) need a %s but no order makes one.\nPick a material to make %d (repeats when you hit 0):')
-            :format(gap.count, gap.name, ORDER_AMOUNT)
-            .. (gap.magma_required and '\nThis building requires a MAGMA-SAFE item.' or ''),
-        with_filter = true,
-        choices = choices,
+        frame_title = title, text = text, with_filter = true, choices = choices,
         on_select = function(_, choice)
             if choice.action == 'cancel' then return end
             if choice.action ~= 'skip' then
-                create_order(gap, choice)
-                made[#made + 1] = ('%s %s'):format(choice.text:gsub(' %[magma%-safe%]', ''), gap.name:lower())
+                if (gap.kind or 'build') == 'reaction' then
+                    create_reaction(gap, choice)
+                    made[#made + 1] = gap.name .. ' (' .. choice.text .. ')'
+                else
+                    create_order(gap, choice)
+                    made[#made + 1] = ('%s %s'):format((choice.text or 'make'):gsub(' %[magma%-safe%]', ''), gap.name:lower())
+                end
             end
             process(gaps, i + 1, made)
         end,
@@ -371,8 +510,8 @@ local function message()
     if not dfhack.world.isFortressMode() then return end
     local gaps = get_scan().gaps
     if #gaps == 0 then return end
-    if #gaps == 1 then return ('Planned %s has no manager order'):format(gaps[1].name:lower()) end
-    return ('%d planned items have no manager order'):format(#gaps)
+    if #gaps == 1 then return ('%s needs a manager order'):format(gaps[1].name) end
+    return ('%d items/supplies need manager orders'):format(#gaps)
 end
 
 -- ---- registration (mirrors needs-tomb-notification) -------------------------
@@ -403,8 +542,12 @@ if arg == 'list' then
     local r = scan()
     print(('planner-orders: %d gap(s):'):format(#r.gaps))
     for _, g in ipairs(r.gaps) do
-        print(('  - %-16s x%d  -> %s%s'):format(g.name, g.count, df.job_type[g.job_type],
-            g.magma_required and '  (magma-safe required)' or ''))
+        if (g.kind or 'build') == 'build' then
+            print(('  - %-16s x%d  -> %s%s'):format(g.name, g.count, df.job_type[g.job_type],
+                g.magma_required and '  (magma-safe required)' or ''))
+        else
+            print(('  - %-16s [hospital %s]'):format(g.name, g.kind))
+        end
     end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
     return
