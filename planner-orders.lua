@@ -38,8 +38,9 @@ accepting creates it (all conditioned so they only run when sensible):
     only while you have at least 1 barrel and 1 plant.
   - Charcoal: makes 20 while you have fewer than 20 fuel bars.
   - Coke: from your bituminous coal / lignite (at a Smelter) while fuel is low.
-  - Smelting: a SmeltOre order for every metal ore you have (while that metal < 100 bars),
-    plus pig iron (< 10) and steel (< 100) when you have iron ore -- each checks ingredients.
+  - Smelting: a SEPARATE ask per metal ore you have (so each ore is offered as you find it),
+    smelting it while that metal < 100 bars; plus pig iron (< 10) and steel (< 100) asks
+    when you have iron ore -- each checks ingredients.
   - Melting: a melt order when items are marked for melting but nothing melts them.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
@@ -501,9 +502,12 @@ local function scan()
             if not hospital_has_order(spec) then gaps[#gaps + 1] = make_hospital_gap(spec) end
         end
     end
-    -- standing-order checks (brewing, fuel, smelting, melting, ...)
-    for _, s in ipairs(STANDING) do
-        if s.needed() then gaps[#gaps + 1] = {name = s.name, kind = 'standing', producer = s} end
+    -- standing-order checks (brewing, fuel, smelting per-ore, melting, ...); each source
+    -- yields zero or more gap descriptors {name, note, shops, build}.
+    for _, source in ipairs(STANDING) do
+        for _, g in ipairs(source()) do
+            gaps[#gaps + 1] = {name = g.name, kind = 'standing', producer = g}
+        end
     end
     table.sort(unmakeable)
     return {gaps = gaps, unmakeable = unmakeable, missing = missing_workshops()}
@@ -666,103 +670,113 @@ end
 local BAR, BOULDER = df.item_type.BAR, df.item_type.BOULDER
 local Daily, OneTime = df.workquota_frequency_type.Daily, df.workquota_frequency_type.OneTime
 
+-- readable lower-case name for an inorganic id ("LIMONITE" -> "limonite")
+local function mat_name(idx)
+    local raw = df.inorganic_raw.find(idx)
+    return raw and raw.id:lower():gsub('_', ' ') or ('material ' .. tostring(idx))
+end
+
+-- each STANDING entry is a function returning a list of gap descriptors
+-- {name, note, shops, build} for the orders currently worth offering. The smelting source
+-- yields ONE gap per ore (plus pig iron / steel), so each ore is asked for as you get it.
 STANDING = {
-    {   -- brewing: keep drinks & seeds stocked (each brew needs a barrel + a plant)
-        name = 'Brewing', shops = {'BREW_DRINK_FROM_PLANT'},
-        note = 'Nothing brews plants into drink. Adds two repeating brew orders: one runs while\n'
-            .. 'you have under 200 drinks, one while under 200 seeds (brewing returns seeds).\n'
-            .. 'Each only runs while you have at least 1 barrel and at least 1 plant.',
-        needed = function() return not reaction_ordered('BREW_DRINK_FROM_PLANT') end,
-        build = function()
-            for _, item in ipairs({df.item_type.DRINK, df.item_type.SEEDS}) do
-                add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT',
-                    amount = BREW_AMOUNT, frequency = Daily, conds = {
-                        C('LessThan', BREW_TARGET, item), C('AtLeast', 1, df.item_type.BARREL),
-                        C('AtLeast', 1, df.item_type.PLANT)}}
-            end
-            return missing_shops({'BREW_DRINK_FROM_PLANT'})
-        end,
-    },
-    {   -- charcoal: keep fuel topped up
-        name = 'Charcoal', shops = {'MakeCharcoal'},
-        note = ('Makes 20 charcoal whenever you have fewer than %d fuel (charcoal/coke) bars.'):format(FUEL_TARGET),
-        needed = function() return not has_order(df.job_type.MakeCharcoal, -1) end,
-        build = function()
-            add_order{job_type = df.job_type.MakeCharcoal, amount = 20, frequency = Daily,
-                conds = {C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
-            return missing_shops({'MakeCharcoal'})
-        end,
-    },
-    {   -- coke: from bituminous coal / lignite at a Smelter while fuel is low
-        name = 'Coke', shops = {'BITUMINOUS_COAL_TO_COKE'},
-        note = ('Makes coke from your bituminous coal / lignite (at a Smelter) while you have\n'
-            .. 'fewer than %d fuel bars and at least 1 of that coal.'):format(FUEL_TARGET),
-        needed = function()
-            return (boulder_present(196) or boulder_present(197))
-                and not (reaction_ordered('BITUMINOUS_COAL_TO_COKE') or reaction_ordered('LIGNITE_TO_COKE'))
-        end,
-        build = function()
-            if boulder_present(196) then
-                add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BITUMINOUS_COAL_TO_COKE',
-                    amount = 20, frequency = Daily, conds = {C('AtLeast', 1, BOULDER, 0, 196), C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
-            end
-            if boulder_present(197) then
-                add_order{job_type = df.job_type.CustomReaction, reaction_name = 'LIGNITE_TO_COKE',
-                    amount = 20, frequency = Daily, conds = {C('AtLeast', 1, BOULDER, 0, 197), C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
-            end
-            return missing_shops({'BITUMINOUS_COAL_TO_COKE'})
-        end,
-    },
-    {   -- smelting: every metal ore you have, plus pig iron and steel
-        name = 'Smelting', shops = {'SmeltOre'},
-        note = ('Smelts every metal ore you have (while that metal < %d bars), and -- if you have\n'
-            .. 'iron ore -- pig iron (< %d) and steel (< %d). Each checks you have the ingredients.')
-            :format(METAL_CAP, PIG_IRON_CAP, METAL_CAP),
-        needed = function()
-            for _, ore in ipairs(present_metal_ores()) do
-                if not smelt_order_exists(ore.idx) then return true end
-            end
-            return false
-        end,
-        build = function()
-            local ores, have_iron_ore = present_metal_ores(), false
-            for _, ore in ipairs(ores) do
-                if not smelt_order_exists(ore.idx) then
-                    add_order{job_type = df.job_type.SmeltOre, mat_type = 0, mat_index = ore.idx,
-                        amount = 10, frequency = Daily, conds = {
-                            C('AtLeast', 1, BOULDER, 0, ore.idx), C('LessThan', METAL_CAP, BAR, 0, ore.metal)}}
+    function()   -- brewing: keep drinks & seeds stocked (each brew needs a barrel + a plant)
+        if reaction_ordered('BREW_DRINK_FROM_PLANT') then return {} end
+        return {{name = 'Brewing', shops = {'BREW_DRINK_FROM_PLANT'},
+            note = 'Nothing brews plants into drink. Adds two repeating brew orders: one runs while\n'
+                .. 'you have under 200 drinks, one while under 200 seeds (brewing returns seeds).\n'
+                .. 'Each only runs while you have at least 1 barrel and at least 1 plant.',
+            build = function()
+                for _, item in ipairs({df.item_type.DRINK, df.item_type.SEEDS}) do
+                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT',
+                        amount = BREW_AMOUNT, frequency = Daily, conds = {
+                            C('LessThan', BREW_TARGET, item), C('AtLeast', 1, df.item_type.BARREL),
+                            C('AtLeast', 1, df.item_type.PLANT)}}
                 end
-                if ore.metal == inorg_idx('IRON') then have_iron_ore = true end
+                return missing_shops({'BREW_DRINK_FROM_PLANT'})
+            end}}
+    end,
+    function()   -- charcoal: keep fuel topped up
+        if has_order(df.job_type.MakeCharcoal, -1) then return {} end
+        return {{name = 'Charcoal', shops = {'MakeCharcoal'},
+            note = ('Makes 20 charcoal whenever you have fewer than %d fuel (charcoal/coke) bars.'):format(FUEL_TARGET),
+            build = function()
+                add_order{job_type = df.job_type.MakeCharcoal, amount = 20, frequency = Daily,
+                    conds = {C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
+                return missing_shops({'MakeCharcoal'})
+            end}}
+    end,
+    function()   -- coke: from bituminous coal / lignite at a Smelter while fuel is low
+        if not (boulder_present(196) or boulder_present(197)) then return {} end
+        if reaction_ordered('BITUMINOUS_COAL_TO_COKE') or reaction_ordered('LIGNITE_TO_COKE') then return {} end
+        return {{name = 'Coke', shops = {'BITUMINOUS_COAL_TO_COKE'},
+            note = ('Makes coke from your bituminous coal / lignite (at a Smelter) while you have\n'
+                .. 'fewer than %d fuel bars and at least 1 of that coal.'):format(FUEL_TARGET),
+            build = function()
+                if boulder_present(196) then
+                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BITUMINOUS_COAL_TO_COKE',
+                        amount = 20, frequency = Daily, conds = {C('AtLeast', 1, BOULDER, 0, 196), C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
+                end
+                if boulder_present(197) then
+                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'LIGNITE_TO_COKE',
+                        amount = 20, frequency = Daily, conds = {C('AtLeast', 1, BOULDER, 0, 197), C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
+                end
+                return missing_shops({'BITUMINOUS_COAL_TO_COKE'})
+            end}}
+    end,
+    function()   -- smelting: ONE ask per metal ore you have, plus pig iron and steel
+        local out, have_iron_ore = {}, false
+        for _, ore in ipairs(present_metal_ores()) do
+            if ore.metal == inorg_idx('IRON') then have_iron_ore = true end
+            if not smelt_order_exists(ore.idx) then
+                local o = ore                                   -- capture for the closure
+                out[#out + 1] = {name = 'Smelt ' .. mat_name(o.idx), shops = {'SmeltOre'},
+                    note = ('Smelts %s into %s while you have at least 1 %s ore and under %d %s bars.')
+                        :format(mat_name(o.idx), mat_name(o.metal), mat_name(o.idx), METAL_CAP, mat_name(o.metal)),
+                    build = function()
+                        add_order{job_type = df.job_type.SmeltOre, mat_type = 0, mat_index = o.idx,
+                            amount = 10, frequency = Daily, conds = {
+                                C('AtLeast', 1, BOULDER, 0, o.idx), C('LessThan', METAL_CAP, BAR, 0, o.metal)}}
+                        return missing_shops({'SmeltOre'})
+                    end}
             end
-            -- pig iron and steel (intermediates from iron); only worthwhile with iron ore
-            if have_iron_ore then
-                local iron, pig, steel = inorg_idx('IRON'), inorg_idx('PIG_IRON'), inorg_idx('STEEL')
-                if not reaction_ordered('PIG_IRON_MAKING') then
+        end
+        if have_iron_ore and not reaction_ordered('PIG_IRON_MAKING') then
+            out[#out + 1] = {name = 'Pig iron', shops = {'PIG_IRON_MAKING'},
+                note = ('Makes pig iron from iron + flux + fuel while you have under %d pig iron bars.'):format(PIG_IRON_CAP),
+                build = function()
+                    local iron, pig = inorg_idx('IRON'), inorg_idx('PIG_IRON')
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'PIG_IRON_MAKING',
                         amount = 5, frequency = Daily, conds = {
                             C('AtLeast', 1, BAR, 0, iron), C('AtLeast', 1, BOULDER, nil, nil, 'FLUX'),
                             C('AtLeast', 1, BAR, COAL_MAT), C('LessThan', PIG_IRON_CAP, BAR, 0, pig)}}
-                end
-                if not reaction_ordered('STEEL_MAKING') then
+                    return missing_shops({'PIG_IRON_MAKING'})
+                end}
+        end
+        if have_iron_ore and not reaction_ordered('STEEL_MAKING') then
+            out[#out + 1] = {name = 'Steel', shops = {'STEEL_MAKING'},
+                note = ('Makes steel from iron + pig iron + flux + fuel while you have under %d steel bars.'):format(METAL_CAP),
+                build = function()
+                    local iron, pig, steel = inorg_idx('IRON'), inorg_idx('PIG_IRON'), inorg_idx('STEEL')
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'STEEL_MAKING',
                         amount = 5, frequency = Daily, conds = {
                             C('AtLeast', 1, BAR, 0, iron), C('AtLeast', 1, BAR, 0, pig),
                             C('AtLeast', 1, BOULDER, nil, nil, 'FLUX'), C('AtLeast', 1, BAR, COAL_MAT),
                             C('LessThan', METAL_CAP, BAR, 0, steel)}}
-                end
-            end
-            return missing_shops({'SmeltOre'})
-        end,
-    },
-    {   -- melting: process items marked for melting
-        name = 'Melting', shops = {'MeltMetalObject'},
-        note = 'Some items are marked for melting but nothing is melting them. Adds a melt order.',
-        needed = function() return melt_count() > 0 and not has_order(df.job_type.MeltMetalObject, -1) end,
-        build = function()
-            add_order{job_type = df.job_type.MeltMetalObject, amount = math.max(1, melt_count()), frequency = Daily}
-            return missing_shops({'MeltMetalObject'})
-        end,
-    },
+                    return missing_shops({'STEEL_MAKING'})
+                end}
+        end
+        return out
+    end,
+    function()   -- melting: process items marked for melting
+        if melt_count() == 0 or has_order(df.job_type.MeltMetalObject, -1) then return {} end
+        return {{name = 'Melting', shops = {'MeltMetalObject'},
+            note = 'Some items are marked for melting but nothing is melting them. Adds a melt order.',
+            build = function()
+                add_order{job_type = df.job_type.MeltMetalObject, amount = math.max(1, melt_count()), frequency = Daily}
+                return missing_shops({'MeltMetalObject'})
+            end}}
+    end,
 }
 
 -- ---- dialog -----------------------------------------------------------------
