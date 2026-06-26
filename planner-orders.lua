@@ -136,7 +136,7 @@ local HOSPITAL_SUPPLIES = {
         note = 'Processed from farmable plants (e.g. pig tails) at a Farmer\'s Workshop.'},
     {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
         note = 'Woven from thread at a Loom.'},
-    {supply = 'Soap', kind = 'reaction', target = 5, makes = 'soap (a bar)',
+    {supply = 'Soap', kind = 'reaction', target = 30, makes = 'soap (a bar)',
         note = 'Cleans wounds (prevents infection). Needs LYE + a fat source; each option\n'
             .. 'also queues its prerequisites (ash->lye, and rendering fat for tallow).',
         options = {
@@ -812,9 +812,13 @@ STANDING = {
     function()   -- melting: process items marked for melting
         if melt_count() == 0 or has_order(df.job_type.MeltMetalObject, -1) then return {} end
         return {{name = 'Melting', shops = {'MeltMetalObject'},
-            note = 'Some items are marked for melting but nothing is melting them. Adds a melt order.',
+            note = 'Some items are marked for melting but nothing is melting them. Adds a melt\n'
+                .. 'order that runs while there is anything to melt.',
             build = function()
-                add_order{job_type = df.job_type.MeltMetalObject, amount = math.max(1, melt_count()), frequency = Daily}
+                -- the "anything to melt" condition: GreaterThan 0 with item_type = NONE, which
+                -- DF reads on a melt order as "items available to melt".
+                add_order{job_type = df.job_type.MeltMetalObject, amount = 30, frequency = Daily,
+                    conds = {C('GreaterThan', 0, df.item_type.NONE)}}
                 return missing_shops({'MeltMetalObject'})
             end}}
     end,
