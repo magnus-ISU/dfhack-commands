@@ -41,6 +41,8 @@ accepting creates it (all conditioned so they only run when sensible):
   - Smelting: a SEPARATE ask per metal ore you have (so each ore is offered as you find it),
     smelting it while that metal < 100 bars; plus pig iron (< 10) and steel (< 100) asks
     when you have iron ore -- each checks ingredients.
+  - Barrels / Bins: makes wooden barrels / bins while under 30 (only offered if you have a
+    Carpenter's Workshop).
   - Melting: a melt order when items are marked for melting but nothing melts them.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
@@ -64,6 +66,7 @@ local COAL_MAT = 7                -- builtin material for coal bars (charcoal AN
 local FUEL_TARGET = 20            -- make fuel (charcoal/coke) while under this many bars
 local METAL_CAP = 100             -- stop smelting a metal once it has this many bars
 local PIG_IRON_CAP = 10           -- pig iron is an intermediate -- keep only a few
+local STORE_TARGET = 30           -- keep at least this many barrels / bins on hand
 
 -- needed-item type -> the job_type that produces it. (Furniture/components are made with
 -- item_type = NONE on the order; the job_type alone determines the product.)
@@ -722,6 +725,28 @@ STANDING = {
                         amount = 20, frequency = Daily, conds = {C('AtLeast', 1, BOULDER, 0, 197), C('LessThan', FUEL_TARGET, BAR, COAL_MAT)}}
                 end
                 return missing_shops({'BITUMINOUS_COAL_TO_COKE'})
+            end}}
+    end,
+    function()   -- wooden barrels -- only offered if a Carpenter's Workshop is built
+        if not ws_exists{ws = df.workshop_type.Carpenters} then return {} end
+        if has_order(df.job_type.MakeBarrel, -1) then return {} end
+        return {{name = 'Barrels', shops = {},
+            note = ('Makes wooden barrels (at a Carpenter\'s) while you have fewer than %d.'):format(STORE_TARGET),
+            build = function()
+                add_order{job_type = df.job_type.MakeBarrel, wood = true, amount = 10, frequency = Daily,
+                    conds = {C('LessThan', STORE_TARGET, df.item_type.BARREL)}}
+                return {}
+            end}}
+    end,
+    function()   -- wooden bins -- only offered if a Carpenter's Workshop is built
+        if not ws_exists{ws = df.workshop_type.Carpenters} then return {} end
+        if has_order(df.job_type.ConstructBin, -1) then return {} end
+        return {{name = 'Bins', shops = {},
+            note = ('Makes wooden bins (at a Carpenter\'s) while you have fewer than %d.'):format(STORE_TARGET),
+            build = function()
+                add_order{job_type = df.job_type.ConstructBin, wood = true, amount = 10, frequency = Daily,
+                    conds = {C('LessThan', STORE_TARGET, df.item_type.BIN)}}
+                return {}
             end}}
     end,
     function()   -- smelting: ONE ask per metal ore you have, plus pig iron and steel
