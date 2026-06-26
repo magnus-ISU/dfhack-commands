@@ -22,6 +22,7 @@ Activates the "always-on" helpers in this pack:
     * labor-groups once         (builds the ordered crafting Work Details -- once per
                                  fort; a re-run is a no-op so manual tweaks survive)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
+    * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -112,6 +113,7 @@ try('embark-nobles (assign key fort positions)', function() dfhack.run_command('
 try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
 try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
+try('auto-tomb (1x1 tomb zone on each coffin)', function() dfhack.run_command('enable', 'auto-tomb') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 

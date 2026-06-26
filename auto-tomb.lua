@@ -43,9 +43,10 @@ local function make_tomb(pos)
         fields = {assigned_unit_id = -1,
                   room = {x = pos.x, y = pos.y, width = 1, height = 1, extents = extents}},
     }
-    -- a Tomb zone is only a real, assignable tomb when its `whole` flag is set (it applies
-    -- to the whole zone, i.e. the coffin in it). Without this the zone is non-functional.
-    if bld then bld.zone_settings.tomb.flags.whole = 1 end
+    -- match how the game/quickfort make a tomb: keep pets from being buried in it.
+    -- (The zone is a functional, assignable tomb either way; this is just a setting --
+    -- note `flags.whole` would be the bitfield's whole-integer accessor, not a real flag.)
+    if bld then bld.zone_settings.tomb.flags.no_pets = true end
     return bld
 end
 
