@@ -16,10 +16,11 @@ dwarf-rts -- on the Squads screen:
     no longer fought -- nothing re-selects behind your back.
   * All left-button map commands resolve on mouse-UP (the raw button is polled each
     frame), so a click is cleanly told apart from a drag and nothing fires on press:
-      - A plain click ATTACKS a hostile on that tile (a direct kill order -- no paused
-        move UI; Shift appends it to the current kill order), else SELECTS one of your
-        own dwarves under the cursor (same rules as the drag-box below), else MOVES the
-        current selection to that tile.
+      - A plain click (no drag) is passed straight through to the game as a normal
+        left-click on mouse-up, so you can select squads, units, and anything under the
+        cursor exactly as you would without this overlay. (The press is swallowed so the
+        game doesn't act mid-gesture, then the click is re-dispatched on release.) RTS
+        commands are issued by DRAGGING, below.
       - A drag (a box) with hostiles inside it orders the selection to attack every
         hostile within +/-3 z-levels of the drag; Shift+drag folds the box's hostiles
         into the current kill order instead of replacing it. A drag with NO hostiles is
@@ -886,7 +887,13 @@ function DwarfRtsClickMove:overlay_onupdate()
             local shift = dfhack.internal.getModifiers().shift
             local acted   -- 'conscript' if a civilian was drafted (needs a list refresh)
             if same_tile(self.press, rel) then
-                acted = single_command(sq, rel, shift)
+                -- NOT a drag -- it's a plain click. We swallowed the press so DF didn't act
+                -- mid-gesture; now re-dispatch it as a normal left-click so the game gets it
+                -- and you can select squads / units / anything under the cursor as usual.
+                -- (self.passthrough tells onInput not to re-swallow this synthetic click.)
+                self.passthrough = true
+                gui.simulateInput(dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
+                self.passthrough = false
             elseif box_attack(sq, self.press, rel, shift) == 0 then
                 -- a drag that hit no hostiles is a SELECTION gesture: pick the boxed
                 -- squads / members (box_select), or -- if it covers only loose civilians
@@ -993,12 +1000,16 @@ function DwarfRtsClickMove:onInput(keys)
         return false                                   -- UI button: let DF handle the click
     end
 
-    -- Map left-clicks (move/attack/drag/select) resolve on mouse-UP via the button
-    -- poller in overlay_onupdate. Swallow the press so DF doesn't act on whatever is
-    -- under the cursor (open a stockpile/pedestal/building menu); the raw button state
-    -- we poll is unaffected by consuming here. No selection is required (a drag selects;
-    -- a click selects the dwarf under it). We do NOT swallow clicks landing on another
-    -- visible overlay (e.g. the notifications list), so those stay clickable.
+    -- our own re-dispatched plain click (from the mouse-up handler): let it through so the
+    -- game actually receives it, instead of swallowing it again.
+    if self.passthrough then return false end
+
+    -- Map left-clicks (drag/select) resolve on mouse-UP via the button poller in
+    -- overlay_onupdate. Swallow the press so DF doesn't act on whatever is under the cursor
+    -- mid-gesture (open a stockpile/pedestal/building menu); the raw button state we poll is
+    -- unaffected by consuming here. A drag is a box select/attack; a plain click is
+    -- re-dispatched as a normal click on mouse-up so selection works. We do NOT swallow
+    -- clicks landing on another visible overlay (e.g. the notifications list).
     if keys._MOUSE_L
         and df.global.gps.mouse_x < df.global.gps.dimx - WINDOW_COLS
         and not over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y)
