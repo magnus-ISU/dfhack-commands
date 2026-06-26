@@ -43,10 +43,13 @@ local function make_tomb(pos)
         fields = {assigned_unit_id = -1,
                   room = {x = pos.x, y = pos.y, width = 1, height = 1, extents = extents}},
     }
-    -- match how the game/quickfort make a tomb: keep pets from being buried in it.
-    -- (The zone is a functional, assignable tomb either way; this is just a setting --
-    -- note `flags.whole` would be the bitfield's whole-integer accessor, not a real flag.)
-    if bld then bld.zone_settings.tomb.flags.no_pets = true end
+    if bld then
+        -- a civzone must be ACTIVE to actually function; constructBuilding leaves it off, so
+        -- without this the tomb exists but can't be assigned/used (looks "broken").
+        bld.spec_sub_flag.active = true
+        -- match how the game/quickfort make a tomb: keep pets from being buried in it.
+        bld.zone_settings.tomb.flags.no_pets = true
+    end
     return bld
 end
 
