@@ -12,6 +12,7 @@ Enable all of magnus's persistent DFHack helpers at once.
 Activates the "always-on" helpers in this pack:
     * needs-tomb-notification   (registers the notify-panel alert)
     * mandate-notification      (registers the immediate-mandate notification)
+    * trader-notification       (counts down the days a caravan is at your depot)
     * planner-orders            (notify + 1-click orders for planned-building items)
     * auto-mandate              (enables the background work-order service)
     * military-uniforms         (creates the steel uniform templates + registers
@@ -90,7 +91,7 @@ if ({...})[1] == 'disable' then
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
-        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders'}) do
+        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready'}) do
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
         end
         if n.config and n.config.write then n.config:write() end
@@ -105,6 +106,7 @@ print('magnus-scripts: enabling persistent helpers...')
 try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notification') end)
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
+try('trader-notification', function() dfhack.run_script('trader-notification') end)
 try('planner-orders', function() dfhack.run_script('planner-orders') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
