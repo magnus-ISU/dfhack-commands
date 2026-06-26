@@ -147,7 +147,7 @@ local HOSPITAL_SUPPLIES = {
             {label = 'Soap from oil [plants]', reaction = 'MAKE_SOAP_FROM_OIL',
                 also = {'MakeAsh', 'MakeLye'}},
         }},
-    {supply = 'Plaster powder', kind = 'reaction', target = 5, makes = 'plaster powder',
+    {supply = 'Plaster powder', kind = 'reaction', target = 30, makes = 'plaster powder',
         note = 'For casts on broken bones. Needs GYPSUM stone (alabaster / selenite /\n'
             .. 'gypsum).',
         options = {
