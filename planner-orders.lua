@@ -32,8 +32,12 @@ the item it makes. Soap options are spelled out ("from tallow [animal fat]" / "f
 when you pick tallow. Item supplies keep a target stock; soap/plaster are one-time batches
 (their outputs can't be counted cleanly by material) you can set to repeat.
 
+It also warns if nothing brews plants into drink; accepting adds two repeating "brew drink
+from plant" orders -- one runs while you have under 200 drinks, one while under 200 seeds
+(brewing returns the seeds).
+
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
-Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, or the right
+Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
 forge/mason's/carpenter's for the chosen material), it warns you which to build.
 
 Run `planner-orders` to register the notification (idempotent; add to dfhack.init or
@@ -47,6 +51,8 @@ local bp = require('plugins.buildingplan')
 
 local ORDER_AMOUNT = 5
 local MAGMA_TEMP = 12000          -- a material is magma-safe if it survives this (deg U)
+local BREW_TARGET = 200           -- keep at least this many drinks / seeds via brewing
+local BREW_AMOUNT = 30            -- brew jobs queued per cycle while under target
 
 -- needed-item type -> the job_type that produces it. (Furniture/components are made with
 -- item_type = NONE on the order; the job_type alone determines the product.)
@@ -266,6 +272,7 @@ local FIXED_WS = {
     MAKE_SOAP_FROM_TALLOW = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
     MAKE_SOAP_FROM_OIL    = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
     MAKE_PLASTER_POWDER   = {label = 'a Kiln',                 fu = df.furnace_type.Kiln},
+    BREW_DRINK_FROM_PLANT = {label = 'a Still',                ws = df.workshop_type.Still},
 }
 
 -- is a workshop/furnace satisfying `req` built? (req may be nil -> "no requirement")
@@ -353,6 +360,15 @@ local function has_order(job_type, subtype)
         if o.job_type == job_type and (not subtype or subtype < 0 or o.item_subtype == subtype) then
             return true
         end
+    end
+    return false
+end
+
+-- is there already a manager order for this reaction code?
+local function reaction_ordered(code)
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        if all[i].job_type == df.job_type.CustomReaction and all[i].reaction_name == code then return true end
     end
     return false
 end
@@ -466,6 +482,10 @@ local function scan()
             if not hospital_has_order(spec) then gaps[#gaps + 1] = make_hospital_gap(spec) end
         end
     end
+    -- standing brewing: warn if nothing brews plants into drink
+    if not reaction_ordered('BREW_DRINK_FROM_PLANT') then
+        gaps[#gaps + 1] = {name = 'Brewing', kind = 'brew'}
+    end
     table.sort(unmakeable)
     return {gaps = gaps, unmakeable = unmakeable, missing = missing_workshops()}
 end
@@ -506,15 +526,6 @@ local function add_order(p)
     end
     mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
-end
-
--- is there already a manager order for this reaction code?
-local function reaction_ordered(code)
-    local all = df.global.world.manager_orders.all
-    for i = 0, #all - 1 do
-        if all[i].job_type == df.job_type.CustomReaction and all[i].reaction_name == code then return true end
-    end
-    return false
 end
 
 -- item/job gap (planned buildings: make 5 at exactly 0; hospital item/job: keep `target`).
@@ -564,6 +575,20 @@ local function create_reaction(gap, opt)
     return list
 end
 
+-- brewing gap: two repeating "brew drink from plant" orders -- one that runs while you have
+-- under BREW_TARGET drinks, one while under BREW_TARGET seeds (brewing returns the seeds).
+-- Returns missing-workshop labels (a Still).
+local function create_brew()
+    for _, cond_item in ipairs({df.item_type.DRINK, df.item_type.SEEDS}) do
+        add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BREW_DRINK_FROM_PLANT',
+                  amount = BREW_AMOUNT, frequency = df.workquota_frequency_type.Daily,
+                  cond = {compare = df.logic_condition_type.LessThan, val = BREW_TARGET,
+                          item_type = cond_item, item_subtype = -1}}
+    end
+    local req = FIXED_WS['BREW_DRINK_FROM_PLANT']
+    return (req and not ws_exists(req)) and {req.label} or {}
+end
+
 -- ---- dialog -----------------------------------------------------------------
 
 -- the missing workshops a reaction gap's options would need (union over options + their
@@ -600,6 +625,13 @@ local function gap_prompt(gap, i, total)
     elseif kind == 'item' then  -- hospital item (pick material)
         return material_choices(gap), ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
             ('Makes %s; pick a material; keeps ~%d in stock.'):format(gap.name:lower(), gap.amount)
+    elseif kind == 'brew' then  -- standing brewing orders
+        local req = FIXED_WS['BREW_DRINK_FROM_PLANT']
+        local warn = (req and not ws_exists(req)) and ('\n\n!! Not built yet: ' .. req.label) or ''
+        return {{text = ('Add 2 brew-drink-from-plant orders (keep <%d drink and <%d seeds)'):format(BREW_TARGET, BREW_TARGET), brew = true}},
+            ('No brewing job  (%d/%d)'):format(i, total),
+            ('Nothing brews plants into drink. This adds two repeating brew orders: one runs\n'
+                .. 'while you have under %d drinks, one while under %d seeds (brewing returns seeds).'):format(BREW_TARGET, BREW_TARGET) .. warn
     else  -- planned-building gap
         return material_choices(gap), ('Missing: %s  (%d/%d)'):format(gap.name, i, total),
             ('%d planned building(s) need a %s but no order makes one.\nPick a material to make %d (repeats when you hit 0):')
@@ -639,9 +671,13 @@ local function process(gaps, i, made, warns)
             if choice.action == 'cancel' then return end
             if choice.action ~= 'skip' then
                 local missing
-                if (gap.kind or 'build') == 'reaction' then
+                local kind = gap.kind or 'build'
+                if kind == 'reaction' then
                     missing = create_reaction(gap, choice)
                     made[#made + 1] = choice.text
+                elseif kind == 'brew' then
+                    missing = create_brew()
+                    made[#made + 1] = 'brewing orders (drink + seeds)'
                 else
                     missing = create_order(gap, choice)
                     made[#made + 1] = (choice.text or gap.name):gsub(' %[magma%-safe%]', '')
@@ -717,7 +753,7 @@ if arg == 'list' then
             print(('  - %-16s x%d  -> %s%s'):format(g.name, g.count, df.job_type[g.job_type],
                 g.magma_required and '  (magma-safe required)' or ''))
         else
-            print(('  - %-16s [hospital %s]'):format(g.name, g.kind))
+            print(('  - %-16s [%s]'):format(g.name, g.kind == 'brew' and 'brewing' or ('hospital ' .. g.kind)))
         end
     end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
