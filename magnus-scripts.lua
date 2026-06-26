@@ -25,8 +25,8 @@ Activates the "always-on" helpers in this pack:
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
-    enable: autobutcher, autoclothing, autonestbox, autotraining, prioritize,
-            seedwatch, suspendmanager, timestream
+    enable: autobutcher, autoclothing, autonestbox, autotraining, hide-tutorials,
+            prioritize, seedwatch, suspendmanager, timestream
     tweak:  fast-heat, realistic-melting
 (The timer-driven tools -- autocheese, automilk, autoshear, cleanowned,
 orders-reevaluate -- aren't plain enables; turn those on in gui/control-panel.)
@@ -125,7 +125,8 @@ if ({...})[1] == 'lovely' then
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
     local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
     for _, c in ipairs({'autobutcher', 'autoclothing', 'autonestbox', 'autotraining',
-                        'prioritize', 'seedwatch', 'suspendmanager', 'timestream'}) do enable_tool(c) end
+                        'hide-tutorials', 'prioritize', 'seedwatch', 'suspendmanager',
+                        'timestream'}) do enable_tool(c) end
     for _, c in ipairs({'fast-heat', 'realistic-melting'}) do tweak_tool(c) end
 end
 
