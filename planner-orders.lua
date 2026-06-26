@@ -137,6 +137,7 @@ local HOSPITAL_SUPPLIES = {
     {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
         note = 'Woven from thread at a Loom.'},
     {supply = 'Soap', kind = 'reaction', target = 30, makes = 'soap (a bar)',
+        count = {item_type = 'BAR', mat_id = 'SOAP'},   -- soap bars: BAR of the SOAP material
         note = 'Cleans wounds (prevents infection). Needs LYE + a fat source; each option\n'
             .. 'also queues its prerequisites (ash->lye, and rendering fat for tallow).',
         options = {
@@ -148,6 +149,7 @@ local HOSPITAL_SUPPLIES = {
                 also = {'MakeAsh', 'MakeLye'}},
         }},
     {supply = 'Plaster powder', kind = 'reaction', target = 30, makes = 'plaster powder',
+        count = {item_type = 'POWDER_MISC', mat_id = 'PLASTER'},   -- POWDER_MISC of INORGANIC:PLASTER
         note = 'For casts on broken bones. Needs GYPSUM stone (alabaster / selenite /\n'
             .. 'gypsum).',
         options = {
@@ -432,6 +434,23 @@ local function hospital_has_order(spec)
     return has_order(df.job_type[spec.job], -1)
 end
 
+-- current stock of a reaction supply we can't keep-stock with a manager condition (soap,
+-- plaster): count finished items in Lua by item_type + material id. Cheap enough at scan time.
+local function reaction_stock(spec)
+    if not spec.count then return 0 end
+    local want_type = df.item_type[spec.count.item_type]
+    local n = 0
+    for _, it in ipairs(df.global.world.items.all) do
+        if it:getType() == want_type and not it.flags.garbage_collect then
+            local m = dfhack.matinfo.decode(it)
+            if m and m.material and m.material.id == spec.count.mat_id then
+                n = n + it:getStackSize()
+            end
+        end
+    end
+    return n
+end
+
 -- turn a HOSPITAL_SUPPLIES spec into a gap the dialog understands
 local function make_hospital_gap(spec)
     local g = {name = spec.supply, kind = spec.kind, note = spec.note, amount = spec.target, title = 'Hospital supply'}
@@ -502,7 +521,13 @@ local function scan()
     -- when the fort has a hospital, also offer orders for the supplies it needs
     if hospital_exists() then
         for _, spec in ipairs(HOSPITAL_SUPPLIES) do
-            if not hospital_has_order(spec) then gaps[#gaps + 1] = make_hospital_gap(spec) end
+            -- offer the supply when there's no order pending AND -- for the one-time soap/plaster
+            -- batches we can't keep-stock with a manager condition -- you're actually low on it.
+            -- This is the "script re-triggers a fresh batch when needed" approach.
+            if not hospital_has_order(spec)
+                and (not spec.count or reaction_stock(spec) < spec.target) then
+                gaps[#gaps + 1] = make_hospital_gap(spec)
+            end
         end
     end
     -- standing-order checks (brewing, fuel, smelting per-ore, barrels/bins, melting, ...).
@@ -784,25 +809,27 @@ STANDING = {
         end
         if have_iron_ore and not reaction_ordered('PIG_IRON_MAKING') then
             out[#out + 1] = {name = 'Pig iron', shops = {'PIG_IRON_MAKING'},
-                note = ('Makes pig iron from iron + flux + fuel while you have under %d pig iron bars.'):format(PIG_IRON_CAP),
+                note = ('Makes pig iron (needs iron + flux + fuel) while you have at least 1 iron bar\n'
+                    .. 'and under %d pig iron bars. Only the iron is gated, so it starts as soon as you\n'
+                    .. 'can make one -- flux/fuel are left to the workshop.'):format(PIG_IRON_CAP),
                 build = function()
                     local iron, pig = inorg_idx('IRON'), inorg_idx('PIG_IRON')
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'PIG_IRON_MAKING',
                         amount = 5, frequency = Daily, conds = {
-                            C('AtLeast', 1, BAR, 0, iron), C('AtLeast', 1, BOULDER, nil, nil, 'FLUX'),
-                            C('AtLeast', 1, BAR, COAL_MAT), C('LessThan', PIG_IRON_CAP, BAR, 0, pig)}}
+                            C('AtLeast', 1, BAR, 0, iron), C('LessThan', PIG_IRON_CAP, BAR, 0, pig)}}
                     return missing_shops({'PIG_IRON_MAKING'})
                 end}
         end
         if have_iron_ore and not reaction_ordered('STEEL_MAKING') then
             out[#out + 1] = {name = 'Steel', shops = {'STEEL_MAKING'},
-                note = ('Makes steel from iron + pig iron + flux + fuel while you have under %d steel bars.'):format(METAL_CAP),
+                note = ('Makes steel (needs iron + pig iron + flux + fuel) while you have at least 1 of\n'
+                    .. 'each metal and under %d steel bars. Only the metals are gated, so it starts as\n'
+                    .. 'soon as you can make one -- flux/fuel are left to the workshop.'):format(METAL_CAP),
                 build = function()
                     local iron, pig, steel = inorg_idx('IRON'), inorg_idx('PIG_IRON'), inorg_idx('STEEL')
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'STEEL_MAKING',
                         amount = 5, frequency = Daily, conds = {
                             C('AtLeast', 1, BAR, 0, iron), C('AtLeast', 1, BAR, 0, pig),
-                            C('AtLeast', 1, BOULDER, nil, nil, 'FLUX'), C('AtLeast', 1, BAR, COAL_MAT),
                             C('LessThan', METAL_CAP, BAR, 0, steel)}}
                     return missing_shops({'STEEL_MAKING'})
                 end}
