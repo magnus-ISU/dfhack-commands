@@ -41,8 +41,8 @@ accepting creates it (all conditioned so they only run when sensible):
   - Smelting: a SEPARATE ask per metal ore you have (so each ore is offered as you find it),
     smelting it while that metal < 100 bars; plus pig iron (< 10) and steel (< 100) asks
     when you have iron ore -- each checks ingredients.
-  - Barrels / Bins: makes wooden barrels / bins while under 30 (only offered if you have a
-    Carpenter's Workshop).
+  - Containers (barrels, bins, buckets, wheelbarrows): a material-picked keep-stocked order
+    each (wood or metal, e.g. copper), only offered when you have a Carpenter's Workshop.
   - Melting: a melt order when items are marked for melting but nothing melts them.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
@@ -66,7 +66,6 @@ local COAL_MAT = 7                -- builtin material for coal bars (charcoal AN
 local FUEL_TARGET = 20            -- make fuel (charcoal/coke) while under this many bars
 local METAL_CAP = 100             -- stop smelting a metal once it has this many bars
 local PIG_IRON_CAP = 10           -- pig iron is an intermediate -- keep only a few
-local STORE_TARGET = 30           -- keep at least this many barrels / bins on hand
 
 -- needed-item type -> the job_type that produces it. (Furniture/components are made with
 -- item_type = NONE on the order; the job_type alone determines the product.)
@@ -132,7 +131,7 @@ local JOB_MATERIALS = {
 local HOSPITAL_SUPPLIES = {
     {supply = 'Splints',  kind = 'item', job = 'ConstructSplint', cond_item = 'SPLINT', target = 5},
     {supply = 'Crutches', kind = 'item', job = 'ConstructCrutch', cond_item = 'CRUTCH', target = 5},
-    {supply = 'Buckets',  kind = 'item', job = 'MakeBucket',      cond_item = 'BUCKET', target = 3},
+    -- buckets are handled by the general container asks (carpenter-gated material picker)
     {supply = 'Thread',   kind = 'job',  job = 'ProcessPlants',   cond_item = 'THREAD', target = 10,
         note = 'Processed from farmable plants (e.g. pig tails) at a Farmer\'s Workshop.'},
     {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
@@ -226,7 +225,7 @@ end
 -- the ordered material choices for a gap (respecting allowed classes + magma requirement)
 local function material_choices(gap)
     local jobname = df.job_type[gap.job_type]
-    local classes = JOB_CLASSES[jobname] or DEFAULT_CLASSES
+    local classes = gap.classes or JOB_CLASSES[jobname] or DEFAULT_CLASSES
     local out, seen_metal = {}, {}
     -- each choice names the item being made, e.g. "Cabinet: Steel [magma-safe]"
     local function add(label, mt, mi, wood)
@@ -397,6 +396,7 @@ end
 local STANDING   -- forward decl: the standing-order producers, defined after order helpers
 
 local function item_label(item_type)
+    if df.item_type[item_type] == 'TRAPPARTS' then return 'Mechanism' end   -- game calls it a mechanism
     local n = df.item_type[item_type] or 'item'
     n = n:lower():gsub('_', ' ')
     return n:sub(1, 1):upper() .. n:sub(2)
@@ -434,7 +434,7 @@ end
 
 -- turn a HOSPITAL_SUPPLIES spec into a gap the dialog understands
 local function make_hospital_gap(spec)
-    local g = {name = spec.supply, kind = spec.kind, note = spec.note, amount = spec.target}
+    local g = {name = spec.supply, kind = spec.kind, note = spec.note, amount = spec.target, title = 'Hospital supply'}
     if spec.kind == 'reaction' then
         g.options, g.chain = spec.options, spec.chain
     else
@@ -505,11 +505,12 @@ local function scan()
             if not hospital_has_order(spec) then gaps[#gaps + 1] = make_hospital_gap(spec) end
         end
     end
-    -- standing-order checks (brewing, fuel, smelting per-ore, melting, ...); each source
-    -- yields zero or more gap descriptors {name, note, shops, build}.
+    -- standing-order checks (brewing, fuel, smelting per-ore, barrels/bins, melting, ...).
+    -- A source either yields a ready gap (it set its own kind, e.g. a material-picker 'item'
+    -- gap) or a {name, note, shops, build} descriptor we wrap as a single-confirm 'standing'.
     for _, source in ipairs(STANDING) do
         for _, g in ipairs(source()) do
-            gaps[#gaps + 1] = {name = g.name, kind = 'standing', producer = g}
+            gaps[#gaps + 1] = g.kind and g or {name = g.name, kind = 'standing', producer = g}
         end
     end
     table.sort(unmakeable)
@@ -574,7 +575,7 @@ local function create_order(gap, choice)
         cond = {compare = gap.cond_compare or df.logic_condition_type.Exactly,
                 val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype},
     }
-    local req = workshop_for(df.job_type[gap.job_type], choice)
+    local req = (gap.ws_for and gap.ws_for(choice)) or workshop_for(df.job_type[gap.job_type], choice)
     if req and not ws_exists(req) then return {req.label} end
     return {}
 end
@@ -679,6 +680,27 @@ local function mat_name(idx)
     return raw and raw.id:lower():gsub('_', ' ') or ('material ' .. tostring(idx))
 end
 
+-- containers offered (material-picked) when a Carpenter's Workshop is built. `tool` marks
+-- a tool item (made via MakeTool with a tooldef subtype, e.g. the wheelbarrow).
+local CONTAINERS = {
+    {name = 'Barrels',      job = 'MakeBarrel',   item = 'BARREL', target = 30},
+    {name = 'Bins',         job = 'ConstructBin', item = 'BIN',    target = 30},
+    {name = 'Buckets',      job = 'MakeBucket',   item = 'BUCKET', target = 10},
+    {name = 'Wheelbarrows', job = 'MakeTool',     item = 'TOOL',   target = 5, tool = 'ITEM_TOOL_WHEELBARROW'},
+}
+
+-- the tooldef subtype index for a tool id (e.g. ITEM_TOOL_WHEELBARROW), or nil
+local function tool_subtype(id)
+    local tools = df.global.world.raws.itemdefs.tools
+    for i = 0, #tools - 1 do if tools[i].id == id then return i end end
+end
+
+-- containers are made at a Carpenter's (wood) or a Metalsmith's Forge (metal)
+local function container_ws(choice)
+    if choice.wood then return {label = "a Carpenter's Workshop", ws = df.workshop_type.Carpenters} end
+    return {label = "a Metalsmith's Forge", ws = df.workshop_type.MetalsmithsForge}
+end
+
 -- each STANDING entry is a function returning a list of gap descriptors
 -- {name, note, shops, build} for the orders currently worth offering. The smelting source
 -- yields ONE gap per ore (plus pig iron / steel), so each ore is asked for as you get it.
@@ -727,27 +749,21 @@ STANDING = {
                 return missing_shops({'BITUMINOUS_COAL_TO_COKE'})
             end}}
     end,
-    function()   -- wooden barrels -- only offered if a Carpenter's Workshop is built
+    function()   -- containers (barrels/bins/buckets/wheelbarrows) -- only with a Carpenter's
         if not ws_exists{ws = df.workshop_type.Carpenters} then return {} end
-        if has_order(df.job_type.MakeBarrel, -1) then return {} end
-        return {{name = 'Barrels', shops = {},
-            note = ('Makes wooden barrels (at a Carpenter\'s) while you have fewer than %d.'):format(STORE_TARGET),
-            build = function()
-                add_order{job_type = df.job_type.MakeBarrel, wood = true, amount = 10, frequency = Daily,
-                    conds = {C('LessThan', STORE_TARGET, df.item_type.BARREL)}}
-                return {}
-            end}}
-    end,
-    function()   -- wooden bins -- only offered if a Carpenter's Workshop is built
-        if not ws_exists{ws = df.workshop_type.Carpenters} then return {} end
-        if has_order(df.job_type.ConstructBin, -1) then return {} end
-        return {{name = 'Bins', shops = {},
-            note = ('Makes wooden bins (at a Carpenter\'s) while you have fewer than %d.'):format(STORE_TARGET),
-            build = function()
-                add_order{job_type = df.job_type.ConstructBin, wood = true, amount = 10, frequency = Daily,
-                    conds = {C('LessThan', STORE_TARGET, df.item_type.BIN)}}
-                return {}
-            end}}
+        local out = {}
+        for _, c in ipairs(CONTAINERS) do
+            local sub = c.tool and tool_subtype(c.tool) or -1   -- wheelbarrow = a tool subtype
+            if (not c.tool or sub) and not has_order(df.job_type[c.job], sub) then
+                out[#out + 1] = {name = c.name, kind = 'item', title = 'Storage',
+                    classes = {wood = true, metal = true},      -- wood or metal (e.g. copper)
+                    ws_for = container_ws,                       -- wood -> carpenter, metal -> forge
+                    job_type = df.job_type[c.job], order_subtype = sub,
+                    cond_item_type = df.item_type[c.item], cond_subtype = sub,
+                    cond_compare = df.logic_condition_type.LessThan, cond_val = c.target, amount = 10}
+            end
+        end
+        return out
     end,
     function()   -- smelting: ONE ask per metal ore you have, plus pig iron and steel
         local out, have_iron_ore = {}, false
@@ -837,8 +853,8 @@ local function gap_prompt(gap, i, total)
         local warn = (req and not ws_exists(req)) and ('\n\n!! Not built yet: ' .. req.label) or ''
         return {{text = ('Make %s: keep ~%d in stock'):format(gap.name:lower(), gap.amount), mat_type = -1, mat_index = -1}},
             ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total), (gap.note or '') .. warn
-    elseif kind == 'item' then  -- hospital item (pick material)
-        return material_choices(gap), ('Hospital supply: %s  (%d/%d)'):format(gap.name, i, total),
+    elseif kind == 'item' then  -- material-picked stock item (hospital supply, container, ...)
+        return material_choices(gap), ('%s: %s  (%d/%d)'):format(gap.title or 'Make', gap.name, i, total),
             ('Makes %s; pick a material; keeps ~%d in stock.'):format(gap.name:lower(), gap.amount)
     elseif kind == 'standing' then  -- a standing-order producer (brewing/fuel/smelting/melting)
         local miss = missing_shops(gap.producer.shops or {})
@@ -966,7 +982,8 @@ if arg == 'list' then
             print(('  - %-16s x%d  -> %s%s'):format(g.name, g.count, df.job_type[g.job_type],
                 g.magma_required and '  (magma-safe required)' or ''))
         else
-            print(('  - %-16s [%s]'):format(g.name, g.kind == 'standing' and 'standing order' or ('hospital ' .. g.kind)))
+            print(('  - %-16s [%s]'):format(g.name,
+                g.kind == 'standing' and 'standing order' or ((g.title or 'hospital'):lower() .. ' ' .. g.kind)))
         end
     end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
