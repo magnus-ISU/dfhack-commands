@@ -94,6 +94,10 @@ if ({...})[1] == 'disable' then
         for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready'}) do
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
         end
+        -- trader-notification suppressed DFHack's stock "traders_ready" alert; restore it
+        if n.config and n.config.data and n.config.data['traders_ready'] then
+            n.config.data['traders_ready'].enabled = true
+        end
         if n.config and n.config.write then n.config:write() end
     end)
     print('Done. Pack helpers disabled. (One-shots already applied -- embark-nobles,')

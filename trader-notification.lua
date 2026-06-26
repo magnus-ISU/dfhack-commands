@@ -21,6 +21,7 @@ to your dfhack-config/init/dfhack.init (magnus-scripts does this for you).
 ]]
 
 local NAME = 'trader_ready'
+local STOCK = 'traders_ready'   -- DFHack's built-in trader notification (we supersede it)
 local TICKS_PER_DAY = 1200   -- fortress-mode day length (cur_year_tick units)
 
 -- ---------------------------------------------------------------------------
@@ -92,6 +93,16 @@ local function register()
     -- doesn't nil-index (and so the notification is on by default)
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
+    end
+    -- our countdown supersedes DFHack's stock "traders_ready" alert -- turn that one off so
+    -- they don't both show. (magnus-scripts disable restores it.)
+    if n.config and n.config.data then
+        local stock = n.NOTIFICATIONS_BY_NAME[STOCK]
+        n.config.data[STOCK] = n.config.data[STOCK] or {version = stock and stock.version or 1}
+        if n.config.data[STOCK].enabled ~= false then
+            n.config.data[STOCK].enabled = false
+            if n.config.write then n.config:write() end
+        end
     end
 end
 
