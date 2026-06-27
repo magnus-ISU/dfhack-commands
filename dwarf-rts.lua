@@ -1146,4 +1146,8 @@ OVERLAY_WIDGETS = {clickmove = DwarfRtsClickMove}
 if dfhack_flags.module then return end
 
 require('plugins.overlay').rescan()
+-- explicitly turn the overlay ON. default_enabled only applies on first discovery; once an
+-- `overlay disable` (e.g. `magnus-scripts disable`) has persisted an off state, rescan alone
+-- won't bring it back -- so running `dwarf-rts` must re-enable it to be reliable.
+dfhack.run_command('overlay', 'enable', 'dwarf-rts.clickmove')
 print('dwarf-rts: click move/attack/select, drag-select, keys 1-9, select-all + close-guard active')
