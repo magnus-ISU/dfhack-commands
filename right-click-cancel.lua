@@ -6,16 +6,18 @@ right-click-cancel
 Mouse helpers for DF's designation and construction tools (overlay "right-click-cancel.cancel"):
 
   * LEFT-DRAG a box (in "box select" / rectangle mode) APPLIES the designation across the box
-    immediately -- no two-click. Works for dig, the dig sub-types (channel / ramps / up,
-    down & up-down stairs), woodcutting (chop), and plant gathering. Only diggable/valid
-    tiles in the box are designated (same rules the game uses).
-  * LEFT single-click (press & release on one tile) is passed through to the game unchanged,
-    so the normal click-click designation still works for precise corners.
+    in one gesture: the game places the first corner on mouse-down (so its selection box
+    renders as you drag) and we auto-place the second corner on release. Works for dig and
+    its sub-types (channel / ramps / up,down,up-down stairs), woodcutting (chop), plant
+    gathering -- whatever designation tool is active. The game does the actual designating,
+    so validity, marker mode, priority, etc. all match exactly.
+  * LEFT single-click is left entirely to the game (placed on mouse-down), so the normal
+    click-click designation and its live selection box are unchanged.
   * RIGHT-DRAG a box REMOVES everything designated in it (dig/chop/gather designations and
     in-progress buildings).
   * RIGHT single-click cancels whatever is designated under the cursor (a dig designation, a
-    tree/plant marked for chop/gather, or an in-progress construction/building). A right
-    click on an empty tile passes through (DF's normal "leave the tool").
+    tree/plant marked for chop/gather, or an in-progress construction/building); a right
+    click on an empty tile passes through (the game's normal "leave the tool").
 
 Toggle or move it with gui/overlay; magnus-scripts enables it each session.
 ]]
@@ -77,7 +79,7 @@ local function cancel_dig(pos)
     return had
 end
 
--- also un-mark a tree/plant designated for chop/gather (belt-and-suspenders with the job removal)
+-- un-mark a tree/plant designated for chop/gather
 local function cancel_plant(pos)
     local plant = dfhack.maps.getPlantAtTile(pos)
     if plant and dfhack.designations.isPlantMarked(plant) and dfhack.designations.canUnmarkPlant(plant) then
@@ -120,131 +122,10 @@ local function in_cancel_mode()
     return false
 end
 
--- ============================================================================
--- DESIGNATE side (left-drag) -- dig validity ported from quickfort's dig logic
--- ============================================================================
-
-local TS, TM = df.tiletype_shape, df.tiletype_material
-local function is_construction(a) return a.material == TM.CONSTRUCTION end
-local function is_floor(a)         return a.shape == TS.FLOOR end
-local function is_ramp(a)          return a.shape == TS.RAMP end
-local function is_diggable_floor(a) return is_floor(a) or a.shape == TS.BOULDER or a.shape == TS.PEBBLES end
-local function is_wall(a)          return a.shape == TS.WALL end
-local function is_tree(a)          return a.material == TM.TREE end
-local function is_fortification(a) return a.shape == TS.FORTIFICATION end
-local function is_up_stair(a)      return a.shape == TS.STAIR_UP end
-local function is_down_stair(a)    return a.shape == TS.STAIR_DOWN end
-local function is_removable_shape(a) return is_ramp(a) or is_up_stair(a) or is_down_stair(a) end
-local function is_gatherable(a)    return a.shape == TS.SHRUB end
-local function is_sapling(a)       return a.shape == TS.SAPLING end
-
--- each returns a dig value to set, or nil if the tile shouldn't be designated for this op
-local function do_mine(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or (not is_wall(c.a) and not is_fortification(c.a))) then return nil end
-    return DV.Default
-end
-local function do_channel(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or is_tree(c.a) or
-        (not is_wall(c.a) and not is_fortification(c.a) and not is_diggable_floor(c.a)
-         and not is_down_stair(c.a) and not is_removable_shape(c.a) and not is_gatherable(c.a)
-         and not is_sapling(c.a))) then return nil end
-    return DV.Channel
-end
-local function do_up_stair(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or (not is_wall(c.a) and not is_fortification(c.a))) then return nil end
-    return DV.UpStair
-end
-local function do_down_stair(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or is_tree(c.a) or
-        (not is_wall(c.a) and not is_fortification(c.a) and not is_diggable_floor(c.a)
-         and not is_removable_shape(c.a) and not is_gatherable(c.a) and not is_sapling(c.a))) then return nil end
-    return DV.DownStair
-end
-local function do_up_down_stair(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or
-        (not is_wall(c.a) and not is_fortification(c.a) and not is_diggable_floor(c.a)
-         and not is_up_stair(c.a))) then return nil end
-    if is_diggable_floor(c.a) then return DV.DownStair end
-    return DV.UpDownStair
-end
-local function do_ramp(c)
-    if c.on_map_edge then return nil end
-    if not c.flags.hidden and (is_construction(c.a) or (not is_wall(c.a) and not is_fortification(c.a))) then return nil end
-    return DV.Ramp
-end
-
-local MODE_DIG = {
-    [MD.DIG_DIG] = do_mine, [MD.DIG_CHANNEL] = do_channel,
-    [MD.DIG_STAIR_UP] = do_up_stair, [MD.DIG_STAIR_DOWN] = do_down_stair,
-    [MD.DIG_STAIR_UPDOWN] = do_up_down_stair, [MD.DIG_RAMP] = do_ramp,
-}
-
--- iterate the box on `a`'s z-level; cb(pos) per tile
 local function for_box(a, b, cb)
     local x1, x2 = math.min(a.x, b.x), math.max(a.x, b.x)
     local y1, y2 = math.min(a.y, b.y), math.max(a.y, b.y)
     for x = x1, x2 do for y = y1, y2 do cb(x, y, a.z) end end
-end
-
-local function designate_dig_box(do_fn, marker, a, b)
-    local mx, my = df.global.world.map.x_count - 1, df.global.world.map.y_count - 1
-    for_box(a, b, function(x, y, z)
-        local pos = {x = x, y = y, z = z}
-        local blk = dfhack.maps.getTileBlock(pos)
-        if not blk then return end
-        local lx, ly = x % 16, y % 16
-        local ctx = {
-            flags = blk.designation[lx][ly],
-            a = df.tiletype.attrs[dfhack.maps.getTileType(pos)],
-            on_map_edge = (x == 0 or y == 0 or x == mx or y == my),
-        }
-        local val = do_fn(ctx)
-        if val then
-            ctx.flags.dig = val
-            if marker then blk.occupancy[lx][ly].dig_marked = true end
-            blk.flags.designated = true
-        end
-    end)
-end
-
-local function designate_plant_box(want, a, b)
-    for_box(a, b, function(x, y, z)
-        local pos = {x = x, y = y, z = z}
-        local attrs = df.tiletype.attrs[dfhack.maps.getTileType(pos)]
-        local match = (want == 'chop' and is_tree(attrs)) or (want == 'gather' and is_gatherable(attrs))
-        if match then
-            local plant = dfhack.maps.getPlantAtTile(pos)
-            if plant and dfhack.designations.canMarkPlant(plant) then
-                dfhack.designations.markPlant(plant)
-            end
-        end
-    end)
-end
-
--- left-drag designation is active only in "box select" (rectangle) mode, for the dig
--- sub-types and chop/gather. (In paint mode the game already drags, so we stay out.)
-local function left_designate_active()
-    local mi = df.global.game.main_interface
-    if not mi.main_designation_doing_rectangles then return false end
-    local m = mi.main_designation_selected
-    return MODE_DIG[m] ~= nil or m == MD.CHOP or m == MD.GATHER
-end
-
-local function apply_left_box(a, b)
-    local mi = df.global.game.main_interface
-    local m = mi.main_designation_selected
-    if MODE_DIG[m] then
-        designate_dig_box(MODE_DIG[m], mi.designation.marker_only, a, b)
-    elseif m == MD.CHOP then
-        designate_plant_box('chop', a, b)
-    elseif m == MD.GATHER then
-        designate_plant_box('gather', a, b)
-    end
 end
 
 local function cancel_box(a, b)
@@ -252,7 +133,19 @@ local function cancel_box(a, b)
 end
 
 -- ============================================================================
--- overlay: poll both mouse buttons; resolve each gesture on release
+-- DESIGNATE side (left-drag): let the GAME designate -- it places the first corner on
+-- mouse-down (drawing its selection box); we just auto-place the second corner on release.
+-- ============================================================================
+
+-- left-drag completion is active only in "box select" (rectangle) mode while a designation
+-- tool is up. (In paint mode the game already drags; single clicks need no help.)
+local function left_drag_active()
+    local mi = df.global.game.main_interface
+    return mi.main_designation_doing_rectangles and mi.main_designation_selected ~= MD.NONE
+end
+
+-- ============================================================================
+-- overlay: watch both mouse buttons
 -- ============================================================================
 
 RightClickCancel = defclass(RightClickCancel, overlay.OverlayWidget)
@@ -274,31 +167,37 @@ end
 local function same(a, b) return a.x == b.x and a.y == b.y and a.z == b.z end
 
 function RightClickCancel:overlay_onupdate()
-    -- LEFT button: drag = designate box; click = pass through to the game
+    -- LEFT button: NOT swallowed -- the game handles mouse-down (places corner 1, renders its
+    -- selection box). On a drag, re-dispatch a click on release to place corner 2 (the game
+    -- then applies the box and clears its anchor). A single click is left entirely to the game.
     local ld = df.global.enabler.mouse_lbut_down
     if ld == 1 and self.lbut ~= 1 then
-        self.lpress = left_designate_active() and dfhack.gui.getMousePos() or nil
-    elseif ld ~= 1 and self.lbut == 1 and self.lpress then
-        local rel = dfhack.gui.getMousePos()
-        if rel then
-            if same(self.lpress, rel) then self:passthrough('_MOUSE_L')
-            else apply_left_box(self.lpress, rel) end
+        self.lpress = left_drag_active() and dfhack.gui.getMousePos() or nil
+    elseif ld ~= 1 and self.lbut == 1 then
+        if self.lpress then
+            local rel = dfhack.gui.getMousePos()
+            if rel and not same(self.lpress, rel) and left_drag_active() then
+                self:passthrough('_MOUSE_L')
+            end
         end
         self.lpress = nil
     end
     self.lbut = ld
 
-    -- RIGHT button: drag = remove box; click = cancel under cursor (else pass through)
+    -- RIGHT button: swallowed in onInput; click = cancel under cursor (else pass through),
+    -- drag = remove the boxed area.
     local rd = df.global.enabler.mouse_rbut_down
     if rd == 1 and self.rbut ~= 1 then
         self.rpress = in_cancel_mode() and dfhack.gui.getMousePos() or nil
-    elseif rd ~= 1 and self.rbut == 1 and self.rpress then
-        local rel = dfhack.gui.getMousePos()
-        if rel then
-            if same(self.rpress, rel) then
-                if not cancel_at(rel) then self:passthrough('_MOUSE_R') end
-            else
-                cancel_box(self.rpress, rel)
+    elseif rd ~= 1 and self.rbut == 1 then
+        if self.rpress then
+            local rel = dfhack.gui.getMousePos()
+            if rel then
+                if same(self.rpress, rel) then
+                    if not cancel_at(rel) then self:passthrough('_MOUSE_R') end
+                else
+                    cancel_box(self.rpress, rel)
+                end
             end
         end
         self.rpress = nil
@@ -308,8 +207,9 @@ end
 
 function RightClickCancel:onInput(keys)
     if self.pass then return false end   -- our own re-dispatched click
-    -- swallow map clicks we resolve on release (the poller above); leave panel clicks alone
-    if keys._MOUSE_L and left_designate_active() and dfhack.gui.getMousePos() then return true end
+    -- only the RIGHT button is intercepted (resolved on release by the poller). The LEFT
+    -- button is left to the game so its native selection box renders. Don't swallow panel
+    -- clicks (getMousePos is nil off the map).
     if keys._MOUSE_R and in_cancel_mode() and dfhack.gui.getMousePos() then return true end
     return false
 end
@@ -320,6 +220,6 @@ if not dfhack_flags.module then
     require('plugins.overlay').rescan()
     dfhack.run_command('overlay', 'enable', 'right-click-cancel.cancel')
     print('right-click-cancel: overlay enabled.')
-    print('  left-drag = box designate (dig/stairs/chop/gather), left-click = normal click')
+    print('  left-drag = box designate (the game renders the box), left-click = normal click')
     print('  right-drag = box remove, right-click = cancel under cursor')
 end
