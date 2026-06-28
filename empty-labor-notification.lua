@@ -25,14 +25,16 @@ local dlg = require('gui.dialogs')
 -- detection: details set to OnlySelectedDoesThis with no assigned units
 -- ---------------------------------------------------------------------------
 
--- A detail's labor only gets done if at least one assigned unit is a living fort citizen.
--- Dead/expelled/visiting units linger in assigned_units but don't count (DF marks the dead
--- as non-citizens), so a detail whose selected dwarves have all died effectively has no
--- workers -- which is exactly what we want to warn about, not just a literally-empty list.
+-- A detail's labor only gets done if at least one assigned unit is a living worker the fort
+-- can actually use: a citizen OR a resident (residents -- e.g. a joined "cursed hunter" --
+-- aren't citizens but are assignable and do the work). Dead/expelled units linger in
+-- assigned_units but don't count, so a detail whose workers have all died is flagged --
+-- which is what we want, not just a literally-empty list.
 local function has_living_worker(w)
     for _, uid in ipairs(w.assigned_units) do
         local u = df.unit.find(uid)
-        if u and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u) then
+        if u and not dfhack.units.isDead(u)
+            and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u)) then
             return true
         end
     end
