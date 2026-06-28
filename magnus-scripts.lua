@@ -25,6 +25,7 @@ Activates the "always-on" helpers in this pack:
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
     * item-description.expand   (overlay: expands a long item description to half-screen)
+    * right-click-cancel        (overlay: right-click cancels designations/constructions)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection) and enable a batch of stock DFHack tools:
@@ -90,6 +91,7 @@ if ({...})[1] == 'disable' then
     try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
+    try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
@@ -126,6 +128,7 @@ try('auto-tomb (1x1 tomb zone on each coffin)', function() dfhack.run_command('e
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
 try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'item-description.expand') end)
+try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if ({...})[1] == 'lovely' then
