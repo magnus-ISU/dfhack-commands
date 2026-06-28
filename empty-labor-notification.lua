@@ -5,8 +5,8 @@ empty-labor-notification
 
 Registers a notification (name: "empty_labor") into DFHack's gui/notify panel, alongside
 "needs a tomb" and the planned-building order warnings. It alerts when any Work Detail is
-set to "Only Selected Does This" but has NO assigned workers -- so that labor silently never
-gets done.
+set to "Only Selected Does This" but has no living workers -- either nothing selected, or the
+selected dwarves have all died/left -- so that labor silently never gets done.
     * exactly one   -> 'Work detail "Masonry" has no workers!'
     * more than one -> '3 work details have no workers!'
 
@@ -25,16 +25,33 @@ local dlg = require('gui.dialogs')
 -- detection: details set to OnlySelectedDoesThis with no assigned units
 -- ---------------------------------------------------------------------------
 
+-- A detail's labor only gets done if at least one assigned unit is a living fort citizen.
+-- Dead/expelled/visiting units linger in assigned_units but don't count (DF marks the dead
+-- as non-citizens), so a detail whose selected dwarves have all died effectively has no
+-- workers -- which is exactly what we want to warn about, not just a literally-empty list.
+local function has_living_worker(w)
+    for _, uid in ipairs(w.assigned_units) do
+        local u = df.unit.find(uid)
+        if u and dfhack.units.isCitizen(u) and not dfhack.units.isDead(u) then
+            return true
+        end
+    end
+    return false
+end
+
+local cache = {frame = -1, list = nil}   -- recompute at most once per frame (cheap, but called often)
 local function scan()
+    local f = df.global.world.frame_counter or 0
+    if f == cache.frame and cache.list then return cache.list end
     local out = {}
     local wds = df.global.plotinfo.labor_info.work_details
     for i = 0, #wds - 1 do
         local w = wds[i]
-        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis
-            and #w.assigned_units == 0 then
+        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis and not has_living_worker(w) then
             out[#out + 1] = w
         end
     end
+    cache.frame, cache.list = f, out
     return out
 end
 
@@ -69,9 +86,10 @@ local function show_dialog()
     local list = scan()
     if #list == 0 then return end
     local lines = {
-        'These Work Details are set to "Only Selected Does This" but have NO assigned',
-        'workers, so their labors never get done. Assign someone, switch them to',
-        '"Everybody Does This", or set "Nobody Does This" to silence this warning.',
+        'These Work Details are set to "Only Selected Does This" but have no living',
+        'workers (none selected, or the selected dwarves have died/left), so their labors',
+        'never get done. Assign someone, switch to "Everybody Does This", or set',
+        '"Nobody Does This" to silence this warning.',
         '',
     }
     for _, w in ipairs(list) do
