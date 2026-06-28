@@ -9,7 +9,8 @@ is designated there, instead of just leaving the tool:
   * a dig designation is removed,
   * a tree marked for chopping is un-designated,
   * a plant marked for gathering is un-designated,
-  * a construction that is being built is canceled (removed).
+  * any building still being built -- a construction, furniture, screw pump, workshop,
+    etc. -- is canceled (removed).
 
 Right-clicking a tile with nothing to cancel is left alone, so DF's normal right-click
 (back out of the tool / cancel the current rectangle) still works.
@@ -71,10 +72,21 @@ local function cancel_dig(pos)
     return had
 end
 
--- cancel a construction that is still being built (has a pending build job)
-local function cancel_construction(pos)
+-- is this building still being built (not finished)? works for any building type --
+-- constructions, furniture, screw pumps, workshops, ... A finished building reports
+-- getBuildStage() == getMaxBuildStage() even when it has work jobs running.
+local function under_construction(bld)
+    if bld:getBuildStage() < bld:getMaxBuildStage() then return true end
+    for _, j in ipairs(bld.jobs) do
+        if j.job_type == df.job_type.ConstructBuilding then return true end
+    end
+    return false
+end
+
+-- cancel ANY building that is still being built (placed but not yet finished)
+local function cancel_building(pos)
     local bld = dfhack.buildings.findAtTile(pos)
-    if bld and bld:getType() == df.building_type.Construction and #bld.jobs > 0 then
+    if bld and under_construction(bld) then
         dfhack.buildings.deconstruct(bld)
         return true
     end
@@ -85,7 +97,7 @@ local function cancel_at(pos)
     local did = cancel_dig(pos)
     if remove_jobs_at(pos, CHOP_JOB) then did = true end
     if remove_jobs_at(pos, GATHER_JOB) then did = true end
-    if cancel_construction(pos) then did = true end
+    if cancel_building(pos) then did = true end
     return did
 end
 
@@ -93,9 +105,8 @@ end
 local function in_cancel_mode()
     local mi = df.global.game.main_interface
     if ACTIVE_DESIG[mi.main_designation_selected] then return true end
-    -- placing a construction
-    if mi.bottom_mode_selected == df.main_bottom_mode_type.BUILDING_PLACEMENT
-        and df.global.buildreq.building_type == df.building_type.Construction then
+    -- placing any building (constructions, furniture, screw pumps, workshops, ...)
+    if mi.bottom_mode_selected == df.main_bottom_mode_type.BUILDING_PLACEMENT then
         return true
     end
     return false
