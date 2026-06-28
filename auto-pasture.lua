@@ -14,10 +14,12 @@ Pieces that work together so you usually never think about pasturing:
            takes over scavenge, leaving the grass pen for grazers only
      Animals already in a pasture are never moved by this.
 
-  3. A background service that pens any unassigned tame fort animal (any age,
-     including ones sitting in cages): grazers -> graze pasture, non-grazers ->
-     scavenge pasture. Animals you deliberately remove are remembered and not
-     re-grabbed. Chained/restrained animals are left alone.
+  3. A background service that pens any unassigned tame fort animal (any age):
+     grazers -> graze pasture, non-grazers -> scavenge pasture. Caged animals are
+     freed and penned too -- EXCEPT caged non-grazers ("scavengers"), which are left
+     in their cages (they don't graze, so they won't starve there). Animals you
+     deliberately remove are remembered and not re-grabbed. Chained/restrained
+     animals are left alone.
 
   4. A notify-panel warning when a pasture is overcrowded: more than ~1 animal
      per 4 grass tiles (graze) or per 4 tiles (scavenge). Clicking it cycles
@@ -187,7 +189,12 @@ local function do_assign()
         if is_chained(unit) then goto continue end  -- restrained on purpose
         if known[unit.id] then goto continue end    -- deliberately left roaming
         -- candidates include caged tame animals; assign_to_zone frees them
-        local zone = dfhack.units.isGrazer(unit) and graze or scavenge
+        local grazer = dfhack.units.isGrazer(unit)
+        -- leave caged non-grazers ("scavengers") in their cages: they don't graze, so they
+        -- won't starve whether caged or pastured -- don't pull every one out just to pen it.
+        -- (caged grazers ARE still freed + pastured, since they need grass to feed.)
+        if unit.flags1.caged and not grazer then goto continue end
+        local zone = grazer and graze or scavenge
         if zone then
             assign_to_zone(unit, zone)
             known[unit.id] = true
