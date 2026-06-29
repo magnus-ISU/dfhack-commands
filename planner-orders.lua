@@ -585,6 +585,8 @@ local function add_order(p)
             item_type = c.item_type or -1, item_subtype = c.item_subtype or -1,
             mat_type = c.mat_type or -1, mat_index = c.mat_index or -1,
             reaction_class = c.reaction_class or ''})
+        -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
+        if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
     end
     mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
@@ -598,7 +600,8 @@ local function create_order(gap, choice)
         mat_type = choice.mat_type, mat_index = choice.mat_index, wood = choice.wood,
         amount = gap.amount or ORDER_AMOUNT, frequency = df.workquota_frequency_type.Daily,
         cond = {compare = gap.cond_compare or df.logic_condition_type.Exactly,
-                val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype},
+                val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype,
+                empty = gap.cond_empty},
     }
     local req = (gap.ws_for and gap.ws_for(choice)) or workshop_for(df.job_type[gap.job_type], choice)
     if req and not ws_exists(req) then return {req.label} end
@@ -708,10 +711,10 @@ end
 -- containers offered (material-picked) when a Carpenter's Workshop is built. `tool` marks
 -- a tool item (made via MakeTool with a tooldef subtype, e.g. the wheelbarrow).
 local CONTAINERS = {
-    {name = 'Barrels',      job = 'MakeBarrel',   item = 'BARREL', target = 30},
-    {name = 'Bins',         job = 'ConstructBin', item = 'BIN',    target = 30},
-    {name = 'Buckets',      job = 'MakeBucket',   item = 'BUCKET', target = 10},
-    {name = 'Wheelbarrows', job = 'MakeTool',     item = 'TOOL',   target = 5, tool = 'ITEM_TOOL_WHEELBARROW'},
+    {name = 'Barrels',      job = 'MakeBarrel',   item = 'BARREL'},
+    {name = 'Bins',         job = 'ConstructBin', item = 'BIN'},
+    {name = 'Buckets',      job = 'MakeBucket',   item = 'BUCKET'},
+    {name = 'Wheelbarrows', job = 'MakeTool',     item = 'TOOL', tool = 'ITEM_TOOL_WHEELBARROW'},
 }
 
 -- the tooldef subtype index for a tool id (e.g. ITEM_TOOL_WHEELBARROW), or nil
@@ -785,7 +788,10 @@ STANDING = {
                     ws_for = container_ws,                       -- wood -> carpenter, metal -> forge
                     job_type = df.job_type[c.job], order_subtype = sub,
                     cond_item_type = df.item_type[c.item], cond_subtype = sub,
-                    cond_compare = df.logic_condition_type.LessThan, cond_val = c.target, amount = 10}
+                    -- keep ~10 EMPTY of each container available (empty = ready to fill),
+                    -- rather than capping the total count
+                    cond_compare = df.logic_condition_type.LessThan, cond_val = 10, cond_empty = true,
+                    amount = 10}
             end
         end
         return out
