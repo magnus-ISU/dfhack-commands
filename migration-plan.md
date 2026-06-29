@@ -50,16 +50,22 @@ wildlife).
 > NOT use it as the "they leave" mechanism — see §3.4 / §4.3 for how wildlife actually departs
 > (wild animals wander off the map edges on their own).
 
-> **⚠️ Tooling status (tested on DFHack 53.15-r1 / DF v0.53.15 — it does NOT work yet):** the
-> shipped `modtools/create-unit` errors out (`Cannot read field world.arena_spawn`) and DFHack
-> warns it is "untested" for this version. The arena-spawn machinery the script drives changed:
-> the old `df.global.world.arena_spawn` (with `.type`/`.filter`) is gone; there is now
-> `df.global.world.arena` (an `arenast` holding `race/caste/item_types/skills/equipment/...`)
-> with no `.spawn`/`.type`/`.filter`. So **the spawn primitive this whole plan depends on is
-> currently non-functional here.** A live test spawn (one wolf next to a boar sounder) failed at
-> this line and created nothing. **Prerequisite/Phase 0** (see §6) is to get a working spawn:
-> either a DFHack update that fixes `create-unit`, or a small custom spawn helper. Everything
-> below assumes that primitive exists.
+> **⚠️ Spawn primitive — `create-unit` is broken here, but we have a working replacement
+> (`wildlife-spawn.lua`).** On DFHack 53.15-r1 / DF v0.53.15 the shipped `modtools/create-unit`
+> errors (`Cannot read field world.arena_spawn`) and is flagged "untested": it drives the old
+> arena-spawn machinery, which is *doubly* gone — `world.arena_spawn` was replaced by a
+> restructured `world.arena` (no `.spawn`/`.type`/`.filter`), **and** the `D_LOOK_ARENA_CREATURE`
+> keybinding it simulates no longer exists (the arena UI was overhauled). So porting that hack is
+> a dead end.
+>
+> **The fix:** `dfhack.units.create(race, caste)` — a Bay12 entry point that builds a *complete*
+> unit (race, caste, name, soul, initialized body and mind), added to `world.units.all`. We then
+> put it into play ourselves: seed a valid `pos`, `dfhack.units.teleport` it (which registers
+> tile occupancy / block membership — note it no-ops on the off-map unit until `pos` is seeded),
+> insert into `world.units.active`, set `flags1.inactive=false` and `civ_id=-1` (wild). This is
+> implemented and **verified live**: spawned wolves were complete (61 body parts), placed,
+> wild, active, and **wandered on their own** when unpaused. Shipped as **`wildlife-spawn.lua`**
+> (`spawn(race, caste, pos)`), which the migration features call.
 
 ---
 
@@ -202,13 +208,14 @@ wildlife-migration` into `magnus-scripts`.
 
 ## 6. Implementation phases
 
-0. **Working spawn primitive (PREREQUISITE).** As tested on DFHack 53.15-r1 / DF 53.15, the
-   shipped `modtools/create-unit` is broken (it reads the removed `world.arena_spawn`; the arena
-   data is now `world.arena`, restructured). Before anything else: confirm a newer DFHack fixes
-   `create-unit`, or write a minimal `spawn_wild(race, caste, pos, n)` helper. Validate it by
-   the exact test we attempted — drop one wolf into the boar sounder and watch it get gored —
-   so we know spawned animals are normal, fightable, mortal units before building features on
-   top.
+0. **Working spawn primitive — ✅ DONE (`wildlife-spawn.lua`).** `modtools/create-unit` is broken
+   on this build (arena hijack, doubly removed — see §1), so the primitive uses
+   `dfhack.units.create` + manual placement instead. Verified live: spawned wolves are complete,
+   placed, wild, active units that wander on their own when unpaused. The one thing still
+   unverified is *combat* — wild wolf and wild boar are mutually neutral, so they don't
+   auto-fight; to confirm spawned animals fight/die normally, force a hostile matchup (spawn a
+   predator already flagged hostile, or pit the spawn against an existing enemy) instead of
+   relying on two neutral wild species to brawl.
 
 1. **Pool builder** (read-only): region lookup → same-biome donor union → weighted, filtered
    candidate pool. Ship a `wildlife-migration pool` debug command that prints the pool (species
