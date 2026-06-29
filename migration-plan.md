@@ -50,6 +50,17 @@ wildlife).
 > NOT use it as the "they leave" mechanism — see §3.4 / §4.3 for how wildlife actually departs
 > (wild animals wander off the map edges on their own).
 
+> **⚠️ Tooling status (tested on DFHack 53.15-r1 / DF v0.53.15 — it does NOT work yet):** the
+> shipped `modtools/create-unit` errors out (`Cannot read field world.arena_spawn`) and DFHack
+> warns it is "untested" for this version. The arena-spawn machinery the script drives changed:
+> the old `df.global.world.arena_spawn` (with `.type`/`.filter`) is gone; there is now
+> `df.global.world.arena` (an `arenast` holding `race/caste/item_types/skills/equipment/...`)
+> with no `.spawn`/`.type`/`.filter`. So **the spawn primitive this whole plan depends on is
+> currently non-functional here.** A live test spawn (one wolf next to a boar sounder) failed at
+> this line and created nothing. **Prerequisite/Phase 0** (see §6) is to get a working spawn:
+> either a DFHack update that fixes `create-unit`, or a small custom spawn helper. Everything
+> below assumes that primitive exists.
+
 ---
 
 ## 2. Design principles
@@ -191,6 +202,14 @@ wildlife-migration` into `magnus-scripts`.
 
 ## 6. Implementation phases
 
+0. **Working spawn primitive (PREREQUISITE).** As tested on DFHack 53.15-r1 / DF 53.15, the
+   shipped `modtools/create-unit` is broken (it reads the removed `world.arena_spawn`; the arena
+   data is now `world.arena`, restructured). Before anything else: confirm a newer DFHack fixes
+   `create-unit`, or write a minimal `spawn_wild(race, caste, pos, n)` helper. Validate it by
+   the exact test we attempted — drop one wolf into the boar sounder and watch it get gored —
+   so we know spawned animals are normal, fightable, mortal units before building features on
+   top.
+
 1. **Pool builder** (read-only): region lookup → same-biome donor union → weighted, filtered
    candidate pool. Ship a `wildlife-migration pool` debug command that prints the pool (species
    + weight + group size) so we can eyeball that the Mountains fort now lists deer/moose/etc.,
@@ -223,8 +242,11 @@ Each phase is independently testable (esp. phase 1, which is pure data).
 - **`GIANT_` variants double-dipping** the limit (the rant's savage-biome complaint). → giant
   variants are just other `race`s in the pool; they're handled like any creature and gated by
   `allow_giant_variants`.
-- **create-unit quirks across versions.** → call it via `dfhack.run_script('modtools/create-unit', …)`
-  and validate the resulting unit; degrade gracefully if an arg is unsupported.
+- **create-unit is version-fragile (and currently broken here).** On DFHack 53.15-r1 it dies on
+  `world.arena_spawn` (see the §1 tooling note) — DFHack itself marks it "untested" for this
+  version. → Phase 0: depend on a fixed upstream `create-unit` or a custom spawn helper; always
+  call via `dfhack.run_script('modtools/create-unit', …)`, validate the resulting unit exists,
+  and fail loudly (don't silently no-op) if the primitive is unavailable.
 - **Interactions with hunting/taming/butchering.** Spawned wild animals are normal wildlife, so
   hunters/cages/traps all work — a feature (you can finally trap that deer), but note tamed
   ones leave our tracking (fine).
