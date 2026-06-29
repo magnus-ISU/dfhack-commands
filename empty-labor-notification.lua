@@ -16,12 +16,16 @@ Messages:
 
 Clicking the notification lists the offending details and the labors they cover. (A detail
 you genuinely want nobody to do should be set to "Nobody Does This", which does NOT warn.)
+The pack's "Military" detail is exempt -- it is meant to hold only soldiers.
 
 Run once per DFHack session to register; magnus-scripts loads it. To make it permanent on
 its own, add `empty-labor-notification` to dfhack-config/init/dfhack.init.
 ]]
 
 local NAME = 'empty_labor'
+-- the pack's "Military" work detail is *meant* to hold only soldiers (labor-groups creates it,
+-- military-labor syncs squad members into it), so never flag it for being soldier-only.
+local MILITARY_DETAIL = 'Military'
 
 local dlg = require('gui.dialogs')
 
@@ -54,7 +58,9 @@ local function scan()
     local wds = df.global.plotinfo.labor_info.work_details
     for i = 0, #wds - 1 do
         local w = wds[i]
-        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis and not has_available_worker(w) then
+        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis
+            and w.name ~= MILITARY_DETAIL                 -- soldier-only by design
+            and not has_available_worker(w) then
             out[#out + 1] = w
         end
     end
