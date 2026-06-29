@@ -22,8 +22,9 @@ Activates the "always-on" helpers in this pack:
     * embark-nobles             (assigns the key fort positions by skill)
     * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
     * labor-groups once         (builds the ordered crafting Work Details -- once per
-                                 fort; a re-run is a no-op so manual tweaks survive.
-                                 `magnus-scripts lovely` instead FORCE-applies it.)
+                                 fort; skipped if its "Weaponsmithing" detail already
+                                 exists, so manual tweaks survive. Run `labor-groups`
+                                 by hand to force a re-apply.)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
     * item-description.expand   (overlay: expands a long item description to half-screen)
@@ -126,11 +127,9 @@ try('military-uniforms (steel templates)', function() dfhack.run_command('milita
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
 try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
--- plain run: once per fort (so manual tweaks survive). `lovely` FORCE-applies it, so the
--- deliberate setup command always (re)orders the Labor list, refreshes icons, and creates
--- any missing details -- assignments are preserved either way.
-try(lovely and 'labor-groups (force re-apply)' or 'labor-groups (ordered craft work details, once/fort)',
-    function() if lovely then dfhack.run_script('labor-groups') else dfhack.run_script('labor-groups', 'once') end end)
+-- once per fort: skipped if labor-groups' signature detail ("Weaponsmithing") is already
+-- present, so manual tweaks survive. Run `labor-groups` (no `once`) by hand to force.
+try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
 try('auto-tomb (1x1 tomb zone on each coffin)', function() dfhack.run_command('enable', 'auto-tomb') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script

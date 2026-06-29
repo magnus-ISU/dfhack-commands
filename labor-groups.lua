@@ -87,15 +87,6 @@ local arg = ({...})[1]
 local dry = arg == 'dry'
 local once = arg == 'once'
 
-local PERSIST_KEY = 'labor-groups'
-if once then
-    local st = dfhack.persistent.getSiteData(PERSIST_KEY)
-    if st and st.applied then
-        print('labor-groups: already applied to this fort -- skipping (run `labor-groups` to force)')
-        return
-    end
-end
-
 local wd = df.global.plotinfo.labor_info.work_details
 
 -- labors the crafting set owns; a detail is "a craft" only if all its labors are managed.
@@ -110,6 +101,28 @@ local function labors_of(w)
     end
     return out
 end
+-- Has this fort already had the layout applied? Detect it by labor-groups' own signature --
+-- the first craft detail ("Weaponsmithing") present, covering exactly its labor, with the
+-- icon we assign it. This reads the actual game state, so there's no separate persistent
+-- flag to create or drift out of sync.
+local function already_applied()
+    local g = GROUPS[1]   -- {name = 'Weaponsmithing', labors = {'FORGE_WEAPON'}, icon = 'ENGRAVERS'}
+    for i = 0, #wd - 1 do
+        local w = wd[i]
+        if w.name == g.name and w.icon == df.work_detail_icon_type[g.icon] then
+            local labs = labors_of(w)
+            if #labs == #g.labors and labs[1] == g.labors[1] then return true end
+        end
+    end
+    return false
+end
+
+if once and already_applied() then
+    print('labor-groups: already applied (the "' .. GROUPS[1].name .. '" detail exists) -- '
+        .. 'skipping (run `labor-groups` to force)')
+    return
+end
+
 local function is_craft(w)
     local labs = labors_of(w)
     if #labs == 0 then return false end
@@ -212,7 +225,6 @@ if not dry then
     -- object -- we hold each handle), then reinsert. Nothing is freed, nothing is reset.
     for i = #wd - 1, 0, -1 do wd:erase(i) end
     for _, h in ipairs(order) do wd:insert('#', h) end
-    dfhack.persistent.saveSiteData(PERSIST_KEY, {applied = true})
 end
 
 -- ---- report -----------------------------------------------------------------
