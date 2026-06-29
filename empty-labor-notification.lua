@@ -1,14 +1,18 @@
--- Warn when a Work Detail is "Only Selected Does This" but has nobody assigned.
+-- Warn when a Work Detail is "Only Selected Does This" but has no usable worker.
 --@ module = false
 --[[
 empty-labor-notification
 
 Registers a notification (name: "empty_labor") into DFHack's gui/notify panel, alongside
-"needs a tomb" and the planned-building order warnings. It alerts when any Work Detail is
-set to "Only Selected Does This" but has no living workers -- either nothing selected, or the
-selected dwarves have all died/left -- so that labor silently never gets done.
-    * exactly one   -> 'Work detail "Masonry" has no workers!'
-    * more than one -> '3 work details have no workers!'
+"needs a tomb" and the planned-building order warnings. It alerts when any Work Detail is set
+to "Only Selected Does This" but has no living, civilian worker to actually do it -- because:
+    * nothing is selected, or
+    * the selected dwarves have all died / left, or
+    * the only selected dwarves are MILITARY (in a squad) -- they're off training/fighting,
+      so the labor still doesn't get done.
+Messages:
+    * exactly one   -> 'Work detail "Masonry" has no available workers!'
+    * more than one -> '3 work details have no available workers!'
 
 Clicking the notification lists the offending details and the labors they cover. (A detail
 you genuinely want nobody to do should be set to "Nobody Does This", which does NOT warn.)
@@ -22,19 +26,20 @@ local NAME = 'empty_labor'
 local dlg = require('gui.dialogs')
 
 -- ---------------------------------------------------------------------------
--- detection: details set to OnlySelectedDoesThis with no assigned units
+-- detection: details set to OnlySelectedDoesThis with no usable worker
 -- ---------------------------------------------------------------------------
 
--- A detail's labor only gets done if at least one assigned unit is a living worker the fort
--- can actually use: a citizen OR a resident (residents -- e.g. a joined "cursed hunter" --
--- aren't citizens but are assignable and do the work). Dead/expelled units linger in
--- assigned_units but don't count, so a detail whose workers have all died is flagged --
--- which is what we want, not just a literally-empty list.
-local function has_living_worker(w)
+-- A detail's labor only gets done by a living worker the fort can actually put on it: a
+-- citizen or resident (residents -- e.g. a joined "cursed hunter" -- aren't citizens but do
+-- the work) who is NOT a soldier. Dead/expelled units linger in assigned_units but don't
+-- count; and a military dwarf (in a squad) is off training/on duty, so a detail whose only
+-- live assignees are soldiers effectively goes unworked too. All of these are flagged.
+local function has_available_worker(w)
     for _, uid in ipairs(w.assigned_units) do
         local u = df.unit.find(uid)
         if u and not dfhack.units.isDead(u)
-            and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u)) then
+            and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u))
+            and u.military.squad_id < 0 then        -- skip soldiers (in a squad)
             return true
         end
     end
@@ -49,7 +54,7 @@ local function scan()
     local wds = df.global.plotinfo.labor_info.work_details
     for i = 0, #wds - 1 do
         local w = wds[i]
-        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis and not has_living_worker(w) then
+        if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis and not has_available_worker(w) then
             out[#out + 1] = w
         end
     end
@@ -63,9 +68,9 @@ local function empty_labor_message()
     local n = #list
     if n == 0 then return end
     if n == 1 then
-        return ('Work detail "%s" has no workers!'):format(list[1].name)
+        return ('Work detail "%s" has no available workers!'):format(list[1].name)
     end
-    return ('%d work details have no workers!'):format(n)
+    return ('%d work details have no available workers!'):format(n)
 end
 
 -- ---------------------------------------------------------------------------
@@ -88,16 +93,16 @@ local function show_dialog()
     local list = scan()
     if #list == 0 then return end
     local lines = {
-        'These Work Details are set to "Only Selected Does This" but have no living',
-        'workers (none selected, or the selected dwarves have died/left), so their labors',
-        'never get done. Assign someone, switch to "Everybody Does This", or set',
-        '"Nobody Does This" to silence this warning.',
+        'These Work Details are set to "Only Selected Does This" but have no living civilian',
+        'worker to do them -- nothing selected, the selected dwarves have died/left, or the',
+        'only ones selected are soldiers (who are off on military duty). Assign a civilian,',
+        'switch to "Everybody Does This", or set "Nobody Does This" to silence this warning.',
         '',
     }
     for _, w in ipairs(list) do
         lines[#lines + 1] = ('  %s  --  %s'):format(w.name, labor_names(w))
     end
-    dlg.showMessage('Work details with no workers', table.concat(lines, '\n'), COLOR_YELLOW)
+    dlg.showMessage('Work details with no available workers', table.concat(lines, '\n'), COLOR_YELLOW)
 end
 
 -- ---------------------------------------------------------------------------
@@ -113,7 +118,7 @@ local function register()
         nmod.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
     -- (re)assign callbacks every time so re-running the script picks up edits
-    entry.desc = 'Notifies when a work detail is "Only Selected Does This" but has no assigned workers.'
+    entry.desc = 'Notifies when an "Only Selected Does This" work detail has no usable worker (none, all dead, or only soldiers).'
     entry.dwarf_fn = empty_labor_message
     entry.on_click = show_dialog
     -- the overlay gates on config.data[name].enabled; make sure it exists so it's on by default
@@ -132,5 +137,5 @@ dfhack.onStateChange[NAME] = function(ev)
 end
 
 print('empty-labor-notification: "empty_labor" registered.')
-print('Warns when a work detail is "Only Selected Does This" with no assigned workers.')
+print('Warns when an "Only Selected" work detail has no available worker (none/dead/only soldiers).')
 print('Click the notification for the list. Add to dfhack.init to load it every session.')
