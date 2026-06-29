@@ -40,9 +40,15 @@ in the loaded `creature_raw`/`caste_raw` — searched; no biome flag field found
 
 `modtools/create-unit` is present and gives us everything we need to add animals:
 `-race`, `-caste`, `-quantity`, `-location [x y z]`, `-locationRange [dx dy dz]` (randomised
-spread, re-rolled per unit — ideal for herds), `-age`, and **`-duration ticks`** (the unit is
-removed automatically after N ticks — ideal for "passing through" waves). Created without
-`-setUnitToFort`/`-civId`, the unit is **wild** (huntable, flees/wanders like native wildlife).
+spread, re-rolled per unit — ideal for herds), `-age`, and **`-duration ticks`**. Created
+without `-setUnitToFort`/`-civId`, the unit is **wild** (huntable, flees/wanders like native
+wildlife).
+
+> **Note on `-duration` (checked the source):** the arg is internally `vanishDelay`, and the
+> docs say the unit *"will vanish in a puff of smoke once the specified number of ticks has
+> elapsed."* It is an **instant disappear**, **not** a graceful walk off the map edge. So we do
+> NOT use it as the "they leave" mechanism — see §3.4 / §4.3 for how wildlife actually departs
+> (wild animals wander off the map edges on their own).
 
 ---
 
@@ -103,25 +109,37 @@ dozens of species — instead of 7.
   (wild — no civ/group), so they enter as a loose cluster and disperse.
 
 ### 3.4 Lifecycle / cleanup
-- Tag spawned units (e.g. a persistent set of unit ids, or a nickname/`-duration`) so we can
-  count them and not exceed `max_extra_wildlife`.
-- Prefer **`-duration`** (e.g. a few in-game weeks) so wanderers eventually leave/despawn if not
-  hunted — keeps the population honest and the save small. (Animals the dwarves kill/tame are
-  removed from our tracking naturally.)
+- Tag spawned units (a persistent set of unit ids) so we can count them and not exceed
+  `max_extra_wildlife`.
+- **Let them leave naturally.** Wild animals wander and exit via the map edges on their own over
+  time, so wanderers self-clear with no forced removal — keep the cap and don't fight DF.
+- **Any forced cleanup must not poof them.** `-duration` makes a unit *vanish in a puff of
+  smoke* (it does NOT walk off the map), which looks silly mid-map. If a fort accumulates
+  stragglers over the cap, prefer relocating an *off-screen* one to a map-edge tile so it walks
+  off; treat `-duration` as an explicit, opt-in last resort only. (Animals dwarves kill/tame
+  leave our tracking naturally.)
 
 ---
 
 ## 4. Feature B — Migration wave (rare event)
 
-Once in a long while, a **herd crosses the map**: many of a single migratory species appear at
-one edge, mill about (graze/rest), and leave — the "huge piles of bison" image from the thread.
+Once in a long while, a **group of one species crosses the map**: many appear at one edge, move
+through, and leave — the "huge piles of bison" image from the thread. Unlike the wanderers, the
+species is drawn from **far afield** (anywhere in the world) and can be **any animal**, not just
+a local herd herbivore — that's what makes a migration feel like it came from somewhere distant.
 
 ### 4.1 Trigger & species
 - Very low per-season chance (config `wave_chance`, default ~once/2 years), or a manual command
   `wildlife-migration wave`.
-- Pick a **gregarious, large-roaming herbivore** from the pool: prefer creatures with a large
-  `population_number` and the herd/grazer profile (`LARGE_ROAMING`, large group size, not a
-  predator). Weight by proximity as in §3.1.
+- **Draw from a far wider pool than the wandering spawns — a migration comes from *afar*.** Use
+  **all regions across the world** (any biome), not just same-biome neighbours, with only a weak
+  long-tail distance bias (e.g. `weight += 1/(1 + distance/K)` with a large `K`, plus a small
+  flat floor so even the most distant regions contribute). This is precisely where you finally
+  see creatures that roam nowhere near home — the point of a migration.
+- **Any kind of animal is eligible**, not just gregarious herd herbivores: predators, solitary
+  beasts, oddities — anything that passes the safety filter (§4.2). Group size still comes from
+  the species' own `population_number`, so "any animal" reads naturally (a wolf wave is a small
+  pack; a yak wave is a throng; a lone-hunter wave might be one or two).
 
 ### 4.2 Eligibility filter (shared by both features)
 Include a `race` only if it is plausible ambient megafauna-or-smaller wildlife. Exclude when the
@@ -139,9 +157,11 @@ creature/caste has any of:
 ### 4.3 Wave mechanics
 - Spawn `wave_size` (e.g. 20–60) of the chosen race along **one** map edge:
   `create-unit -quantity N -location [edge] -locationRange [span 2 1]`.
-- Give them somewhere to go so they cross and leave: set a destination at the **opposite edge**
-  (a station/wander order or a movement goal), and/or `-duration` so they clear out after a few
-  days even if the player doesn't engage. Fire a DF announcement + pause-worthy popup
+- Make them cross and exit *naturally*: spawn at one edge; being wild, they wander and leave via
+  the map edges on their own. To make a wave move briskly opposite-ward, optionally nudge their
+  goal toward the far edge (investigate whether a wild unit's wander/flee target can be set;
+  otherwise rely on natural wandering). Do **not** use `-duration` to "end" the wave — that
+  poofs them mid-map in a puff of smoke. Fire a DF announcement + pause-worthy popup
   ("A great herd of yaks is migrating across the area!").
 - Respect `max_extra_wildlife` so a wave doesn't tank FPS; cap `wave_size` accordingly.
 
@@ -155,13 +175,14 @@ creature/caste has any of:
 | `daily_chance` | 0.08 | chance/day of a wandering-wildlife spawn |
 | `group_scale` | 1.0 | multiplier on natural group sizes |
 | `max_extra_wildlife` | 40 | cap on live script-spawned animals |
-| `radius` | all-same-biome | donor selection: same-biome union, or N-region radius |
-| `allow_predators` | true | include `LARGE_PREDATOR` (reduced weight) |
+| `wander_radius` | same-biome | wanderer (Feature A) donor set: same-biome union, or N-region radius |
+| `allow_predators` | true | include `LARGE_PREDATOR` (reduced weight for wanderers) |
 | `allow_giant_variants` | rare | chance to substitute a `GIANT_` caste/creature |
 | `allow_vermin` | false | include vermin-type populations |
 | `wave_chance` | per ~2 yr | migration-wave probability per season |
-| `wave_size` | 30 | herd size for a wave |
-| `unit_duration` | ~3 weeks | auto-despawn timer for spawned wildlife (0 = permanent) |
+| `wave_size` | 30 | herd size for a wave (capped by `max_extra_wildlife`) |
+| `wave_distance_k` | large | flattens the wave's distance bias — bigger = reaches further afield |
+| `unit_duration` | 0 (off) | hard-cleanup timer; >0 makes spawns *poof* (puff of smoke) after N ticks. Off by default — prefer natural map-edge exit |
 
 Surface this as overlay/notify status like the rest of the pack, and wire `enable
 wildlife-migration` into `magnus-scripts`.
@@ -188,7 +209,9 @@ Each phase is independently testable (esp. phase 1, which is pure data).
 ## 7. Risks & mitigations
 
 - **FPS / save bloat.** Many wild units cost path/think time. → Hard cap (`max_extra_wildlife`),
-  `-duration` despawn, slow cadence, small default groups.
+  slow cadence, small default groups, and **natural map-edge exit** (wild animals wander off on
+  their own). `-duration` is NOT a graceful exit (it poofs them in a puff of smoke); use it only
+  as an opt-in last resort if a fort really accumulates stragglers.
 - **Spawning something nasty.** → §4.2 filter (no megabeasts/night creatures/feature beasts);
   predators optional and down-weighted.
 - **Animal-people / sapients in the pool.** → exclude `CAN_SPEAK`/`CAN_LEARN`.
@@ -227,9 +250,12 @@ Each phase is independently testable (esp. phase 1, which is pure data).
 
 ### TL;DR
 DF already stores, per region, the realised animal `population`; the 7-limit is just how few
-land in *your* region. By **unioning the `Animal` populations of all same-biome regions**
-(proximity-weighted, filtered for safe ambient wildlife) we get a large candidate pool, and use
-`modtools/create-unit` to **occasionally spawn wanderers** and **rarely stage a migration herd**
-at the map edge — additive, opt-in, and reversible. Verified the data path on a live Mountains
-fort that currently shows exactly 7 species while 40 mountain regions' draws sit ready to be
+land in *your* region. Two features draw on it: **wanderers** union the `Animal` populations of
+nearby **same-biome** regions (proximity-weighted) and occasionally walk one in; **migration
+waves** draw from **all regions worldwide** with only a weak distance bias and allow **any
+animal**, so far-flung species cross the map. Both filter for safe ambient wildlife and spawn
+via `modtools/create-unit` at the map edge — additive, opt-in, reversible. Wildlife **leaves by
+wandering off the edges**, not by `-duration` (which just poofs them in a puff of smoke).
+Verified the data path on a live Mountains fort that currently shows exactly 7 species while 40
+mountain regions' draws sit ready to be
 pooled.
