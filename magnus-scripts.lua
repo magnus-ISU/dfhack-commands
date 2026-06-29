@@ -22,7 +22,8 @@ Activates the "always-on" helpers in this pack:
     * embark-nobles             (assigns the key fort positions by skill)
     * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
     * labor-groups once         (builds the ordered crafting Work Details -- once per
-                                 fort; a re-run is a no-op so manual tweaks survive)
+                                 fort; a re-run is a no-op so manual tweaks survive.
+                                 `magnus-scripts lovely` instead FORCE-applies it.)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
     * item-description.expand   (overlay: expands a long item description to half-screen)
@@ -111,6 +112,8 @@ if ({...})[1] == 'disable' then
     return
 end
 
+local lovely = ({...})[1] == 'lovely'
+
 print('magnus-scripts: enabling persistent helpers...')
 try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notification') end)
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
@@ -123,7 +126,11 @@ try('military-uniforms (steel templates)', function() dfhack.run_command('milita
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
 try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
-try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
+-- plain run: once per fort (so manual tweaks survive). `lovely` FORCE-applies it, so the
+-- deliberate setup command always (re)orders the Labor list, refreshes icons, and creates
+-- any missing details -- assignments are preserved either way.
+try(lovely and 'labor-groups (force re-apply)' or 'labor-groups (ordered craft work details, once/fort)',
+    function() if lovely then dfhack.run_script('labor-groups') else dfhack.run_script('labor-groups', 'once') end end)
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
 try('auto-tomb (1x1 tomb zone on each coffin)', function() dfhack.run_command('enable', 'auto-tomb') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
@@ -133,7 +140,7 @@ try('overlay enable item-description.expand', function() dfhack.run_command('ove
 try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
-if ({...})[1] == 'lovely' then
+if lovely then
     -- standing orders (1 = on/auto, 0 = off): enforce off every session
     df.global.standing_orders_auto_loom = 0
     df.global.standing_orders_auto_collect_webs = 0
