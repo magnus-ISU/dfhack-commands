@@ -8,8 +8,8 @@ Registers a notification (name: "empty_labor") into DFHack's gui/notify panel, a
 to "Only Selected Does This" but has no living, civilian worker to actually do it -- because:
     * nothing is selected, or
     * the selected dwarves have all died / left, or
-    * the only selected dwarves are MILITARY (in a squad) -- they're off training/fighting,
-      so the labor still doesn't get done.
+    * the only selected dwarves have the Military labor (are in the "Military" work detail) --
+      they're off on military duty, so the labor still doesn't get done.
 Messages:
     * exactly one   -> 'Work detail "Masonry" has no available workers!'
     * more than one -> '3 work details have no available workers!'
@@ -33,17 +33,31 @@ local dlg = require('gui.dialogs')
 -- detection: details set to OnlySelectedDoesThis with no usable worker
 -- ---------------------------------------------------------------------------
 
+-- Members of the "Military" work detail = the fort's active military, as curated by
+-- military-labor (off-duty squads and non-leader trainees are NOT included, so those dwarves
+-- still count as available labor). A dwarf "has the Military labor assigned" if it's in here.
+local function military_members()
+    local set = {}
+    local wds = df.global.plotinfo.labor_info.work_details
+    for i = 0, #wds - 1 do
+        if wds[i].name == MILITARY_DETAIL then
+            for _, uid in ipairs(wds[i].assigned_units) do set[uid] = true end
+        end
+    end
+    return set
+end
+
 -- A detail's labor only gets done by a living worker the fort can actually put on it: a
 -- citizen or resident (residents -- e.g. a joined "cursed hunter" -- aren't citizens but do
--- the work) who is NOT a soldier. Dead/expelled units linger in assigned_units but don't
--- count; and a military dwarf (in a squad) is off training/on duty, so a detail whose only
--- live assignees are soldiers effectively goes unworked too. All of these are flagged.
-local function has_available_worker(w)
+-- the work) that does NOT have the Military labor assigned (i.e. is not in the "Military"
+-- work detail -- those dwarves are off on military duty). Dead/expelled units linger in
+-- assigned_units but don't count either. All such "unworkable" details are flagged.
+local function has_available_worker(w, mil)
     for _, uid in ipairs(w.assigned_units) do
         local u = df.unit.find(uid)
         if u and not dfhack.units.isDead(u)
             and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u))
-            and u.military.squad_id < 0 then        -- skip soldiers (in a squad)
+            and not mil[uid] then                   -- not in the Military detail
             return true
         end
     end
@@ -55,12 +69,13 @@ local function scan()
     local f = df.global.world.frame_counter or 0
     if f == cache.frame and cache.list then return cache.list end
     local out = {}
+    local mil = military_members()
     local wds = df.global.plotinfo.labor_info.work_details
     for i = 0, #wds - 1 do
         local w = wds[i]
         if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis
-            and w.name ~= MILITARY_DETAIL                 -- soldier-only by design
-            and not has_available_worker(w) then
+            and w.name ~= MILITARY_DETAIL                 -- the grouping detail itself; soldier-only by design
+            and not has_available_worker(w, mil) then
             out[#out + 1] = w
         end
     end
@@ -99,10 +114,11 @@ local function show_dialog()
     local list = scan()
     if #list == 0 then return end
     local lines = {
-        'These Work Details are set to "Only Selected Does This" but have no living civilian',
-        'worker to do them -- nothing selected, the selected dwarves have died/left, or the',
-        'only ones selected are soldiers (who are off on military duty). Assign a civilian,',
-        'switch to "Everybody Does This", or set "Nobody Does This" to silence this warning.',
+        'These Work Details are set to "Only Selected Does This" but have no living worker to',
+        'do them -- nothing selected, the selected dwarves have died/left, or the only ones',
+        'selected have the Military labor (are in the "Military" work detail, off on military',
+        'duty). Assign a free dwarf, switch to "Everybody Does This", or set "Nobody Does',
+        'This" to silence this warning.',
         '',
     }
     for _, w in ipairs(list) do
