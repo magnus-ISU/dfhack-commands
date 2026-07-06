@@ -132,6 +132,16 @@ local function is_wall_tile(pos)
     return false
 end
 
+-- does this tile already have a floor on its own layer? -> a real FLOOR tile, a planned/built
+-- floor construction here, OR the walkable TOP of a wall directly below (a wall implies a floor
+-- one layer up). If so we build a WALL on it; if there's NO floor, we build a FLOOR.
+local function has_floor_here(pos)
+    if shape_of(pos) == SH.FLOOR then return true end
+    local b = dfhack.buildings.findAtTile(pos)
+    if b and b:getType() == df.building_type.Construction and b.type == CT.Floor then return true end
+    return is_wall_tile({x = pos.x, y = pos.y, z = pos.z - 1})
+end
+
 local function has_wall_below(pos)
     return is_wall_tile({x = pos.x, y = pos.y, z = pos.z - 1})
 end
@@ -143,13 +153,6 @@ local function ortho_wall_count(pos)
         if is_wall_tile({x = pos.x + d[1], y = pos.y + d[2], z = pos.z}) then n = n + 1 end
     end
     return n
-end
-
--- is this a gap in a wall line? walls on both opposite orthogonal sides (E&W or N&S). Such a
--- tile should be a WALL (completing the line) even with air below, not a cantilevered floor.
-local function between_walls(pos)
-    return (is_wall_tile({x = pos.x - 1, y = pos.y, z = pos.z}) and is_wall_tile({x = pos.x + 1, y = pos.y, z = pos.z}))
-        or (is_wall_tile({x = pos.x, y = pos.y - 1, z = pos.z}) and is_wall_tile({x = pos.x, y = pos.y + 1, z = pos.z}))
 end
 
 -- ---- designation / construction primitives ----------------------------------
@@ -171,8 +174,12 @@ for _, n in ipairs({'STONE', 'MINERAL', 'LAVA_STONE', 'FEATURE'}) do
 end
 -- designate smoothing on a natural-stone tile (ignored on soil/air/constructions). dig+smooth
 -- coexist, so an interior tile being mined smooths itself into a smooth floor after it's dug.
+-- CRITICAL: skip tiles that are ALREADY smooth -- smooth=1 on an already-smooth wall carves a
+-- FORTIFICATION and on an already-smooth floor ENGRAVES it (that is how DF designates those).
 local function designate_smooth(pos)
     if not SMOOTHABLE[material_of(pos)] then return end
+    local tt = dfhack.maps.getTileType(pos)
+    if tt and df.tiletype.attrs[tt].special == df.tiletype_special.SMOOTH then return end
     local blk = block_of(pos); if not blk then return end
     blk.designation[pos.x % 16][pos.y % 16].smooth = 1
     blk.flags.designated = true
@@ -276,37 +283,27 @@ function convert_dig_box(a, b)
     -- walls/floors only when the footprint is 1 tile thick in a horizontal axis (a 1xNxN or
     -- Nx1xN plane, or a thin line) -- a 2xNxN or thicker footprint is rejected
     local thick = dx > 1 and dy > 1
-    if #opens > 0 and thick then
-        log(('  -> SKIP build: %dx%dx%d footprint thicker than 1 (walls need 1xNxN / Nx1xN)'):format(dx, dy, dz))
-    else
+    -- build WALLS only when the whole selection is wall-intent: every tile is open (a single
+    -- rock/dig tile in the box cancels it) and the footprint is 1 tile thick in a horizontal axis.
+    if #opens > 0 and #rocks == 0 and not thick then
         -- a single 1x1 click on an open tile flanked by exactly 2 orthogonal walls is a doorway
-        -- -> build a DOOR instead of a wall; any other 1x1 stays a wall/floor
+        -- -> build a DOOR instead of a wall
         local single = dx == 1 and dy == 1 and dz == 1
-        -- build bottom-up so each course sees the (just-placed) one below it
         table.sort(opens, function(p, q) return p.z < q.z end)
         for _, p in ipairs(opens) do
             clear_dig(p)
             if single and ortho_wall_count(p) == 2 then
                 construct_door(p)
             else
-                local sub = (has_wall_below(p) or between_walls(p)) and CT.Wall or CT.Floor
-                construct_real(p, sub)
+                -- WALL where the tile already has a floor to stand a wall on (real/planned floor,
+                -- or the top of a wall below); FLOOR where there's no floor on this layer
+                construct_real(p, has_floor_here(p) and CT.Wall or CT.Floor)
             end
             did = true
         end
     end
     for _, p in ipairs(trees) do set_dig(p, DV.Default); log('  CHOP tree @' .. fmt(p)); did = true end
-
-    -- a flat rock ROOM dig -> also queue SMOOTHING of the whole room + a 1-tile-wider border
-    -- (the mined-out floor and the surrounding walls). dig+smooth coexist, so interior tiles
-    -- smooth after they are dug; border walls smooth once the room exposes their faces.
-    if z1 == z2 and dx > 1 and dy > 1 and #rocks > 0 then
-        for x = x1 - 1, x2 + 1 do for y = y1 - 1, y2 + 1 do
-            designate_smooth({x = x, y = y, z = z1})
-        end end
-        log(('  SMOOTH room+border (%d,%d)->(%d,%d)'):format(x1 - 1, y1 - 1, x2 + 1, y2 + 1))
-        did = true
-    end
+    -- (room smoothing removed -- the implementation was wrong; nothing is designated for smoothing)
     return did
 end
 

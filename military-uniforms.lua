@@ -322,9 +322,19 @@ end
 -- wearer's race for a requirement, the item's maker_race for stock -- keeping human-sized and
 -- dwarf-sized pieces on separate tallies, and non-dwarf soldiers get correctly-sized gear.
 local function civ_race() return df.global.plotinfo.race_id end
+-- SHIELDS and WEAPONS are HELD, not worn -- one size fits all, so they must NOT be tracked per
+-- wearer race. Keying them by a soldier's race (e.g. a human's 506) means a made shield/weapon
+-- (which records no usable size, so it counts as civ size) never satisfies that requirement, so
+-- the service forges endlessly. Only ARMOUR is sized to the wearer. So shields/weapons always
+-- key to civ size, on both the requirement and stock sides.
+local SIZELESS = {[df.item_type.SHIELD] = true, [df.item_type.WEAPON] = true}
+local function key_race(item_type, race)
+    return SIZELESS[item_type] and civ_race() or race
+end
 -- the size race an item is made for (maker_race; a raceless/generic item, or an item type
--- with no maker_race field at all, counts as civ size)
+-- with no maker_race field at all, counts as civ size). Sizeless types always civ size.
 local function item_size_race(it)
+    if SIZELESS[it:getType()] then return civ_race() end
     local ok, r = pcall(function() return it.maker_race end)
     return (ok and r and r >= 0) and r or civ_race()
 end
@@ -354,13 +364,14 @@ local function compute_required()
                             local it = v[j]
                             -- squad_uniform_spec uses mattype/matindex (not mat_type/mat_index)
                             if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and it.mattype >= 0 then
+                                local krace = key_race(it.item_type, srace)   -- civ for shields/weapons
                                 local key = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
-                                                                      it.mattype, it.matindex, srace)
+                                                                      it.mattype, it.matindex, krace)
                                 local r = req[key]
                                 if not r then
                                     r = {item_type = it.item_type, subtype = it.item_subtype,
                                          mat_type = it.mattype, mat_index = it.matindex,
-                                         size_race = srace, count = 0}
+                                         size_race = krace, count = 0}
                                     req[key] = r
                                 end
                                 r.count = r.count + slot_qty(it.item_type)
@@ -413,8 +424,8 @@ local function compute_per_soldier()
                         for j = 0, #v - 1 do
                             local it = v[j]
                             if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and it.mattype >= 0 then
-                                local k = ('%d/%d/%d/%d/%d'):format(
-                                    it.item_type, it.item_subtype, it.mattype, it.matindex, srace)
+                                local k = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
+                                    it.mattype, it.matindex, key_race(it.item_type, srace))
                                 if HANDED[it.item_type] then           -- gauntlets: one of each hand
                                     needs[#needs + 1] = {k = k, hand = 0}
                                     needs[#needs + 1] = {k = k, hand = 1}

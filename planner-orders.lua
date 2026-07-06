@@ -704,6 +704,7 @@ local function add_order(p)
     if p.leather then o.material_category.leather = true end
     o.amount_total, o.amount_left = p.amount, p.amount
     o.frequency = p.frequency or df.workquota_frequency_type.Daily
+    if p.max_workshops then o.max_workshops = p.max_workshops end   -- cap concurrent workshops
     o.workshop_id = -1
     o.status.validated, o.status.active = true, true
     local conds = p.conds or (p.cond and {p.cond}) or {}
@@ -1118,6 +1119,7 @@ STANDING = {
                 -- the "anything to melt" condition: GreaterThan 0 with item_type = NONE, which
                 -- DF reads on a melt order as "items available to melt".
                 add_order{job_type = df.job_type.MeltMetalObject, amount = 30, frequency = Daily,
+                    max_workshops = 1,   -- cap it at one Smelter so melting doesn't hog every shop
                     conds = {C('GreaterThan', 0, df.item_type.NONE)}}
                 return missing_shops({'MeltMetalObject'})
             end}}
