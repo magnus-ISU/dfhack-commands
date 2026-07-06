@@ -28,7 +28,7 @@ local sr = df.global.selection_rect
 
 -- ---- debug log --------------------------------------------------------------
 local LOGFILE = '/tmp/claude-1000/-home-mag-Downloads-code-dfhack-commands/d7187ea9-db68-452e-893b-e9108000916e/scratchpad/dig-shapes.log'
-local DEBUG = true
+local DEBUG = false
 local function log(msg)
     if not DEBUG then return end
     local fh = io.open(LOGFILE, 'a')
@@ -357,10 +357,6 @@ function DigShapes:onInput(keys)
         local on_ui = m.current_hover_left_x ~= 0
         -- explicit never-mine zone: the left 2 columns everywhere + the top-left 4x4 corner
         local in_zone = mx < 2 or (mx < 4 and my < 4)
-        log(('RCLICK gps=%d,%d | mp=%s hover=%d alert=%s over=%s[%s] band=%s on_ui=%s(lx%d) zone=%s'):format(
-            mx, my, tostring(mp ~= nil), m.current_hover, tostring(m.current_hover_alert),
-            tostring(ooo), table.concat(hit, ','), tostring(in_band),
-            tostring(on_ui), m.current_hover_left_x, tostring(in_zone)))
         if mp and m.current_hover == -1 and not m.current_hover_alert and not ooo
             and not in_band and not on_ui and not in_zone then
             enter_mining()
@@ -374,11 +370,5 @@ OVERLAY_WIDGETS = {watcher = DigShapes}
 
 if dfhack_flags.module then return end
 
-local args = {...}
-if args[1] == 'debug' then
-    print('dig-shapes: set DEBUG in the source; logging to ' .. LOGFILE)
-    return
-end
-
 require('plugins.overlay').rescan()
-print('dig-shapes: right-click=mining; shaped digs=stairs/walls/chop/remove. DEBUG log: ' .. LOGFILE)
+print('dig-shapes: right-click=mining; shaped digs=stairs/walls/chop/remove.')
