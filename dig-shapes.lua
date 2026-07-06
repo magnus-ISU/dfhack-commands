@@ -103,7 +103,9 @@ local function is_empty(pos) return shape_of(pos) == SH.EMPTY end
 -- a tile we can build a wall/floor/stair ON: open air OR an existing (natural) floor
 local function is_buildable_open(pos)
     local s = shape_of(pos)
-    return s == SH.EMPTY or s == SH.FLOOR
+    -- EMPTY air, a FLOOR, or a floor with a plant on it (SAPLING / SHRUB -- dead saplings and
+    -- harvestable plants). A construction there just clears the plant.
+    return s == SH.EMPTY or s == SH.FLOOR or s == SH.SAPLING or s == SH.SHRUB
 end
 local function is_tree(pos) return material_of(pos) == TM.TREE end
 -- completed OR in-progress construction on this tile?
@@ -136,7 +138,8 @@ end
 -- floor construction here, OR the walkable TOP of a wall directly below (a wall implies a floor
 -- one layer up). If so we build a WALL on it; if there's NO floor, we build a FLOOR.
 local function has_floor_here(pos)
-    if shape_of(pos) == SH.FLOOR then return true end
+    local s = shape_of(pos)
+    if s == SH.FLOOR or s == SH.SAPLING or s == SH.SHRUB then return true end   -- ground (maybe a plant on it)
     local b = dfhack.buildings.findAtTile(pos)
     if b and b:getType() == df.building_type.Construction and b.type == CT.Floor then return true end
     return is_wall_tile({x = pos.x, y = pos.y, z = pos.z - 1})
@@ -185,16 +188,17 @@ local function designate_smooth(pos)
     blk.flags.designated = true
 end
 
--- place a REAL construction (dwarves build it with any available material) -- not a blueprint
+-- place a construction via BUILDINGPLAN, so it uses whatever material/quality the player has
+-- configured for that construction type (e.g. obsidian blocks for walls) rather than "any
+-- material". buildingplan applies the per-type filter and reserves matching items.
 local function construct_real(pos, subtype)
-    if dfhack.buildings.findAtTile(pos) then log('  construct SKIP occupied @' .. fmt(pos)); return end
+    if dfhack.buildings.findAtTile(pos) then return end
     local ok, bld = pcall(dfhack.buildings.constructBuilding,
         {type = df.building_type.Construction, subtype = subtype, pos = pos})
+    if not ok or not bld then log('  construct FAILED @' .. fmt(pos)); return end
     local b = (type(bld) == 'table') and bld[1] or bld
-    local njobs = (ok and b) and #b.jobs or -1
-    local susp = (njobs and njobs > 0) and tostring(b.jobs[0].flags.suspend) or 'n/a'
-    log(('  construct %s @%s ok=%s bld=%s jobs=%s suspend=%s'):format(
-        df.construction_type[subtype], fmt(pos), tostring(ok), tostring(b ~= nil), tostring(njobs), susp))
+    if b then buildingplan.addPlannedBuilding(b) end
+    log(('  construct %s (buildingplan) @%s'):format(df.construction_type[subtype], fmt(pos)))
 end
 
 -- build a Door via buildingplan (a door is built from a crafted door ITEM, which buildingplan

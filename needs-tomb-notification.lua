@@ -37,6 +37,36 @@ end
 -- light cache so we don't rescan every overlay refresh
 local cache = {frame = -1, list = {}}
 
+-- can this dead unit haunt the fort as a ghost (so it needs laying to rest)? -> it was a member
+-- of the fort, of ANY race: either the fort civ (dwarves) OR a MEMBER/FORMER_MEMBER of the fort
+-- GROUP (residents -- e.g. a human mercenary who joined). Checking the histfig group link (rather
+-- than dfhack.units.isOwnGroup, which only matches a live MEMBER link) also catches the dead,
+-- whose link may have flipped to FORMER_MEMBER.
+-- only SAPIENT (intelligent, CAN_LEARN) creatures become ghosts -- tame animals never do, so
+-- they must not be counted even though they belong to the fort.
+local function is_sapient(u)
+    local cr = df.global.world.raws.creatures.all[u.race]
+    local caste = cr and cr.caste[u.caste]
+    return caste ~= nil and caste.flags.CAN_LEARN or false
+end
+
+local function is_fort_member(u)
+    if u.civ_id >= 0 and u.civ_id == df.global.plotinfo.civ_id then return true end
+    local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
+    if not hf then return false end
+    local gid = df.global.plotinfo.group_id
+    for _, link in ipairs(hf.entity_links) do
+        if link.entity_id == gid then
+            local lt = link:getType()
+            if lt == df.histfig_entity_link_type.MEMBER
+                or lt == df.histfig_entity_link_type.FORMER_MEMBER then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function scan()
     local frame = df.global.world.frame_counter or 0
     if frame == cache.frame then return cache.list end
@@ -51,15 +81,16 @@ local function scan()
         local it = vec[i]
         local t = it and it:getType()
         if it and (t == df.item_type.CORPSE or t == df.item_type.CORPSEPIECE)
-            and it.race == fortrace
             and not (it.flags.garbage_collect or it.flags.removed)
         then
             local uid = it.unit_id
             local u = uid and uid >= 0 and df.unit.find(uid)
-            -- require the unit to actually be dead: CORPSEPIECE items also come
-            -- from LIVING dwarves (fingers/limbs lost in combat), which must not
-            -- be counted as needing a tomb
-            if u and u.civ_id == fortciv and dfhack.units.isDead(u) then
+            -- Anyone who can become a GHOST needs laying to rest: a dead member of the
+            -- fort GROUP -- citizen OR resident, of ANY race (e.g. a human mercenary who
+            -- joined) -- not just the fort race. isOwnGroup covers residents; we no longer
+            -- filter corpses by race. Require the unit to actually be dead (a CORPSEPIECE
+            -- can also be a limb lost by a LIVING unit, which must not count).
+            if u and dfhack.units.isDead(u) and is_sapient(u) and is_fort_member(u) then
                 local rec = info[uid]
                 if not rec then
                     rec = {unit = u, buried = false, unburied = false, pos = nil}
@@ -333,7 +364,7 @@ function MemorialScreen:init()
 
     self:addviews{
         widgets.Window{
-            frame_title = 'Dwarves needing a tomb',
+            frame_title = 'Dead needing a tomb',
             frame = {w = 66, h = 22},
             resizable = true,
             resize_min = {w = 44, h = 10},
@@ -414,7 +445,7 @@ local function needs_tomb_message()
     if count == 1 then
         return ('%s needs a tomb!'):format(list[1].name)
     end
-    return ('%d dwarves need tombs!'):format(count)
+    return ('%d need tombs!'):format(count)
 end
 
 -- ---------------------------------------------------------------------------
