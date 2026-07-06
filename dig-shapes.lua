@@ -145,6 +145,13 @@ local function ortho_wall_count(pos)
     return n
 end
 
+-- is this a gap in a wall line? walls on both opposite orthogonal sides (E&W or N&S). Such a
+-- tile should be a WALL (completing the line) even with air below, not a cantilevered floor.
+local function between_walls(pos)
+    return (is_wall_tile({x = pos.x - 1, y = pos.y, z = pos.z}) and is_wall_tile({x = pos.x + 1, y = pos.y, z = pos.z}))
+        or (is_wall_tile({x = pos.x, y = pos.y - 1, z = pos.z}) and is_wall_tile({x = pos.x, y = pos.y + 1, z = pos.z}))
+end
+
 -- ---- designation / construction primitives ----------------------------------
 
 local function block_of(pos) return dfhack.maps.getTileBlock(pos) end
@@ -282,8 +289,7 @@ function convert_dig_box(a, b)
             if single and ortho_wall_count(p) == 2 then
                 construct_door(p)
             else
-                local sub = has_wall_below(p) and CT.Wall or CT.Floor
-                log(('  open %s (wall_below=%s)'):format(df.construction_type[sub], tostring(has_wall_below(p))))
+                local sub = (has_wall_below(p) or between_walls(p)) and CT.Wall or CT.Floor
                 construct_real(p, sub)
             end
             did = true
