@@ -21,9 +21,9 @@ Pieces that work together so you usually never think about pasturing:
      deliberately remove are remembered and not re-grabbed. Chained/restrained
      animals are left alone.
 
-  4. A notify-panel warning when a pasture is overcrowded: more than ~1 animal
-     per 4 grass tiles (graze) or per 4 tiles (scavenge). Clicking it cycles
-     through the overcrowded pastures -- zooming to each, selecting it, and
+  4. A notify-panel warning when the GRAZE pasture is overcrowded: more than ~1
+     animal per grass tile (very generous). The scavenge pasture is not warned about.
+     Clicking it cycles through the overcrowded pastures -- zooming to each, and
      opening its "repaint this zone" UI so you can resize it on the spot.
 
 Usage:
@@ -308,22 +308,17 @@ end
 
 -- ---- overcrowding notification --------------------------------------------
 
--- the designated pastures overcrowded past ~1 animal per 4 grass tiles (graze)
--- or per 4 tiles (scavenge); graze first, then scavenge
+-- the GRAZE pasture overcrowded past ~1 animal per grass tile (a very generous
+-- threshold). The scavenge pasture is intentionally NOT warned about -- non-grazers
+-- don't starve from crowding, so its space warning was removed.
 local function overcrowded_pastures()
     load_state()
     local out = {}
     local graze = valid_pasture(state.graze_id)
     if graze then
-        local cap = math.floor(pen_metrics(graze).grass / 4)
+        local cap = pen_metrics(graze).grass
         local n = #graze.assigned_units
         if n > cap then out[#out + 1] = {zone = graze, label = ('graze pasture %d'):format(n - cap)} end
-    end
-    local scav = valid_pasture(state.scavenge_id)
-    if scav and state.scavenge_id ~= state.graze_id then
-        local cap = math.floor(pen_metrics(scav).tiles / 4)
-        local n = #scav.assigned_units
-        if n > cap then out[#out + 1] = {zone = scav, label = ('scavenge %d'):format(n - cap)} end
     end
     return out
 end

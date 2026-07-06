@@ -162,6 +162,24 @@ local function over_other_overlay(mx, my)
     return false
 end
 
+-- GENERAL "is this click meant for the map (not any UI)?" test -- the single guard every
+-- map-interaction feature here should use. The load-bearing part is the STRICT
+-- dfhack.gui.getMousePos() (no arg): it returns a tile ONLY when the cursor is over the
+-- exposed map viewport, and nil over ANY UI -- the bottom toolbar, the minimap, a right-side
+-- panel, an open menu/list, a designation palette, everything. (The permissive
+-- getMousePos(true) instead returns a map tile even under those, which is what caused clicks
+-- on menus to fall through to the scripts.) We additionally stand off DF hover elements
+-- (current_hover) and any OTHER DFHack overlay (notifications, etc.) that draws over the map
+-- without blocking the viewport. Works for any UI element, present or future.
+--   Returns the map pos when the click is on the map, or nil when it's on UI (pass it through).
+local function map_pos_if_clear(mx, my)
+    local pos = dfhack.gui.getMousePos()               -- strict: nil over any UI
+    if not pos then return nil end
+    if df.global.game.main_interface.current_hover ~= -1 then return nil end  -- DF hover element
+    if over_other_overlay(mx, my) then return nil end  -- another DFHack overlay (e.g. notify)
+    return pos
+end
+
 -- mid-way through giving some other squad order: leave the input alone
 local function busy(sq)
     return sq.giving_kill_order or sq.giving_patrol_order
@@ -879,9 +897,10 @@ function DwarfRtsClickMove:overlay_onupdate()
             -- ONLY the main squads screen -- never the equip/schedule sub-screens, whose
             -- buttons would otherwise queue station/attack commands
             and dfhack.gui.getCurFocus(true)[1] == 'dwarfmode/Squads/Default'
-            and df.global.game.main_interface.current_hover == -1
             and df.global.gps.mouse_x < df.global.gps.dimx - WINDOW_COLS
-            and not over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y)
+            -- general UI guard: strict getMousePos is nil over ANY menu/panel/toolbar, so a
+            -- press on any UI element (not just the ones we used to special-case) is ignored
+            and map_pos_if_clear(df.global.gps.mouse_x, df.global.gps.mouse_y) ~= nil
     elseif down ~= 1 and self.lbut_down == 1 then          -- release
         local rel = dfhack.gui.getMousePos(true)
         if self.press_ok and self.press and rel then
@@ -1015,7 +1034,9 @@ function DwarfRtsClickMove:onInput(keys)
     -- on another visible overlay (e.g. the notifications list).
     if keys._MOUSE_L
         and df.global.gps.mouse_x < df.global.gps.dimx - WINDOW_COLS
-        and not over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y)
+        -- general UI guard (same as the press poller): only swallow a press that lands on the
+        -- exposed map, so a click on ANY menu/panel/toolbar reaches DF normally
+        and map_pos_if_clear(df.global.gps.mouse_x, df.global.gps.mouse_y) ~= nil
     then
         return true
     end

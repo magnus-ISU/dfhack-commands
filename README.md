@@ -23,9 +23,15 @@ itself stays off until you toggle it on that screen). It does **not** enable
 `no-pausing` (that stops *all* pausing — manual toggle).
 
 `magnus-scripts lovely` *also* sets two standing orders (no automatic weaving, no
-automatic web collection) and enables a batch of stock DFHack tools —
-`enable`: autobutcher, autoclothing, autonestbox, autotraining, prioritize,
-seedwatch, suspendmanager, timestream; `tweak`: fast-heat, realistic-melting. The
+automatic web collection), enables `auto-name` (letter-per-wave migrant renamer),
+applies **autobutcher embark protection** once per fort (any animal you embark
+with in numbers above autobutcher's category target gets that race's target
+raised to the embark count — raise-only, so your starting animals are never
+butchered; later-bred surplus still is), and enables a batch of stock DFHack
+tools —
+`enable`: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
+`name+` burrows), prioritize, seedwatch, suspendmanager, timestream; `tweak`:
+fast-heat, realistic-melting. The
 timer-driven ones (autocheese/automilk/autoshear/cleanowned/orders-reevaluate)
 aren't plain enables — turn those on in `gui/control-panel`.
 
@@ -49,11 +55,15 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
 | `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
+| `civ-alert-notification` | register | ✅ done | While the **civilian alert** is on, notify-panel warning `N citizens outside the fortress` — fort civilians (non-soldiers) whose tile isn't inside the alert's burrow(s). Clears when everyone's in or the alert is off; click cycles/zooms to each straggler. Gate: `plotinfo.alerts.civ_alert_idx` → active alert with ≥1 burrow (the "No alert" entry has none); inside-test via `dfhack.burrows.isAssignedTile(burrow, unit.pos)` |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
+| `auto-name` | enableable+service | ✅ done | Renames each migrant's FIRST name so a whole wave shares a starting letter — wave 1→A, wave 2→B, … (wraps after Z), each name unique within the wave and gender-correct. Names come from `dfhack-config/auto-name-names.txt` (editable: male block, blank line, female block; ~1390 mixed Greek/Roman/Norse/medieval names). Skips the original 7, nicknamed dwarves, and fort-born kids; waves grouped by the real in-game arrival event so grouping is exact. Works on an already-running fort (one-time retroactive pass, then watches for new waves); re-running does nothing already-handled. `enable auto-name` / `auto-name` / `auto-name scan` / `auto-name status` |
+| `binnable-stockpile` | overlay | ✅ done | "all binnables" button (bottom-left of the stockpile settings screen, `Ctrl-B`): sets the selected pile to accept exactly the container-stored categories — Ammo, Armor, Bars/Blocks, Cloth, Coins, Finished goods, Food, Gems, Leather, Sheets, Weapons ON; Animals/Corpses/Furniture/Refuse/Stone/Wood OFF. Imports DFHack's `cat_*.dfstock` library presets so it tracks subtypes across versions |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
-| `embark-nobles` | one-shot | ✅ done | Fills **vacant** key fort positions by skill (leaves already-assigned nobles alone; safe to re-run / auto-run via magnus-scripts): chief medical dwarf, militia commander, broker, manager, bookkeeper (best-skilled; a dwarf may hold several), + expedition leader forced to be a separate dwarf. `embark-nobles dry` previews |
+| `embark-prep` | overlay | ✅ done | Embark "Prepare carefully" Dwarves tab (`setupdwarfgame/Dwarves`): three buttons that give the **selected** dwarf 1 point in each skill that affects an office — Manager→Organizer (`Ctrl-M`), Bookkeeper→Record Keeper (`Ctrl-K`), Broker→Appraiser+Comedian/Flatterer/Intimidator/Judge of Intent/Liar/Negotiator/Persuader (`Ctrl-B`, 8 picks) — skills already ≥1 aren't re-bought; overspending the 10-pick budget still sets the skills but is reported. Plus a **Preferences window** (lower-left) listing the selected dwarf's likes (materials/creatures/foods/items/plants/colors/shapes/art forms), updating with the selection. Data: `viewscreen_setupdwarfgamest.dwarf_info[selected_u].skilllevel[job_skill]` (0-5, each level = 1 of `skill_picks_left`); prefs via `s_unit[selected_u].status.current_soul.preferences` (NB fish/egg food prefs put the creature race id in `mattype`, `matindex=-1`; `dwarf_info.name` is empty pre-embark — use the unit) |
+| `embark-nobles` | one-shot | 🔴 **UNFINISHED — not in the pack** | Meant to fill **vacant** key fort positions by skill (chief medical dwarf, militia commander, broker, manager, bookkeeper, + expedition leader as a separate dwarf). **Removed from `magnus-scripts`** — it appears to interfere with position assignments and needs rework. Run `embark-nobles` by hand only if you want it (`embark-nobles dry` previews). **TODO: fix the assignment interference.** |
 | `inside-burrow` | enableable | ✅ done | Armed at embark (via magnus-scripts): when the fort has **no burrows yet**, watches for the **first tile any miner digs out** and seeds a one-tile burrow named `inside+` there, then disables itself. The trailing `+` makes DFHack's `burrow` plugin auto-expand it as you keep digging, so it grows to cover the whole fort interior. Does nothing if any burrow already exists. `inside-burrow status` reports state |
-| `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that, for every soldier in a squad, **self-manages a manager order per gear piece in the exact item+material their uniform specifies** (copper armour + iron sword → those orders, not just steel) — queues **one** unit only when total stock `< need` **and** a metal `BAR` of that material exists, deleting the order once the need is met so **nothing is force-produced** (DF makes an order's items on submit regardless of conditions, so we don't lean on repeating conditional orders); **Upgrade to masterwork** (`Shift-M`) makes one extra and marks inferior (non-masterwork, non-artifact) copies for melting to re-forge; **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
+| `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that **self-manages a manager order per gear piece in the exact item+material each soldier's uniform specifies**, queuing **one** unit at a time and deleting orders once met so **nothing is force-produced**. It forges **one soldier's set at a time, per metal** (steel finishes one soldier while silver/copper independently progresses another — so full sets, breastplates included, actually complete), **serves dwarves in the "Military" work detail first**, and **keeps 3 bars of each metal in reserve** for moods/other jobs. **Copper backup stock** (the uniform is never edited): gear is made in the uniform's metal (steel), but whenever the soldiers don't have enough wearable pieces for an armour slot in **any** metal (desired steel + copper stock < the number who need it), it also stocks a **copper** version of that piece (**armour, shield, and weapon** — a copper weapon beats an empty hand; pieces already specified as copper are skipped) so nobody's left naked or unarmed. **Not gated on steel supply** — even while steel is slowly forging, copper fills the gap; it stops once steel+copper covers everyone. Soldiers choose what to wear themselves. **Gear is SIZED per wearer:** a non-dwarf soldier (e.g. a human mercenary) gets armor forged to their size by setting the manager order's `specdata.race` to their race; requirements and stock are tracked per size (via each item's `maker_race`), so dwarf-sized armor never counts as covering a human, and their iron/copper backups are sized too. **Gauntlets and high boots are targeted as pairs (2 per soldier); gauntlets are handed, so it requires one masterwork of EACH hand (left+right), while boots need any 2 masterwork.** **Upgrade to masterwork** (`Shift-M`) upgrades **every soldier's pieces in parallel** (not one soldier at a time — so a later soldier's shield isn't blocked behind an earlier soldier's hard-to-masterwork gauntlet), and each cycle **melts enough surplus inferior copies to cover the masterwork shortfall** (out of bars → recycle the extras into bars; clears forbid so they actually melt). **Forge Steel Picks** (`Shift-P`, default OFF) keeps one steel pick per miner (Mining-labor dwarves) in stock, one at a time, honouring the masterwork toggle and recycling surplus steel gear into bars when out of steel. **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
 
@@ -205,6 +215,57 @@ command does NOT work). Position: `overlay position <script>.<name> <x> <y>`
 All of these are GUI features. Each needs the relevant viewscreen opened so the
 focus string (`dfhack.gui.getCurFocus(true)`), data path, and button placement
 can be confirmed before/while building.
+
+### General map-click UI guard (DONE, shared) — `map_pos_if_clear`
+
+Every map-interaction feature (squad commands, and the planned RTS mining/building
+below) must route clicks through ONE guard so clicks on any UI element do the normal
+thing instead of firing the script. The load-bearing signal is the STRICT
+`dfhack.gui.getMousePos()` (no arg): it returns a tile ONLY over the exposed map
+viewport and `nil` over ANY UI — bottom toolbar, minimap, right-side panels, open
+menus/lists, designation palettes, notifications' region, etc. (The permissive
+`getMousePos(true)` returns a map tile even under those, which caused the click-through.)
+`dwarf-rts.lua` exposes `map_pos_if_clear(mx,my)`: returns the map pos if the click is
+clear (strict getMousePos non-nil, `current_hover == -1`, and not over another DFHack
+overlay via `over_other_overlay`), else nil → pass the click to DF. Applied to the squad
+press-poller + onInput; reuse it for the mining/building feature.
+
+### 🟢 RTS mining + building mode (requested) — `dig-shapes.lua`
+
+All of this lives in **`dig-shapes.lua`** (overlay `dig-shapes.watcher`), gated through
+`map_pos_if_clear()` — strict `getMousePos()` is nil over any panel, `current_hover` flags DF
+buttons, and `over_other_overlay()` stands off other DFHack overlays. (The old `mining-build.lua`
+"Build …" button was **removed** — it didn't work.)
+
+1. **Right-click on the map → enter mining (Dig) mode.** On `dwarfmode/Default`, a right-click
+   routed through `map_pos_if_clear()` sets `main_interface.main_designation_selected = DIG_DIG`.
+   Because the guard also excludes other overlays, **right-clicking a notification dismisses the
+   notification** (the click passes through) instead of entering mining. Scoped to
+   `dwarfmode/Default` so it never steals a right-click meant to back out of a menu/tool.
+2. **1×1×N single column → staircase.** Wall tiles are carved (`designation.dig =
+   tile_dig_designation.UpStair/UpDownStair/DownStair`: up at the bottom, up-down in the middle,
+   down at the top); open-air tiles get a **REAL constructed stair**; tree tiles get chopped.
+3. **Any selection through open-air tiles → constructed walls / floors, bottom-up.** A tile
+   becomes a **WALL** if the tile directly below is a wall — natural rock **OR an already-placed
+   construction wall** (so `findAtTile` sees planned walls as solid and courses stack upward) —
+   otherwise a **FLOOR**. Works for flat `N×1×1` lines, tall `N×1×N` planes, etc. Open tiles are
+   processed **bottom-up** (sorted by z) so each course sees the one below. Natural rock is left
+   as an ordinary dig (mining); existing floors are left alone.
+4. **A selection whose only contents are constructed walls/pillars → designated for removal**
+   (`dfhack.constructions.designateRemove`). **Tree tiles → chop** (`designation.dig = Default`).
+
+Constructions are **REAL, not buildingplan blueprints**: `dfhack.buildings.constructBuilding`
+alone attaches a `ConstructBuilding` job with the standard "any building material" filter
+(`isPlannedBuilding=false`), so dwarves build them with available materials — calling
+`addPlannedBuilding` (the old code) is what made them blueprints.
+
+The box is captured by the watcher: it tracks `selection_rect` (corner 1) + the live cursor
+(corner 2) while the Dig tool is active, then on box-apply defers one frame and reclassifies
+(`convert_dig_box`). **Verified via safe probes:** `constructBuilding` yields real (non-planned)
+constructions; `findAtTile` sees a just-placed construction (bottom-up stacking); stair-carve
+designations are correct. NOTE: the interactive box-capture + right-click paths read the OS
+cursor (`getMousePos`), so they can only be fully exercised with a live cursor in-game — verify
+there. `tree → chop` via `designation.dig = Default` also wants an in-game confirmation.
 
 ### 🟡 dwarf-rts — RTS-style squad control (`dwarf-rts.lua`)
 
@@ -383,10 +444,14 @@ Verified mechanics: `flags.melt/forbid/dump/foreign/artifact`;
 **Needs live UI:** the bottom toolbar viewscreen + Stocks-button position (for
 the overlay button); exotic-detection method; the exact focus-on-sheet call.
 
-### ✅ embark-nobles (DONE)
+### 🔴 embark-nobles (UNFINISHED — removed from the pack)
 
 `embark-nobles` assigns the six key fort positions in one shot (handy right after
 embark). `embark-nobles dry` previews the picks without changing anything.
+
+**Status:** removed from `magnus-scripts` because it appears to interfere with
+position assignments. It is NOT finished — needs rework before being auto-run
+again. Use by hand at your own risk for now.
 
 - **Only vacant positions are filled** — already-assigned nobles are left
   untouched, so it's safe to re-run and to auto-run from magnus-scripts.

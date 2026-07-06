@@ -3,6 +3,11 @@
 --[[
 embark-nobles
 =============
+
+!! UNFINISHED / NOT IN THE PACK !!  Removed from magnus-scripts: it appears to
+interfere with position assignments (e.g. the chief medical dwarf / hospital
+staffing) and needs rework before it should auto-run again. Run by hand only.
+
 Fills any VACANT key fort positions (already-assigned ones are left untouched) --
 handy right after embark, and safe to re-run:
 

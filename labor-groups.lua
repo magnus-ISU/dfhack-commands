@@ -10,7 +10,8 @@ Lays the Labor screen out as:
        every remaining moodable skill)
     3. the other defaults -- Hunters, Fisherdwarves, Plant gatherers, Haulers, Orderlies,
        Siege operators, plus anything else you added
-    4. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
+    4. "Cook" and "Brewer" (farmer/plow icon) at the end of the list
+    5. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
        your squads by the separate `military-labor` script)
 
 NON-DESTRUCTIVE: existing details are reordered (and their icons updated), never deleted
@@ -55,6 +56,12 @@ local GROUPS = {
     {name = 'Weaver',           labors = {'WEAVER'},          icon = 'PLANT_GATHERERS'},
 }
 
+-- food details, at the END of the list, right before Military (farmer/plow icon)
+local END_GROUPS = {
+    {name = 'Cook',   labors = {'COOK'},   icon = 'PLANTERS'},
+    {name = 'Brewer', labors = {'BREWER'}, icon = 'PLANTERS'},
+}
+
 -- the military grouping detail (no labor; membership synced by military-labor). Last.
 local MILITARY_NAME = 'Military'
 local MILITARY_ICON = 'SIEGE_OPERATORS'
@@ -92,6 +99,7 @@ local wd = df.global.plotinfo.labor_info.work_details
 -- labors the crafting set owns; a detail is "a craft" only if all its labors are managed.
 local managed = {}
 for _, g in ipairs(GROUPS) do for _, l in ipairs(g.labors) do managed[l] = true end end
+for _, g in ipairs(END_GROUPS) do for _, l in ipairs(g.labors) do managed[l] = true end end
 
 local function labors_of(w)
     local out = {}
@@ -171,11 +179,24 @@ local function plan()
     for _, L in ipairs(TAIL) do local i = take_by_labor(L); if i then add_default(i) end end
     local mil_idx = by_name[MILITARY_NAME]
     if mil_idx then placed[mil_idx] = true end                  -- reserve military for last
+    for _, g in ipairs(END_GROUPS) do                           -- reserve cook/brewer for the end
+        local i = by_name[g.name]
+        if i then placed[i] = true end
+    end
     for i = 0, #wd - 1 do                                       -- any other details
         if not placed[i] then placed[i] = true
             local w = wd[i]
             rows[#rows + 1] = {idx = i, name = w.name, icon_name = df.work_detail_icon_type[w.icon],
                                mode_name = df.work_detail_mode[w.flags.mode], status = 'kept'}
+        end
+    end
+    for _, g in ipairs(END_GROUPS) do                           -- cook/brewer: end, before Military
+        local i = by_name[g.name]
+        if i then
+            rows[#rows + 1] = {idx = i, name = g.name, icon_name = g.icon,
+                               mode_name = df.work_detail_mode[wd[i].flags.mode], status = 'kept'}
+        else
+            rows[#rows + 1] = {name = g.name, icon_name = g.icon, mode_name = 'EverybodyDoesThis', status = 'NEW'}
         end
     end
     if mil_idx then
@@ -207,8 +228,10 @@ if not dry then
                 h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- members synced by military-labor
             else
                 h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- new craft
-                for _, g in ipairs(GROUPS) do
-                    if g.name == r.name then for _, l in ipairs(g.labors) do h.allowed_labors[l] = true end end
+                for _, list in ipairs({GROUPS, END_GROUPS}) do
+                    for _, g in ipairs(list) do
+                        if g.name == r.name then for _, l in ipairs(g.labors) do h.allowed_labors[l] = true end end
+                    end
                 end
             end
             h.icon = df.work_detail_icon_type[r.icon_name]
@@ -216,9 +239,11 @@ if not dry then
         order[#order + 1] = h
     end
     -- ensure each existing craft has its labor enabled (idempotent; additive, no clearing)
-    for _, g in ipairs(GROUPS) do
-        for i = 0, #wd - 1 do
-            if wd[i].name == g.name then for _, l in ipairs(g.labors) do wd[i].allowed_labors[l] = true end end
+    for _, list in ipairs({GROUPS, END_GROUPS}) do
+        for _, g in ipairs(list) do
+            for i = 0, #wd - 1 do
+                if wd[i].name == g.name then for _, l in ipairs(g.labors) do wd[i].allowed_labors[l] = true end end
+            end
         end
     end
     -- rewrite the vector in the new order: erase every slot (erase does NOT delete the

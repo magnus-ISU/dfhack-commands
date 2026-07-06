@@ -14,12 +14,12 @@ Activates the "always-on" helpers in this pack:
     * mandate-notification      (registers the immediate-mandate notification)
     * trader-notification       (counts down the days a caravan is at your depot)
     * empty-labor-notification  (warns: a work detail is "Only Selected" with no workers)
+    * civ-alert-notification    (warns: citizens still outside the civilian-alert burrow)
     * planner-orders            (notify + 1-click orders for planned-building items)
     * auto-mandate              (enables the background work-order service)
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
     * dwarf-rts                 (registers the RTS-style squad-screen overlay)
-    * embark-nobles             (assigns the key fort positions by skill)
     * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
     * labor-groups once         (builds the ordered crafting Work Details -- once per
                                  fort; skipped if its "Weaponsmithing" detail already
@@ -29,12 +29,22 @@ Activates the "always-on" helpers in this pack:
     * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
+    * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
+    * no-sparring-spam          (auto-removes sparring combat reports as they appear)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
-weaving, no automatic web collection) and enable a batch of stock DFHack tools:
-    enable: autobutcher, autoclothing, autonestbox, autotraining, hide-tutorials,
-            prioritize, seedwatch, suspendmanager, timestream
+weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
+renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
+full description), and enable a batch of stock DFHack tools:
+    enable: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
+            `name+` burrows), hide-tutorials, prioritize, seedwatch, suspendmanager,
+            timestream
     tweak:  fast-heat, realistic-melting
+It also applies autobutcher EMBARK PROTECTION once per fort: any animal you
+arrive with in numbers above autobutcher's target for its category (e.g. 9
+female dogs vs the default 4 female adults) gets that race's target raised to
+the embark count, so your starting animals aren't butchered. Raise-only, never
+re-runs (later-bred surplus is still butchered down to those targets).
 (The timer-driven tools -- autocheese, automilk, autoshear, cleanowned,
 orders-reevaluate -- aren't plain enables; turn those on in gui/control-panel.)
 
@@ -46,9 +56,9 @@ templates and re-removes the default metal uniforms (idempotent). The gear-order
 service stays OFF until you flip its toggles on the squad Equip screen (Shift-G
 queue, Shift-M masterwork); that choice persists with the fort.
 
-embark-nobles is safe every session: it only fills VACANT positions and leaves
-already-assigned nobles untouched, so your manual noble choices are respected.
-`embark-nobles dry` previews what (if anything) it would fill.
+embark-nobles is NOT run by this pack: it is UNFINISHED (it appears to interfere
+with position assignments), so it was removed from magnus-scripts. Run it by hand
+(`embark-nobles`) only if you want to, and `embark-nobles dry` to preview first.
 
 inside-burrow is safe every session: it only acts when the fort has NO burrows
 yet, seeding a self-expanding `inside+` burrow on the first interior tile a miner
@@ -75,13 +85,41 @@ Usage
 ]====]
 
 if not dfhack.world.isFortressMode() then
-    qerror('magnus-scripts: load a fort first (fortress mode only)')
+    -- soft return (not qerror): this script auto-runs from onMapLoad.init, which
+    -- also fires on non-fort maps -- we just do nothing there instead of erroring.
+    return
 end
 
 local function try(label, fn)
     local ok, err = pcall(fn)
     print(('  [%s] %s'):format(ok and 'ok' or 'FAIL', label))
     if not ok then print('       ' .. tostring(err)) end
+end
+
+-- ---- self-arming: (re)run automatically on every fort load ------------------
+-- We keep exactly one `magnus-scripts [lovely]` line in dfhack-config's
+-- onMapLoad.init (which DFHack runs each time a fort map loads). `disable`
+-- removes it. This is what makes the pack persist across game restarts.
+local INIT_PATH = dfhack.getDFPath() .. '/dfhack-config/init/onMapLoad.init'
+
+local function set_autostart(variant)
+    -- variant: nil -> remove our line; '' -> `magnus-scripts`; 'lovely' -> `magnus-scripts lovely`
+    local lines, f = {}, io.open(INIT_PATH, 'r')
+    if f then
+        for line in f:lines() do
+            if not line:match('^%s*magnus%-scripts') then lines[#lines + 1] = line end
+        end
+        f:close()
+    end
+    if variant then
+        lines[#lines + 1] = 'magnus-scripts' .. (variant ~= '' and (' ' .. variant) or '')
+    end
+    local w = io.open(INIT_PATH, 'w')
+    if not w then return false, 'could not write ' .. INIT_PATH end
+    w:write(table.concat(lines, '\n'))
+    if #lines > 0 then w:write('\n') end
+    w:close()
+    return true
 end
 
 -- ---- `magnus-scripts disable`: turn off everything this pack switched on ------
@@ -95,10 +133,11 @@ if ({...})[1] == 'disable' then
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
+    try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'auto-name') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
-        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready', 'empty_labor'}) do
+        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready', 'empty_labor', 'civ_alert_outside'}) do
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
         end
         -- trader-notification suppressed DFHack's stock "traders_ready" alert; restore it
@@ -107,9 +146,10 @@ if ({...})[1] == 'disable' then
         end
         if n.config and n.config.write then n.config:write() end
     end)
-    print('Done. Pack helpers disabled. (One-shots already applied -- embark-nobles,')
-    print('labor-groups, the steel uniform templates -- are left as-is. The `lovely`')
-    print('stock tools, if you enabled them, stay on -- toggle those in gui/control-panel.)')
+    try('remove auto-run on load', function() assert(set_autostart(nil)) end)
+    print('Done. Pack helpers disabled and auto-run-on-load removed. (One-shots already')
+    print('applied -- labor-groups, the steel uniform templates -- are left as-is. The')
+    print('`lovely` stock tools, if enabled, stay on -- toggle in gui/control-panel.)')
     return
 end
 
@@ -121,11 +161,13 @@ try('mandate-notification', function() dfhack.run_script('mandate-notification')
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('trader-notification', function() dfhack.run_script('trader-notification') end)
 try('empty-labor-notification', function() dfhack.run_script('empty-labor-notification') end)
+try('civ-alert-notification', function() dfhack.run_script('civ-alert-notification') end)
 try('planner-orders', function() dfhack.run_script('planner-orders') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
-try('embark-nobles (assign key fort positions)', function() dfhack.run_command('embark-nobles') end)
+-- embark-nobles intentionally NOT run here: it's unfinished and appears to interfere
+-- with position assignments. Run `embark-nobles` by hand if you want it.
 try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
 -- once per fort: skipped if labor-groups' signature detail ("Weaponsmithing") is already
 -- present, so manual tweaks survive. Run `labor-groups` (no `once`) by hand to force.
@@ -137,6 +179,8 @@ try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
 try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'item-description.expand') end)
 try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
+try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('dig-shapes') end)
+try('no-sparring-spam (auto-remove sparring reports as they appear)', function() dfhack.run_script('no-sparring-spam') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if lovely then
@@ -145,13 +189,94 @@ if lovely then
     df.global.standing_orders_auto_collect_webs = 0
     print('  [ok] standing orders: no automatic weaving, no automatic web collection')
 
+    -- rename each migrant wave to a shared starting letter (A, B, C, ...); enabling
+    -- also does the one-time retroactive pass and keeps watching for new waves
+    try('auto-name (letter-per-wave migrant renamer)',
+        function() dfhack.run_command('enable', 'auto-name') end)
+
+    -- selecting a statue jumps straight to the statue item's sheet (its full description)
+    try('statue-redirect (auto-open statue details)',
+        function() dfhack.run_command('enable', 'statue-redirect') end)
+
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
     local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
-    for _, c in ipairs({'autobutcher', 'autoclothing', 'autonestbox', 'autotraining',
+
+    -- autobutcher: NEVER disturb custom settings. If you already have it enabled (or a
+    -- watch list configured), leave it exactly as you set it; only enable it fresh when
+    -- it's off and unconfigured. (`enable` doesn't wipe settings, but this avoids even
+    -- touching it when you've tuned your target counts / watch list.)
+    try('autobutcher (skip if already configured)', function()
+        local ab = require('plugins.autobutcher')
+        local configured = ab.isEnabled()
+        if not configured then
+            local ok, wl = pcall(ab.autobutcher_getWatchList)
+            configured = ok and wl and #wl > 0
+        end
+        if configured then
+            print('       autobutcher already configured -- left untouched')
+        else
+            dfhack.run_command('enable', 'autobutcher')
+        end
+    end)
+
+    -- embark protection (once per fort): if you arrive with MORE of an animal than
+    -- autobutcher's target for its category (e.g. 9 female dogs vs a default of 4),
+    -- raise that race's target to the count you embarked with so your starting
+    -- animals are never butchered down to the default. Raise-only; never lowers
+    -- targets, and never re-runs on later loads (so animals bred later still get
+    -- butchered down to these targets as usual).
+    try('autobutcher embark protection (once/fort)', function()
+        if not dfhack.isMapLoaded() then return end
+        local KEY = 'magnus-scripts/autobutcher-embark'
+        if (dfhack.persistent.getSiteData(KEY) or {}).done then
+            print('       already applied on this fort -- skipped')
+            return
+        end
+        local ab = require('plugins.autobutcher')
+        local defaults = ab.autobutcher_getSettings()
+        local watch = {}
+        for _, d in ipairs(ab.autobutcher_getWatchList()) do watch[d.id] = d end
+        local counts = {}
+        for _, u in ipairs(df.global.world.units.active) do
+            if dfhack.units.isFortControlled(u) and dfhack.units.isTame(u)
+                and dfhack.units.isAlive(u) and dfhack.units.isAnimal(u) then
+                local c = counts[u.race] or {fk = 0, mk = 0, fa = 0, ma = 0}
+                local adult = dfhack.units.isAdult(u)
+                local male = u.sex == df.pronoun_type.he
+                local k = adult and (male and 'ma' or 'fa') or (male and 'mk' or 'fk')
+                c[k] = c[k] + 1
+                counts[u.race] = c
+            end
+        end
+        for race, c in pairs(counts) do
+            local base = watch[race] or defaults
+            local fk, mk = math.max(base.fk, c.fk), math.max(base.mk, c.mk)
+            local fa, ma = math.max(base.fa, c.fa), math.max(base.ma, c.ma)
+            if fk > base.fk or mk > base.mk or fa > base.fa or ma > base.ma then
+                ab.autobutcher_setWatchListRace(race, fk, mk, fa, ma, true)
+                local cr = df.creature_raw.find(race)
+                print(('       %s: targets raised to %d/%d/%d/%d (fk/mk/fa/ma)')
+                    :format(cr and cr.name[1] or ('race ' .. race), fk, mk, fa, ma))
+            end
+        end
+        dfhack.persistent.saveSiteData(KEY, {done = true})
+    end)
+
+    -- `burrow` = auto-grow: burrows named with a trailing `+` (e.g. inside-burrow's
+    -- `inside+`) expand into adjacent tiles as they're dug out. inside-burrow only
+    -- enables it when it seeds -- enable it here unconditionally so manually-made
+    -- `name+` burrows grow too.
+    for _, c in ipairs({'autoclothing', 'autonestbox', 'autotraining', 'burrow',
                         'hide-tutorials', 'prioritize', 'seedwatch', 'suspendmanager',
                         'timestream'}) do enable_tool(c) end
     for _, c in ipairs({'fast-heat', 'realistic-melting'}) do tweak_tool(c) end
 end
 
+-- arm (or refresh) auto-run on the next fort load, recording which variant was used
+try('arm auto-run on load (' .. (lovely and 'lovely' or 'plain') .. ')',
+    function() assert(set_autostart(lovely and 'lovely' or '')) end)
+
 print('Done. One-shot commands: destroy-forbidden, clear-flows, raid-status, attack-invaders.')
 print('Manual toggle: no-pausing (stops all pausing).')
+print(('Auto-run-on-load ARMED (%s). It will re-run every time this fort loads until you run '
+    .. '`magnus-scripts disable`.'):format(lovely and 'magnus-scripts lovely' or 'magnus-scripts'))
