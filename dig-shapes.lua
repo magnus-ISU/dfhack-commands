@@ -266,10 +266,11 @@ function convert_dig_box(a, b)
     end
 
     local did = false
-    -- only construct walls/floors for a thin plane/line (a dim == 1), never a solid NxNxN block
-    local solid_block = dx > 1 and dy > 1 and dz > 1
-    if #opens > 0 and solid_block then
-        log(('  -> SKIP build: %dx%dx%d is a solid block (walls need a 1xNxN plane)'):format(dx, dy, dz))
+    -- walls/floors only when the footprint is 1 tile thick in a horizontal axis (a 1xNxN or
+    -- Nx1xN plane, or a thin line) -- a 2xNxN or thicker footprint is rejected
+    local thick = dx > 1 and dy > 1
+    if #opens > 0 and thick then
+        log(('  -> SKIP build: %dx%dx%d footprint thicker than 1 (walls need 1xNxN / Nx1xN)'):format(dx, dy, dz))
     else
         -- a single 1x1 click on an open tile flanked by exactly 2 orthogonal walls is a doorway
         -- -> build a DOOR instead of a wall; any other 1x1 stays a wall/floor

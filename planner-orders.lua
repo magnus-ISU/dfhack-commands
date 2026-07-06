@@ -149,6 +149,19 @@ local JOB_MATERIALS = {
     ForgeAnvil = {'IRON', 'STEEL'},
 }
 
+-- All tools share the MakeTool job, but individual tools permit different materials (encoded in
+-- their raw def flags). Most notably HARD_MAT / GLASS_MAT tools (pedestals, display cases, nest
+-- boxes, jugs, pots, ...) can be made from GLASS, which the MakeTool default omits. For a
+-- glass-capable tool, offer glass on top of the usual stone/wood/metal; otherwise fall back to
+-- JOB_CLASSES.MakeTool.
+local function tool_classes(subtype)
+    local t = df.global.world.raws.itemdefs.tools[subtype]
+    if t and t.flags and (t.flags.HARD_MAT or t.flags.GLASS_MAT) then
+        return {stone = true, wood = true, metal = true, glass = true}
+    end
+    return nil
+end
+
 -- Supplies a hospital wants kept stocked. When the fort has a hospital, planner-orders
 -- offers an order for each of these that has none yet. Three kinds:
 --   item     -- pick a material (wood/metal), keep `target` in stock
@@ -611,7 +624,7 @@ local function scan()
                             if tsub then
                                 bump('TOOL:' .. tsub, {name = tname, job_type = df.job_type.MakeTool,
                                     order_subtype = tsub, cond_item_type = df.item_type.TOOL,
-                                    cond_subtype = tsub}, magma)
+                                    cond_subtype = tsub, classes = tool_classes(tsub)}, magma)
                             else unmake('Tool') end
                         else
                             local jobname = ITEM_JOB[df.item_type[f.item_type]]
@@ -752,8 +765,23 @@ local function create_reaction(gap, opt)
         if req and not ws_exists(req) then missing[req.label] = true end
     end
     -- the chosen soap/plaster reaction
-    add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
-              amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+    if opt.reaction == 'MAKE_PLASTER_POWDER' then
+        -- plaster: a STANDING order (not a one-time batch) matching the hand-made one -- make 1
+        -- whenever plaster powder < 30 AND a GYPSUM boulder (reaction-class, any gypsum stone) and
+        -- an empty bag are on hand
+        local plaster = dfhack.matinfo.find('INORGANIC:PLASTER')
+        local bag = C('GreaterThan', 0, df.item_type.BAG); bag.empty = true
+        add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
+            amount = 1, frequency = df.workquota_frequency_type.Daily,
+            conds = {
+                C('GreaterThan', 0, df.item_type.BOULDER, nil, nil, 'GYPSUM'),
+                C('LessThan', 30, df.item_type.POWDER_MISC, plaster and plaster.type, plaster and plaster.index),
+                bag,
+            }}
+    else
+        add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
+                  amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+    end
     note_ws(opt.reaction)
     -- its prerequisites
     for _, name in ipairs(opt.also or {}) do
