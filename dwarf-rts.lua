@@ -101,6 +101,20 @@ local WINDOW_COLS = 28
 
 local function squads_ui() return df.global.game.main_interface.squads end
 
+-- squad ids DFHack's autotraining tool is currently driving (active only), read from its
+-- persisted site data (keys are stored as strings, so coerce back to numbers). These squads
+-- are only rostered to train, so the RTS select-all leaves them out.
+local function autotraining_squads()
+    local set = {}
+    local d = dfhack.persistent.getSiteData('autotraining')
+    if d and d.training_squads then
+        for k, active in pairs(d.training_squads) do
+            if active then set[tonumber(k)] = true end
+        end
+    end
+    return set
+end
+
 -- Squad sub-dialogs that sit ON TOP of the squads screen, where dwarf-rts must stand
 -- fully aside. Two distinct hazards:
 --   * squad_equipment / squad_schedule are separate viewscreens that hide the squads
@@ -852,9 +866,13 @@ function DwarfRtsClickMove:overlay_onupdate()
     local open = sq.open
 
     if open and not self.prev_open then
-        -- panel just opened: RTS select-all, unless a conscription selection is pending
+        -- panel just opened: RTS select-all, unless a conscription selection is pending.
+        -- Autotraining squads are excluded -- they're only rostered to train, not to command.
         if not pending_select then
-            for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = true end
+            local training = autotraining_squads()
+            for i = 0, #sq.squad_selected - 1 do
+                sq.squad_selected[i] = not training[sq.squad_id[i]]
+            end
         end
     elseif (not open) and self.prev_open then
         -- panel just closed: if anything is still selected (a squad, or members in the
@@ -866,6 +884,10 @@ function DwarfRtsClickMove:overlay_onupdate()
             sq.viewing_squad_index = -1            -- collapse the member view too
             sq.squad_hfid_selected:resize(0)
             open = true
+        elseif df.global.game.main_interface.main_designation_selected ~= df.main_designation_type.NONE then
+            -- the panel closed because the player switched to a map designation tool (e.g. the
+            -- dig-helper entering mining from an idle squads screen): that's not a stand-down,
+            -- so leave squad orders and any temp squads intact.
         else
             clear_all_orders(sq)            -- close goes through: stand every squad down
             disband_conscription_squads()   -- ...and disband any temp Conscription squads

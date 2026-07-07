@@ -38,6 +38,7 @@ local function fmt(p) return ('%d,%d,z%d'):format(p.x, p.y, p.z) end
 
 local function mi() return df.global.game.main_interface end
 local function enter_mining() mi().main_designation_selected = df.main_designation_type.DIG_DIG end
+local function squads_ui() return mi().squads end
 
 local WINDOW_COLS = 28   -- dwarf-rts's right-side squads window band; yield right-clicks there
 
@@ -126,6 +127,8 @@ local function is_diggable_wall(pos)
     return shape_of(pos) == SH.WALL and material_of(pos) ~= TM.TREE and material_of(pos) ~= TM.CONSTRUCTION
         and not construction_here(pos)
 end
+-- a tile that already has an up-stair carved into it (a staircase continuing up from below)
+local function is_up_stair(pos) return shape_of(pos) == SH.STAIR_UP end
 
 -- is pos a wall? natural/completed wall (WALL shape) OR a placed (even in-progress) wall
 -- construction whose tile may still read as EMPTY.
@@ -237,8 +240,15 @@ local function make_staircase(x, y, z1, z2)
         if z == z2 then dig_val, con_sub = DV.DownStair, CT.DownStair
         elseif z == z1 then dig_val, con_sub = DV.UpStair, CT.UpStair
         else dig_val, con_sub = DV.UpDownStair, CT.UpDownStair end
+        -- if the bottom of the column already has an up-stair carved (a staircase continues below),
+        -- carve an up/DOWN stair here instead of a plain up-stair so the new column connects down.
+        if z == z1 and is_up_stair(pos) then dig_val = DV.UpDownStair end
         if construction_here(pos) then
             log('  stair SKIP (already a construction) @' .. fmt(pos))
+        elseif is_up_stair(pos) then
+            -- existing carved up-stair: re-designate to extend the stairway downward
+            set_dig(pos, dig_val)
+            log(('  stair EXTEND (was up-stair) dig=%s @%s'):format(df.tile_dig_designation[dig_val], fmt(pos)))
         elseif is_diggable_wall(pos) then
             set_dig(pos, dig_val)
             log(('  stair CARVE dig=%s @%s'):format(df.tile_dig_designation[dig_val], fmt(pos)))
@@ -287,12 +297,17 @@ function convert_dig_box(a, b)
     end
 
     local did = false
-    -- walls/floors only when the footprint is 1 tile thick in a horizontal axis (a 1xNxN or
-    -- Nx1xN plane, or a thin line) -- a 2xNxN or thicker footprint is rejected
+    -- Geometry rules for build-intent selections (every tile open, no rock/dig tile):
+    --   * a WALL must be 1xNxM -- 1 tile thick in a horizontal axis (a vertical plane), any
+    --     vertical span. A footprint thicker than 1 in BOTH horizontal axes is a "thick" box.
+    --   * a FLOOR slab may be NxMx1 -- any horizontal footprint but a SINGLE z-level -- but only
+    --     when the ENTIRE area would be floor (no tile in it would become a wall).
+    -- A tile becomes a WALL when has_floor_here(p) (something to stand a wall on), else a FLOOR.
     local thick = dx > 1 and dy > 1
-    -- build WALLS only when the whole selection is wall-intent: every tile is open (a single
-    -- rock/dig tile in the box cancels it) and the footprint is 1 tile thick in a horizontal axis.
-    if #opens > 0 and #rocks == 0 and not thick then
+    local all_floor = true
+    for _, p in ipairs(opens) do if has_floor_here(p) then all_floor = false; break end end
+    local floor_slab = all_floor and dz == 1   -- an NxMx1 all-floor slab is allowed even when thick
+    if #opens > 0 and #rocks == 0 and (not thick or floor_slab) then
         -- a single 1x1 click on an open tile flanked by exactly 2 orthogonal walls is a doorway
         -- -> build a DOOR instead of a wall
         local single = dx == 1 and dy == 1 and dz == 1
@@ -336,9 +351,12 @@ function DigShapes:overlay_onupdate()
         local mp = dfhack.gui.getMousePos()
         if mp then self.last = mp end
     elseif self.corner then
-        local aa, bb = self.corner, self.last
-        self.corner, self.last = nil, nil
-        if aa and bb then
+        -- the drag ended. Only convert if it was COMPLETED, not cancelled: a right-click or
+        -- Escape during the drag (flagged in onInput) clears selection_rect the same way a
+        -- finished box does, so without this check a cancel would build the partial box.
+        local aa, bb, cancelled = self.corner, self.last, self.cancelled
+        self.corner, self.last, self.cancelled = nil, nil, nil
+        if aa and bb and not cancelled then
             dfhack.timeout(1, 'frames', function() pcall(convert_dig_box, aa, bb) end)
         end
     end
@@ -348,23 +366,49 @@ end
 -- unconsumed right-click on dwarfmode/Default is cancelled by DF). So we yield (return false,
 -- letting DF/dwarf-rts handle it) whenever the cursor is over UI: the dwarf-rts right-side band,
 -- an announcement alert, another overlay, a DF hover element, or off the exposed map.
+-- nothing selected on the open squads panel (no whole squad, no expanded member)?
+local function squads_idle()
+    local sq = squads_ui()
+    if not sq.open then return false end
+    for i = 0, #sq.squad_selected - 1 do if sq.squad_selected[i] then return false end end
+    return #sq.squad_hfid_selected == 0
+end
+
 function DigShapes:onInput(keys)
-    if keys._MOUSE_R and (dfhack.gui.getCurFocus(true)[1] or '') == 'dwarfmode/Default' then
-        local mp = dfhack.gui.getMousePos()
-        local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
-        local m = mi()
-        local hit = {}
-        local ooo = over_other_overlay(mx, my, hit)
-        local in_band = mx >= df.global.gps.dimx - WINDOW_COLS   -- dwarf-rts squads band
-        -- DF sets current_hover_left_x to the left edge of whatever UI element the cursor is
-        -- over (the alert reads 4); it stays 0 over the open map. Non-zero => over UI, don't mine.
-        local on_ui = m.current_hover_left_x ~= 0
-        -- explicit never-mine zone: the left 2 columns everywhere + the top-left 4x4 corner
-        local in_zone = mx < 2 or (mx < 4 and my < 4)
-        if mp and m.current_hover == -1 and not m.current_hover_alert and not ooo
-            and not in_band and not on_ui and not in_zone then
-            enter_mining()
-            return true
+    -- Cancelling an IN-PROGRESS dig drag (right-click or Escape) must not be treated as
+    -- completing the box. Flag it so overlay_onupdate discards the pending selection, and let
+    -- DF process the cancel natively (a right-click here never falls through to enter mining).
+    if self.corner and (keys._MOUSE_R or keys.LEAVESCREEN) then
+        self.cancelled = true
+        return false
+    end
+
+    if keys._MOUSE_R then
+        local focus = dfhack.gui.getCurFocus(true)[1] or ''
+        -- Enter mining on a right-click over the open map: from the normal view, OR while the
+        -- squads screen is open with NO squad selected. dwarf-rts forwards that (idle) right-click
+        -- to DF, so the dig-helper turns it into mining just like on the normal map. With a squad
+        -- selected we stay out so dwarf-rts's own right-click (back out / close) still works.
+        local from_squads = focus == 'dwarfmode/Squads/Default' and squads_idle()
+        if focus == 'dwarfmode/Default' or from_squads then
+            local mp = dfhack.gui.getMousePos()
+            local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+            local m = mi()
+            local ooo = over_other_overlay(mx, my)
+            local in_band = mx >= df.global.gps.dimx - WINDOW_COLS   -- dwarf-rts squads band
+            -- DF sets current_hover_left_x to the left edge of whatever UI element the cursor is
+            -- over (the alert reads 4); it stays 0 over the open map. Non-zero => over UI.
+            local on_ui = m.current_hover_left_x ~= 0
+            -- explicit never-mine zone: the left 2 columns everywhere + the top-left 4x4 corner
+            local in_zone = mx < 2 or (mx < 4 and my < 4)
+            if mp and m.current_hover == -1 and not m.current_hover_alert and not ooo
+                and not in_band and not on_ui and not in_zone then
+                -- coming from the squads screen: close the panel so the map takes clicks again.
+                -- dwarf-rts leaves squad orders intact because a designation tool is now active.
+                if from_squads then squads_ui().open = false end
+                enter_mining()
+                return true
+            end
         end
     end
     return false   -- yield: dwarf-rts / DF / alerts handle the right-click
