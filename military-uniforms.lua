@@ -61,6 +61,13 @@ miner has a masterwork steel pick).
                                    enough surplus inferior copies each cycle to cover the
                                    masterwork shortfall (out of bars -> recycle the extras),
                                    clearing forbid so they actually melt
+
+A masterwork only counts toward the goal if it is UNDAMAGED (wear 0) and NOT on display -- a
+worn masterwork has lost its edge, and a piece locked in a display case/pedestal can never be
+equipped -- so neither is treated as "done" (and displayed pieces are never melted). Whenever a
+better piece than what's in use becomes available (a fresh masterwork, or just any higher-quality
+item), the service flags DF to re-run equipment assignment for that slot, so soldiers swap UP to
+it -- fired only when a new, better piece actually appears, so there's no equip churn.
   Forge Steel Picks (Shift-P)      OFF by default. Keeps one steel pick per miner (dwarves
                                    with the Mining labor) in stock, forged one at a time,
                                    respecting the bar reserve. Honours Upgrade to masterwork
@@ -299,6 +306,18 @@ local MAKE_JOB = {
     [df.item_type.WEAPON] = df.job_type.MakeWeapon,
 }
 
+-- item_type -> the plotinfo.equipment.update dirty-flag field that makes DF re-run assignment
+-- for that slot (so soldiers swap up to a better piece when one becomes available)
+local UPDATE_FIELD = {
+    [df.item_type.ARMOR]  = 'armor',
+    [df.item_type.HELM]   = 'helm',
+    [df.item_type.PANTS]  = 'pants',
+    [df.item_type.GLOVES] = 'gloves',
+    [df.item_type.SHOES]  = 'shoes',
+    [df.item_type.SHIELD] = 'shield',
+    [df.item_type.WEAPON] = 'weapon',
+}
+
 -- gauntlets and high boots are worn as PAIRS, so a soldier needs 2 of each (a
 -- uniform slot lists them once). They're forged a pair at a time, but each item's
 -- quality is independent, so a "pair" can be one masterwork + one not.
@@ -476,6 +495,16 @@ local function item_equipped(it)
     return false
 end
 
+-- is this item on display (in a display case / pedestal)? A displayed piece is locked to that
+-- furniture and can never be equipped by a soldier, so it must NOT count as available gear --
+-- nor be melted (the player put it there on purpose).
+local function item_on_display(it)
+    for _, r in ipairs(it.general_refs) do
+        if r:getType() == df.general_ref_type.BUILDING_DISPLAY_FURNITURE then return true end
+    end
+    return false
+end
+
 -- locate one of our tracked manager orders by id
 local function order_by_id(id)
     local mo = df.global.world.manager_orders
@@ -580,6 +609,7 @@ local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_s
             elseif it:getQuality() < df.item_quality.Masterful
                 and not it.flags.artifact
                 and not item_equipped(it)                     -- a worn piece can't be melted
+                and not item_on_display(it)                   -- never melt a piece on display
                 and dfhack.items.canMelt(it)
                 and (stock[key] or 0) > req[key].count        -- surplus only: keep a full set
             then
@@ -746,6 +776,7 @@ local function load_state()
         if state.wardogs == nil then state.wardogs = false end
         if state.pickaxes == nil then state.pickaxes = false end -- miner steel picks default OFF
         if not state.orders then state.orders = {} end
+        if not state.best_q then state.best_q = {} end           -- best avail quality per gear key
     end
     return state
 end
@@ -824,10 +855,10 @@ local function equip_miner_pickaxes()
             and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
             if it.flags.melt then
                 melting = melting + 1                       -- steel already on the way back
-            else
+            elseif not item_on_display(it) then             -- a displayed pick isn't usable stock
                 total = total + 1
-                if it:getQuality() >= df.item_quality.Masterful and not it.flags.artifact then
-                    mw = mw + 1
+                if it:getQuality() >= df.item_quality.Masterful and it.wear == 0 and not it.flags.artifact then
+                    mw = mw + 1                             -- masterwork counts only if undamaged
                 elseif dfhack.items.canMelt(it) and not item_equipped(it) then
                     cands[#cands + 1] = it                  -- inferior, meltable, not in-hand
                 end
@@ -912,6 +943,8 @@ local function run_cycle()
     -- stock by material, and the leather-supply counts. Items already flagged for
     -- melting don't count (they're being recycled).
     local stock, mwstock, bars = {}, {}, {}
+    -- best AVAILABLE (unassigned, wearable) quality per gear key -> drives the upgrade re-equip
+    local availq = {}
     -- hand-split counts for handed types (gauntlets): stock_h[key][hand], mwstock_h[key][hand]
     local stock_h, mwstock_h = {}, {}
     local bstock = {}            -- bstock[material_index]["type/sub"] = existing iron/copper backup pieces
@@ -930,20 +963,30 @@ local function run_cycle()
             flasks = flasks + 1
         elseif not it.flags.melt and t == df.item_type.BACKPACK then
             backpacks = backpacks + 1
-        elseif not it.flags.melt then
+        elseif not it.flags.melt and not item_on_display(it) then
+            -- (an item locked to a display case / pedestal can never be equipped, so it does
+            -- not count as gear stock -- masterwork or otherwise)
             local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(),
                                                 it:getMaterialIndex(), item_size_race(it))
             if req[k] then
                 stock[k] = (stock[k] or 0) + 1
+                -- track the best quality among UNASSIGNED copies (an equipped piece is already
+                -- on a soldier -- it isn't something to upgrade TO)
+                if not item_equipped(it) then
+                    local q = it:getQuality()
+                    if q > (availq[k] or -1) then availq[k] = q end
+                end
                 local handed = HANDED[t]
                 local hand = handed and item_hand(it) or nil
                 if handed then
                     stock_h[k] = stock_h[k] or {[0] = 0, [1] = 0}
                     stock_h[k][hand] = stock_h[k][hand] + 1
                 end
-                -- artifacts are quality 5 but never auto-equip (and can't be melted),
-                -- so they must NOT count toward the masterwork goal
+                -- a masterwork counts toward the goal only if it is UNDAMAGED (wear 0 -- a worn
+                -- masterwork has lost its edge) and not an artifact (artifacts never auto-equip
+                -- and can't be melted), so we don't treat a degraded/undisplayable piece as done
                 if it:getQuality() >= df.item_quality.Masterful
+                    and it.wear == 0
                     and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
                 then
                     mwstock[k] = (mwstock[k] or 0) + 1
@@ -966,6 +1009,27 @@ local function run_cycle()
         end
         ::next_item::
     end
+
+    -- RE-EQUIP ON UPGRADE: when a better piece than what's in use becomes available (a freshly
+    -- forged masterwork -- or just any higher-quality item), set DF's per-slot dirty flag so it
+    -- re-runs equipment assignment and soldiers swap up. We fire only when the best AVAILABLE
+    -- (unassigned) quality for a needed piece RISES above what we last saw for that key, i.e. a
+    -- new, better piece was created -- so it's not re-triggered every cycle (no equip churn).
+    state.best_q = state.best_q or {}
+    local upd = df.global.plotinfo.equipment.update
+    local seen_key = {}
+    for key, r in pairs(req) do
+        seen_key[key] = true
+        local cur = availq[key] or -1
+        local field = UPDATE_FIELD[r.item_type]
+        if field and cur > (state.best_q[key] or -1) then
+            upd[field] = true
+        end
+        state.best_q[key] = cur
+    end
+    -- drop keys no longer needed, so if that piece is re-created later it re-triggers cleanly
+    for key in pairs(state.best_q) do if not seen_key[key] then state.best_q[key] = nil end end
+
     -- count soldiers (occupied fort squad positions)
     local fort = df.global.plotinfo.group_id
     local soldiers = 0
