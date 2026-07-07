@@ -304,6 +304,24 @@ local function has_pending_slab_order(hf)
     return false
 end
 
+-- a memorial slab ALREADY engraved for this hf exists in the fort (ready to be placed/built) --
+-- so there's no point engraving another; it just needs building. Matches any Memorial-engraved
+-- slab whose topic is this hf (a built one means they're memorialized and off the list anyway).
+local function has_engraved_slab(hf)
+    local vec = df.global.world.items.other.IN_PLAY
+    for i = 0, #vec - 1 do
+        local it = vec[i]
+        if it:getType() == df.item_type.SLAB
+            and it.engraving_type == df.slab_engraving_type.Memorial
+            and it.topic == hf
+            and not (it.flags.garbage_collect or it.flags.removed)
+        then
+            return true
+        end
+    end
+    return false
+end
+
 local function create_slab_order(hf)
     local mo = df.global.world.manager_orders
     local o = df.manager_order:new()      -- ownership passes to the vector on insert
@@ -366,7 +384,9 @@ end
 local function enqueue_memorial_slabs(list)
     local need, skipped = {}, 0
     for _, e in ipairs(list) do
-        if e.hf and e.hf >= 0 and not has_pending_slab_order(e.hf) then
+        -- skip anyone who already has an engraved slab ready (just needs placing) or an engrave
+        -- order already queued -- only engrave for those with neither
+        if e.hf and e.hf >= 0 and not has_pending_slab_order(e.hf) and not has_engraved_slab(e.hf) then
             table.insert(need, e)
         else
             skipped = skipped + 1
@@ -457,7 +477,7 @@ function MemorialScreen:queue_slabs()
         table.insert(parts, ('Not enough blank slabs -- queued a "make rock slab" order for %d more.'):format(made))
     end
     if skipped > 0 then
-        table.insert(parts, ('%d already had a slab order pending.'):format(skipped))
+        table.insert(parts, ('%d already have a slab ready or on order.'):format(skipped))
     end
     if #parts == 0 then
         table.insert(parts, 'Nothing to do.')
