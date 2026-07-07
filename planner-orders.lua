@@ -669,11 +669,16 @@ local function scan()
     return {gaps = gaps, unmakeable = unmakeable, missing = missing_workshops()}
 end
 
--- light per-frame cache (the notify message runs often)
-local cache = {frame = -1}
+-- Cache the (expensive) scan so the ~1/second notification refresh doesn't re-walk buildings,
+-- items, IN_PLAY and every manager order each time. NOTE: this is a wall-clock TTL, NOT a
+-- frame-counter cache -- frame_counter advances every tick, so a per-frame cache hits only while
+-- PAUSED and thrashes (full re-scan every refresh) while unpaused. Planned-item order gaps change
+-- slowly, so a few seconds' staleness is fine (a queued order clears its gap within the TTL).
+local SCAN_TTL_MS = 5000
+local cache = {t = nil}
 local function get_scan()
-    local fc = df.global.world.frame_counter
-    if cache.frame ~= fc then cache.frame = fc; cache.result = scan() end
+    local now = dfhack.getTickCount()
+    if not cache.t or now - cache.t >= SCAN_TTL_MS then cache.t = now; cache.result = scan() end
     return cache.result
 end
 

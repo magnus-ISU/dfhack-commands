@@ -53,15 +53,32 @@ local function make_tomb(pos)
     return bld
 end
 
--- place a tomb on every coffin that lacks one; returns how many were added
+-- place a tomb on every coffin that lacks one; returns how many were added.
+--
+-- This runs on a frequent heartbeat (every SCAN_FRAMES), but walking all of world.buildings.all
+-- (hundreds-to-thousands of buildings in a developed fort) that often is pure overhead: a coffin
+-- can only ever appear as a NEW building. So the common "nothing changed" tick is a cheap O(1)
+-- length check and returns immediately; the full walk runs only when the building set actually
+-- changed (a coffin -- or anything -- was added/removed), plus a periodic backstop pass to cover
+-- the rare cases a bare count can miss (a net-zero add+remove in one window, or a transient
+-- make_tomb failure). Placing a tomb adds a civzone building, so we re-read the count afterward
+-- so the next tick settles instead of rescanning.
+local last_count = -1
+local since_full = 0
+local FULL_EVERY = 30   -- force a full walk at least every FULL_EVERY heartbeats, as a backstop
 local function scan()
+    local all = df.global.world.buildings.all
+    since_full = since_full + 1
+    if #all == last_count and since_full < FULL_EVERY then return 0 end
+    since_full = 0
     local made = 0
-    for _, b in ipairs(df.global.world.buildings.all) do
+    for _, b in ipairs(all) do
         if b:getType() == df.building_type.Coffin then
             local pos = {x = b.centerx, y = b.centery, z = b.z}
             if not has_tomb(pos) and make_tomb(pos) then made = made + 1 end
         end
     end
+    last_count = #df.global.world.buildings.all   -- re-read: make_tomb appended civzone buildings
     return made
 end
 

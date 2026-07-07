@@ -36,8 +36,12 @@ local function unit_display_name(u)
     return dfhack.translation.translateName(dfhack.units.getVisibleName(u))
 end
 
--- light cache so we don't rescan every overlay refresh
-local cache = {frame = -1, list = {}}
+-- Cache the scan so the ~1/second notification refresh doesn't re-walk every corpse and unit
+-- each time. NOTE: this is a wall-clock TTL, NOT a frame-counter cache -- frame_counter advances
+-- every tick, so a per-frame cache hits only while PAUSED and thrashes (re-scans every refresh)
+-- while unpaused. Deaths/burials/memorials change slowly, so a few seconds' staleness is fine.
+local SCAN_TTL_MS = 5000
+local cache = {t = nil, list = {}}
 
 -- can this dead unit haunt the fort as a ghost (so it needs laying to rest)? -> it was a member
 -- of the fort, of ANY race: either the fort civ (dwarves) OR a MEMBER/FORMER_MEMBER of the fort
@@ -73,8 +77,8 @@ local function is_fort_member(u)
 end
 
 local function scan()
-    local frame = df.global.world.frame_counter or 0
-    if frame == cache.frame then return cache.list end
+    local now = dfhack.getTickCount()
+    if cache.t and now - cache.t < SCAN_TTL_MS then return cache.list end
 
     local fortrace = df.global.plotinfo.race_id
     local fortciv  = df.global.plotinfo.civ_id
@@ -167,7 +171,7 @@ local function scan()
         end
     end
 
-    cache.frame = frame
+    cache.t = now
     cache.list = list
     return list
 end
