@@ -335,27 +335,65 @@ local function item_hand(it)
     return 0
 end
 
--- ARMOR/GEAR MUST BE SIZED TO THE WEARER. A dwarf fort can forge non-dwarf (e.g. human)
--- sized armor by setting a manager order's specdata.race to the wearer's race; the finished
--- item then records that size in its maker_race. So every gear key carries a SIZE RACE -- the
--- wearer's race for a requirement, the item's maker_race for stock -- keeping human-sized and
--- dwarf-sized pieces on separate tallies, and non-dwarf soldiers get correctly-sized gear.
+-- ARMOR/GEAR MUST BE SIZED TO THE WEARER. A dwarf fort forges non-dwarf-sized armor by setting a
+-- manager order's specdata.race; the finished item records that size in its maker_race.
+--
+-- SIZING POLICY (per request):
+--   * HYENA-MAN is a universal size -- its wearer sits between dwarves (6000) and humans (7000),
+--     so hyena-man armor fits BOTH. We MAKE hyena-man armor for dwarves (slightly better than
+--     dwarf-sized, and it cross-fits), and dwarves ACCEPT either hyena-man OR dwarf-sized.
+--   * Humans MAKE and accept human-sized armor.
+--   * MASTERWORK target = the make size: a dwarf's target is hyena-man (a dwarf-sized masterwork
+--     doesn't satisfy it, so it gets upgraded to hyena-man); a human's is human.
+-- (Simplification: humans do not count a hyena-sized piece toward basic coverage -- only
+--  human-sized -- since fully sharing the hyena pool would need a bigger allocation rewrite and
+--  the impact is nil: humans get human armor made for them.)
 local function civ_race() return df.global.plotinfo.race_id end
--- SHIELDS and WEAPONS are HELD, not worn -- one size fits all, so they must NOT be tracked per
--- wearer race. Keying them by a soldier's race (e.g. a human's 506) means a made shield/weapon
--- (which records no usable size, so it counts as civ size) never satisfies that requirement, so
--- the service forges endlessly. Only ARMOUR is sized to the wearer. So shields/weapons always
--- key to civ size, on both the requirement and stock sides.
+-- SHIELDS and WEAPONS are HELD, not worn -- one size fits all, so they are never sized per wearer;
+-- they always key to civ size on both the requirement and stock sides.
 local SIZELESS = {[df.item_type.SHIELD] = true, [df.item_type.WEAPON] = true}
-local function key_race(item_type, race)
-    return SIZELESS[item_type] and civ_race() or race
+
+-- hyena-man creature index (our universal armor size), resolved once (raws are static)
+local hyena_cache
+local function hyena_race()
+    if hyena_cache ~= nil then return hyena_cache or nil end
+    local all = df.global.world.raws.creatures.all
+    for i = 0, #all - 1 do
+        if all[i].creature_id == 'HYENA_MAN' then hyena_cache = i; return i end
+    end
+    hyena_cache = false
+    return nil
 end
--- the size race an item is made for (maker_race; a raceless/generic item, or an item type
--- with no maker_race field at all, counts as civ size). Sizeless types always civ size.
+
+-- the size race to MAKE armor for a wearer of `race`: hyena-man for dwarves, else the wearer's
+-- own race. Sizeless gear is always civ size. This is the req/order key size.
+local function make_race(item_type, race)
+    if SIZELESS[item_type] then return civ_race() end
+    local h = hyena_race()
+    if h and race == civ_race() then return h end   -- dwarf -> hyena-man
+    return race
+end
+local function key_race(item_type, race) return make_race(item_type, race) end
+
+-- which req-key size an item's ACTUAL size satisfies for basic coverage: a hyena- OR dwarf-sized
+-- piece both cover the dwarf (hyena) key; anything else keys to its own maker race. Sizeless ->
+-- civ. This is where "dwarves accept dwarf-sized OR hyena-man" lives.
 local function item_size_race(it)
     if SIZELESS[it:getType()] then return civ_race() end
     local ok, r = pcall(function() return it.maker_race end)
-    return (ok and r and r >= 0) and r or civ_race()
+    local m = (ok and r and r >= 0) and r or civ_race()
+    local h = hyena_race()
+    if h and (m == civ_race() or m == h) then return h end   -- dwarf/hyena-sized -> hyena key
+    return m
+end
+-- is this item ALREADY the MAKE size for its key? Only make-size pieces count toward the
+-- MASTERWORK target (so a dwarf-sized masterwork does not satisfy a dwarf -> it upgrades to
+-- hyena-man). Sizeless items are always "make size".
+local function item_is_makesize(it)
+    if SIZELESS[it:getType()] then return true end
+    local ok, r = pcall(function() return it.maker_race end)
+    local m = (ok and r and r >= 0) and r or civ_race()
+    return m == item_size_race(it)
 end
 -- the race the soldier occupying a squad position is (for sizing their gear)
 local function occupant_race(pos)
@@ -558,8 +596,11 @@ local function item_wear(it)
     return (ok and w) or 0
 end
 
--- mark an item for melting, clearing forbid so it can actually be hauled + melted
+-- mark an item for melting, clearing forbid so it can actually be hauled + melted. NEVER melt a
+-- masterwork or artifact -- their quality/value is irreplaceable. (The callers already filter to
+-- inferior copies, but guard here too so no future path can ever melt one.)
 local function mark_melt(it)
+    if it.flags.artifact or it:getQuality() >= df.item_quality.Masterful then return false end
     it.flags.forbid = false
     return dfhack.items.markForMelting(it)
 end
@@ -989,6 +1030,7 @@ local function run_cycle()
                 -- and can't be melted), so we don't treat a degraded/undisplayable piece as done
                 if it:getQuality() >= df.item_quality.Masterful
                     and it.wear == 0
+                    and item_is_makesize(it)   -- a dwarf-sized masterwork isn't the hyena target
                     and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
                 then
                     mwstock[k] = (mwstock[k] or 0) + 1
