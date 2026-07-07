@@ -103,9 +103,11 @@ local function is_empty(pos) return shape_of(pos) == SH.EMPTY end
 -- a tile we can build a wall/floor/stair ON: open air OR an existing (natural) floor
 local function is_buildable_open(pos)
     local s = shape_of(pos)
-    -- EMPTY air, a FLOOR, or a floor with a plant on it (SAPLING / SHRUB -- dead saplings and
-    -- harvestable plants). A construction there just clears the plant.
-    return s == SH.EMPTY or s == SH.FLOOR or s == SH.SAPLING or s == SH.SHRUB
+    -- EMPTY air, a FLOOR, a floor strewn with rock (PEBBLES / BOULDER), or a floor with a plant
+    -- on it (SAPLING / SHRUB -- dead saplings and harvestable plants). Building there just clears
+    -- whatever's on the floor.
+    return s == SH.EMPTY or s == SH.FLOOR or s == SH.PEBBLES or s == SH.BOULDER
+        or s == SH.SAPLING or s == SH.SHRUB
 end
 local function is_tree(pos) return material_of(pos) == TM.TREE end
 -- completed OR in-progress construction on this tile?
@@ -139,7 +141,8 @@ end
 -- one layer up). If so we build a WALL on it; if there's NO floor, we build a FLOOR.
 local function has_floor_here(pos)
     local s = shape_of(pos)
-    if s == SH.FLOOR or s == SH.SAPLING or s == SH.SHRUB then return true end   -- ground (maybe a plant on it)
+    -- ground: a plain floor, a floor strewn with rock (pebbles/boulder), or a floor with a plant
+    if s == SH.FLOOR or s == SH.PEBBLES or s == SH.BOULDER or s == SH.SAPLING or s == SH.SHRUB then return true end
     local b = dfhack.buildings.findAtTile(pos)
     if b and b:getType() == df.building_type.Construction and b.type == CT.Floor then return true end
     return is_wall_tile({x = pos.x, y = pos.y, z = pos.z - 1})

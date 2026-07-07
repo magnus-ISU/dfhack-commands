@@ -51,7 +51,10 @@ local function is_sapient(u)
 end
 
 local function is_fort_member(u)
-    if u.civ_id >= 0 and u.civ_id == df.global.plotinfo.civ_id then return true end
+    -- must be a MEMBER of the fortress GROUP -- NOT merely the fort civ. Mercenaries and other
+    -- hired hands share the fort's civ id (so a civ_id check wrongly flags them, e.g. a dead
+    -- human mercenary), but they are not group members and do not haunt the fort as ghosts.
+    -- Citizens/residents carry a MEMBER (or, once dead, possibly FORMER_MEMBER) link to the group.
     local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
     if not hf then return false end
     local gid = df.global.plotinfo.group_id
@@ -198,6 +201,13 @@ local function describe_incident(inc)
     return cause_phrase(inc.death_cause) or 'cause of death unknown'
 end
 
+-- some "figure died" / death-incident records carry a PLACEHOLDER death_type (MEMORIALIZE)
+-- rather than a real cause -- e.g. a resident/mercenary whose death DF abstracted. Skip those so
+-- we keep looking for a record with an actual cause and never print the raw "memorialize" token.
+local PLACEHOLDER_CAUSE = {}
+if df.death_type.MEMORIALIZE then PLACEHOLDER_CAUSE[df.death_type.MEMORIALIZE] = true end
+local function meaningful_cause(dc) return dc ~= nil and dc >= 0 and not PLACEHOLDER_CAUSE[dc] end
+
 local function attach_death_info(list)
     local by_hf, by_unit, remaining = {}, {}, 0
     for _, e in ipairs(list) do
@@ -213,7 +223,7 @@ local function attach_death_info(list)
         local ev = events[i]
         if df.history_event_hist_figure_diedst:is_instance(ev) then
             local e = by_hf[ev.victim_hf]
-            if e and not e.killed_by then
+            if e and not e.killed_by and meaningful_cause(ev.death_cause) then
                 e.killed_by = describe_death_event(ev)
                 remaining = remaining - 1
             end
@@ -227,7 +237,7 @@ local function attach_death_info(list)
             local inc = incidents[i]
             if inc.type == df.incident_type.Death then
                 local e = by_unit[inc.victim]
-                if e and not e.killed_by then
+                if e and not e.killed_by and meaningful_cause(inc.death_cause) then
                     e.killed_by = describe_incident(inc)
                     remaining = remaining - 1
                 end

@@ -22,7 +22,9 @@ to your dfhack-config/init/dfhack.init (magnus-scripts does this for you).
 
 local NAME = 'trader_ready'
 local STOCK = 'traders_ready'   -- DFHack's built-in trader notification (we supersede it)
-local TICKS_PER_DAY = 1200   -- fortress-mode day length (cur_year_tick units)
+-- caravan.time_remaining is NOT in cur_year_tick units -- it decrements ~1 per 10 game ticks
+-- (measured: 47 units over 472 ticks). So one day (1200 game ticks) is 120 of these units.
+local TICKS_PER_DAY = 120
 
 -- ---------------------------------------------------------------------------
 -- detection
