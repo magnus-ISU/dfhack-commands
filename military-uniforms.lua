@@ -99,7 +99,9 @@ local GROUP = {
 -- fallback), so we recognise our own by the weapon suffix, not a fixed prefix.
 local WEAPON_SET = {}
 for _, s in ipairs(GROUP) do WEAPON_SET[s.weapon] = true end
+local CIVILIAN_NAME = 'civilian'   -- our standalone leather/bone/steel civilian uniform
 local function is_owned_name(name)
+    if name == CIVILIAN_NAME then return true end
     local w = name:match('^.+ %- (.+)$')
     return w ~= nil and WEAPON_SET[w] == true
 end
@@ -140,9 +142,10 @@ local function resolve_sub(vec, civ_set, name)
     for i = 0, #vec - 1 do if vec[i].name == name then return i end end
 end
 
-local function item_info(mattype, matindex)
+local function item_info(mattype, matindex, matclass)
     local info = df.entity_uniform_item:new()
-    info.mattype, info.matindex, info.material_class = mattype, matindex, -1
+    info.mattype, info.matindex = mattype or -1, matindex or -1
+    info.material_class = matclass or -1          -- e.g. Leather / Bone for non-metal pieces
     info.item_color, info.armorlevel, info.maker_race = -1, -1, -1
     info.art_image_id, info.art_image_subid = -1, -1
     info.image_thread_color, info.image_material_class = -1, -1
@@ -150,12 +153,13 @@ local function item_info(mattype, matindex)
     return info
 end
 
--- add an item (type+subtype+material) to a uniform slot
-local function add_to_slot(u, slot, item_type, subtype, mattype, matindex)
+-- add an item to a uniform slot: either a specific material (mattype/matindex, e.g. steel) OR a
+-- material CLASS (matclass, an entity_material_category like Leather/Bone) for non-metal pieces.
+local function add_to_slot(u, slot, item_type, subtype, mattype, matindex, matclass)
     if not subtype then return false end
     u.uniform_item_types[slot]:insert('#', item_type)
     u.uniform_item_subtypes[slot]:insert('#', subtype)
-    u.uniform_item_info[slot]:insert('#', item_info(mattype, matindex))
+    u.uniform_item_info[slot]:insert('#', item_info(mattype, matindex, matclass))
     return true
 end
 
@@ -208,6 +212,10 @@ local function create_template(ent, spec, armour, wmat)
             add_to_slot(u, slot, it[1], resolve_sub(it[2], setof(it[3]), it[4]), 0, armour)
         end
     end
+    -- leather CLOAK (over-layer, slot 0) -- always leather regardless of the armour metal. Leather
+    -- wears out, so the service replaces a damaged one and the dwarf re-equips it (see the tally).
+    add_to_slot(u, 0, IT.ARMOR, resolve_sub(R.armor, setof(r.armor_type), 'cloak'),
+                -1, -1, df.entity_material_category.Leather)
     -- shield (slot 5) -- armour metal; buckler for crossbow
     add_to_slot(u, 5, IT.SHIELD, resolve_sub(R.shields, setof(r.shield_type), spec.shield or 'shield'), 0, armour)
     -- weapon (slot 6) -- its own metal (steel unless overridden); weapons include diggers (pick)
@@ -218,6 +226,144 @@ local function create_template(ent, spec, armour, wmat)
     ent.uniforms:insert('#', u)
     ent.next_uniform_id = ent.next_uniform_id + 1
     return u
+end
+
+-- the standalone "civilian" uniform: steel helm/gauntlets/high boots + steel battle axe, a LEATHER
+-- body armour, BONE greaves, and a WOOD shield. "Wear clothing under armor" is OFF
+-- (replace_clothing = true). Meant to be assigned to civilians for light self-defence gear.
+local function create_civilian_uniform(ent)
+    local r, R, IT = ent.resources, df.global.world.raws.itemdefs, df.item_type
+    local proto
+    for i = 0, #ent.uniforms - 1 do
+        if ent.uniforms[i].name:find('Melee') then proto = ent.uniforms[i]; break end
+    end
+    local steel = inorganic_idx('STEEL')
+    local u = df.entity_uniform:new()
+    u.id = ent.next_uniform_id
+    u.name = CIVILIAN_NAME
+    u.type = proto and proto.type or 0
+    u.flags.replace_clothing = true                                          -- no clothing under armour
+    add_to_slot(u, 1, IT.HELM,   resolve_sub(R.helms,  setof(r.helm_type),   'helm'),      0, steel)
+    add_to_slot(u, 3, IT.GLOVES, resolve_sub(R.gloves, setof(r.gloves_type), 'gauntlet'),  0, steel)
+    add_to_slot(u, 4, IT.SHOES,  resolve_sub(R.shoes,  setof(r.shoes_type),  'high boot'), 0, steel)
+    add_to_slot(u, 0, IT.ARMOR,  resolve_sub(R.armor,  setof(r.armor_type),  'armor'),     -- leather body armour
+                -1, -1, df.entity_material_category.Leather)
+    add_to_slot(u, 2, IT.PANTS,  resolve_sub(R.pants,  setof(r.pants_type),  'greaves'),   -- bone greaves
+                -1, -1, df.entity_material_category.Bone)
+    add_to_slot(u, 5, IT.SHIELD, resolve_sub(R.shields, setof(r.shield_type), 'shield'),   -- wood shield
+                -1, -1, df.entity_material_category.Wood)
+    add_to_slot(u, 6, IT.WEAPON, resolve_sub(R.weapons, setof(r.weapon_type), 'battle axe'), 0, steel)
+    ent.uniforms:insert('#', u)
+    ent.next_uniform_id = ent.next_uniform_id + 1
+    return u
+end
+
+-- resolve the leather-cloak armour subtype once
+local cloak_sub_cache
+local function cloak_subtype(ent)
+    if cloak_sub_cache == nil then
+        cloak_sub_cache = resolve_sub(df.global.world.raws.itemdefs.armor,
+                                      setof(ent.resources.armor_type), 'cloak') or false
+    end
+    return cloak_sub_cache or nil
+end
+
+-- give every military soldier a leather cloak WITHOUT re-assigning uniforms: add it (slot 0) to
+-- the owned "Steel - *" templates AND to each fort squad position's resolved uniform. Idempotent
+-- and self-healing (re-adds if DF re-derives a position from its template). The civilian uniform
+-- is skipped (it has no cloak).
+local function ensure_cloaks(ent)
+    local sub = cloak_subtype(ent)
+    if not sub then return end
+    for i = 0, #ent.uniforms - 1 do
+        local u = ent.uniforms[i]
+        if is_owned_name(u.name) and u.name ~= CIVILIAN_NAME then
+            local has = false
+            for j = 0, #u.uniform_item_types[0] - 1 do
+                if u.uniform_item_types[0][j] == df.item_type.ARMOR
+                    and u.uniform_item_subtypes[0][j] == sub then has = true; break end
+            end
+            if not has then
+                add_to_slot(u, 0, df.item_type.ARMOR, sub, -1, -1, df.entity_material_category.Leather)
+            end
+        end
+    end
+    local fort = df.global.plotinfo.group_id
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                if pos.occupant >= 0 then
+                    local v = pos.equipment.uniform[0]
+                    local has = false
+                    for j = 0, #v - 1 do
+                        if v[j].item_type == df.item_type.ARMOR and v[j].item_subtype == sub then
+                            has = true; break
+                        end
+                    end
+                    if not has then
+                        local spec = df.squad_uniform_spec:new()
+                        spec.item = -1
+                        spec.item_type = df.item_type.ARMOR
+                        spec.item_subtype = sub
+                        spec.material_class = df.entity_material_category.Leather
+                        spec.mattype, spec.matindex, spec.color = -1, -1, -1
+                        v:insert('#', spec)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- resolve the regular-shield subtype (not a buckler) once
+local shield_sub_cache
+local function shield_subtype(ent)
+    if shield_sub_cache == nil then
+        shield_sub_cache = resolve_sub(df.global.world.raws.itemdefs.shields,
+                                       setof(ent.resources.shield_type), 'shield') or false
+    end
+    return shield_sub_cache or nil
+end
+
+-- Set the regular-shield slot (5) material on every soldier's uniform (templates + positions) to
+-- (mt, mi, mc). Used to DEFER steel shields: the shield is WOOD/iron/copper until all other steel
+-- gear is done, then STEEL. Bucklers (crossbow) keep their own material. Idempotent (only writes
+-- when the material differs).
+local function set_shield_material(ent, mt, mi, mc)
+    local sub = shield_subtype(ent)
+    if not sub then return end
+    for i = 0, #ent.uniforms - 1 do
+        local u = ent.uniforms[i]
+        if is_owned_name(u.name) and u.name ~= CIVILIAN_NAME then
+            for j = 0, #u.uniform_item_types[5] - 1 do
+                if u.uniform_item_types[5][j] == df.item_type.SHIELD
+                    and u.uniform_item_subtypes[5][j] == sub then
+                    local info = u.uniform_item_info[5][j]
+                    info.mattype, info.matindex, info.material_class = mt, mi, mc
+                end
+            end
+        end
+    end
+    local fort = df.global.plotinfo.group_id
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                if pos.occupant >= 0 then
+                    local v = pos.equipment.uniform[5]
+                    for j = 0, #v - 1 do
+                        if v[j].item_type == df.item_type.SHIELD and v[j].item_subtype == sub
+                            and (v[j].mattype ~= mt or v[j].matindex ~= mi or v[j].material_class ~= mc) then
+                            v[j].mattype, v[j].matindex, v[j].material_class = mt, mi, mc
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- remove the templates this tool owns (name prefix), so re-running is clean
@@ -273,6 +419,7 @@ function create_steel_uniforms()
         local u = create_template(ent, spec, armour, wmat)
         made[#made + 1] = u.name
     end
+    made[#made + 1] = create_civilian_uniform(ent).name
     local deleted_metal = delete_metal_defaults(ent)
     return made, deleted_metal
 end
@@ -402,6 +549,44 @@ local function occupant_race(pos)
     return (u and u.race) or civ_race()
 end
 
+-- ---- non-metal materials (wood shields, leather cloaks/armour, bone greaves) ----------------
+-- A gear material in our keys/orders is a (mat_type, mat_index) pair: a METAL is (0, inorganic
+-- idx) as before; a WOOD / LEATHER / BONE piece is (-1, entity_material_category). MATCLASS maps
+-- that category to the manager-order material_category field (to MAKE it) and the material_flags
+-- bit (to DETECT it in stock).
+local MATCLASS = {
+    [df.entity_material_category.Leather] = {order = 'leather', flag = df.material_flags.LEATHER},
+    [df.entity_material_category.Bone]    = {order = 'bone',    flag = df.material_flags.BONE},
+    [df.entity_material_category.Wood]    = {order = 'wood',    flag = df.material_flags.WOOD},
+}
+local function is_matclass(mt, mi) return mt == -1 and MATCLASS[mi] ~= nil end
+-- the non-metal class (a MATCLASS key) of an item, or nil. (Only called for gear items.)
+local function item_matclass(it)
+    local mi = dfhack.matinfo.decode(it)
+    if not (mi and mi.material) then return nil end
+    local f = mi.material.flags
+    for cat, spec in pairs(MATCLASS) do
+        if f[spec.flag] then return cat end
+    end
+    return nil
+end
+-- the (mat_type, mat_index) key pair for an ITEM: metal -> (0, idx); wood/leather/bone ->
+-- (-1, category); anything else its raw material.
+local function item_matpair(it)
+    if it:getMaterial() == 0 then return 0, it:getMaterialIndex() end
+    local cls = item_matclass(it)
+    if cls then return -1, cls end
+    return it:getMaterial(), it:getMaterialIndex()
+end
+-- the (mat_type, mat_index) key pair for a UNIFORM item's material spec: a specific material
+-- (mattype>=0, e.g. steel) stays; a material CLASS (material_class>=0) becomes (-1, category).
+-- Returns nil if the spec has neither (a bare "any material" slot we don't manage).
+local function uniform_matpair(it)
+    if it.mattype >= 0 then return it.mattype, it.matindex end
+    if it.material_class >= 0 and MATCLASS[it.material_class] then return -1, it.material_class end
+    return nil
+end
+
 -- tally what every assigned squad soldier's uniform asks for, by exact item +
 -- material (so copper armour + iron sword each get their own order):
 -- "type/sub/mt/mi" -> {item_type, subtype, mat_type, mat_index, count}
@@ -419,15 +604,16 @@ local function compute_required()
                         local v = pos.equipment.uniform[slot]
                         for j = 0, #v - 1 do
                             local it = v[j]
-                            -- squad_uniform_spec uses mattype/matindex (not mat_type/mat_index)
-                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and it.mattype >= 0 then
+                            -- squad_uniform_spec uses mattype/matindex (metal) OR material_class
+                            local mt, mi = uniform_matpair(it)
+                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and mt then
                                 local krace = key_race(it.item_type, srace)   -- civ for shields/weapons
                                 local key = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
-                                                                      it.mattype, it.matindex, krace)
+                                                                      mt, mi, krace)
                                 local r = req[key]
                                 if not r then
                                     r = {item_type = it.item_type, subtype = it.item_subtype,
-                                         mat_type = it.mattype, mat_index = it.matindex,
+                                         mat_type = mt, mat_index = mi,
                                          size_race = krace, count = 0}
                                     req[key] = r
                                 end
@@ -480,9 +666,10 @@ local function compute_per_soldier()
                         local v = pos.equipment.uniform[slot]
                         for j = 0, #v - 1 do
                             local it = v[j]
-                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and it.mattype >= 0 then
+                            local mt, mi = uniform_matpair(it)
+                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and mt then
                                 local k = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
-                                    it.mattype, it.matindex, key_race(it.item_type, srace))
+                                    mt, mi, key_race(it.item_type, srace))
                                 if HANDED[it.item_type] then           -- gauntlets: one of each hand
                                     needs[#needs + 1] = {k = k, hand = 0}
                                     needs[#needs + 1] = {k = k, hand = 1}
@@ -573,7 +760,12 @@ local function queue_one(key, r)
         local mo = df.global.world.manager_orders
         o = df.manager_order:new()
         o.job_type, o.item_type, o.item_subtype = MAKE_JOB[r.item_type], -1, r.subtype
-        o.mat_type, o.mat_index = r.mat_type, r.mat_index
+        if is_matclass(r.mat_type, r.mat_index) then
+            o.mat_type, o.mat_index = -1, -1
+            o.material_category[MATCLASS[r.mat_index].order] = true   -- wood / leather / bone
+        else
+            o.mat_type, o.mat_index = r.mat_type, r.mat_index
+        end
         -- SIZE the gear to the wearer's race: for a non-dwarf (e.g. human) soldier, set the
         -- order's specdata.race so the forge makes their size; dwarves use the default (-1)
         if r.size_race and r.size_race ~= civ_race() then o.specdata.race = r.size_race end
@@ -971,6 +1163,8 @@ local function run_cycle()
     if state.wardogs then train_surplus_war_dogs(); assign_war_dogs() end
     local pick_short = state.pickaxes and equip_miner_pickaxes() or 0
     if not state.queue then return end
+    local ent = fort_entity()
+    if ent then ensure_cloaks(ent) end   -- every soldier carries a leather cloak (templates + positions)
     local copper_idx = inorganic_idx('COPPER')
     local iron_idx, pig_idx, steel_idx = inorganic_idx('IRON'), inorganic_idx('PIG_IRON'), inorganic_idx('STEEL')
     local iron_ores = iron_ore_set(iron_idx)
@@ -992,7 +1186,7 @@ local function run_cycle()
     local stock_h, mwstock_h = {}, {}
     local bstock = {}            -- bstock[material_index]["type/sub"] = existing iron/copper backup pieces
     local iron_ore_count = 0
-    local hides, flasks, backpacks = 0, 0, 0
+    local hides, flasks, backpacks, logs = 0, 0, 0, 0
     for _, it in ipairs(df.global.world.items.all) do
         if not_fort_stock(it) then goto next_item end
         local t = it:getType()
@@ -1000,18 +1194,23 @@ local function run_cycle()
             bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
         elseif t == df.item_type.BOULDER then
             if it:getMaterial() == 0 and iron_ores[it:getMaterialIndex()] then iron_ore_count = iron_ore_count + 1 end
+        elseif t == df.item_type.WOOD and not it.flags.melt then
+            logs = logs + 1                                  -- for the wood-shield stand-in
         elseif t == df.item_type.SKIN_TANNED then
             hides = hides + 1
         elseif not it.flags.melt and t == df.item_type.FLASK then
             flasks = flasks + 1
         elseif not it.flags.melt and t == df.item_type.BACKPACK then
             backpacks = backpacks + 1
-        elseif not it.flags.melt and not item_installed(it) then
-            -- (an item built into a building -- a weapon trap, or a display case / pedestal --
-            -- can never be equipped, so it does not count as gear stock, masterwork or otherwise)
-            local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(),
-                                                it:getMaterialIndex(), item_size_race(it))
-            if req[k] then
+        elseif not it.flags.melt and not item_installed(it) and MAKE_JOB[t] then
+            -- (only makeable gear types; an item built into a building -- weapon trap / display
+            -- case -- can never be equipped, so it does not count as gear stock)
+            local mt, mi_ = item_matpair(it)
+            local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), mt, mi_, item_size_race(it))
+            -- LEATHER wears out: a damaged (worn) leather piece (cloak / leather armour) does NOT
+            -- count as coverage, so the service makes a fresh one and the dwarf re-equips it.
+            local leather_worn = mt == -1 and mi_ == df.entity_material_category.Leather and it.wear > 0
+            if req[k] and not leather_worn then
                 stock[k] = (stock[k] or 0) + 1
                 -- track the best quality among UNASSIGNED copies (an equipped piece is already
                 -- on a soldier -- it isn't something to upgrade TO)
@@ -1039,14 +1238,13 @@ local function run_cycle()
                         mwstock_h[k][hand] = mwstock_h[k][hand] + 1
                     end
                 end
-            elseif it:getMaterial() == 0 then
+            elseif mt == 0 then
                 -- an iron/copper piece of a backup-able type = existing backup stock
-                local mi = it:getMaterialIndex()
-                if mi == iron_idx or mi == copper_idx then
+                if mi_ == iron_idx or mi_ == copper_idx then
                     local ts = t .. '/' .. it:getSubtype() .. '/' .. item_size_race(it)
                     if backup_by_ts[ts] then
-                        bstock[mi] = bstock[mi] or {}
-                        bstock[mi][ts] = (bstock[mi][ts] or 0) + 1
+                        bstock[mi_] = bstock[mi_] or {}
+                        bstock[mi_][ts] = (bstock[mi_][ts] or 0) + 1
                     end
                 end
             end
@@ -1160,12 +1358,37 @@ local function run_cycle()
     local budget = {}
     for mk, b in pairs(bars) do budget[mk] = b - RESERVE_BARS - (committed[mk] or 0) end
 
+    -- STEEL SHIELDS LAST: a steel shield is only made once EVERY OTHER requested steel item is
+    -- covered (and masterworked, if upgrading). Until then the shield slot is a wood/iron/copper
+    -- stand-in (set_shield_material, below), so this mainly guards the transition cycle.
+    local steel_gear_done = true
+    if steel_idx then
+        for key, r in pairs(req) do
+            if r.mat_type == 0 and r.mat_index == steel_idx and r.item_type ~= df.item_type.SHIELD then
+                if HANDED[r.item_type] then
+                    local ph = r.count / 2
+                    local sh, mh = stock_h[key] or {}, mwstock_h[key] or {}
+                    if (sh[0] or 0) < ph or (sh[1] or 0) < ph then steel_gear_done = false end
+                    if state.masterwork and ((mh[0] or 0) < ph or (mh[1] or 0) < ph) then steel_gear_done = false end
+                else
+                    if (stock[key] or 0) < r.count then steel_gear_done = false end
+                    if state.masterwork and (mwstock[key] or 0) < r.count then steel_gear_done = false end
+                end
+            end
+        end
+    end
+
     for key, r in pairs(req) do
+        local is_steel_shield = r.item_type == df.item_type.SHIELD
+            and r.mat_type == 0 and r.mat_index == steel_idx
         local mk = barkey(r.mat_type, r.mat_index)
         local o = state.orders[key] and order_by_id(state.orders[key])
         local in_flight = o and o.amount_left > 0
-        if want[key] and (in_flight or (budget[mk] or 0) >= BARS_PER_ITEM) then
-            if not in_flight then budget[mk] = (budget[mk] or 0) - BARS_PER_ITEM end
+        local is_metal = r.mat_type == 0        -- wood / leather / bone don't consume metal bars
+        if is_steel_shield and not steel_gear_done then
+            drop_order(key)    -- steel shields wait until the rest of the steel gear is done
+        elseif want[key] and (in_flight or not is_metal or (budget[mk] or 0) >= BARS_PER_ITEM) then
+            if is_metal and not in_flight then budget[mk] = (budget[mk] or 0) - BARS_PER_ITEM end
             queue_one(key, r)
         else
             drop_order(key)    -- another soldier's piece, or no bars to spare past the reserve
@@ -1221,6 +1444,24 @@ local function run_cycle()
                 end
             end
         end
+    end
+
+    -- SHIELD STAND-IN: pick the shield material and stamp it on every uniform. STEEL once the rest
+    -- of the steel gear is done; else WOOD (if logs), else IRON (if any), else COPPER. This defers
+    -- the steel shield and gives soldiers a wood shield meanwhile -- their uniform shield becomes
+    -- wood, so DF equips a wood shield and the service (reading the uniform) makes one.
+    if ent and steel_idx then
+        local mt, mi, mc
+        if steel_gear_done then
+            mt, mi, mc = 0, steel_idx, -1
+        elseif logs > 0 then
+            mt, mi, mc = -1, -1, df.entity_material_category.Wood
+        elseif iron_idx and ((bars[barkey(0, iron_idx)] or 0) > 0 or iron_ore_count > 0) then
+            mt, mi, mc = 0, iron_idx, -1
+        elseif copper_idx then
+            mt, mi, mc = 0, copper_idx, -1
+        end
+        if mt then set_shield_material(ent, mt, mi, mc) end
     end
 
     -- recycle surplus steel: for the masterwork upgrade AND to free bars for miner picks
