@@ -37,11 +37,13 @@ local function unit_display_name(u)
 end
 
 -- Cache the scan so the ~1/second notification refresh doesn't re-walk every corpse and unit
--- each time. NOTE: this is a wall-clock TTL, NOT a frame-counter cache -- frame_counter advances
--- every tick, so a per-frame cache hits only while PAUSED and thrashes (re-scans every refresh)
--- while unpaused. Deaths/burials/memorials change slowly, so a few seconds' staleness is fine.
-local SCAN_TTL_MS = 5000
-local cache = {t = nil, list = {}}
+-- each time. Two guards, together: (1) a FRAME-counter check -- if no game tick has advanced
+-- since our last call (the game is PAUSED, or this is a second call in one frame) nothing can
+-- have changed, so reuse for free; (2) a wall-clock TTL -- while UNPAUSED the frame advances
+-- every tick, so the frame check alone would thrash; the TTL then throttles to one scan per
+-- minute. Deaths/burials/memorials change slowly, so up to a minute of staleness is fine.
+local SCAN_TTL_MS = 60000
+local cache = {frame = nil, t = nil, list = {}}
 
 -- can this dead unit haunt the fort as a ghost (so it needs laying to rest)? -> it was a member
 -- of the fort, of ANY race: either the fort civ (dwarves) OR a MEMBER/FORMER_MEMBER of the fort
@@ -77,8 +79,12 @@ local function is_fort_member(u)
 end
 
 local function scan()
+    local fc = df.global.world.frame_counter or 0
     local now = dfhack.getTickCount()
-    if cache.t and now - cache.t < SCAN_TTL_MS then return cache.list end
+    if cache.list and (fc == cache.frame or (cache.t and now - cache.t < SCAN_TTL_MS)) then
+        cache.frame = fc     -- track the latest frame so a following pause reuses immediately
+        return cache.list
+    end
 
     local fortrace = df.global.plotinfo.race_id
     local fortciv  = df.global.plotinfo.civ_id
@@ -171,6 +177,7 @@ local function scan()
         end
     end
 
+    cache.frame = fc
     cache.t = now
     cache.list = list
     return list

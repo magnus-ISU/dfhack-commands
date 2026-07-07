@@ -675,10 +675,18 @@ end
 -- PAUSED and thrashes (full re-scan every refresh) while unpaused. Planned-item order gaps change
 -- slowly, so a few seconds' staleness is fine (a queued order clears its gap within the TTL).
 local SCAN_TTL_MS = 5000
-local cache = {t = nil}
+local cache = {frame = nil, t = nil}
 local function get_scan()
+    local fc = df.global.world.frame_counter or 0
     local now = dfhack.getTickCount()
-    if not cache.t or now - cache.t >= SCAN_TTL_MS then cache.t = now; cache.result = scan() end
+    -- reuse when no game tick has advanced since our last call (the game is PAUSED, or a second
+    -- call in one frame -> nothing changed, zero work) OR when we scanned within the TTL. Only a
+    -- call that is BOTH on a new frame AND past the TTL re-runs the (expensive) scan.
+    if cache.result and (fc == cache.frame or (cache.t and now - cache.t < SCAN_TTL_MS)) then
+        cache.frame = fc
+        return cache.result
+    end
+    cache.frame, cache.t, cache.result = fc, now, scan()
     return cache.result
 end
 

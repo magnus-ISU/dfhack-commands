@@ -31,7 +31,6 @@ Activates the "always-on" helpers in this pack:
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
-    * no-sparring-spam          (auto-removes sparring combat reports as they appear)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
@@ -182,7 +181,6 @@ try('overlay rescan', function() require('plugins.overlay').rescan() end)
 try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'item-description.expand') end)
 try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
 try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('dig-shapes') end)
-try('no-sparring-spam (auto-remove sparring reports as they appear)', function() dfhack.run_script('no-sparring-spam') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if lovely then

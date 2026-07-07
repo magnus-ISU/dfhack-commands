@@ -20,38 +20,45 @@ I enumerated every "ticking" construct and checked each for large-collection ite
 
 ### 1. `needs-tomb-notification.lua` — heavy scan every second (unpaused)
 `dwarf_fn` → `scan()` walks **all IN_PLAY items + all active units** each call. It cached on
-`df.global.world.frame_counter`, which advances every game tick — so the cache **hits only while
-paused and thrashes while unpaused**, re-scanning on essentially every 1/sec notify refresh.
-**Fix:** wall-clock TTL cache (`dfhack.getTickCount()`, 5 s). The heavy scan now runs at most every
-~5 s regardless of pause state. Deaths/burials/memorials change slowly, so the few-seconds latency
-is imperceptible.
+`df.global.world.frame_counter`, which advances every game tick — so the frame cache **hits only
+while paused and thrashes while unpaused**, re-scanning on essentially every 1/sec notify refresh.
+**Fix:** a **hybrid** cache — keep the frame-counter check as a zero-cost fast-path (paused / same
+frame → reuse; no wasted work while frozen) *and* add a wall-clock TTL (`getTickCount`, **60 s**)
+to throttle the unpaused case where the frame advances every tick. Only a call that is both on a
+new frame and past the TTL re-walks.
 
 ### 2. `planner-orders.lua` — the heaviest one, every second (unpaused)
 `dwarf_fn` → `get_scan()` → `scan()` walks `buildings.all` + `items.all` + `IN_PLAY` (×5 via the
 STANDING sources) + `manager_orders.all` (×7), and allocates/`:delete()`s a job-item filter per
-planned-building slot. Same `frame_counter` cache that thrashes while unpaused → the full scan ran
-~1/sec during all normal play. **Fix:** same wall-clock TTL cache (5 s). A queued order clears its
-gap within the TTL, so no visible change.
+planned-building slot. Same `frame_counter` thrash. **Fix:** same hybrid (frame fast-path + TTL),
+TTL kept short (**5 s**) so a queued order clears its gap promptly.
 
-### 3. `auto-tomb.lua` — walks `buildings.all` ~6×/second
-Heartbeat runs `scan()` every `SCAN_FRAMES = 10` frames, and `scan()` iterates **all of
-`world.buildings.all`** (hundreds-to-thousands in a developed fort) to find coffins. It's enabled
-by `magnus-scripts`, so this ran continuously. A coffin can only appear as a **new** building, so
-walking the whole list 6×/sec is pure overhead. **Fix:** guard the walk on an O(1)
-`#buildings.all` length check — the common "nothing changed" tick returns immediately — with a
-periodic full-walk backstop (every 30 heartbeats) for the rare cases a bare count can miss (a
-net-zero add+remove in one window, or a transient `make_tomb` failure). The count is re-read after
-the walk because placing a tomb appends a civzone building.
+### 3. `auto-tomb.lua` — walked `buildings.all` ~6×/second
+Heartbeat ran `scan()` every `SCAN_FRAMES = 10` frames, and `scan()` iterates **all of
+`world.buildings.all`** (hundreds-to-thousands in a developed fort) to find coffins. Enabled by
+`magnus-scripts`, so it ran continuously. **Fix:** the heartbeat now re-walks at most **once per
+60 s** of real time (wall-clock gate) and skips entirely while the sim is frozen (frame counter
+unchanged → no new coffin possible). A coffin gets its tomb zone within ~60 s of placement, which
+is plenty responsive.
+
+### 4. `auto-name.lua` — `units.active` scan every 100 frames
+Migrant renamer; heartbeat scanned `units.active` every `SCAN_FRAMES = 100` frames even though
+migrants arrive only in occasional waves. **Fix:** interval bumped to **500 frames** (~once per
+game-day). The heavy history-events scan was already gated to when unnamed migrants exist.
+
+### 5. `no-sparring-spam.lua` — DELETED
+Ran a `units.active` scan every 10 ticks (the most frequent tick in the pack) and didn't work
+reliably. Removed the script, its deployed copy, and its `magnus-scripts` load lines.
 
 ## Why these were written that way (and the trap)
 
 The `frame_counter` cache in #1/#2 is a natural-looking "recompute at most once per frame" guard,
 and it **works perfectly while paused** — which is exactly how notification output tends to get
 eyeballed while developing. The failure is only visible while unpaused, where every 1/sec notify
-call lands on a new frame and misses the cache. The TTL cache keeps the original intent (avoid
-redundant scans) and fixes the unpaused case. `auto-tomb` picked a fast 10-frame interval for
-responsiveness; the comment even admits "coffins aren't placed every tick" — the count guard keeps
-that responsiveness while removing the cost.
+call lands on a new frame and misses. The right fix keeps that frame check (it's free and correct
+while paused) and layers a wall-clock TTL on top for the unpaused case. `auto-tomb` picked a fast
+10-frame interval for responsiveness; a coffin doesn't need its tomb zone within 0.15 s, so a 60 s
+interval is the right trade.
 
 ## Reviewed and deliberately left as-is
 
@@ -81,19 +88,8 @@ that responsiveness while removing the cost.
   `statue-redirect`'s Remove button. Each is scoped to a specific viewscreen and only ticks while
   that screen is open — not during normal play. Left.
 
-## Notes / lower-priority observations (not changed)
+## Notes / lower-priority observations
 
-- **`auto-name.lua`** (migrant renamer, toggled by magnus-scripts): heartbeat every
-  `SCAN_FRAMES = 100` frames (~1.6/sec) calls `living_citizens()` (iterates `units.active`). The
-  *expensive* history-events scan is gated (runs only when unnamed migrants exist), so the constant
-  cost is just a citizen filter — modest. A count guard won't help (`units.active` is volatile from
-  wildlife). Could bump the interval since migrants arrive only a few times per game-year, but the
-  benefit is small and I avoided touching it without a live test.
-- **`no-sparring-spam.lua`**: `repeat-util` `scheduleEvery(..., 10, 'ticks', ...)` iterates
-  `units.active` every 10 ticks — the most *frequent* tick — but the per-cycle work is modest
-  (`units.active`, not items/buildings), and it early-outs of the report-vector scans unless there
-  are new sparring reports. A clean O(1) guard would need a monotonic "new report" signal I
-  couldn't verify with DF off, and you care about prompt sparring removal, so I left it.
 - **`dig-shapes` vs `right-click-cancel`**: both are auto-loaded overlays on `dwarfmode` with
   overlapping box-designation / removal / right-click handling. Not a measurable perf issue (both
   light per frame), but it's redundant surface area worth consolidating some day — flagged, not

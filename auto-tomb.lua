@@ -18,7 +18,8 @@ Add `enable auto-tomb` to magnus-scripts / dfhack.init to run it every session.
 ]]
 
 local GLOBAL_KEY = 'auto-tomb'
-local SCAN_FRAMES = 10   -- re-check this often (responsive, but coffins aren't placed every tick)
+local SCAN_FRAMES = 100   -- heartbeat driver cadence (just checks the clock -- cheap)
+local CHECK_MS = 60000    -- ...but actually re-walk the buildings at most once per 60 seconds
 
 -- ---- the work ---------------------------------------------------------------
 
@@ -53,32 +54,16 @@ local function make_tomb(pos)
     return bld
 end
 
--- place a tomb on every coffin that lacks one; returns how many were added.
---
--- This runs on a frequent heartbeat (every SCAN_FRAMES), but walking all of world.buildings.all
--- (hundreds-to-thousands of buildings in a developed fort) that often is pure overhead: a coffin
--- can only ever appear as a NEW building. So the common "nothing changed" tick is a cheap O(1)
--- length check and returns immediately; the full walk runs only when the building set actually
--- changed (a coffin -- or anything -- was added/removed), plus a periodic backstop pass to cover
--- the rare cases a bare count can miss (a net-zero add+remove in one window, or a transient
--- make_tomb failure). Placing a tomb adds a civzone building, so we re-read the count afterward
--- so the next tick settles instead of rescanning.
-local last_count = -1
-local since_full = 0
-local FULL_EVERY = 30   -- force a full walk at least every FULL_EVERY heartbeats, as a backstop
+-- place a tomb on every coffin that lacks one; returns how many were added. The heartbeat only
+-- calls this about once a minute (see below), so walking world.buildings.all here is cheap.
 local function scan()
-    local all = df.global.world.buildings.all
-    since_full = since_full + 1
-    if #all == last_count and since_full < FULL_EVERY then return 0 end
-    since_full = 0
     local made = 0
-    for _, b in ipairs(all) do
+    for _, b in ipairs(df.global.world.buildings.all) do
         if b:getType() == df.building_type.Coffin then
             local pos = {x = b.centerx, y = b.centery, z = b.z}
             if not has_tomb(pos) and make_tomb(pos) then made = made + 1 end
         end
     end
-    last_count = #df.global.world.buildings.all   -- re-read: make_tomb appended civzone buildings
     return made
 end
 
@@ -103,9 +88,17 @@ end
 local function start_heartbeat()
     local my = hb_gen() + 1
     hb_gen(my)
+    local last_scan, last_frame = nil, nil
     local function hb()
         if not isEnabled() or my ~= hb_gen() then return end
-        scan()
+        local fc = df.global.world.frame_counter or 0
+        local now = dfhack.getTickCount()
+        -- re-walk at most once per CHECK_MS of real time, and never while the game is frozen (no
+        -- game frame has advanced since the last scan -> no new coffin could exist)
+        if fc ~= last_frame and (not last_scan or now - last_scan >= CHECK_MS) then
+            last_scan, last_frame = now, fc
+            scan()
+        end
         dfhack.timeout(SCAN_FRAMES, 'frames', hb)
     end
     hb()

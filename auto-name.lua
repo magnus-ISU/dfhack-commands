@@ -45,7 +45,8 @@ Add `enable auto-name` to magnus-scripts / dfhack.init to run it every session.
 
 local GLOBAL_KEY = 'auto-name'
 local NAMES_PATH = dfhack.getDFPath() .. '/dfhack-config/auto-name-names.txt'
-local SCAN_FRAMES = 100   -- re-check for new migrants a few times per game-day
+local SCAN_FRAMES = 500   -- re-check for new migrants roughly once per game-day (migrants arrive
+                          -- in occasional waves, so a frequent scan of units.active is wasteful)
 
 -- a..z ; wave index is 0-based (wave 0 -> 'a'), wraps after 'z'
 local function wave_letter(idx) return string.char(string.byte('a') + (idx % 26)) end
