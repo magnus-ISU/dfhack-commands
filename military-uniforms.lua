@@ -495,14 +495,16 @@ local function item_equipped(it)
     return false
 end
 
--- is this item on display (in a display case / pedestal)? A displayed piece is locked to that
--- furniture and can never be equipped by a soldier, so it must NOT count as available gear --
--- nor be melted (the player put it there on purpose).
-local function item_on_display(it)
-    for _, r in ipairs(it.general_refs) do
-        if r:getType() == df.general_ref_type.BUILDING_DISPLAY_FURNITURE then return true end
-    end
-    return false
+-- is this item built into a building? Such a piece can never be equipped by a soldier, so it
+-- must NOT count as available gear (nor be a melt candidate). This covers two cases that would
+-- otherwise inflate stock and mask a real shortage:
+--   * a weapon locked in a weapon TRAP -- a fort can have dozens (e.g. 88 silver war hammers,
+--     60+ spears in traps here), none of them equippable;
+--   * a piece on DISPLAY in a case / pedestal (the player put it there on purpose).
+-- flags.in_building is set for exactly these built-in items -- verified on this fort that every
+-- in-building gear piece is a trap or display component, never loose/equippable stock.
+local function item_installed(it)
+    return it.flags.in_building
 end
 
 -- locate one of our tracked manager orders by id
@@ -609,7 +611,7 @@ local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_s
             elseif it:getQuality() < df.item_quality.Masterful
                 and not it.flags.artifact
                 and not item_equipped(it)                     -- a worn piece can't be melted
-                and not item_on_display(it)                   -- never melt a piece on display
+                and not item_installed(it)                    -- never melt a trapped/displayed piece
                 and dfhack.items.canMelt(it)
                 and (stock[key] or 0) > req[key].count        -- surplus only: keep a full set
             then
@@ -855,7 +857,7 @@ local function equip_miner_pickaxes()
             and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
             if it.flags.melt then
                 melting = melting + 1                       -- steel already on the way back
-            elseif not item_on_display(it) then             -- a displayed pick isn't usable stock
+            elseif not item_installed(it) then              -- a trapped/displayed pick isn't usable stock
                 total = total + 1
                 if it:getQuality() >= df.item_quality.Masterful and it.wear == 0 and not it.flags.artifact then
                     mw = mw + 1                             -- masterwork counts only if undamaged
@@ -963,9 +965,9 @@ local function run_cycle()
             flasks = flasks + 1
         elseif not it.flags.melt and t == df.item_type.BACKPACK then
             backpacks = backpacks + 1
-        elseif not it.flags.melt and not item_on_display(it) then
-            -- (an item locked to a display case / pedestal can never be equipped, so it does
-            -- not count as gear stock -- masterwork or otherwise)
+        elseif not it.flags.melt and not item_installed(it) then
+            -- (an item built into a building -- a weapon trap, or a display case / pedestal --
+            -- can never be equipped, so it does not count as gear stock, masterwork or otherwise)
             local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), it:getMaterial(),
                                                 it:getMaterialIndex(), item_size_race(it))
             if req[k] then
