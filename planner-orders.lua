@@ -181,7 +181,7 @@ local HOSPITAL_SUPPLIES = {
     {supply = 'Cloth',    kind = 'job',  job = 'WeaveCloth',      cond_item = 'CLOTH',  target = 10,
         exists_generic = 'WeaveCloth',
         note = 'Woven from thread at a Loom.'},
-    {supply = 'Empty leather bags', kind = 'job', job = 'ConstructBag', cond_item = 'BOX', target = 10,
+    {supply = 'Empty leather bags', kind = 'job', job = 'ConstructBag', cond_item = 'BAG', target = 10,
         leather = true, cond_empty = true,
         note = 'Empty bags to hold plaster powder for casts (plaster is milled INTO a bag,\n'
             .. 'so without empties the plaster reaction stalls). Made from leather at a\n'

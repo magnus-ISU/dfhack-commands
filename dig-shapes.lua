@@ -346,16 +346,38 @@ local function dig_tool_active()
 end
 
 function DigShapes:overlay_onupdate()
-    if dig_tool_active() and sr.start_z >= 0 then
-        self.corner = self.corner or {x = sr.start_x, y = sr.start_y, z = sr.start_z}
+    local active = dig_tool_active() and sr.start_z >= 0
+    -- A right-click while a shaped drag is in progress CANCELS it, and DF clears selection_rect
+    -- exactly as a COMPLETED box does. That cancel click does NOT reach our onInput (DF captures
+    -- mouse input during an active designation drag), so the old onInput-based flag never fired
+    -- for chop/build/remove boxes -- only plain digging appeared "fixed" because convert_dig_box
+    -- is a no-op there. So we poll the raw right button here instead: a right-press (0->1 edge)
+    -- while a drag is pending flags it cancelled, and the transition below discards it.
+    local rdown = df.global.enabler.mouse_rbut_down
+    local rpress = rdown == 1 and self.rbut_down ~= 1
+    self.rbut_down = rdown
+
+    if active then
+        if not self.corner then                 -- drag just began: start fresh (clear any stale cancel)
+            self.corner = {x = sr.start_x, y = sr.start_y, z = sr.start_z}
+            self.cancelled = false
+        end
+        if rpress then self.cancelled = true; log('right-press during drag -> cancel') end
         local mp = dfhack.gui.getMousePos()
         if mp then self.last = mp end
     elseif self.corner then
-        -- the drag ended. Only convert if it was COMPLETED, not cancelled: a right-click or
-        -- Escape during the drag (flagged in onInput) clears selection_rect the same way a
-        -- finished box does, so without this check a cancel would build the partial box.
-        local aa, bb, cancelled = self.corner, self.last, self.cancelled
+        -- the drag ended. Only convert if it was COMPLETED, not cancelled (a right-press this very
+        -- frame -- when DF already cleared sr before we saw it -- still counts as a cancel).
+        if rpress then self.cancelled = true; log('right-press at drag end -> cancel') end
+        -- ESCAPE (and right-click) also gets captured away from onInput. But DF box designations
+        -- are a press-drag-RELEASE gesture: a COMPLETED box ends by RELEASING the left button (so
+        -- it's up now), while a cancel -- Escape OR right-click -- fires while the left button is
+        -- still HELD, clearing selection_rect with the button still down. So left-still-down at
+        -- drag-end means it was cancelled, which catches Escape without needing the keypress.
+        local lheld = df.global.enabler.mouse_lbut_down == 1
+        local aa, bb, cancelled = self.corner, self.last, (self.cancelled or lheld)
         self.corner, self.last, self.cancelled = nil, nil, nil
+        log(('drag ended: lheld=%s cancelled=%s'):format(tostring(lheld), tostring(cancelled)))
         if aa and bb and not cancelled then
             dfhack.timeout(1, 'frames', function() pcall(convert_dig_box, aa, bb) end)
         end
