@@ -258,6 +258,76 @@ local function create_civilian_uniform(ent)
     return u
 end
 
+-- copy an entity_uniform template's items into a squad position's resolved uniform (so the
+-- position wears exactly that uniform). resize(0) clears the old specs -- do NOT :delete() them
+-- (DF owns them; a tiny leak beats a crash), mirroring dwarf-rts.
+local function apply_uniform_to_position(pos, u)
+    local eq = pos.equipment
+    for slot = 0, 6 do
+        eq.uniform[slot]:resize(0)
+        local types = u.uniform_item_types[slot]
+        for j = 0, #types - 1 do
+            local info = u.uniform_item_info[slot][j]
+            local spec = df.squad_uniform_spec:new()
+            spec.item = -1
+            spec.item_type = types[j]
+            spec.item_subtype = u.uniform_item_subtypes[slot][j]
+            spec.material_class = info.material_class
+            spec.mattype, spec.matindex, spec.color = info.mattype, info.matindex, -1
+            eq.uniform[slot]:insert('#', spec)
+        end
+    end
+    eq.assigned_items:resize(0)
+    eq.backpack, eq.flask, eq.quiver = -1, -1, -1
+end
+
+-- create a squad wearing `uniform` seeded with `unit_ids` (first = captain in pos 0, rest pos
+-- 1..9). Mirrors dwarf-rts's make_conscription_squad. Returns the squad, or nil + reason.
+local function create_civilian_squad(ent, uniform, unit_ids)
+    if #unit_ids == 0 then return nil, 'no unsquadded adult civilians found' end
+    local captain = df.unit.find(unit_ids[1])
+    if not captain then return nil, 'captain unit missing' end
+    local pos_id, pidx
+    for j = 0, #ent.positions.own - 1 do
+        local p = ent.positions.own[j]
+        if p.squad_size > 0 and p.number < 0 then pos_id, pidx = p.id, j; break end
+    end
+    if not pos_id then return nil, 'no militia-captain position on the fort entity' end
+    local aid = ent.positions.next_assignment_id
+    ent.positions.next_assignment_id = aid + 1
+    ent.positions.assignments:insert('#', {new = df.entity_position_assignment,
+        id = aid, position_id = pos_id, position_vector_idx = pidx,
+        histfig = -1, histfig2 = -1, squad_id = -1, st_id = -1, ab_id = -1,
+        vassal_of_entity_id = -1, vassal_of_position_profile_id = -1,
+        assigned_army_controller_id = -1, temp = 0})
+    local aidx
+    for i = 0, #ent.positions.assignments - 1 do
+        if ent.positions.assignments[i].id == aid then aidx = i; break end
+    end
+    local a = ent.positions.assignments[aidx]
+    a.histfig, a.histfig2 = captain.hist_figure_id, captain.hist_figure_id
+    df.historical_figure.find(captain.hist_figure_id).entity_links:insert('#', {
+        new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
+        assignment_id = a.id, assignment_vector_idx = aidx, start_year = df.global.cur_year})
+    local sq = dfhack.military.makeSquad(aid)
+    if not sq then
+        a.histfig, a.histfig2 = -1, -1
+        for i = #ent.positions.assignments - 1, 0, -1 do
+            if ent.positions.assignments[i].id == aid then ent.positions.assignments:erase(i) end
+        end
+        return nil, 'dfhack.military.makeSquad failed'
+    end
+    sq.alias = 'Civilians'
+    sq.positions[0].occupant = captain.hist_figure_id
+    captain.military.squad_id, captain.military.squad_position = sq.id, 0
+    apply_uniform_to_position(sq.positions[0], uniform)
+    for i = 2, math.min(#unit_ids, 10) do
+        dfhack.military.addToSquad(unit_ids[i], sq.id, i - 1)
+        apply_uniform_to_position(sq.positions[i - 1], uniform)
+    end
+    return sq
+end
+
 -- resolve the leather-cloak armour subtype once
 local cloak_sub_cache
 local function cloak_subtype(ent)
@@ -1643,6 +1713,33 @@ end
 if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
 
 local args = {...}
+if args[1] == 'civilian' then
+    -- create the "civilian" uniform (if absent) and a squad of N unsquadded adult citizens
+    -- wearing it, then run a gear cycle so their leather/bone/wood/steel pieces get ordered.
+    local ent = fort_entity()
+    if not ent then qerror('no fort entity') end
+    local uniform
+    for i = 0, #ent.uniforms - 1 do
+        if ent.uniforms[i].name == CIVILIAN_NAME then uniform = ent.uniforms[i]; break end
+    end
+    if not uniform then uniform = create_civilian_uniform(ent) end
+    local n = tonumber(args[2]) or 3
+    local recruits = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        if u.military.squad_id == -1 and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
+            and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) then
+            recruits[#recruits + 1] = u.id
+            if #recruits >= n then break end
+        end
+    end
+    local sq, err = create_civilian_squad(ent, uniform, recruits)
+    if not sq then qerror('civilian squad: ' .. tostring(err)) end
+    local seated = 0
+    for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then seated = seated + 1 end end
+    load_state(); run_cycle()
+    print(('military-uniforms: "civilian" uniform + squad of %d created; gear cycle run.'):format(seated))
+    return
+end
 if args[1] == 'orders' then
     load_state()
     run_cycle()        -- reconcile standing orders against current stock/need once
