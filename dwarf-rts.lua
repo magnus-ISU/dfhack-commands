@@ -385,6 +385,96 @@ local function move_selected(ui, pos)
     end
 end
 
+-- ---- notification group-kill: shift-click a vanilla "N invaders/hostiles/agitated animals" --
+--
+-- DFHack's gui/notify list (internal/notify/notifications) shows "N agitated animals", "N
+-- invaders", "N hostiles". Normally a click zooms to the next unit in the group; a SHIFT-click
+-- zooms to the PREVIOUS one. We repurpose the shift-click: with squads selected, it orders every
+-- selected squad to kill EVERY unit in that group. Predicates mirror the vanilla for_* iterators
+-- so we target exactly the units the count is counting; with no squads selected we fall through
+-- to the vanilla behavior.
+local function pred_agitated(u)
+    return not dfhack.units.isDead(u) and dfhack.units.isActive(u)
+        and not u.flags1.caged and not u.flags1.chained and dfhack.units.isAgitated(u)
+end
+local function pred_invader(u)
+    return not dfhack.units.isDead(u) and dfhack.units.isActive(u)
+        and not u.flags1.caged and not u.flags1.chained
+        and dfhack.units.isInvader(u) and not dfhack.units.isHidden(u)
+end
+local function pred_hostile(u)
+    return not dfhack.units.isDead(u) and dfhack.units.isActive(u)
+        and not u.flags1.caged and not u.flags1.chained
+        and not dfhack.units.isInvader(u) and not dfhack.units.isFortControlled(u)
+        and not dfhack.units.isHidden(u) and not dfhack.units.isAgitated(u)
+        and dfhack.units.isDanger(u)
+end
+
+local function group_unit_ids(pred)
+    local ids = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        if pred(u) then ids[#ids + 1] = u.id end
+    end
+    return ids
+end
+
+-- The vanilla notifications live only on the main map (dwarfmode/Default), where the squads
+-- panel is shut -- and closing that panel deselects everything (the deliberate "are you sure"
+-- close). So we remember the selection you had when you LEFT the squads screen, and command
+-- that from the map. `last_selection` is that remembered set of squad ids (captured in the
+-- close-guard below). The live on-screen selection still wins if there is one.
+local last_selection = nil   -- captured by the overlay close-guard (defined later in this chunk)
+
+local function effective_selected_squad_ids()
+    local ui = squads_ui()
+    local ids = {}
+    for i = 0, #ui.squad_selected - 1 do
+        if ui.squad_selected[i] then ids[#ids + 1] = ui.squad_id[i] end
+    end
+    if #ids > 0 then return ids end
+    return last_selection or {}
+end
+
+-- order every selected squad (live selection, else the one remembered from the squads screen)
+-- to kill all of `ids`, a fresh order each. Returns the number of squads commanded.
+local function order_selected_kill_group(ids)
+    local n = 0
+    for _, sid in ipairs(effective_selected_squad_ids()) do
+        local s = df.squad.find(sid)
+        if s then squad_kill(s, ids, false); n = n + 1 end
+    end
+    return n
+end
+
+local NOTIFY_PREDS = {
+    agitated_count = pred_agitated,
+    invader_count  = pred_invader,
+    hostile_count  = pred_hostile,
+}
+
+-- wrap the three group notifications' on_click so a shift-click with squads selected commands
+-- them onto the whole group. Idempotent, and re-applied on world/map load (the notify module
+-- may be reloaded). Safe if the notify module isn't present.
+local function register_notification_kills()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or type(n) ~= 'table' or not n.NOTIFICATIONS_BY_NAME then return end
+    for name, pred in pairs(NOTIFY_PREDS) do
+        local entry = n.NOTIFICATIONS_BY_NAME[name]
+        if entry and not entry.rts_group_kill then
+            entry.rts_group_kill = true
+            local orig = entry.on_click
+            entry.on_click = function(state, shift)
+                if shift and #effective_selected_squad_ids() > 0 then
+                    local ids = group_unit_ids(pred)
+                    if #ids > 0 then order_selected_kill_group(ids) end
+                    return state   -- consumed: command the selected squads instead of zooming
+                end
+                return orig and orig(state, shift) or state
+            end
+        end
+    end
+end
+
 local box_select   -- forward decl (defined after conscription): single_command selects
                    -- the own dwarf under a click via a 1-tile box_select
 
@@ -879,6 +969,12 @@ function DwarfRtsClickMove:overlay_onupdate()
         -- expanded member view), veto the close and drop the selection instead (a second
         -- close, nothing selected now, goes through)
         if self.armed_close then
+            -- remember the selection you're leaving with, so a main-map notification group-kill
+            -- can still command these squads after the panel deselects + closes
+            last_selection = {}
+            for i = 0, #sq.squad_selected - 1 do
+                if sq.squad_selected[i] then last_selection[#last_selection + 1] = sq.squad_id[i] end
+            end
             sq.open = true
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
             sq.viewing_squad_index = -1            -- collapse the member view too
@@ -1193,4 +1289,13 @@ require('plugins.overlay').rescan()
 -- `overlay disable` (e.g. `magnus-scripts disable`) has persisted an off state, rescan alone
 -- won't bring it back -- so running `dwarf-rts` must re-enable it to be reliable.
 dfhack.run_command('overlay', 'enable', 'dwarf-rts.clickmove')
+
+-- hook the vanilla group notifications for shift-click group-kill, and re-hook whenever the
+-- notify module may have been reloaded (new world / map load)
+register_notification_kills()
+dfhack.onStateChange.dwarf_rts_notify = function(ev)
+    if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then register_notification_kills() end
+end
+
 print('dwarf-rts: click move/attack/select, drag-select, keys 1-9, select-all + close-guard active')
+print('  shift-click a "N invaders/hostiles/agitated animals" notification to send selected squads.')

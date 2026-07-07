@@ -6,7 +6,8 @@ list used by "moody dwarf is gathering items" and "N groups of citizens are
 stranded" (DFHack's gui/notify overlay).
 
 It alerts when fortress dwarves have died but have no tomb (their corpse is not
-interred in a coffin):
+interred in a coffin) AND have not been memorialized (a built memorial slab lays a
+ghost to rest just as burial does):
     * exactly one  -> "Urist McMiner needs a tomb!"
     * more than one -> "2 dwarves need tombs!"
 
@@ -79,10 +80,22 @@ local function scan()
 
     -- per dead unit: is any part interred (buried) / is any part loose (unburied)
     local info, order = {}, {}
+    -- hf ids with a BUILT memorial slab: a memorial lays a ghost to rest just like a burial, so
+    -- a memorialized dwarf needs no tomb. The slab's `topic` is the memorialized hf; it must be
+    -- ENGRAVED as a Memorial and actually BUILT (in_building) -- an engraved slab still sitting in
+    -- a stockpile hasn't laid anyone to rest yet.
+    local memorialized = {}
     local vec = df.global.world.items.other.IN_PLAY
     for i = 0, #vec - 1 do
         local it = vec[i]
         local t = it and it:getType()
+        if it and t == df.item_type.SLAB
+            and it.engraving_type == df.slab_engraving_type.Memorial
+            and it.topic and it.topic >= 0 and it.flags.in_building
+            and not (it.flags.garbage_collect or it.flags.removed)
+        then
+            memorialized[it.topic] = true
+        end
         if it and (t == df.item_type.CORPSE or t == df.item_type.CORPSEPIECE)
             and not (it.flags.garbage_collect or it.flags.removed)
         then
@@ -113,11 +126,12 @@ local function scan()
         end
     end
 
-    -- a dwarf needs a tomb only if they have a loose part and NONE is interred
+    -- a dwarf needs a tomb only if they have a loose part, NONE is interred, and they have NOT
+    -- been memorialized (a built memorial slab lays their ghost to rest just as a burial would)
     local list = {}
     for _, uid in ipairs(order) do
         local rec = info[uid]
-        if rec.unburied and not rec.buried then
+        if rec.unburied and not rec.buried and not memorialized[rec.unit.hist_figure_id] then
             table.insert(list, {
                 unit_id = uid,
                 hf = rec.unit.hist_figure_id,
