@@ -27,7 +27,7 @@ Activates the "always-on" helpers in this pack:
                                  exists, so manual tweaks survive. Run `labor-groups`
                                  by hand to force a re-apply.)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
-    * auto-tomb                 (drops a 1x1 Tomb zone onto each coffin you place)
+    * auto-tomb                 (1x1 Tomb zone on each coffin, 1x1 Pasture zone on each nest box)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
@@ -174,7 +174,7 @@ try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_comm
 -- present, so manual tweaks survive. Run `labor-groups` (no `once`) by hand to force.
 try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
-try('auto-tomb (1x1 tomb zone on each coffin)', function() dfhack.run_command('enable', 'auto-tomb') end)
+try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'auto-tomb') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on

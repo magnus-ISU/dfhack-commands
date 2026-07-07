@@ -35,11 +35,13 @@ TTL kept short (**5 s**) so a queued order clears its gap promptly.
 
 ### 3. `auto-tomb.lua` — walked `buildings.all` ~6×/second
 Heartbeat ran `scan()` every `SCAN_FRAMES = 10` frames, and `scan()` iterates **all of
-`world.buildings.all`** (hundreds-to-thousands in a developed fort) to find coffins. Enabled by
-`magnus-scripts`, so it ran continuously. **Fix:** the heartbeat now re-walks at most **once per
-60 s** of real time (wall-clock gate) and skips entirely while the sim is frozen (frame counter
-unchanged → no new coffin possible). A coffin gets its tomb zone within ~60 s of placement, which
-is plenty responsive.
+`world.buildings.all`** (hundreds-to-thousands in a developed fort) to find coffins/nest boxes.
+Enabled by `magnus-scripts`, so it ran continuously. **Fix:** a **building-count trigger** — the
+watched furniture can only appear as a *new* building, so the common tick is an O(1) `#buildings.all`
+length compare and skips; the full walk runs only when the building set changed (instant on
+placement, even while paused) or on a periodic backstop measured in *game* frames (so a paused fort
+does no full walks). This keeps placement instant *and* cheap. (auto-tomb also now drops a 1x1
+Pen/Pasture zone on nest boxes via the same trigger — a feature, same mechanism.)
 
 ### 4. `auto-name.lua` — `units.active` scan every 100 frames
 Migrant renamer; heartbeat scanned `units.active` every `SCAN_FRAMES = 100` frames even though

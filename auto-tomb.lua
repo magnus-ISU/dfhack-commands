@@ -1,67 +1,78 @@
--- Auto-place a 1x1 Tomb zone over every coffin, so each becomes an assignable tomb.
+-- Auto-place a 1x1 zone over furniture that needs one: a Tomb zone on every coffin, and a
+-- Pen/Pasture zone on every nest box.
 --@module = true
 --@enable = true
 --[[
 auto-tomb
 
-Watches your fort and drops a 1x1 Tomb activity zone onto any coffin (built or just placed)
-that doesn't already sit under one. A coffin inside a Tomb zone becomes an assignable tomb
--- so every coffin you place is immediately ready to assign to a dwarf, with no manual
-zone-painting. Coffins that already have a tomb zone are left alone (idempotent), and other
-zones on the tile are untouched.
+Watches your fort and drops a 1x1 activity zone onto furniture that needs one, so it becomes
+immediately assignable with no manual zone-painting:
+  * a coffin (built or just placed) that isn't already under a Tomb zone -> a 1x1 Tomb zone,
+    so it's ready to assign to a dwarf;
+  * a nest box that isn't already under a Pen/Pasture zone -> a 1x1 Pen zone, so you can pasture
+    a female egg-layer onto it to lay.
+Furniture that already has the matching zone is left alone (idempotent), and other zones on the
+tile are untouched.
 
     enable auto-tomb     start watching (persists with the fort)
     disable auto-tomb    stop
-    auto-tomb            place tombs on any coffins missing one right now, and report
+    auto-tomb            zone any coffins / nest boxes missing one right now, and report
 
 Add `enable auto-tomb` to magnus-scripts / dfhack.init to run it every session.
 ]]
 
 local GLOBAL_KEY = 'auto-tomb'
-local SCAN_FRAMES = 100   -- heartbeat driver cadence (just checks the clock -- cheap)
-local CHECK_MS = 60000    -- ...but actually re-walk the buildings at most once per 60 seconds
+local SCAN_FRAMES = 10       -- heartbeat cadence: an O(1) building-count check, so it's cheap
+local BACKSTOP_FRAMES = 500  -- also do a full walk this often (in GAME frames -> never while
+                             -- paused) to cover the rare cases a bare count check can miss
 
 -- ---- the work ---------------------------------------------------------------
 
--- is the tile already under a Tomb zone?
-local function has_tomb(pos)
+-- furniture building type -> the 1x1 civzone subtype to drop on it
+local AUTO_ZONE = {
+    [df.building_type.Coffin]  = df.civzone_type.Tomb,
+    [df.building_type.NestBox] = df.civzone_type.Pen,   -- Pen == Pen/Pasture
+}
+
+-- is the tile already under a civzone of `ztype`?
+local function has_zone(pos, ztype)
     local zones = dfhack.buildings.findCivzonesAt(pos)
     if zones then
         for _, z in ipairs(zones) do
-            if z.type == df.civzone_type.Tomb then return true end
+            if z.type == ztype then return true end
         end
     end
     return false
 end
 
--- create a 1x1 Tomb zone at pos (a civzone needs an extents bitmap; ours is one tile = 1)
-local function make_tomb(pos)
+-- create a 1x1 civzone of `subtype` at pos (a civzone needs an extents bitmap; ours is one tile)
+local function make_zone(pos, subtype)
     local extents = df.reinterpret_cast(df.building_extents_type, df.new('uint8_t', 1))
     extents[0] = 1
     local bld = dfhack.buildings.constructBuilding{
-        type = df.building_type.Civzone, subtype = df.civzone_type.Tomb, abstract = true,
+        type = df.building_type.Civzone, subtype = subtype, abstract = true,
         pos = pos, width = 1, height = 1,
         fields = {assigned_unit_id = -1,
                   room = {x = pos.x, y = pos.y, width = 1, height = 1, extents = extents}},
     }
     if bld then
         -- a civzone must be ACTIVE to actually function; constructBuilding leaves it off, so
-        -- without this the tomb exists but can't be assigned/used (looks "broken").
+        -- without this the zone exists but can't be assigned/used (looks "broken").
         bld.spec_sub_flag.active = true
         -- match how the game/quickfort make a tomb: keep pets from being buried in it.
-        bld.zone_settings.tomb.flags.no_pets = true
+        if subtype == df.civzone_type.Tomb then bld.zone_settings.tomb.flags.no_pets = true end
     end
     return bld
 end
 
--- place a tomb on every coffin that lacks one; returns how many were added. The heartbeat only
--- calls this about once a minute (see below), so walking world.buildings.all here is cheap.
+-- drop the matching zone on every coffin / nest box that lacks one; returns how many were added
 local function scan()
     local made = 0
     for _, b in ipairs(df.global.world.buildings.all) do
-        if b:getType() == df.building_type.Coffin then
+        local ztype = AUTO_ZONE[b:getType()]
+        if ztype then
             local pos = {x = b.centerx, y = b.centery, z = b.z}
-            if not has_tomb(pos) and make_tomb(pos) then made = made + 1 end
+            if not has_zone(pos, ztype) and make_zone(pos, ztype) then made = made + 1 end
         end
     end
     return made
@@ -88,16 +99,21 @@ end
 local function start_heartbeat()
     local my = hb_gen() + 1
     hb_gen(my)
-    local last_scan, last_frame = nil, nil
+    local last_count, last_full = -1, -1
     local function hb()
         if not isEnabled() or my ~= hb_gen() then return end
+        local n = #df.global.world.buildings.all
         local fc = df.global.world.frame_counter or 0
-        local now = dfhack.getTickCount()
-        -- re-walk at most once per CHECK_MS of real time, and never while the game is frozen (no
-        -- game frame has advanced since the last scan -> no new coffin could exist)
-        if fc ~= last_frame and (not last_scan or now - last_scan >= CHECK_MS) then
-            last_scan, last_frame = now, fc
+        -- A coffin / nest box can only appear as a NEW building, so the common "nothing changed"
+        -- tick is just an O(1) length compare and skips. Walk the list only when the building set
+        -- changed (something added/removed -- catches placements even while paused), or when the
+        -- periodic backstop is due. The backstop is measured in GAME frames, which don't advance
+        -- while paused, so a paused fort does no full walks. Placing a zone adds a civzone
+        -- building, so re-read the count afterward to settle instead of rescanning next tick.
+        if n ~= last_count or (fc - last_full) >= BACKSTOP_FRAMES then
             scan()
+            last_count = #df.global.world.buildings.all
+            last_full = fc
         end
         dfhack.timeout(SCAN_FRAMES, 'frames', hb)
     end
@@ -128,10 +144,10 @@ if dfhack_flags and dfhack_flags.module then return end
 if dfhack_flags and dfhack_flags.enable ~= nil then
     if not dfhack.world.isFortressMode() then qerror('auto-tomb only works in fortress mode') end
     set_enabled(dfhack_flags.enable_state)
-    print('auto-tomb: ' .. (isEnabled() and 'ENABLED (watching coffins)' or 'disabled'))
+    print('auto-tomb: ' .. (isEnabled() and 'ENABLED (watching coffins + nest boxes)' or 'disabled'))
     return
 end
 
 if not dfhack.world.isFortressMode() then qerror('auto-tomb only works in fortress mode') end
 local n = scan()
-print(('auto-tomb: placed %d new tomb zone%s on coffins missing one.'):format(n, n == 1 and '' or 's'))
+print(('auto-tomb: placed %d new zone%s on coffins / nest boxes missing one.'):format(n, n == 1 and '' or 's'))
