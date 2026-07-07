@@ -5,9 +5,10 @@ Registers a custom notification (name: "needs_tomb") into the same notification
 list used by "moody dwarf is gathering items" and "N groups of citizens are
 stranded" (DFHack's gui/notify overlay).
 
-It alerts when fortress dwarves have died but have no tomb (their corpse is not
-interred in a coffin) AND have not been memorialized (a built memorial slab lays a
-ghost to rest just as burial does):
+It alerts when fortress dwarves have died and are not at rest -- their corpse is
+loose (not interred in a coffin), OR they are walking as a GHOST (even if some
+remains are interred, or the body is gone) -- and have not been memorialized (a
+built memorial slab lays a ghost to rest just as burial does):
     * exactly one  -> "Urist McMiner needs a tomb!"
     * more than one -> "2 dwarves need tombs!"
 
@@ -109,7 +110,8 @@ local function scan()
             if u and dfhack.units.isDead(u) and is_sapient(u) and is_fort_member(u) then
                 local rec = info[uid]
                 if not rec then
-                    rec = {unit = u, buried = false, unburied = false, pos = nil}
+                    rec = {unit = u, buried = false, unburied = false, pos = nil,
+                           ghostly = u.flags3.ghostly}
                     info[uid] = rec
                     table.insert(order, uid)
                 end
@@ -126,12 +128,36 @@ local function scan()
         end
     end
 
-    -- a dwarf needs a tomb only if they have a loose part, NONE is interred, and they have NOT
-    -- been memorialized (a built memorial slab lays their ghost to rest just as a burial would)
+    -- GHOSTS: a ghostly dead fort member is DEFINITIVELY not at rest -- even if some remains are
+    -- interred (a partial burial still leaves the ghost), or the body is gone entirely (no corpse
+    -- item at all). So catch ghosts straight from the (bounded) active-unit list, independent of
+    -- any loose corpse: they always need a slab/tomb until laid to rest.
+    for _, u in ipairs(df.global.world.units.active) do
+        if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) and is_fort_member(u) then
+            local uid = u.id
+            local rec = info[uid]
+            if not rec then
+                rec = {unit = u, buried = false, unburied = false, pos = nil, ghostly = true}
+                info[uid] = rec
+                table.insert(order, uid)
+            else
+                rec.ghostly = true
+            end
+            if not rec.pos then
+                local x, y, z = dfhack.units.getPosition(u)
+                if x then rec.pos = xyz2pos(x, y, z) end
+            end
+        end
+    end
+
+    -- a dwarf needs a tomb if their body is loose (a loose part, none interred) OR they are a
+    -- ghost (not at rest regardless of burial) -- and they have NOT been memorialized (a built
+    -- memorial slab lays their ghost to rest just as a burial would)
     local list = {}
     for _, uid in ipairs(order) do
         local rec = info[uid]
-        if rec.unburied and not rec.buried and not memorialized[rec.unit.hist_figure_id] then
+        if (rec.ghostly or (rec.unburied and not rec.buried))
+            and not memorialized[rec.unit.hist_figure_id] then
             table.insert(list, {
                 unit_id = uid,
                 hf = rec.unit.hist_figure_id,
