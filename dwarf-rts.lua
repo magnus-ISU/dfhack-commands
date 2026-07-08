@@ -273,6 +273,20 @@ local function enemy_at(pos)
     end
 end
 
+-- a live, visible FRIENDLY (non-enemy) unit on a map tile: your own dwarves/pets, or a visiting
+-- merchant/diplomat -- anything you'd want to click to inspect rather than command. A mousedown on
+-- one is forwarded to DF (so its info/selection opens) instead of becoming an RTS move/attack/drag.
+local function allied_at(pos)
+    local U = df.global.world.units.active
+    for i = 0, #U - 1 do
+        local u = U[i]
+        if u.pos.x == pos.x and u.pos.y == pos.y and u.pos.z == pos.z
+            and not dfhack.units.isDead(u) and not dfhack.units.isHidden(u) and not is_enemy(u) then
+            return u
+        end
+    end
+end
+
 -- the squad's commander histfig (first occupied position), for the order issuer
 local function leader_hf(sq)
     for i = 0, #sq.positions - 1 do
@@ -1063,6 +1077,9 @@ function DwarfRtsClickMove:overlay_onupdate()
     local down = df.global.enabler.mouse_lbut_down
     if down == 1 and self.lbut_down ~= 1 then              -- press
         self.press = dfhack.gui.getMousePos(true)
+        -- a press that lands on a FRIENDLY unit is forwarded to DF as a plain click (select/open
+        -- that unit) and never becomes an RTS command or drag box -- decided once, here on press
+        self.press_allied = self.press ~= nil and allied_at(self.press) ~= nil
         self.press_ok = open and not busy(sq)
             -- We always poll on the squads map (so a DRAG box works whether or not anything
             -- is selected). A plain click only commands when something is selected; with
@@ -1079,7 +1096,13 @@ function DwarfRtsClickMove:overlay_onupdate()
         if self.press_ok and self.press and rel then
             local shift = dfhack.internal.getModifiers().shift
             local acted   -- 'conscript' if a civilian was drafted (needs a list refresh)
-            if same_tile(self.press, rel) then
+            if self.press_allied then
+                -- gesture began on a friendly unit: forward it to DF (open/select that unit),
+                -- never an RTS command or drag box (the press was swallowed; re-dispatch on up)
+                self.passthrough = true
+                gui.simulateInput(dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
+                self.passthrough = false
+            elseif same_tile(self.press, rel) then
                 -- a plain click (no drag). If a squad/member is selected, it's a command;
                 -- if nothing is selected, forward it to the game as a normal click so you
                 -- can select squads/units (the press was swallowed; re-dispatch on up).
@@ -1101,7 +1124,7 @@ function DwarfRtsClickMove:overlay_onupdate()
                 dfhack.timeout(1, 'frames', refresh_squad_list)
             end
         end
-        self.press = nil
+        self.press, self.press_allied = nil, false
     end
     self.lbut_down = down
 end
@@ -1326,8 +1349,9 @@ function DwarfRtsClickMove:render(dc)
         end
     end
     -- the live drag box (press recorded, button still held); press_ok already confined
-    -- the press to the squads map area
-    if self.press_ok and self.press and self.lbut_down == 1 then
+    -- the press to the squads map area. A press on a friendly unit forwards as a click, so it
+    -- draws no drag box.
+    if self.press_ok and self.press and self.lbut_down == 1 and not self.press_allied then
         local cur = dfhack.gui.getMousePos(true)
         if cur and cur.z == self.press.z and not same_tile(self.press, cur) then
             draw_drag_box(self.press, cur, BOX_PENS[classify_box(self.press, cur)])
