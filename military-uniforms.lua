@@ -68,13 +68,14 @@ equipped -- so neither is treated as "done" (and displayed pieces are never melt
 better piece than what's in use becomes available (a fresh masterwork, or just any higher-quality
 item), the service flags DF to re-run equipment assignment for that slot, so soldiers swap UP to
 it -- fired only when a new, better piece actually appears, so there's no equip churn.
-  Forge Steel Picks (Shift-P)      OFF by default. Keeps one steel pick per miner (dwarves
-                                   with the Mining labor) in stock, forged one at a time,
-                                   respecting the bar reserve. Honours Upgrade to masterwork
-                                   (targets a masterwork pick each). Out of steel bars, it
-                                   recycles surplus steel gear into bars to make the picks.
-                                   When complete, FORBIDS every other (non-steel) pickaxe in
-                                   the fort so miners switch to the steel ones.
+  Forge Steel Tools (Shift-P)      OFF by default. Keeps one steel pick per miner (Mining labor)
+                                   AND one steel battle axe per woodcutter (Wood Cutting labor) in
+                                   stock, forged one at a time, respecting the bar reserve. Honours
+                                   Upgrade to masterwork (targets a masterwork tool each). Out of
+                                   steel bars, it recycles surplus steel gear into bars. When a
+                                   tool type is complete, FORBIDS every other (non-steel) one so the
+                                   workers switch to steel -- but never a battle axe a SOLDIER holds
+                                   (the military's steel axes are left alone, not miscounted either).
   Train surplus war dogs (Shift-D) war-train adult male dogs beyond BREEDER_MALES
                                    breeders (Pets/Livestock training, done by an Animal
                                    Trainer -- not the soldiers). A male PUPPY counts toward
@@ -441,6 +442,11 @@ local BREEDER_MALES = 2   -- adult male dogs kept untrained for breeding
 local function pick_subtype()
     local w = df.global.world.raws.itemdefs.weapons
     for i = 0, #w - 1 do if w[i].id == 'ITEM_WEAPON_PICK' then return i end end
+end
+-- weapon subtype for the wood-cutting axe (ITEM_WEAPON_AXE_BATTLE), resolved per world
+local function axe_subtype()
+    local w = df.global.world.raws.itemdefs.weapons
+    for i = 0, #w - 1 do if w[i].id == 'ITEM_WEAPON_AXE_BATTLE' then return i end end
 end
 
 -- makeable equipment item_type -> Make job
@@ -1104,28 +1110,50 @@ local function iron_ore_set(iron_idx)
 end
 
 -- fort citizens with the Mining labor enabled (the dwarves who dig)
-local function miners()
+local function workers_with_labor(labor)
     local out = {}
     for _, u in ipairs(df.global.world.units.active) do
         if dfhack.units.isCitizen(u) and dfhack.units.isActive(u) and not dfhack.units.isDead(u) then
-            local ok, has = pcall(function() return u.status.labors[df.unit_labor.MINE] end)
+            local ok, has = pcall(function() return u.status.labors[labor] end)
             if ok and has then out[#out + 1] = u end
         end
     end
     return out
 end
+local function miners() return workers_with_labor(df.unit_labor.MINE) end
+local function woodcutters() return workers_with_labor(df.unit_labor.CUTWOOD) end
 
--- Equip miners with steel pickaxes: keep one steel pick per miner in stock, forged one
--- at a time (respecting the steel reserve + whatever soldier gear has committed). When
--- "Upgrade to masterwork" is on, the target is a MASTERWORK pick per miner, and inferior
--- surplus picks are melted to re-forge (same policy as the gear masterwork upgrade).
--- Tracked under the single order key 'pick'. Independent of the gear-queue toggle.
-local function equip_miner_pickaxes()
+-- a citizen SOLDIER is holding this item? (a pick or battle axe wielded as a military weapon --
+-- so the forbid never disarms them).
+local function soldier_holding(it)
+    local u = dfhack.items.getHolderUnit(it)
+    return u and u.military.squad_id >= 0
+end
+-- held by a FIGHTER: a soldier who is NOT one of the workers we're equipping. Both picks (the
+-- "Steel - pick" uniform) and battle axes double as military weapons, so a tool assigned to such a
+-- fighter must NOT be counted as a spare worker tool. A worker who is ALSO a soldier keeps their
+-- tool counted (they're in worker_ids), so miner-militia aren't made to forge a second pick.
+local function held_by_fighter(it, worker_ids)
+    local u = dfhack.items.getHolderUnit(it)
+    return u and u.military.squad_id >= 0 and not worker_ids[u.id]
+end
+
+-- Equip a set of workers (miners / woodcutters) with a steel tool (pick / battle axe): keep one
+-- steel tool per worker in stock, forged one at a time (respecting the steel reserve + whatever
+-- soldier gear has committed). When "Upgrade to masterwork" is on, the target is a MASTERWORK tool
+-- each and inferior surplus is melted to re-forge (same policy as the gear masterwork upgrade).
+-- When every worker is covered, FORBIDS all OTHER (non-steel) tools of that type so the workers
+-- drop them and pick up the steel ones. Tracked under order key `key`. Both picks and battle axes
+-- also serve as MILITARY weapons, so a steel tool assigned to a FIGHTER (a soldier who isn't one of
+-- these workers) is neither counted as a spare worker tool nor force-forbidden off them.
+-- Independent of the gear-queue toggle.
+local function equip_workers(units, sub, key, done_field)
     local steel_idx = inorganic_idx('STEEL')
-    local sub = pick_subtype()
-    if not steel_idx or not sub then drop_order('pick'); return end
-    local need = #miners()
-    if need == 0 then drop_order('pick'); return end
+    if not steel_idx or not sub then drop_order(key); return 0 end
+    local need = #units
+    if need == 0 then drop_order(key); return 0 end
+    local worker_ids = {}
+    for _, u in ipairs(units) do worker_ids[u.id] = true end
 
     -- tally steel picks (total + masterwork), steel bars, and inferior melt candidates
     local total, mw, steel_bars, melting = 0, 0, 0, 0
@@ -1139,7 +1167,8 @@ local function equip_miner_pickaxes()
             and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
             if it.flags.melt then
                 melting = melting + 1                       -- steel already on the way back
-            elseif not item_installed(it) then              -- a trapped/displayed pick isn't usable stock
+            elseif not item_installed(it)                   -- a trapped/displayed tool isn't usable stock
+                and not held_by_fighter(it, worker_ids) then -- a fighter's pick/axe is not worker stock
                 total = total + 1
                 if it:getQuality() >= df.item_quality.Masterful and it.wear == 0 and not it.flags.artifact then
                     mw = mw + 1                             -- masterwork counts only if undamaged
@@ -1163,25 +1192,26 @@ local function equip_miner_pickaxes()
 
     -- forge toward one (masterwork, if enabled) pick per miner, one at a time
     local avail = state.masterwork and mw or total
-    local o = state.orders['pick'] and order_by_id(state.orders['pick'])
+    local o = state.orders[key] and order_by_id(state.orders[key])
     local in_flight = o and o.amount_left > 0
     if avail < need and (in_flight or budget >= BARS_PER_ITEM) then
-        queue_one('pick', {item_type = df.item_type.WEAPON, subtype = sub,
-                           mat_type = 0, mat_index = steel_idx})
+        queue_one(key, {item_type = df.item_type.WEAPON, subtype = sub,
+                        mat_type = 0, mat_index = steel_idx})
     else
-        drop_order('pick')
+        drop_order(key)
     end
 
     -- COMPLETE = every miner has a (masterwork, if enabled) steel pick. Record it for the
     -- overlay's "Done" label, and forbid all OTHER pickaxes (any pick that isn't one of our
     -- steel ones) so miners drop them and pick up the steel picks instead.
     local done = avail >= need
-    state.done_picks = done
+    state[done_field] = done
     if done then
         for _, it in ipairs(df.global.world.items.all) do
             if it:getType() == df.item_type.WEAPON and it:getSubtype() == sub
                 and not (it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx)
                 and not it.flags.forbid
+                and not soldier_holding(it)   -- never disarm a soldier (pick/axe as a weapon)
             then it.flags.forbid = true end
         end
     end
@@ -1353,7 +1383,16 @@ local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
     if state.wardogs then train_surplus_war_dogs(); assign_war_dogs() end
-    local pick_short = state.pickaxes and equip_miner_pickaxes() or 0
+    -- steel digging picks for miners + steel battle axes for woodcutters (same toggle). Both tools
+    -- also serve as military weapons, so each pass ignores tools held by a fighter (a soldier who
+    -- isn't that kind of worker) -- they aren't counted as spares nor forbidden off the soldier.
+    local pick_short = 0
+    if state.pickaxes then
+        pick_short = equip_workers(miners(), pick_subtype(), 'pick', 'done_picks')
+                   + equip_workers(woodcutters(), axe_subtype(), 'axe', 'done_axes')
+    else
+        drop_order('pick'); drop_order('axe')
+    end
     if not state.queue then return end
     local ent = fort_entity()
     if ent then ensure_cloaks(ent) end   -- every soldier carries a leather cloak (templates + positions)
@@ -1483,7 +1522,7 @@ local function run_cycle()
     -- gone from req).
     for key in pairs(state.orders) do
         if key:sub(1, 7) == 'supply/' then                                    -- ensure_supply handles it
-        elseif key == 'pick' then                                             -- equip_miner_pickaxes handles it
+        elseif key == 'pick' or key == 'axe' then                             -- equip_workers handles these
         elseif key == 'shieldstandin' then                                    -- shield stand-in pass handles it
         elseif key:sub(1, 3) == 'cu/' then
             if not req[key:sub(4)] then drop_order(key) end                   -- base steel piece gone
@@ -1767,7 +1806,7 @@ function set_toggle(name, val)
     state[name] = val
     save_state()
     if name == 'queue' and not val then drop_all_orders(); save_state() end
-    if name == 'pickaxes' and not val then drop_order('pick'); save_state() end
+    if name == 'pickaxes' and not val then drop_order('pick'); drop_order('axe'); save_state() end
     if service_on() then start_heartbeat() else stop_heartbeat() end
     run_cycle()
 end
@@ -1870,7 +1909,7 @@ function MilitaryUniformOverlay:init()
                 widgets.ToggleHotkeyLabel{
                     view_id = 'pickaxes',
                     frame = {t = 3, l = 0},
-                    label = 'Forge Steel Picks',
+                    label = 'Forge Steel Tools',
                     key = 'CUSTOM_SHIFT_P',
                     options = on_or_done('picks'),
                     initial_option = false,
@@ -1886,7 +1925,10 @@ function MilitaryUniformOverlay:render(dc)
     -- read completion flags straight from persisted state (the background cycle that sets
     -- them may run in a different script env than this overlay), for the "Done" labels
     local st = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
-    DONE.queue, DONE.masterwork, DONE.picks = st.done_queue, st.done_masterwork, st.done_picks
+    DONE.queue, DONE.masterwork = st.done_queue, st.done_masterwork
+    -- "Forge Steel Tools" is Done only when miners AND woodcutters are all covered (no woodcutters
+    -- -> done_axes is vacuously true, so it reflects the picks alone)
+    DONE.picks = st.done_picks and (st.done_axes ~= false)
     self.subviews.queue:setOption(state.queue)
     self.subviews.masterwork:setOption(state.masterwork)
     self.subviews.wardogs:setOption(state.wardogs)
