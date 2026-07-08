@@ -12,8 +12,9 @@ safe zone. Shows only while the alert is on and at least one enemy is inside; cl
 burrow is clear or the alert is switched off. Clicking it zooms to each enemy in turn.
 
 Enemy test: dfhack.units.isDanger (invaders / hostiles / crazed / undead / megabeasts) OR
-isAgitated (agitated wildlife), and NOT isHidden -- an undetected ambusher/sneaker you haven't
-spotted yet is not counted. "Inside" uses dfhack.burrows.isAssignedTile, same as the
+isAgitated (agitated wildlife), and NOT isHidden and NOT caged -- an undetected ambusher/sneaker
+you haven't spotted, or an enemy already captured in a cage, is not counted. "Inside" uses
+dfhack.burrows.isAssignedTile, same as the
 civilian-outside check. Run `enemies-inside-notification` to register (idempotent);
 magnus-scripts loads it.
 ]]
@@ -45,6 +46,7 @@ end
 local function is_enemy(u)
     if not dfhack.units.isActive(u) or dfhack.units.isDead(u) or u.pos.x < 0 then return false end
     if dfhack.units.isFortControlled(u) or dfhack.units.isHidden(u) then return false end
+    if u.flags1.caged then return false end   -- a captured enemy in a cage isn't a live threat
     return dfhack.units.isDanger(u) or dfhack.units.isAgitated(u)
 end
 
