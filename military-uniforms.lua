@@ -820,7 +820,8 @@ end
 -- need. Instead we self-manage: run_cycle decides WHICH gear key to make (one
 -- soldier's set at a time, honouring the bar reserve) and calls this to create or
 -- re-arm exactly ONE unit for that key; drop_order removes a key once it's covered.
-local function queue_one(key, r)
+local function queue_one(key, r, n)
+    n = n or 1
     local o = state.orders[key] and order_by_id(state.orders[key])
     if not o then
         local mo = df.global.world.manager_orders
@@ -837,16 +838,18 @@ local function queue_one(key, r)
         if r.size_race and r.size_race ~= civ_race() then o.specdata.race = r.size_race end
         o.id = mo.manager_order_next_id
         mo.manager_order_next_id = o.id + 1
-        o.frequency = df.workquota_frequency_type.OneTime  -- one unit, no DF auto-repeat
-        o.amount_total, o.amount_left = 1, 1
+        o.frequency = df.workquota_frequency_type.OneTime  -- one batch, no DF auto-repeat
+        o.amount_total, o.amount_left = n, n
         o.status.validated, o.status.active = true, true
         mo.all:insert(0, o)
         state.orders[key] = o.id
-    elseif o.amount_left < 1 then
-        o.amount_total, o.amount_left = 1, 1     -- last unit forged, still short: one more
+    else
+        -- re-size the outstanding batch to the amount we want NOW (the caller recomputes the
+        -- shortfall each cycle), so an over-large batch shrinks as pieces are forged and never
+        -- keeps hogging a metal's bar budget away from other gear.
+        o.amount_total, o.amount_left = n, n
         o.status.active = true
     end
-    -- else: a unit is queued and not yet forged -- leave it (one at a time)
 end
 
 local function item_wear(it)
@@ -1609,55 +1612,10 @@ local function run_cycle()
             avail[key] = mwph and (mwstock[key] or 0) or (stock[key] or 0)
         end
     end
-    local want = {}          -- gear keys to forge this cycle
-    local metal_owner = {}   -- barkey -> index of the soldier that metal is finishing now
-    for i, sreq in ipairs(persoldier) do
-        for _, need in ipairs(sreq.needs) do
-            local k = need.k
-            local covered
-            if need.hand ~= nil then                              -- gauntlet: this exact hand
-                local pool = avail_h[k]
-                if pool and pool[need.hand] > 0 then pool[need.hand] = pool[need.hand] - 1; covered = true end
-            elseif (avail[k] or 0) > 0 then
-                avail[k] = avail[k] - 1; covered = true           -- covered from stock
-            end
-            if not covered and req[k] then                        -- missing: needs forging
-                if state.masterwork and basic_done[k] then
-                    -- MASTERWORK UPGRADE: everyone already has a plain piece of this item, so
-                    -- upgrade them all in parallel (the bar budget still paces it). Otherwise a
-                    -- later soldier's piece (e.g. soldier 2's shield) would be blocked behind
-                    -- an earlier soldier's hard-to-masterwork piece forever.
-                    want[k] = true
-                else
-                    -- INITIAL EQUIP: finish ONE soldier's set per metal before the next, so a
-                    -- scarce metal completes whole sets instead of spreading thin.
-                    local mk = barkey(req[k].mat_type, req[k].mat_index)
-                    if metal_owner[mk] == nil then metal_owner[mk] = i end
-                    if metal_owner[mk] == i then want[k] = true end
-                end
-            end
-        end
-    end
-
-    -- BAR RESERVE: keep RESERVE_BARS of each metal free for moods / other jobs. The
-    -- spendable budget is on-hand bars minus the reserve minus what our already-queued
-    -- orders will still consume, so we never queue an order that dips a metal below it.
-    local committed = {}
-    for k, id in pairs(state.orders) do
-        if k:sub(1, 7) ~= 'supply/' then
-            local o = order_by_id(id)
-            if o and o.amount_left > 0 then
-                local mk = barkey(o.mat_type, o.mat_index)
-                committed[mk] = (committed[mk] or 0) + o.amount_left
-            end
-        end
-    end
-    local budget = {}
-    for mk, b in pairs(bars) do budget[mk] = b - RESERVE_BARS - (committed[mk] or 0) end
-
-    -- STEEL SHIELDS LAST: a steel shield is only forged once EVERY OTHER requested steel item is
-    -- covered (and masterworked, if upgrading) -- i.e. no other steel item is still requested. This
-    -- flag defers the steel-shield order below; the wood replacement is queued separately.
+    -- STEEL SHIELDS LAST: steel_gear_done is true once every NON-shield steel item is covered (and
+    -- masterworked, if upgrading). Computed BEFORE the pacing loop, because a steel shield is forged
+    -- last: while it is deferred it must NOT claim the steel slot, or a soldier whose only gap is
+    -- that deferred shield blocks every later soldier's real steel gear (their axes) behind it.
     local steel_gear_done = true
     if steel_idx then
         for key, r in pairs(req) do
@@ -1675,20 +1633,85 @@ local function run_cycle()
         end
     end
 
+    -- WANT every gear key that is still short across ALL soldiers -- no one-soldier-at-a-time
+    -- metal pacing. That pacing stalled shared keys (a sizeless steel axe, same-size armour): the
+    -- key was only forged when the ONE claiming soldier happened to need it, so a dozen others could
+    -- wait behind an unrelated piece. The queue pass instead forges each wanted key's whole
+    -- shortfall in one batch, bounded by the metal's bar budget -- which is what actually paces a
+    -- scarce metal. Overproduction is acceptable. (Deferred steel shields are dropped in the queue
+    -- pass regardless of want, so they still come last.)
+    local want = {}
+    for _, sreq in ipairs(persoldier) do
+        for _, need in ipairs(sreq.needs) do
+            local k = need.k
+            local r = req[k]
+            do
+                local covered
+                if need.hand ~= nil then                          -- gauntlet: this exact hand
+                    local pool = avail_h[k]
+                    if pool and pool[need.hand] > 0 then pool[need.hand] = pool[need.hand] - 1; covered = true end
+                elseif (avail[k] or 0) > 0 then
+                    avail[k] = avail[k] - 1; covered = true       -- covered from stock
+                end
+                if not covered and r then want[k] = true end     -- still short -> forge it
+            end
+        end
+    end
+
+    -- BAR RESERVE + gear budget. Keep RESERVE_BARS of each metal free for moods/other jobs. The
+    -- gear orders themselves are re-sized to fit each cycle, so they are NOT pre-subtracted -- only
+    -- our NON-gear steel orders (miner pick / woodcutter axe) are, since those are committed
+    -- elsewhere. (Pre-subtracting gear would let last cycle's big batch block this cycle's forging.)
+    local committed = {}
+    for k, id in pairs(state.orders) do
+        if not req[k] and k:sub(1, 7) ~= 'supply/' then   -- pick / axe / shieldstandin / cu-backup
+            local o = order_by_id(id)
+            if o and o.amount_left > 0 then
+                local mk = barkey(o.mat_type, o.mat_index)
+                committed[mk] = (committed[mk] or 0) + o.amount_left
+            end
+        end
+    end
+    local budget = {}
+    for mk, b in pairs(bars) do budget[mk] = math.max(0, b - RESERVE_BARS - (committed[mk] or 0)) end
+
+    -- FAIR SHARE: split each metal's budget evenly across the gear keys still short in it, so one
+    -- big shortfall (e.g. 39 helms) can't hog the bars and starve another (the civilians' axes).
+    -- Each key forges up to its share this cycle; overproduction is acceptable and the batch
+    -- re-sizes down as pieces are made. Masterwork upgrades / paired pieces stay one at a time.
+    local wanted_n = {}
+    for key, r in pairs(req) do
+        local defer = r.item_type == df.item_type.SHIELD and r.mat_type == 0 and r.mat_index == steel_idx and not steel_gear_done
+        if want[key] and r.mat_type == 0 and not defer
+            and not (state.masterwork and basic_done[key]) and not HANDED[r.item_type] then
+            local mk = barkey(r.mat_type, r.mat_index)
+            wanted_n[mk] = (wanted_n[mk] or 0) + 1
+        end
+    end
+    local share = {}
+    for mk, cnt in pairs(wanted_n) do share[mk] = math.max(1, math.floor((budget[mk] or 0) / cnt)) end
+
     for key, r in pairs(req) do
         local is_steel_shield = r.item_type == df.item_type.SHIELD
             and r.mat_type == 0 and r.mat_index == steel_idx
         local mk = barkey(r.mat_type, r.mat_index)
-        local o = state.orders[key] and order_by_id(state.orders[key])
-        local in_flight = o and o.amount_left > 0
         local is_metal = r.mat_type == 0        -- wood / leather / bone don't consume metal bars
         if is_steel_shield and not steel_gear_done then
             drop_order(key)    -- steel shields wait until the rest of the steel gear is done
-        elseif want[key] and (in_flight or not is_metal or (budget[mk] or 0) >= BARS_PER_ITEM) then
-            if is_metal and not in_flight then budget[mk] = (budget[mk] or 0) - BARS_PER_ITEM end
-            queue_one(key, r)
+        elseif not want[key] then
+            drop_order(key)    -- covered
+        elseif is_metal and (budget[mk] or 0) < BARS_PER_ITEM then
+            drop_order(key)    -- no bars to spare past the reserve
         else
-            drop_order(key)    -- another soldier's piece, or no bars to spare past the reserve
+            local n
+            if (state.masterwork and basic_done[key]) or HANDED[r.item_type] then
+                n = 1                                            -- masterwork upgrade / paired: one at a time
+            elseif is_metal then
+                n = math.max(1, math.min(r.count - (stock[key] or 0), share[mk] or 1))
+            else
+                n = math.max(1, r.count - (stock[key] or 0))     -- wood/leather/bone: no bar limit
+            end
+            queue_one(key, r, n)
         end
     end
 
