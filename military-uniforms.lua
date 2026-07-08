@@ -679,6 +679,18 @@ local function position_is_civilian(pos)
     return has_armor and not has_metal
 end
 
+-- does this position carry a CUSTOM uniform -- a slot requirement pinned to a SPECIFIC item (item
+-- id >= 0), e.g. an artifact breastplate the player assigned by hand? The uniform + its assigned
+-- items live on the POSITION, so such a member must NEVER be moved between squads (a move would drop
+-- them into a standard position and wipe the custom assignment). We pin them in place like a leader.
+local function position_has_custom_uniform(pos)
+    for slot = 0, 6 do
+        local v = pos.equipment.uniform[slot]
+        for j = 0, #v - 1 do if v[j].item >= 0 then return true end end
+    end
+    return false
+end
+
 -- index of the "Ready" routine in the fort's schedule list (what a squad's cur_routine_idx points
 -- into), or nil if there's no routine by that name. Off-duty is index 0; "Ready" is the standard
 -- station-and-train routine, so once a civilian militia is fully equipped we switch it on.
@@ -731,7 +743,8 @@ local function compute_per_soldier()
                         local real_civ = position_is_civilian(pos)   -- an actual Civilian-* squad member
                         local civilian = real_civ or (training[sq.id] and p ~= 0)
                         local entry = {unit_id = uid, sid = sq.id, civilian = civilian,
-                                       real_civ = real_civ, leader = (p == 0), needs = needs}
+                                       real_civ = real_civ, leader = (p == 0), needs = needs,
+                                       pinned = position_has_custom_uniform(pos)}   -- custom uniform: never move
                         if civilian then civ[#civ + 1] = entry
                         elseif mil[uid] then prioritized[#prioritized + 1] = entry
                         else rest[#rest + 1] = entry end
@@ -1265,19 +1278,27 @@ end
 -- "No Orders" (Off-duty) squad, in civilian clothes. If there aren't enough civilian squads to keep
 -- the equipped group and the not-yet-equipped group in SEPARATE squads, we ask (via a persisted
 -- flag -> notification) for another civilian squad and leave the overflow squad on No Orders.
+-- A member with a hand-assigned CUSTOM uniform (a specific item, e.g. an artifact breastplate) is
+-- PINNED: never moved (a move would replace their custom uniform with the destination's standard
+-- one), so they stay put whether they are a leader or a plain member -- their squad can go Ready
+-- only once they, too, are equippable.
 local OFF_ROUTINE = 0                       -- "No Orders" == the built-in Off-duty routine (index 0)
 local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     local ridx = ready_routine_idx()
     if not ridx then return end
     local training = autotraining_squads()
 
-    -- gather real civilian squads (Civilian-* uniform, not autotraining), each: leader + members
+    -- gather real civilian squads (Civilian-* uniform, not autotraining). Split each squad's members
+    -- into its LEADER, PINNED members (a hand-assigned custom uniform -- never moved, else the move
+    -- wipes it), and MOVABLE members (standard uniform, freely repacked).
     local squads, sids = {}, {}
     for _, e in ipairs(persoldier) do
         if e.real_civ and not training[e.sid] then
             local g = squads[e.sid]
-            if not g then g = {members = {}}; squads[e.sid] = g; sids[#sids + 1] = e.sid end
-            if e.leader then g.leader = e else g.members[#g.members + 1] = e end
+            if not g then g = {movable = {}, pinned = {}}; squads[e.sid] = g; sids[#sids + 1] = e.sid end
+            if e.leader then g.leader = e
+            elseif e.pinned then g.pinned[#g.pinned + 1] = e
+            else g.movable[#g.movable + 1] = e end
         end
     end
     if #sids == 0 then return end
@@ -1291,18 +1312,27 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
         end
         return av, avh
     end
-    local nonleaders = {}
-    for _, sid in ipairs(sids) do for _, m in ipairs(squads[sid].members) do nonleaders[#nonleaders + 1] = m end end
+    local function clone(av, avh)                        -- so a squad's anchors can be tried atomically
+        local a, h = {}, {}
+        for k, v in pairs(av) do a[k] = v end
+        for k, v in pairs(avh) do h[k] = {[0] = v[0], [1] = v[1]} end
+        return a, h
+    end
+    local movpool = {}
+    for _, sid in ipairs(sids) do for _, m in ipairs(squads[sid].movable) do movpool[#movpool + 1] = m end end
 
-    -- M = total civilian members; S = how many can be fully equipped (leaders first, so squads can
-    -- activate, then non-leaders) -- both determine how many Ready vs No-Orders squads are needed.
-    local M = #nonleaders
-    for _, sid in ipairs(sids) do if squads[sid].leader then M = M + 1 end end
+    -- M = total civilian members; S = how many can be fully equipped (leaders + pinned first -- the
+    -- fixed occupants -- then movable) -- both set how many Ready vs No-Orders squads are needed.
+    local M = 0
+    for _, sid in ipairs(sids) do
+        M = M + (squads[sid].leader and 1 or 0) + #squads[sid].pinned + #squads[sid].movable
+    end
     local S = 0
     do
         local av, avh = fresh()
         for _, sid in ipairs(sids) do local L = squads[sid].leader; if L and reserve_set(L.needs, av, avh) then S = S + 1 end end
-        for _, m in ipairs(nonleaders) do if reserve_set(m.needs, av, avh) then S = S + 1 end end
+        for _, sid in ipairs(sids) do for _, p in ipairs(squads[sid].pinned) do if reserve_set(p.needs, av, avh) then S = S + 1 end end end
+        for _, m in ipairs(movpool) do if reserve_set(m.needs, av, avh) then S = S + 1 end end
     end
     local avail = #sids
     local function ceil10(n) return n > 0 and math.floor((n + 9) / 10) or 0 end
@@ -1311,19 +1341,31 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     local R = feasible and ready_needed or math.max(0, avail - noorder_needed)
     local need_squad = not feasible
 
-    -- assign the first R squads that have an equippable leader as Ready, filled greedily with
-    -- equippable members (their own first, to minimise moves); everything else -> No Orders.
+    -- assign the first R squads as Ready. A squad's fixed occupants (leader + any pinned members)
+    -- can't be moved out, so it can be Ready only if EVERY one of them is equippable (else a pinned
+    -- member is stripped naked); then fill the rest with movable equippable members. Everything else
+    -- -> No Orders, with the fixed occupants staying put.
     local av, avh = fresh()
     local target, routine, used = {}, {}, {}
     local ready_made = 0
     for _, sid in ipairs(sids) do
         local g = squads[sid]
-        if ready_made < R and g.leader and reserve_set(g.leader.needs, av, avh) then
-            routine[sid] = ridx; target[g.leader.unit_id] = sid; used[g.leader.unit_id] = true
-            ready_made = ready_made + 1
-            local filled, order = 1, {}
-            for _, m in ipairs(g.members) do order[#order + 1] = m end
-            for _, m in ipairs(nonleaders) do order[#order + 1] = m end
+        local anchors = {}
+        if g.leader then anchors[#anchors + 1] = g.leader end
+        for _, p in ipairs(g.pinned) do anchors[#anchors + 1] = p end
+        local can = g.leader ~= nil and ready_made < R
+        local ca, cah = clone(av, avh)
+        if can then
+            for _, a in ipairs(anchors) do if not reserve_set(a.needs, ca, cah) then can = false; break end end
+        end
+        if can then
+            av, avh = ca, cah                            -- commit the anchor reservations
+            routine[sid] = ridx; ready_made = ready_made + 1
+            local filled = #anchors
+            for _, a in ipairs(anchors) do target[a.unit_id] = sid; used[a.unit_id] = true end
+            local order = {}
+            for _, m in ipairs(g.movable) do order[#order + 1] = m end
+            for _, m in ipairs(movpool) do order[#order + 1] = m end
             for _, m in ipairs(order) do
                 if filled >= 10 then break end
                 if not used[m.unit_id] and reserve_set(m.needs, av, avh) then
@@ -1332,19 +1374,21 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
             end
         else
             routine[sid] = OFF_ROUTINE
-            if g.leader then target[g.leader.unit_id] = sid; used[g.leader.unit_id] = true end
+            for _, a in ipairs(anchors) do target[a.unit_id] = sid; used[a.unit_id] = true end
         end
     end
-    -- place remaining non-leaders into No-Orders squads (9 non-leader slots each); prefer the squad
-    -- they are already in to avoid needless moves.
+    -- place remaining MOVABLE members into No-Orders squads; the leader + pinned members already hold
+    -- fixed slots, so a No-Orders squad has (9 - #pinned) movable slots. Prefer their current squad.
     local noorder, slots = {}, {}
-    for _, sid in ipairs(sids) do if routine[sid] == OFF_ROUTINE then noorder[#noorder + 1] = sid; slots[sid] = 9 end end
-    for _, m in ipairs(nonleaders) do
+    for _, sid in ipairs(sids) do
+        if routine[sid] == OFF_ROUTINE then noorder[#noorder + 1] = sid; slots[sid] = 9 - #squads[sid].pinned end
+    end
+    for _, m in ipairs(movpool) do
         if not used[m.unit_id] and routine[m.sid] == OFF_ROUTINE and (slots[m.sid] or 0) > 0 then
             target[m.unit_id] = m.sid; used[m.unit_id] = true; slots[m.sid] = slots[m.sid] - 1
         end
     end
-    for _, m in ipairs(nonleaders) do
+    for _, m in ipairs(movpool) do
         if not used[m.unit_id] then
             for _, sid in ipairs(noorder) do
                 if slots[sid] > 0 then target[m.unit_id] = sid; slots[sid] = slots[sid] - 1; used[m.unit_id] = true; break end
