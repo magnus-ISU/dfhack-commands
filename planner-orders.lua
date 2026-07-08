@@ -1038,10 +1038,11 @@ STANDING = {
         if not ws_exists(FIXED_WS['WeaveCloth']) then return {} end      -- Loom
         if weave_targets_yarn() then return {} end
         return {{name = 'Yarn cloth', shops = {'WeaveCloth'},
-            note = 'Weaves yarn (wool/hair) thread into cloth at a Loom -- Daily x10, running\n'
-                .. 'while you have under 30 yarn cloth and more than 8 yarn thread.',
+            note = 'Weaves yarn (wool/hair) thread into cloth at a Loom -- Daily x5, running\n'
+                .. 'while you have under 30 yarn cloth and more than 8 yarn thread (a small batch\n'
+                .. 'so it does not run the yarn thread dry).',
             build = function()
-                add_order{job_type = df.job_type.WeaveCloth, amount = 10, frequency = Daily,
+                add_order{job_type = df.job_type.WeaveCloth, amount = 5, frequency = Daily,
                     conds = {C('LessThan', 30, df.item_type.CLOTH, nil, nil, nil, {'yarn'}),
                              C('GreaterThan', 8, df.item_type.THREAD, nil, nil, nil, {'yarn'})}}
                 return missing_shops({'WeaveCloth'})
