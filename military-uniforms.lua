@@ -87,22 +87,27 @@ it -- fired only when a new, better piece actually appears, so there's no equip 
 -- weapon group + per-weapon overrides (material + shield kind); default = steel
 local GROUP = {
     {weapon = 'short sword'},
-    {weapon = 'war hammer', wmat = 'SILVER'},
     {weapon = 'battle axe'},
+    {weapon = 'war hammer', wmat = 'SILVER'},
     {weapon = 'spear'},
-    {weapon = 'pick'},
     {weapon = 'mace'},
+    {weapon = 'pick'},
     {weapon = 'crossbow', wmat = 'COPPER', shield = 'buckler'},
+}
+
+-- civilian uniforms: "Civilian - <weapon>", same steel/leather/bone/wood set, one per weapon
+local CIVILIAN_GROUP = {
+    {weapon = 'battle axe', wmat = 'STEEL'},
+    {weapon = 'mace', wmat = 'SILVER'},
 }
 
 -- our templates are named "<Metal> - <weapon>" (metal varies with the copper
 -- fallback), so we recognise our own by the weapon suffix, not a fixed prefix.
 local WEAPON_SET = {}
 for _, s in ipairs(GROUP) do WEAPON_SET[s.weapon] = true end
-local CIVILIAN_NAME = 'civilian'   -- our standalone leather/bone/steel civilian uniform
+local function is_civilian_name(name) return name:find('^Civilian %- ') ~= nil end
 local function is_owned_name(name)
-    if name == CIVILIAN_NAME then return true end
-    local w = name:match('^.+ %- (.+)$')
+    local w = name:match('^.+ %- (.+)$')     -- "Steel - X" and "Civilian - X" both match by weapon
     return w ~= nil and WEAPON_SET[w] == true
 end
 
@@ -231,16 +236,18 @@ end
 -- the standalone "civilian" uniform: steel helm/gauntlets/high boots + steel battle axe, a LEATHER
 -- body armour, BONE greaves, and a WOOD shield. "Wear clothing under armor" is OFF
 -- (replace_clothing = true). Meant to be assigned to civilians for light self-defence gear.
-local function create_civilian_uniform(ent)
+local function create_civilian_uniform(ent, spec)
     local r, R, IT = ent.resources, df.global.world.raws.itemdefs, df.item_type
     local proto
     for i = 0, #ent.uniforms - 1 do
         if ent.uniforms[i].name:find('Melee') then proto = ent.uniforms[i]; break end
     end
     local steel = inorganic_idx('STEEL')
+    local wmat = resolve_metal(inorganic_idx(spec.wmat or 'STEEL') or steel,
+                               inorganic_idx('COPPER'), metal_bar_counts())
     local u = df.entity_uniform:new()
     u.id = ent.next_uniform_id
-    u.name = CIVILIAN_NAME
+    u.name = 'Civilian - ' .. spec.weapon
     u.type = proto and proto.type or 0
     u.flags.replace_clothing = true                                          -- no clothing under armour
     add_to_slot(u, 1, IT.HELM,   resolve_sub(R.helms,  setof(r.helm_type),   'helm'),      0, steel)
@@ -252,7 +259,7 @@ local function create_civilian_uniform(ent)
                 -1, -1, df.entity_material_category.Bone)
     add_to_slot(u, 5, IT.SHIELD, resolve_sub(R.shields, setof(r.shield_type), 'shield'),   -- wood shield
                 -1, -1, df.entity_material_category.Wood)
-    add_to_slot(u, 6, IT.WEAPON, resolve_sub(R.weapons, setof(r.weapon_type), 'battle axe'), 0, steel)
+    add_to_slot(u, 6, IT.WEAPON, resolve_sub(R.weapons, setof(r.weapon_type), spec.weapon), 0, wmat)  -- steel axe / silver mace
     ent.uniforms:insert('#', u)
     ent.next_uniform_id = ent.next_uniform_id + 1
     return u
@@ -347,7 +354,7 @@ local function ensure_cloaks(ent)
     if not sub then return end
     for i = 0, #ent.uniforms - 1 do
         local u = ent.uniforms[i]
-        if is_owned_name(u.name) and u.name ~= CIVILIAN_NAME then
+        if is_owned_name(u.name) and not is_civilian_name(u.name) then
             local has = false
             for j = 0, #u.uniform_item_types[0] - 1 do
                 if u.uniform_item_types[0][j] == df.item_type.ARMOR
@@ -397,45 +404,6 @@ local function shield_subtype(ent)
     return shield_sub_cache or nil
 end
 
--- Set the regular-shield slot (5) material on every soldier's uniform (templates + positions) to
--- (mt, mi, mc). Used to DEFER steel shields: the shield is WOOD/iron/copper until all other steel
--- gear is done, then STEEL. Bucklers (crossbow) keep their own material. Idempotent (only writes
--- when the material differs).
-local function set_shield_material(ent, mt, mi, mc)
-    local sub = shield_subtype(ent)
-    if not sub then return end
-    for i = 0, #ent.uniforms - 1 do
-        local u = ent.uniforms[i]
-        if is_owned_name(u.name) and u.name ~= CIVILIAN_NAME then
-            for j = 0, #u.uniform_item_types[5] - 1 do
-                if u.uniform_item_types[5][j] == df.item_type.SHIELD
-                    and u.uniform_item_subtypes[5][j] == sub then
-                    local info = u.uniform_item_info[5][j]
-                    info.mattype, info.matindex, info.material_class = mt, mi, mc
-                end
-            end
-        end
-    end
-    local fort = df.global.plotinfo.group_id
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for p = 0, #sq.positions - 1 do
-                local pos = sq.positions[p]
-                if pos.occupant >= 0 then
-                    local v = pos.equipment.uniform[5]
-                    for j = 0, #v - 1 do
-                        if v[j].item_type == df.item_type.SHIELD and v[j].item_subtype == sub
-                            and (v[j].mattype ~= mt or v[j].matindex ~= mi or v[j].material_class ~= mc) then
-                            v[j].mattype, v[j].matindex, v[j].material_class = mt, mi, mc
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
 -- remove the templates this tool owns (name prefix), so re-running is clean
 local function remove_owned(ent)
     local removed = 0
@@ -473,6 +441,36 @@ local function delete_metal_defaults(ent)
     return names
 end
 
+-- put the entity's uniforms in a tidy order: the military "Steel - *" set (GROUP order), then the
+-- "Civilian - *" set (CIVILIAN_GROUP order), then the two default "..., leather armor" uniforms at
+-- the very end. Anything else keeps its relative order after. Reorders the pointer vector IN PLACE
+-- (reassigns slots, no delete/insert), so uniform ids and squad assignments are untouched.
+local function reorder_uniforms(ent)
+    local mil, civ, defs, others = {}, {}, {}, {}
+    for i = 0, #ent.uniforms - 1 do
+        local u = ent.uniforms[i]
+        local name = u.name
+        if is_civilian_name(name) then
+            civ[name:match('^Civilian %- (.+)$')] = u
+        elseif is_owned_name(name) then
+            mil[name:match('.+ %- (.+)$')] = u
+        elseif name == 'Melee, leather armor' or name == 'Crossbows, leather armor' then
+            defs[name] = u
+        else
+            others[#others + 1] = u
+        end
+    end
+    local ordered = {}
+    for _, s in ipairs(GROUP) do if mil[s.weapon] then ordered[#ordered + 1] = mil[s.weapon] end end
+    for _, s in ipairs(CIVILIAN_GROUP) do if civ[s.weapon] then ordered[#ordered + 1] = civ[s.weapon] end end
+    if defs['Melee, leather armor'] then ordered[#ordered + 1] = defs['Melee, leather armor'] end
+    if defs['Crossbows, leather armor'] then ordered[#ordered + 1] = defs['Crossbows, leather armor'] end
+    for _, u in ipairs(others) do ordered[#ordered + 1] = u end
+    if #ordered == #ent.uniforms then
+        for i = 0, #ent.uniforms - 1 do ent.uniforms[i] = ordered[i + 1] end
+    end
+end
+
 function create_steel_uniforms()
     local ent = fort_entity()
     if not ent then qerror('no fort entity') end
@@ -489,8 +487,11 @@ function create_steel_uniforms()
         local u = create_template(ent, spec, armour, wmat)
         made[#made + 1] = u.name
     end
-    made[#made + 1] = create_civilian_uniform(ent).name
+    for _, spec in ipairs(CIVILIAN_GROUP) do
+        made[#made + 1] = create_civilian_uniform(ent, spec).name
+    end
     local deleted_metal = delete_metal_defaults(ent)
+    reorder_uniforms(ent)
     return made, deleted_metal
 end
 
@@ -1250,6 +1251,7 @@ local function run_cycle()
     -- stock by material, and the leather-supply counts. Items already flagged for
     -- melting don't count (they're being recycled).
     local stock, mwstock, bars = {}, {}, {}
+    local shields_by_sub = {}     -- wearable shields per subtype, ANY material (for the stand-in)
     -- best AVAILABLE (unassigned, wearable) quality per gear key -> drives the upgrade re-equip
     local availq = {}
     -- hand-split counts for handed types (gauntlets): stock_h[key][hand], mwstock_h[key][hand]
@@ -1275,6 +1277,9 @@ local function run_cycle()
         elseif not it.flags.melt and not item_installed(it) and MAKE_JOB[t] then
             -- (only makeable gear types; an item built into a building -- weapon trap / display
             -- case -- can never be equipped, so it does not count as gear stock)
+            if t == df.item_type.SHIELD then
+                shields_by_sub[it:getSubtype()] = (shields_by_sub[it:getSubtype()] or 0) + 1
+            end
             local mt, mi_ = item_matpair(it)
             local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), mt, mi_, item_size_race(it))
             -- LEATHER wears out: a damaged (worn) leather piece (cloak / leather armour) does NOT
@@ -1358,6 +1363,7 @@ local function run_cycle()
     for key in pairs(state.orders) do
         if key:sub(1, 7) == 'supply/' then                                    -- ensure_supply handles it
         elseif key == 'pick' then                                             -- equip_miner_pickaxes handles it
+        elseif key == 'shieldstandin' then                                    -- shield stand-in pass handles it
         elseif key:sub(1, 3) == 'cu/' then
             if not req[key:sub(4)] then drop_order(key) end                   -- base steel piece gone
         elseif not req[key] then
@@ -1428,9 +1434,9 @@ local function run_cycle()
     local budget = {}
     for mk, b in pairs(bars) do budget[mk] = b - RESERVE_BARS - (committed[mk] or 0) end
 
-    -- STEEL SHIELDS LAST: a steel shield is only made once EVERY OTHER requested steel item is
-    -- covered (and masterworked, if upgrading). Until then the shield slot is a wood/iron/copper
-    -- stand-in (set_shield_material, below), so this mainly guards the transition cycle.
+    -- STEEL SHIELDS LAST: a steel shield is only forged once EVERY OTHER requested steel item is
+    -- covered (and masterworked, if upgrading) -- i.e. no other steel item is still requested. This
+    -- flag defers the steel-shield order below; the wood replacement is queued separately.
     local steel_gear_done = true
     if steel_idx then
         for key, r in pairs(req) do
@@ -1516,22 +1522,38 @@ local function run_cycle()
         end
     end
 
-    -- SHIELD STAND-IN: pick the shield material and stamp it on every uniform. STEEL once the rest
-    -- of the steel gear is done; else WOOD (if logs), else IRON (if any), else COPPER. This defers
-    -- the steel shield and gives soldiers a wood shield meanwhile -- their uniform shield becomes
-    -- wood, so DF equips a wood shield and the service (reading the uniform) makes one.
-    if ent and steel_idx then
-        local mt, mi, mc
-        if steel_gear_done then
-            mt, mi, mc = 0, steel_idx, -1
-        elseif logs > 0 then
-            mt, mi, mc = -1, -1, df.entity_material_category.Wood
-        elseif iron_idx and ((bars[barkey(0, iron_idx)] or 0) > 0 or iron_ore_count > 0) then
-            mt, mi, mc = 0, iron_idx, -1
-        elseif copper_idx then
-            mt, mi, mc = 0, copper_idx, -1
+    -- SHIELD REPLACEMENT: the uniforms are left exactly as written -- military ask for a STEEL
+    -- shield, civilians for a WOOD shield. The rule lives entirely in the orders: a STEEL shield
+    -- is only forged once NO OTHER steel item is still requested (steel_gear_done; the steel-shield
+    -- order is deferred in the main queue above). Otherwise a WOOD shield (or iron/copper) is made
+    -- as the replacement so soldiers have something to hold. Shields are sizeless, so we count
+    -- EVERY regular shield of the subtype (need = every soldier who wants one).
+    local ssub = ent and shield_subtype(ent)
+    if ssub and steel_idx and not steel_gear_done then
+        local need = 0
+        for _, r in pairs(req) do
+            if r.item_type == df.item_type.SHIELD and r.subtype == ssub then need = need + r.count end
         end
-        if mt then set_shield_material(ent, mt, mi, mc) end
+        if (shields_by_sub[ssub] or 0) < need then
+            local mt, mi, mc
+            if logs > 0 then
+                mt, mi, mc = -1, -1, df.entity_material_category.Wood
+            elseif iron_idx and ((bars[barkey(0, iron_idx)] or 0) > 0 or iron_ore_count > 0) then
+                mt, mi, mc = 0, iron_idx, -1
+            elseif copper_idx then
+                mt, mi, mc = 0, copper_idx, -1
+            end
+            if mt then
+                queue_one('shieldstandin', {item_type = df.item_type.SHIELD, subtype = ssub,
+                    mat_type = mt, mat_index = mi, size_race = civ_race()})
+            else
+                drop_order('shieldstandin')
+            end
+        else
+            drop_order('shieldstandin')
+        end
+    else
+        drop_order('shieldstandin')
     end
 
     -- recycle surplus steel: for the masterwork upgrade AND to free bars for miner picks
@@ -1714,30 +1736,40 @@ if not dfhack.world.isFortressMode() then qerror('military-uniforms only works i
 
 local args = {...}
 if args[1] == 'civilian' then
-    -- create the "civilian" uniform (if absent) and a squad of N unsquadded adult citizens
-    -- wearing it, then run a gear cycle so their leather/bone/wood/steel pieces get ordered.
+    -- ensure the "Civilian - *" uniforms exist + are ordered. With a number arg, also create a
+    -- squad of N unsquadded adult citizens wearing "Civilian - battle axe".
     local ent = fort_entity()
     if not ent then qerror('no fort entity') end
-    local uniform
-    for i = 0, #ent.uniforms - 1 do
-        if ent.uniforms[i].name == CIVILIAN_NAME then uniform = ent.uniforms[i]; break end
+    for i = 0, #ent.uniforms - 1 do                                    -- migrate the old name
+        if ent.uniforms[i].name == 'civilian' then ent.uniforms[i].name = 'Civilian - battle axe' end
     end
-    if not uniform then uniform = create_civilian_uniform(ent) end
-    local n = tonumber(args[2]) or 3
-    local recruits = {}
-    for _, u in ipairs(df.global.world.units.active) do
-        if u.military.squad_id == -1 and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
-            and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) then
-            recruits[#recruits + 1] = u.id
-            if #recruits >= n then break end
+    local byname = {}
+    for i = 0, #ent.uniforms - 1 do byname[ent.uniforms[i].name] = ent.uniforms[i] end
+    for _, spec in ipairs(CIVILIAN_GROUP) do
+        local nm = 'Civilian - ' .. spec.weapon
+        if not byname[nm] then byname[nm] = create_civilian_uniform(ent, spec) end
+    end
+    reorder_uniforms(ent)
+    local n = tonumber(args[2])
+    if n then
+        local recruits = {}
+        for _, u in ipairs(df.global.world.units.active) do
+            if u.military.squad_id == -1 and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
+                and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) then
+                recruits[#recruits + 1] = u.id
+                if #recruits >= n then break end
+            end
         end
+        local sq, err = create_civilian_squad(ent, byname['Civilian - battle axe'], recruits)
+        if not sq then qerror('civilian squad: ' .. tostring(err)) end
+        local seated = 0
+        for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then seated = seated + 1 end end
+        load_state(); run_cycle()
+        print(('military-uniforms: civilian uniforms ready + squad of %d created; gear cycle run.'):format(seated))
+    else
+        load_state(); run_cycle()
+        print('military-uniforms: civilian uniforms ready (Civilian - battle axe, Civilian - mace) + reordered.')
     end
-    local sq, err = create_civilian_squad(ent, uniform, recruits)
-    if not sq then qerror('civilian squad: ' .. tostring(err)) end
-    local seated = 0
-    for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then seated = seated + 1 end end
-    load_state(); run_cycle()
-    print(('military-uniforms: "civilian" uniform + squad of %d created; gear cycle run.'):format(seated))
     return
 end
 if args[1] == 'orders' then
