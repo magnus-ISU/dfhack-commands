@@ -54,10 +54,32 @@ local function is_off_duty(sid)
     return sq and sq.cur_routine_idx == 0
 end
 
+-- Is this squad member wearing one of the "Civilian - *" uniforms (a civilian militia) rather than
+-- a real military uniform? Ideally we'd match the word "civilian" in the uniform NAME, but DFHack
+-- exposes no squad->uniform-template link, so (per the request) we fall back to the reliable
+-- marker: a Civilian uniform has LEATHER body armour and NO metal breastplate / mail shirt, while
+-- every "Steel - *" military uniform has a metal breastplate in the body slot.
+local function in_civilian_uniform(u)
+    local sq = df.squad.find(u.military.squad_id)
+    if not sq then return false end
+    local pos = sq.positions[u.military.squad_position]
+    if not pos then return false end
+    local has_armor, has_metal = false, false
+    local body = pos.equipment.uniform[0]
+    for j = 0, #body - 1 do
+        if body[j].item_type == df.item_type.ARMOR then
+            has_armor = true
+            if body[j].mattype == 0 then has_metal = true end   -- metal breastplate / mail shirt
+        end
+    end
+    return has_armor and not has_metal   -- leather body armour, no metal breastplate -> civilian
+end
+
 -- every fort citizen currently in a squad (the militia + standing army), minus:
 --   * members of an autotraining squad, UNLESS they are the squad leader (position 0)
---     -- the rest are only rostered to train; and
---   * everyone in a squad on the default Off-Duty routine (not actually serving).
+--     -- the rest are only rostered to train;
+--   * everyone in a squad on the default Off-Duty routine (not actually serving); and
+--   * anyone wearing a "Civilian - *" uniform (a civilian militia, not real military).
 local function military_unit_ids()
     local training = autotraining_squads()
     local ids = {}
@@ -67,6 +89,7 @@ local function military_unit_ids()
             and dfhack.units.isActive(u) and not dfhack.units.isDead(u)
             and not (training[sid] and u.military.squad_position ~= 0)   -- skip non-leader trainees
             and not is_off_duty(sid)                                     -- skip off-duty squads
+            and not in_civilian_uniform(u)                              -- skip civilian-uniform militia
         then ids[#ids + 1] = u.id end
     end
     return ids

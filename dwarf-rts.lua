@@ -115,6 +115,56 @@ local function autotraining_squads()
     return set
 end
 
+-- Is this a civilian-militia squad (a "Civilian - *" uniform)? DFHack exposes no squad->uniform
+-- name link, so -- matching military-uniforms/military-labor -- we detect it by the body slot:
+-- a civilian uniform wears LEATHER body armour with NO metal breastplate / mail shirt, while every
+-- military uniform has a metal breastplate. Like autotraining squads, these are left out of the
+-- RTS select-all (they're a shelter-in-place militia, not a strike force).
+local function is_civilian_squad(sid)
+    local sq = df.squad.find(sid)
+    if not sq then return false end
+    for p = 0, #sq.positions - 1 do
+        local body = sq.positions[p].equipment.uniform[0]
+        local has_armor, has_metal = false, false
+        for j = 0, #body - 1 do
+            if body[j].item_type == df.item_type.ARMOR then
+                has_armor = true
+                if body[j].mattype == 0 then has_metal = true end
+            end
+        end
+        if has_armor and not has_metal then return true end   -- leather body, no metal -> civilian
+    end
+    return false
+end
+
+-- Order the squads panel: non-civilian (real military) squads first, then civilian-militia squads,
+-- then autotraining squads last (an autotraining squad goes last even if it's civilian). Stable
+-- within each group. The panel is drawn from main_interface.squads.squad_id, which DF REBUILDS (in
+-- squad-id order) every time the panel opens -- it does NOT read the entity's squad list -- so this
+-- re-pin has to run on each open, AFTER that rebuild (reordering while closed just gets wiped on the
+-- next open). squad_selected is permuted in lockstep so selections stay aligned. No-op once ordered.
+local function reorder_squad_list(ui)
+    local training = autotraining_squads()
+    local n = #ui.squad_id
+    local mil, civ, at = {}, {}, {}          -- military, civilian, autotraining -- each of {id, sel}
+    for i = 0, n - 1 do
+        local id = ui.squad_id[i]
+        local e = {id = id, sel = ui.squad_selected[i]}
+        if training[id] then at[#at + 1] = e
+        elseif is_civilian_squad(id) then civ[#civ + 1] = e
+        else mil[#mil + 1] = e end
+    end
+    local ordered = {}
+    for _, e in ipairs(mil) do ordered[#ordered + 1] = e end
+    for _, e in ipairs(civ) do ordered[#ordered + 1] = e end
+    for _, e in ipairs(at)  do ordered[#ordered + 1] = e end
+    local changed = false
+    for i = 0, n - 1 do if ui.squad_id[i] ~= ordered[i + 1].id then changed = true; break end end
+    if not changed then return false end          -- already in the desired order
+    for i = 0, n - 1 do ui.squad_id[i] = ordered[i + 1].id; ui.squad_selected[i] = ordered[i + 1].sel end
+    return true
+end
+
 -- Squad sub-dialogs that sit ON TOP of the squads screen, where dwarf-rts must stand
 -- fully aside. Two distinct hazards:
 --   * squad_equipment / squad_schedule are separate viewscreens that hide the squads
@@ -956,12 +1006,17 @@ function DwarfRtsClickMove:overlay_onupdate()
     local open = sq.open
 
     if open and not self.prev_open then
-        -- panel just opened: RTS select-all, unless a conscription selection is pending.
-        -- Autotraining squads are excluded -- they're only rostered to train, not to command.
+        -- panel just opened: DF has just (re)built squad_id in id order, so re-pin the list now
+        -- (military, then civilian, then autotraining), before the frame renders.
+        reorder_squad_list(sq)
+        -- RTS select-all, unless a conscription selection is pending. Autotraining AND
+        -- civilian-militia squads are excluded -- they're rostered to train or to shelter, not
+        -- to be commanded as a strike force by default.
         if not pending_select then
             local training = autotraining_squads()
             for i = 0, #sq.squad_selected - 1 do
-                sq.squad_selected[i] = not training[sq.squad_id[i]]
+                local sid = sq.squad_id[i]
+                sq.squad_selected[i] = not training[sid] and not is_civilian_squad(sid)
             end
         end
     elseif (not open) and self.prev_open then

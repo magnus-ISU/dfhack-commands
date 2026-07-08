@@ -265,76 +265,6 @@ local function create_civilian_uniform(ent, spec)
     return u
 end
 
--- copy an entity_uniform template's items into a squad position's resolved uniform (so the
--- position wears exactly that uniform). resize(0) clears the old specs -- do NOT :delete() them
--- (DF owns them; a tiny leak beats a crash), mirroring dwarf-rts.
-local function apply_uniform_to_position(pos, u)
-    local eq = pos.equipment
-    for slot = 0, 6 do
-        eq.uniform[slot]:resize(0)
-        local types = u.uniform_item_types[slot]
-        for j = 0, #types - 1 do
-            local info = u.uniform_item_info[slot][j]
-            local spec = df.squad_uniform_spec:new()
-            spec.item = -1
-            spec.item_type = types[j]
-            spec.item_subtype = u.uniform_item_subtypes[slot][j]
-            spec.material_class = info.material_class
-            spec.mattype, spec.matindex, spec.color = info.mattype, info.matindex, -1
-            eq.uniform[slot]:insert('#', spec)
-        end
-    end
-    eq.assigned_items:resize(0)
-    eq.backpack, eq.flask, eq.quiver = -1, -1, -1
-end
-
--- create a squad wearing `uniform` seeded with `unit_ids` (first = captain in pos 0, rest pos
--- 1..9). Mirrors dwarf-rts's make_conscription_squad. Returns the squad, or nil + reason.
-local function create_civilian_squad(ent, uniform, unit_ids)
-    if #unit_ids == 0 then return nil, 'no unsquadded adult civilians found' end
-    local captain = df.unit.find(unit_ids[1])
-    if not captain then return nil, 'captain unit missing' end
-    local pos_id, pidx
-    for j = 0, #ent.positions.own - 1 do
-        local p = ent.positions.own[j]
-        if p.squad_size > 0 and p.number < 0 then pos_id, pidx = p.id, j; break end
-    end
-    if not pos_id then return nil, 'no militia-captain position on the fort entity' end
-    local aid = ent.positions.next_assignment_id
-    ent.positions.next_assignment_id = aid + 1
-    ent.positions.assignments:insert('#', {new = df.entity_position_assignment,
-        id = aid, position_id = pos_id, position_vector_idx = pidx,
-        histfig = -1, histfig2 = -1, squad_id = -1, st_id = -1, ab_id = -1,
-        vassal_of_entity_id = -1, vassal_of_position_profile_id = -1,
-        assigned_army_controller_id = -1, temp = 0})
-    local aidx
-    for i = 0, #ent.positions.assignments - 1 do
-        if ent.positions.assignments[i].id == aid then aidx = i; break end
-    end
-    local a = ent.positions.assignments[aidx]
-    a.histfig, a.histfig2 = captain.hist_figure_id, captain.hist_figure_id
-    df.historical_figure.find(captain.hist_figure_id).entity_links:insert('#', {
-        new = df.histfig_entity_link_positionst, entity_id = ent.id, link_strength = 100,
-        assignment_id = a.id, assignment_vector_idx = aidx, start_year = df.global.cur_year})
-    local sq = dfhack.military.makeSquad(aid)
-    if not sq then
-        a.histfig, a.histfig2 = -1, -1
-        for i = #ent.positions.assignments - 1, 0, -1 do
-            if ent.positions.assignments[i].id == aid then ent.positions.assignments:erase(i) end
-        end
-        return nil, 'dfhack.military.makeSquad failed'
-    end
-    sq.alias = 'Civilians'
-    sq.positions[0].occupant = captain.hist_figure_id
-    captain.military.squad_id, captain.military.squad_position = sq.id, 0
-    apply_uniform_to_position(sq.positions[0], uniform)
-    for i = 2, math.min(#unit_ids, 10) do
-        dfhack.military.addToSquad(unit_ids[i], sq.id, i - 1)
-        apply_uniform_to_position(sq.positions[i - 1], uniform)
-    end
-    return sq
-end
-
 -- resolve the leather-cloak armour subtype once
 local cloak_sub_cache
 local function cloak_subtype(ent)
@@ -713,16 +643,55 @@ local function military_labor_set()
     return {}
 end
 
--- ordered list of soldiers, each -> {unit_id, needs = {{k=gearkey, hand=0|1|nil}, ...}}
--- for the makeable metal pieces their uniform specifies. Each entry is ONE item the
--- soldier must have (a masterwork one, in masterwork mode): pairs contribute two entries,
--- and gauntlets' two entries are hand-tagged (0 and 1) so we require one of EACH hand;
--- boots' two entries are hand=nil (any 2). Soldiers in the "Military" work detail are
--- listed FIRST (prioritized for new gear), then the rest, each group in squad order.
+-- squad ids DFHack's autotraining tool is currently driving (active only), read from its
+-- persisted site data (keys are stored as strings, so coerce back to numbers). Matches how
+-- military-labor / dwarf-rts read it. Non-leader members of these are only rostered to train,
+-- not real soldiers, so we deprioritise their gear like a civilian's.
+local function autotraining_squads()
+    local set = {}
+    local d = dfhack.persistent.getSiteData('autotraining')
+    if d and d.training_squads then
+        for k, active in pairs(d.training_squads) do
+            if active then set[tonumber(k)] = true end
+        end
+    end
+    return set
+end
+
+-- a squad position wearing a "Civilian - *" uniform: no metal breastplate / mail shirt in the
+-- body slot (leather body armour instead). Same marker military-labor uses -- DFHack exposes no
+-- squad->uniform-template link, so we can't read the name.
+local function position_is_civilian(pos)
+    local has_armor, has_metal = false, false
+    local body = pos.equipment.uniform[0]
+    for j = 0, #body - 1 do
+        if body[j].item_type == df.item_type.ARMOR then
+            has_armor = true
+            if body[j].mattype == 0 then has_metal = true end
+        end
+    end
+    return has_armor and not has_metal
+end
+
+-- index of the "Ready" routine in the fort's schedule list (what a squad's cur_routine_idx points
+-- into), or nil if there's no routine by that name. Off-duty is index 0; "Ready" is the standard
+-- station-and-train routine, so once a civilian militia is fully equipped we switch it on.
+local function ready_routine_idx()
+    local routines = df.global.plotinfo.alerts.routines
+    for i = 0, #routines - 1 do
+        if routines[i].name == 'Ready' then return i end
+    end
+end
+
+-- ordered list of soldiers, each -> {unit_id, sid, civilian, needs = {{k=gearkey, hand=..}, ...}}
+-- for the makeable pieces their uniform specifies. Ordered MILITARY first (Military-detail
+-- members, then other military, in squad order), then CIVILIAN-uniform soldiers LAST -- so a
+-- civilian's gear is only queued after every military dwarf already has theirs.
 local function compute_per_soldier()
     local fort = df.global.plotinfo.group_id
     local mil = military_labor_set()
-    local prioritized, rest = {}, {}
+    local training = autotraining_squads()
+    local prioritized, rest, civ = {}, {}, {}
     for s = 0, #df.global.world.squads.all - 1 do
         local sq = df.global.world.squads.all[s]
         if sq.entity_id == fort then
@@ -751,15 +720,20 @@ local function compute_per_soldier()
                         end
                     end
                     if #needs > 0 then
-                        local entry = {unit_id = uid, needs = needs}
-                        if mil[uid] then prioritized[#prioritized + 1] = entry
+                        -- civilian for gear purposes = a Civilian-* uniform OR a non-leader member of
+                        -- an autotraining squad (only rostered to train; the leader stays a soldier).
+                        local civilian = position_is_civilian(pos) or (training[sq.id] and p ~= 0)
+                        local entry = {unit_id = uid, sid = sq.id, civilian = civilian, needs = needs}
+                        if civilian then civ[#civ + 1] = entry
+                        elseif mil[uid] then prioritized[#prioritized + 1] = entry
                         else rest[#rest + 1] = entry end
                     end
                 end
             end
         end
     end
-    for _, e in ipairs(rest) do prioritized[#prioritized + 1] = e end   -- military first, then rest
+    for _, e in ipairs(rest) do prioritized[#prioritized + 1] = e end   -- military detail, then rest military
+    for _, e in ipairs(civ) do prioritized[#prioritized + 1] = e end    -- ...then civilians LAST
     return prioritized
 end
 
@@ -875,10 +849,11 @@ end
 -- most-damaged, then lowest quality, never masterwork/artifact), only from item types with
 -- more than `need` equippable copies -- so soldiers keep a full set while we recycle the
 -- extras into bars for re-forging. `extra_short` adds non-gear steel demand (miner picks).
-local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_short)
+local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_short, basic_done)
     local short, inbound, cands = {}, {}, {}
     if state.masterwork then     -- gear masterwork shortfall (only when upgrading is on)
         for key, r in pairs(req) do
+            if not basic_done or basic_done[key] then   -- only recycle for a key past its basic set
             local mk = barkey(r.mat_type, r.mat_index)
             local owed
             if HANDED[r.item_type] then
@@ -891,6 +866,7 @@ local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_s
                 owed = math.max(0, r.count - (mwstock[key] or 0))
             end
             short[mk] = (short[mk] or 0) + owed
+            end
         end
     end
     for mk, n in pairs(extra_short or {}) do short[mk] = (short[mk] or 0) + n end
@@ -1370,27 +1346,44 @@ local function run_cycle()
             drop_order(key)
         end
     end
+    -- BASIC COVERAGE, PER KEY: a key's non-masterwork set is "done" once total stock (masterwork
+    -- pieces count -- a masterwork boot is still a boot to wear) covers everyone who wants it. Only
+    -- then may that key be UPGRADED to masterwork. This gates masterwork per item, so masterworks
+    -- are made only after every unit (military AND civilian) has a plain piece of that item -- and,
+    -- because civilians are ordered last for basic equip, only after the military are fully kitted.
+    local basic_done = {}
+    for key, r in pairs(req) do
+        if HANDED[r.item_type] then
+            local ph, sh = r.count / 2, stock_h[key] or {}
+            basic_done[key] = (sh[0] or 0) >= ph and (sh[1] or 0) >= ph
+        else
+            basic_done[key] = (stock[key] or 0) >= r.count
+        end
+    end
+
     -- ONE SOLDIER AT A TIME, PER METAL: hand current stock to soldiers in order, then
     -- for EACH metal independently forge one soldier at a time. A metal is "claimed" by
     -- the first soldier (in order) still missing a piece of it, and only that soldier's
     -- gaps in that metal are queued -- so e.g. a later soldier's SILVER warhammer still
     -- gets made while STEEL is busy finishing an earlier soldier's set. This still
     -- completes full sets (breastplate included) instead of spreading a metal thin.
-    -- In masterwork mode the "stock" a soldier can be handed is the masterwork count.
-    -- available pool per key -- masterwork counts in masterwork mode, total otherwise.
+    -- A key that is in its MASTERWORK phase (masterwork toggle on AND its basic set done)
+    -- draws from the masterwork count instead, and upgrades in parallel.
     -- Handed types (gauntlets) get a per-hand pool so we require one of EACH hand.
+    local persoldier = compute_per_soldier()
     local avail, avail_h = {}, {}
     for key, r in pairs(req) do
+        local mwph = state.masterwork and basic_done[key]   -- this key is upgrading to masterwork
         if HANDED[r.item_type] then
-            local src = state.masterwork and mwstock_h[key] or (not state.masterwork and stock_h[key])
+            local src = mwph and mwstock_h[key] or stock_h[key]
             avail_h[key] = {[0] = src and src[0] or 0, [1] = src and src[1] or 0}
         else
-            avail[key] = state.masterwork and (mwstock[key] or 0) or (stock[key] or 0)
+            avail[key] = mwph and (mwstock[key] or 0) or (stock[key] or 0)
         end
     end
     local want = {}          -- gear keys to forge this cycle
     local metal_owner = {}   -- barkey -> index of the soldier that metal is finishing now
-    for i, sreq in ipairs(compute_per_soldier()) do
+    for i, sreq in ipairs(persoldier) do
         for _, need in ipairs(sreq.needs) do
             local k = need.k
             local covered
@@ -1401,9 +1394,9 @@ local function run_cycle()
                 avail[k] = avail[k] - 1; covered = true           -- covered from stock
             end
             if not covered and req[k] then                        -- missing: needs forging
-                if state.masterwork then
-                    -- MASTERWORK UPGRADE: every soldier already has a full set, so upgrade
-                    -- all of them in parallel (the bar budget still paces it). Otherwise a
+                if state.masterwork and basic_done[k] then
+                    -- MASTERWORK UPGRADE: everyone already has a plain piece of this item, so
+                    -- upgrade them all in parallel (the bar budget still paces it). Otherwise a
                     -- later soldier's piece (e.g. soldier 2's shield) would be blocked behind
                     -- an earlier soldier's hard-to-masterwork piece forever.
                     want[k] = true
@@ -1561,11 +1554,53 @@ local function run_cycle()
     if state.masterwork or pick_short > 0 then
         local extra = pick_short > 0 and steel_idx
             and {[barkey(0, steel_idx)] = pick_short} or nil
-        melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra)
+        melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra, basic_done)
     end
     -- leather field kit: a backpack (food) and a waterskin/flask (water) per soldier
     ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
     ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
+
+    -- CIVILIAN MILITIA -> READY: a civilian squad stays off-duty while its gear is being made
+    -- (orders are queued regardless of routine), and flips to the "Ready" routine once every one
+    -- of its members actually holds a full basic set. Coverage is allocated in priority order
+    -- (military first, civilians last) against a fresh copy of stock, so a civilian squad only
+    -- flips once the pieces it shares with the army (steel helm/gauntlets/boots) are truly spare.
+    do
+        local ridx = ready_routine_idx()
+        local training = autotraining_squads()   -- never override an autotraining squad's routine
+        if ridx then
+            local av, avh = {}, {}
+            for key, r in pairs(req) do
+                if HANDED[r.item_type] then
+                    local s = stock_h[key] or {}
+                    avh[key] = {[0] = s[0] or 0, [1] = s[1] or 0}
+                else
+                    av[key] = stock[key] or 0
+                end
+            end
+            local geared, seen = {}, {}
+            for _, sreq in ipairs(persoldier) do
+                local ok = true
+                for _, need in ipairs(sreq.needs) do
+                    local k = need.k
+                    if need.hand ~= nil then
+                        local pool = avh[k]
+                        if pool and pool[need.hand] > 0 then pool[need.hand] = pool[need.hand] - 1 else ok = false end
+                    elseif (av[k] or 0) > 0 then av[k] = av[k] - 1 else ok = false end
+                end
+                if sreq.civilian then
+                    if not seen[sreq.sid] then seen[sreq.sid] = true; geared[sreq.sid] = true end
+                    if not ok then geared[sreq.sid] = false end
+                end
+            end
+            for sid, done in pairs(geared) do
+                local sq = df.squad.find(sid)
+                if done and sq and not training[sid] and sq.cur_routine_idx ~= ridx then
+                    sq.cur_routine_idx = ridx
+                end
+            end
+        end
+    end
 
     -- completion flags for the overlay's "Done" label: queue = every soldier has each piece
     -- (by stock, hand-aware); masterwork = every piece is masterwork. Vacuously done if no
@@ -1736,8 +1771,8 @@ if not dfhack.world.isFortressMode() then qerror('military-uniforms only works i
 
 local args = {...}
 if args[1] == 'civilian' then
-    -- ensure the "Civilian - *" uniforms exist + are ordered. With a number arg, also create a
-    -- squad of N unsquadded adult citizens wearing "Civilian - battle axe".
+    -- ensure both "Civilian - *" uniforms exist + are ordered. (You assign them to squads
+    -- yourself -- this tool no longer drafts civilians.)
     local ent = fort_entity()
     if not ent then qerror('no fort entity') end
     for i = 0, #ent.uniforms - 1 do                                    -- migrate the old name
@@ -1750,26 +1785,8 @@ if args[1] == 'civilian' then
         if not byname[nm] then byname[nm] = create_civilian_uniform(ent, spec) end
     end
     reorder_uniforms(ent)
-    local n = tonumber(args[2])
-    if n then
-        local recruits = {}
-        for _, u in ipairs(df.global.world.units.active) do
-            if u.military.squad_id == -1 and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
-                and not dfhack.units.isDead(u) and dfhack.units.isAdult(u) then
-                recruits[#recruits + 1] = u.id
-                if #recruits >= n then break end
-            end
-        end
-        local sq, err = create_civilian_squad(ent, byname['Civilian - battle axe'], recruits)
-        if not sq then qerror('civilian squad: ' .. tostring(err)) end
-        local seated = 0
-        for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then seated = seated + 1 end end
-        load_state(); run_cycle()
-        print(('military-uniforms: civilian uniforms ready + squad of %d created; gear cycle run.'):format(seated))
-    else
-        load_state(); run_cycle()
-        print('military-uniforms: civilian uniforms ready (Civilian - battle axe, Civilian - mace) + reordered.')
-    end
+    load_state(); run_cycle()
+    print('military-uniforms: civilian uniforms ready (Civilian - battle axe, Civilian - mace) + reordered.')
     return
 end
 if args[1] == 'orders' then
