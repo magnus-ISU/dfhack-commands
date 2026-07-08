@@ -140,6 +140,53 @@ local function main_cat_name(cs)
     end
 end
 
+-- ---- middle (sub-category) column: re-click a sub to toggle all its spec items -----------------
+-- There's no clean write path for a sub (its sub_mode_ptr is nil, spec_item[] is a stale display
+-- cache, and subs like Metal/Gem/Stone are slices of one field). So instead we let DF do it: on a
+-- re-click we move the mouse onto col3's own "All"/"None" header and hand the real click to the
+-- native screen, which toggles exactly the selected sub's items (slices included). Direction still
+-- needs the current on/off state; for that we read the sub's backing vector out of cs.sp.
+
+-- x of the "None" header on row y, at/after x0 (its "All" twin is at cols[3])
+local function none_x(y, x0)
+    local function ch(x) local ok, c = pcall(dfhack.screen.readTile, x, y); return (ok and c and c.ch) or 0 end
+    for x = x0, df.global.gps.dimx - 4 do
+        if ch(x) == 78 and ch(x + 1) == 111 and ch(x + 2) == 110 and ch(x + 3) == 101 then return x end
+    end
+end
+
+-- the cs.sp vector backing the selected sub-category. The col2 list shows the settings struct's
+-- len>0 vector fields in declaration order (empty fields are hidden; boolean/special subs carry a
+-- non-NONE sub_mode_ptr_type), so the Nth NONE-type sub is the Nth len>0 vector field. Positional,
+-- so it stays correct even when two fields share a length (e.g. fish vs unprepared_fish).
+local function sub_vector(cs)
+    local mn = main_cat_name(cs)
+    local s = mn and cs.sp[mn]
+    if not s then return end
+    local fields = {}
+    for _, v in pairs(s) do
+        if type(v) == 'userdata' then
+            local ok, l = pcall(function() return #v end)
+            if ok and l > 0 then fields[#fields + 1] = v end
+        end
+    end
+    local pos = 0
+    for i = 0, #cs.sub_mode - 1 do
+        if cs.sub_mode_ptr_type[i] == df.stock_pile_pointer_type.NONE then
+            if cs.sub_mode[i] == cs.cur_sub_mode then return fields[pos + 1] end
+            pos = pos + 1
+        end
+    end
+end
+
+local function any_elem_on(field)
+    for i = 0, #field - 1 do
+        local e = field[i]
+        if (type(e) == 'boolean' and e) or (type(e) == 'number' and e ~= 0) then return true end
+    end
+    return false
+end
+
 CategoryToggle = defclass(CategoryToggle, overlay.OverlayWidget)
 CategoryToggle.ATTRS{
     desc = 'Stockpile customize: click an already-selected category again to toggle it all on/off.',
@@ -152,15 +199,50 @@ CategoryToggle.ATTRS{
 
 function CategoryToggle:onInput(keys)
     if keys._MOUSE_L then
-        -- record the pre-click main category + where the click landed; judge the result next frame
-        -- (DF selects on this same click, so we compare cur_main_mode before vs after to spot a re-click)
         local cs = df.global.game.main_interface.custom_stockpile
-        self.pending = {mx = df.global.gps.mouse_x, my = df.global.gps.mouse_y, cm = cs.cur_main_mode}
+        local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+        local cols, all_y = all_columns()
+        -- Only act on clicks in the list area (below the "All/None" header row). This deliberately
+        -- ignores clicks ON the header -- including the phantom click DF replays at the position we
+        -- redirect to below -- so those never overwrite self.prev and steal the next real re-click.
+        if cols and all_y and my > all_y then
+            -- second click on the SAME middle-column (sub-category) row: redirect this real click onto
+            -- col3's All/None so the native screen toggles the sub. Only for 3-column categories.
+            if cols[3] and self.prev and my == self.prev.my and mx >= cols[2] and mx < cols[3] then
+                local field = sub_vector(cs)
+                if field then
+                    -- Direction = flip the current state. cs.sp lags a frame behind a just-applied
+                    -- toggle, so on rapid re-clicks of the SAME sub we trust our own last-applied
+                    -- state instead of the stale read -- keeps 3rd/4th clicks alternating, not no-op.
+                    local key = cs.cur_main_mode .. '/' .. cs.cur_sub_mode
+                    local current
+                    if self.applied and self.applied.key == key then current = self.applied.state
+                    else current = any_elem_on(field) end
+                    local target_on = not current
+                    -- target on -> col3 "All"; target off -> col3 "None"
+                    df.global.gps.mouse_x = target_on and cols[3] or (none_x(all_y, cols[3] + 3) or cols[3])
+                    df.global.gps.mouse_y = all_y
+                    self.applied = {key = key, state = target_on}
+                    self.restore = {mx = mx, my = my}   -- put the cursor back next frame (see below)
+                end
+            end
+            self.prev = {mx = mx, my = my}
+            -- also record the pre-click main category for the col1 re-click test judged next frame
+            self.pending = {mx = mx, my = my, cm = cs.cur_main_mode}
+        end
     end
     return false   -- never consume the click; DF still does its own selection
 end
 
 function CategoryToggle:overlay_onupdate()
+    -- After a redirect DF leaves gps.mouse parked on the header (it only refreshes the cursor on real
+    -- OS movement), so the user's next stationary click would land on "All/None" and do nothing. Put
+    -- the cursor back on the row they actually clicked so consecutive clicks keep toggling.
+    if self.restore then
+        df.global.gps.mouse_x = self.restore.mx
+        df.global.gps.mouse_y = self.restore.my
+        self.restore = nil
+    end
     local p = self.pending
     if not p then return end
     self.pending = nil
