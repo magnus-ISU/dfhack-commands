@@ -58,11 +58,11 @@ end
 BinnableButton = defclass(BinnableButton, overlay.OverlayWidget)
 BinnableButton.ATTRS{
     desc = 'Stockpile screen button: set the pile to accept all binnable/barrelable items.',
-    default_pos = {x = 1, y = -4},   -- bottom-left, 3 rows up to clear the native buttons
+    default_pos = {x = 8, y = -5},   -- bottom-left area, clear of the native buttons
     default_enabled = true,
     viewscreens = 'dwarfmode/Stockpile/Some/Customize',
     frame = {w = 26, h = 1},
-    version = 1,
+    version = 2,   -- bumped so the moved default position takes effect
 }
 
 function BinnableButton:init()
