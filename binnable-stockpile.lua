@@ -77,7 +77,113 @@ function BinnableButton:init()
     }
 end
 
-OVERLAY_WIDGETS = {button = BinnableButton}
+-- ---- click an already-selected category again to toggle it all on/off ----------------------
+-- Re-click model (no click-timing): when the category that is ALREADY selected gets clicked again,
+-- toggle every item under it on/off (so a triple-click = on, then off). The column is found by
+-- SCANNING the "All" header buttons, so it survives any font/window resize -- no hardcoded coords.
+
+-- A category (or sub-category) settings object holds every filter -- item types, materials
+-- (mats/other_mats) and quality (quality_core/quality_total) -- as boolean or number flags, some
+-- loose, some in vectors. Toggling a category flips ALL of them together (a full on/off, like the
+-- native "All"/"None"), so we do not special-case any field. Wood/Stone hold only `mats`; corpses
+-- only `corpses`; that all just works when we visit every field.
+local function elem_on(e)
+    local t = type(e)
+    return (t == 'boolean' and e) or (t == 'number' and e ~= 0)
+end
+local function any_on(obj)
+    for _, v in pairs(obj) do
+        if elem_on(v) then return true end
+        if type(v) == 'userdata' then
+            local ok, len = pcall(function() return #v end)
+            if ok then for i = 0, len - 1 do if elem_on(v[i]) then return true end end end
+        end
+    end
+    return false
+end
+
+-- category settings field name -> DFHack library preset name (mostly cat_<name>; "sheet" is plural)
+local function cat_preset(name)
+    return name == 'sheet' and 'library/cat_sheets' or ('library/cat_' .. name)
+end
+
+-- x-positions of the "All" column headers, and the row they sit on. Scans the top rows and keeps the
+-- row with the MOST "All" markers -- normal categories have 3 columns, but Wood/Stone/Corpses have no
+-- middle column and show only 2, so we require >=2 (not 3) or those would be skipped. Resolution-
+-- independent (scans rendered tiles); returns nil if no header row is found.
+local function all_columns()
+    local gps = df.global.gps
+    local function ch(x, y) local ok, c = pcall(dfhack.screen.readTile, x, y); return (ok and c and c.ch) or 0 end
+    local best, best_y
+    for y = 0, math.min(gps.dimy - 1, 20) do
+        local xs, x = {}, 0
+        while x < gps.dimx - 2 do
+            if ch(x, y) == 65 and ch(x + 1, y) == 108 and ch(x + 2, y) == 108 then   -- "All"
+                xs[#xs + 1] = x; x = x + 3
+            else x = x + 1 end
+        end
+        if #xs >= 2 and (not best or #xs > #best) then best, best_y = xs, y end
+    end
+    return best, best_y
+end
+
+-- the sp.settings field name of the selected MAIN category. cur_main_mode is a category VALUE, not
+-- an index, so we find its row in main_mode and read that row's group_set identity (the one flag it
+-- sets is the category's name -- animals / food / bars_blocks / ...).
+local function main_cat_name(cs)
+    for i = 0, #cs.main_mode - 1 do
+        if cs.main_mode[i] == cs.cur_main_mode then
+            local gs = cs.main_mode_flag[i]
+            if gs then for k, v in pairs(gs) do if v == true then return tostring(k) end end end
+            return
+        end
+    end
+end
+
+CategoryToggle = defclass(CategoryToggle, overlay.OverlayWidget)
+CategoryToggle.ATTRS{
+    desc = 'Stockpile customize: click an already-selected category again to toggle it all on/off.',
+    default_pos = {x = 1, y = 1},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Stockpile/Some/Customize',
+    frame = {w = 1, h = 1},
+    overlay_onupdate_max_freq_seconds = 0,
+}
+
+function CategoryToggle:onInput(keys)
+    if keys._MOUSE_L then
+        -- record the pre-click main category + where the click landed; judge the result next frame
+        -- (DF selects on this same click, so we compare cur_main_mode before vs after to spot a re-click)
+        local cs = df.global.game.main_interface.custom_stockpile
+        self.pending = {mx = df.global.gps.mouse_x, my = df.global.gps.mouse_y, cm = cs.cur_main_mode}
+    end
+    return false   -- never consume the click; DF still does its own selection
+end
+
+function CategoryToggle:overlay_onupdate()
+    local p = self.pending
+    if not p then return end
+    self.pending = nil
+    local cols, all_y = all_columns()
+    if not cols or p.my <= all_y then return end   -- need the header row; ignore clicks on it
+    -- only the MAIN-category (left) column: a click left of the 2nd "All" header. Wood/Stone/Corpses
+    -- have no middle column so cols[2] is their spec-item "All", which still sits right of the list.
+    if p.mx >= cols[2] then return end
+    local cs = df.global.game.main_interface.custom_stockpile
+    -- toggle only when the SAME category is still selected after the click (i.e. a re-click, not a
+    -- switch to a new category) -- so first click selects, next click flips the whole category
+    if cs.cur_main_mode ~= p.cm then return end
+    local sp = dfhack.gui.getSelectedStockpile(true)
+    local name = sp and main_cat_name(cs)
+    if name and sp.settings[name] then
+        -- flip the whole category on/off via DFHack's own preset (item types + materials + quality
+        -- together; populates the enable vectors so even a never-touched category still toggles)
+        local mode = any_on(sp.settings[name]) and 'disable' or 'enable'
+        stockpiles.import_settings(cat_preset(name), {id = sp.id, mode = mode})
+    end
+end
+
+OVERLAY_WIDGETS = {button = BinnableButton, category_toggle = CategoryToggle}
 
 if dfhack_flags.module then
     return
