@@ -273,6 +273,55 @@ local function has_generic_order(job_type)
     return false
 end
 
+-- The WOOL/HAIR (yarn) textile chain, mirroring the pig-tail chain but for animal fibre:
+-- spin raw hair/wool into yarn thread, then weave that thread into yarn cloth. Wool/hair spans
+-- every creature, so the orders target the material CLASS via the condition's flags2 (yarn /
+-- hair_wool) rather than one specific material the way the pig-tail chain does.
+
+-- raw hair/wool on hand to SPIN? Sheared wool already comes off as THREAD (that's yarn thread,
+-- woven directly), so the spin step is for raw fibre that is NOT yet thread or a finished good.
+local FIBRE_FINISHED = {   -- item types that are woven/finished (so NOT raw spinnable fibre)
+    [df.item_type.THREAD] = true, [df.item_type.CLOTH] = true, [df.item_type.ARMOR] = true,
+    [df.item_type.GLOVES] = true, [df.item_type.SHOES] = true, [df.item_type.PANTS] = true,
+    [df.item_type.HELM] = true, [df.item_type.QUIVER] = true, [df.item_type.BAG] = true,
+    [df.item_type.CHAIN] = true, [df.item_type.CORPSEPIECE] = true, [df.item_type.CORPSE] = true,
+}
+local function hair_wool_present()
+    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+        if not FIBRE_FINISHED[it:getType()] then
+            local m = dfhack.matinfo.decode(it)
+            if m and m.material and m.material.flags[df.material_flags.YARN] then return true end
+        end
+    end
+    return false
+end
+
+-- yarn thread on hand to WEAVE? (spun wool/hair -- item_type THREAD, material flagged YARN)
+local function yarn_thread_present()
+    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+        if it:getType() == df.item_type.THREAD then
+            local m = dfhack.matinfo.decode(it)
+            if m and m.material and m.material.flags[df.material_flags.YARN] then return true end
+        end
+    end
+    return false
+end
+
+-- is there a WeaveCloth order that specifically targets YARN cloth (a condition with the yarn
+-- flag)? Distinguishes it from the general / pig-tail weave orders, like order_targets_pigtail.
+local function weave_targets_yarn()
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        local o = all[i]
+        if o.job_type == df.job_type.WeaveCloth then
+            for _, c in ipairs(o.item_conditions) do
+                if c.flags2.yarn then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- ---- materials --------------------------------------------------------------
 
 -- inorganic material index by raw id (STEEL/COPPER/...), cached
@@ -387,6 +436,7 @@ local FIXED_WS = {
     MakeAsh               = {label = 'a Wood Furnace',         fu = df.furnace_type.WoodFurnace},
     MakeLye               = {label = 'an Ashery',              ws = df.workshop_type.Ashery},
     ProcessPlants         = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
+    SpinThread            = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     WeaveCloth            = {label = 'a Loom',                 ws = df.workshop_type.Loom},
     ConstructBag          = {label = 'a Leather Works',        ws = df.workshop_type.Leatherworks},
     ConstructMechanisms   = {label = "a Mechanic's Workshop",  ws = df.workshop_type.Mechanics},
@@ -693,10 +743,10 @@ end
 -- ---- order creation ---------------------------------------------------------
 
 -- a condition spec. compare is a logic_condition_type name string.
-local function C(compare, val, item_type, mat_type, mat_index, reaction_class)
+local function C(compare, val, item_type, mat_type, mat_index, reaction_class, flags2)
     return {compare = df.logic_condition_type[compare], val = val, item_type = item_type or -1,
             item_subtype = -1, mat_type = mat_type or -1, mat_index = mat_index or -1,
-            reaction_class = reaction_class}
+            reaction_class = reaction_class, flags2 = flags2}   -- flags2: list of material-class flag names
 end
 
 -- general manager-order builder. p: job_type, [reaction_name], [item_subtype], [mat_type,
@@ -729,6 +779,12 @@ local function add_order(p)
             reaction_class = c.reaction_class or ''})
         -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
         if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
+        -- flags2 material-class match (yarn / hair_wool / silk / plant): count only items of that
+        -- fibre class, so a "yarn cloth" order counts wool/hair cloth across every creature at once
+        if c.flags2 then
+            local cond = o.item_conditions[#o.item_conditions - 1]
+            for _, fl in ipairs(c.flags2) do cond.flags2[fl] = true end
+        end
     end
     mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
@@ -961,6 +1017,33 @@ STANDING = {
                 add_order{job_type = df.job_type.WeaveCloth, amount = 10, frequency = Daily,
                     conds = {C('LessThan', 30, df.item_type.CLOTH, pt.type, pt.index),
                              C('GreaterThan', 8, df.item_type.THREAD, pt.type, pt.index)}}
+                return missing_shops({'WeaveCloth'})
+            end}}
+    end,
+    function()   -- spin thread: spin raw hair/wool into yarn thread at a Farmer's Workshop
+        if not hair_wool_present() then return {} end                   -- raw fibre on hand to spin
+        if has_order(df.job_type.SpinThread, -1) then return {} end
+        return {{name = 'Spin thread', shops = {'SpinThread'},         -- prompts the Farmer's Workshop if absent
+            note = 'Spins raw hair/wool into yarn thread at a Farmer\'s Workshop -- Daily x5,\n'
+                .. 'running while you have under 30 yarn thread. Offers to build the Farmer\'s\n'
+                .. 'Workshop too if you don\'t have one.',
+            build = function()
+                add_order{job_type = df.job_type.SpinThread, amount = 5, frequency = Daily,
+                    conds = {C('LessThan', 30, df.item_type.THREAD, nil, nil, nil, {'yarn'})}}
+                return missing_shops({'SpinThread'})
+            end}}
+    end,
+    function()   -- yarn cloth: weave yarn (wool/hair) thread into cloth at a Loom
+        if not yarn_thread_present() then return {} end
+        if not ws_exists(FIXED_WS['WeaveCloth']) then return {} end      -- Loom
+        if weave_targets_yarn() then return {} end
+        return {{name = 'Yarn cloth', shops = {'WeaveCloth'},
+            note = 'Weaves yarn (wool/hair) thread into cloth at a Loom -- Daily x10, running\n'
+                .. 'while you have under 30 yarn cloth and more than 8 yarn thread.',
+            build = function()
+                add_order{job_type = df.job_type.WeaveCloth, amount = 10, frequency = Daily,
+                    conds = {C('LessThan', 30, df.item_type.CLOTH, nil, nil, nil, {'yarn'}),
+                             C('GreaterThan', 8, df.item_type.THREAD, nil, nil, nil, {'yarn'})}}
                 return missing_shops({'WeaveCloth'})
             end}}
     end,
