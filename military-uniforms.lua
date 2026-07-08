@@ -1449,6 +1449,7 @@ local function run_cycle()
     local req = compute_required()
     -- armour pieces soldiers need, indexed by "item_type/subtype" (for copper backup)
     local backup_by_ts = {}
+    local cloak_sub = ent and cloak_subtype(ent)   -- the leather cloak is always leather, never metal
     for key, r in pairs(req) do
         if BACKUP_TYPES[r.item_type] then
             backup_by_ts[r.item_type .. '/' .. r.subtype .. '/' .. r.size_race] = key
@@ -1746,7 +1747,10 @@ local function run_cycle()
         for key, r in pairs(req) do
             local ts = r.item_type .. '/' .. r.subtype .. '/' .. r.size_race
             local already_backup = r.mat_type == 0 and r.mat_index == backup_idx
-            if backup_by_ts[ts] == key and not already_backup then   -- a backup-able piece
+            local is_cloak = r.item_type == df.item_type.ARMOR and cloak_sub and r.subtype == cloak_sub
+            if is_cloak then
+                drop_order('cu/' .. key)   -- a cloak is always leather: never forge a metal backup
+            elseif backup_by_ts[ts] == key and not already_backup then   -- a backup-able piece
                 local cukey = 'cu/' .. key
                 local covered = (stock[key] or 0) + (backup_stock[ts] or 0)
                 local o = state.orders[cukey] and order_by_id(state.orders[cukey])
