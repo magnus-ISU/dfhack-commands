@@ -45,10 +45,27 @@ local function alert_burrows(a)
     return out
 end
 
--- a fort civilian who should be sheltering: a living, on-map citizen who is not a soldier
-local function is_shelterable(u)
+-- unit ids in the "Military" work detail (the fort's real standing military, per military-labor).
+-- ONLY these count as soldiers exempt from sheltering. A civilian-militia dwarf or an autotraining
+-- trainee is in a squad (squad_id >= 0) but is NOT in this detail, so they still shelter like any
+-- civilian -- which is why we key off the labor, not merely squad membership.
+local function military_labor_set()
+    local wd = df.global.plotinfo.labor_info.work_details
+    for i = 0, #wd - 1 do
+        if wd[i].name == 'Military' then
+            local set = {}
+            for _, id in ipairs(wd[i].assigned_units) do set[id] = true end
+            return set
+        end
+    end
+    return {}
+end
+
+-- a fort civilian who should be sheltering: a living, on-map citizen who is not a serving soldier
+-- (i.e. not in the "Military" work detail; being in a squad is not enough -- civilian militia counts)
+local function is_shelterable(u, mil)
     return dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) and not dfhack.units.isDead(u)
-        and dfhack.units.isActive(u) and u.military.squad_id < 0 and u.pos.x >= 0
+        and dfhack.units.isActive(u) and not mil[u.id] and u.pos.x >= 0
 end
 
 -- fort civilians whose tile is NOT inside any alert burrow
@@ -57,9 +74,10 @@ local function citizens_outside()
     if not a then return {} end
     local burrows = alert_burrows(a)
     if #burrows == 0 then return {} end
+    local mil = military_labor_set()
     local out = {}
     for _, u in ipairs(df.global.world.units.active) do
-        if is_shelterable(u) then
+        if is_shelterable(u, mil) then
             local inside = false
             for _, b in ipairs(burrows) do
                 if dfhack.burrows.isAssignedTile(b, u.pos) then inside = true; break end
