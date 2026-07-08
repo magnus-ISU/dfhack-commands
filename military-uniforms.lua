@@ -722,8 +722,10 @@ local function compute_per_soldier()
                     if #needs > 0 then
                         -- civilian for gear purposes = a Civilian-* uniform OR a non-leader member of
                         -- an autotraining squad (only rostered to train; the leader stays a soldier).
-                        local civilian = position_is_civilian(pos) or (training[sq.id] and p ~= 0)
-                        local entry = {unit_id = uid, sid = sq.id, civilian = civilian, needs = needs}
+                        local real_civ = position_is_civilian(pos)   -- an actual Civilian-* squad member
+                        local civilian = real_civ or (training[sq.id] and p ~= 0)
+                        local entry = {unit_id = uid, sid = sq.id, civilian = civilian,
+                                       real_civ = real_civ, leader = (p == 0), needs = needs}
                         if civilian then civ[#civ + 1] = entry
                         elseif mil[uid] then prioritized[#prioritized + 1] = entry
                         else rest[#rest + 1] = entry end
@@ -1204,6 +1206,149 @@ local function equip_miner_pickaxes()
     return math.max(0, (need - avail) - math.max(0, budget))
 end
 
+-- Reserve ONE member's full set from the size-aware pools (all-or-nothing). Returns true and
+-- DECREMENTS av/avh if every piece the member needs is in stock; false and leaves the pools intact.
+local function reserve_set(needs, av, avh)
+    local nk, nh = {}, {}
+    for _, need in ipairs(needs) do
+        if need.hand ~= nil then
+            nh[need.k] = nh[need.k] or {}
+            nh[need.k][need.hand] = (nh[need.k][need.hand] or 0) + 1
+        else
+            nk[need.k] = (nk[need.k] or 0) + 1
+        end
+    end
+    for k, c in pairs(nk) do if (av[k] or 0) < c then return false end end
+    for k, hands in pairs(nh) do for h, c in pairs(hands) do
+        if ((avh[k] and avh[k][h]) or 0) < c then return false end
+    end end
+    for k, c in pairs(nk) do av[k] = av[k] - c end
+    for k, hands in pairs(nh) do for h, c in pairs(hands) do avh[k][h] = avh[k][h] - c end end
+    return true
+end
+
+-- CIVILIAN MILITIA ARRANGEMENT: a squad set to "Ready" makes ALL its members equip, stripping any
+-- who lack a full set down to naked. So instead of flipping a squad early, we PACK members between
+-- civilian squads so every Ready squad holds only members who each have a complete set -- and each
+-- person kits up as their own set comes off the forge. Squad LEADERS never move (they anchor their
+-- squad, so a squad can be Ready only once its own leader is equippable). Everyone else sits in a
+-- "No Orders" (Off-duty) squad, in civilian clothes. If there aren't enough civilian squads to keep
+-- the equipped group and the not-yet-equipped group in SEPARATE squads, we ask (via a persisted
+-- flag -> notification) for another civilian squad and leave the overflow squad on No Orders.
+local OFF_ROUTINE = 0                       -- "No Orders" == the built-in Off-duty routine (index 0)
+local function arrange_civilian_squads(persoldier, req, stock, stock_h)
+    local ridx = ready_routine_idx()
+    if not ridx then return end
+    local training = autotraining_squads()
+
+    -- gather real civilian squads (Civilian-* uniform, not autotraining), each: leader + members
+    local squads, sids = {}, {}
+    for _, e in ipairs(persoldier) do
+        if e.real_civ and not training[e.sid] then
+            local g = squads[e.sid]
+            if not g then g = {members = {}}; squads[e.sid] = g; sids[#sids + 1] = e.sid end
+            if e.leader then g.leader = e else g.members[#g.members + 1] = e end
+        end
+    end
+    if #sids == 0 then return end
+    table.sort(sids)
+
+    local function fresh()
+        local av, avh = {}, {}
+        for key, r in pairs(req) do
+            if HANDED[r.item_type] then local s = stock_h[key] or {}; avh[key] = {[0] = s[0] or 0, [1] = s[1] or 0}
+            else av[key] = stock[key] or 0 end
+        end
+        return av, avh
+    end
+    local nonleaders = {}
+    for _, sid in ipairs(sids) do for _, m in ipairs(squads[sid].members) do nonleaders[#nonleaders + 1] = m end end
+
+    -- M = total civilian members; S = how many can be fully equipped (leaders first, so squads can
+    -- activate, then non-leaders) -- both determine how many Ready vs No-Orders squads are needed.
+    local M = #nonleaders
+    for _, sid in ipairs(sids) do if squads[sid].leader then M = M + 1 end end
+    local S = 0
+    do
+        local av, avh = fresh()
+        for _, sid in ipairs(sids) do local L = squads[sid].leader; if L and reserve_set(L.needs, av, avh) then S = S + 1 end end
+        for _, m in ipairs(nonleaders) do if reserve_set(m.needs, av, avh) then S = S + 1 end end
+    end
+    local avail = #sids
+    local function ceil10(n) return n > 0 and math.floor((n + 9) / 10) or 0 end
+    local ready_needed, noorder_needed = ceil10(S), ceil10(M - S)
+    local feasible = (ready_needed + noorder_needed) <= avail
+    local R = feasible and ready_needed or math.max(0, avail - noorder_needed)
+    local need_squad = not feasible
+
+    -- assign the first R squads that have an equippable leader as Ready, filled greedily with
+    -- equippable members (their own first, to minimise moves); everything else -> No Orders.
+    local av, avh = fresh()
+    local target, routine, used = {}, {}, {}
+    local ready_made = 0
+    for _, sid in ipairs(sids) do
+        local g = squads[sid]
+        if ready_made < R and g.leader and reserve_set(g.leader.needs, av, avh) then
+            routine[sid] = ridx; target[g.leader.unit_id] = sid; used[g.leader.unit_id] = true
+            ready_made = ready_made + 1
+            local filled, order = 1, {}
+            for _, m in ipairs(g.members) do order[#order + 1] = m end
+            for _, m in ipairs(nonleaders) do order[#order + 1] = m end
+            for _, m in ipairs(order) do
+                if filled >= 10 then break end
+                if not used[m.unit_id] and reserve_set(m.needs, av, avh) then
+                    target[m.unit_id] = sid; used[m.unit_id] = true; filled = filled + 1
+                end
+            end
+        else
+            routine[sid] = OFF_ROUTINE
+            if g.leader then target[g.leader.unit_id] = sid; used[g.leader.unit_id] = true end
+        end
+    end
+    -- place remaining non-leaders into No-Orders squads (9 non-leader slots each); prefer the squad
+    -- they are already in to avoid needless moves.
+    local noorder, slots = {}, {}
+    for _, sid in ipairs(sids) do if routine[sid] == OFF_ROUTINE then noorder[#noorder + 1] = sid; slots[sid] = 9 end end
+    for _, m in ipairs(nonleaders) do
+        if not used[m.unit_id] and routine[m.sid] == OFF_ROUTINE and (slots[m.sid] or 0) > 0 then
+            target[m.unit_id] = m.sid; used[m.unit_id] = true; slots[m.sid] = slots[m.sid] - 1
+        end
+    end
+    for _, m in ipairs(nonleaders) do
+        if not used[m.unit_id] then
+            for _, sid in ipairs(noorder) do
+                if slots[sid] > 0 then target[m.unit_id] = sid; slots[sid] = slots[sid] - 1; used[m.unit_id] = true; break end
+            end
+            if not used[m.unit_id] then need_squad = true end   -- nowhere to put them
+        end
+    end
+
+    if _G.MU_DRY_ARRANGE then
+        for _, sid in ipairs(sids) do
+            local n = 0; for _, ts in pairs(target) do if ts == sid then n = n + 1 end end
+            print(('PLAN squad %d -> %-8s members=%d'):format(sid, routine[sid] == ridx and 'Ready' or 'NoOrders', n))
+        end
+        print(('PLAN M=%d S=%d avail=%d ready_needed=%d noorder_needed=%d feasible=%s R=%d need_squad=%s'):format(
+            M, S, avail, ready_needed, noorder_needed, tostring(feasible), R, tostring(need_squad)))
+        return
+    end
+
+    -- EXECUTE: free every mover first (so target slots open up), then re-add; leaders never move.
+    local moves = {}
+    for uid, sid in pairs(target) do
+        local u = df.unit.find(uid)
+        if u and u.military.squad_id ~= sid then moves[#moves + 1] = {uid = uid, sid = sid} end
+    end
+    for _, mv in ipairs(moves) do pcall(dfhack.military.removeFromSquad, mv.uid) end
+    for _, mv in ipairs(moves) do pcall(dfhack.military.addToSquad, mv.uid, mv.sid, -1) end
+    for _, sid in ipairs(sids) do
+        local sq = df.squad.find(sid)
+        if sq and sq.cur_routine_idx ~= routine[sid] then sq.cur_routine_idx = routine[sid] end
+    end
+
+    state.civ_need_squad = need_squad and true or false
+end
+
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
@@ -1560,47 +1705,10 @@ local function run_cycle()
     ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
     ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
 
-    -- CIVILIAN MILITIA -> READY: a civilian squad stays off-duty while its gear is being made
-    -- (orders are queued regardless of routine), and flips to the "Ready" routine once every one
-    -- of its members actually holds a full basic set. Coverage is allocated in priority order
-    -- (military first, civilians last) against a fresh copy of stock, so a civilian squad only
-    -- flips once the pieces it shares with the army (steel helm/gauntlets/boots) are truly spare.
-    do
-        local ridx = ready_routine_idx()
-        local training = autotraining_squads()   -- never override an autotraining squad's routine
-        if ridx then
-            local av, avh = {}, {}
-            for key, r in pairs(req) do
-                if HANDED[r.item_type] then
-                    local s = stock_h[key] or {}
-                    avh[key] = {[0] = s[0] or 0, [1] = s[1] or 0}
-                else
-                    av[key] = stock[key] or 0
-                end
-            end
-            local geared, seen = {}, {}
-            for _, sreq in ipairs(persoldier) do
-                local ok = true
-                for _, need in ipairs(sreq.needs) do
-                    local k = need.k
-                    if need.hand ~= nil then
-                        local pool = avh[k]
-                        if pool and pool[need.hand] > 0 then pool[need.hand] = pool[need.hand] - 1 else ok = false end
-                    elseif (av[k] or 0) > 0 then av[k] = av[k] - 1 else ok = false end
-                end
-                if sreq.civilian then
-                    if not seen[sreq.sid] then seen[sreq.sid] = true; geared[sreq.sid] = true end
-                    if not ok then geared[sreq.sid] = false end
-                end
-            end
-            for sid, done in pairs(geared) do
-                local sq = df.squad.find(sid)
-                if done and sq and not training[sid] and sq.cur_routine_idx ~= ridx then
-                    sq.cur_routine_idx = ridx
-                end
-            end
-        end
-    end
+    -- CIVILIAN MILITIA: pack members between civilian squads so each Ready squad holds only fully-
+    -- equipped members (each person kits up as their own set is forged); ask for another squad if
+    -- the split needs more squads than exist. See arrange_civilian_squads.
+    arrange_civilian_squads(persoldier, req, stock, stock_h)
 
     -- completion flags for the overlay's "Done" label: queue = every soldier has each piece
     -- (by stock, hand-aware); masterwork = every piece is masterwork. Vacuously done if no
@@ -1664,9 +1772,39 @@ function set_toggle(name, val)
     run_cycle()
 end
 
+-- ---- notification: "appoint another civilian squad" (mirrors the pack's notify scripts) ----
+-- arrange_civilian_squads sets state.civ_need_squad when the civilian militia cannot be split into
+-- equipped (Ready) and un-equipped (No Orders) groups without another squad. Surface that as a
+-- notify-panel line so the player knows to appoint one more civilian squad.
+local CIV_SQUAD_NOTE = 'military_uniforms_civ_squad'
+local function civ_squad_message()
+    if not dfhack.world.isFortressMode() then return end
+    load_state()
+    if not state.civ_need_squad then return end
+    return {{text = 'Appoint another civilian militia squad (no room to equip everyone)', pen = COLOR_YELLOW}}
+end
+local function register_civ_squad_notify()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[CIV_SQUAD_NOTE]
+    if not entry then
+        entry = {name = CIV_SQUAD_NOTE, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[CIV_SQUAD_NOTE] = entry
+    end
+    entry.desc = 'Asks you to appoint another civilian militia squad when the existing ones cannot '
+        .. 'hold the equipped (Ready) and un-equipped (No Orders) members in separate squads.'
+    entry.dwarf_fn = civ_squad_message
+    if n.config and n.config.data and not n.config.data[CIV_SQUAD_NOTE] then
+        n.config.data[CIV_SQUAD_NOTE] = {enabled = true, version = 1}
+    end
+end
+register_civ_squad_notify()
+
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
+        register_civ_squad_notify()
         if dfhack.world.isFortressMode() and service_on() then start_heartbeat() end
     elseif sc == SC_MAP_UNLOADED then
         stop_heartbeat(); state = nil
