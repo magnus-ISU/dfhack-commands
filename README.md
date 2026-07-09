@@ -84,7 +84,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 
 | Script | Bug | Status |
 | --- | --- | --- |
-| `dwarf-rts` | The **first time** you open the Squads screen in a session, it must be opened with the native **Squads toolbar button** — right-clicking the right-hand side of the screen won't open it that first time (it works on every subsequent open). Cause: the right-click opened the panel by flag-flipping `squads.open`, which skips DF's open logic that builds `squad_id` (empty until a native open). Fix: right-click now feeds DF's own `D_SQUADS` key so it runs the real open. | 🔧 fixed (pending live test) |
+| `dwarf-rts` | The **first time** you open the Squads screen in a session, it must be opened with the native **Squads toolbar button** — right-clicking the right-hand side of the screen won't open it that first time (it works on every subsequent open). Cause: the right-click opened the panel by flag-flipping `squads.open`, which skips DF's open logic that builds `squad_id` (empty until a native open). Fix: right-click now feeds DF's own `D_SQUADS` key so it runs the real open. | ✅ fixed (confirmed live) |
 
 ---
 

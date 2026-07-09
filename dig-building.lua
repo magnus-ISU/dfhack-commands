@@ -205,7 +205,10 @@ DigBuilding.ATTRS{
     desc = 'While the Dig tool is active, a left-hand picker to place any building.',
     default_pos = {x = 1, y = TOP_MARGIN + 1},   -- left edge; 10 rows of clear space above
     default_enabled = true,
-    viewscreens = 'dwarfmode/Default',
+    -- broad 'dwarfmode' match: selecting the Dig tool switches focus to dwarfmode/Designate/DIG_DIG,
+    -- so a narrow 'dwarfmode/Default' overlay would never render on the dig screen. Visibility is
+    -- gated to dig_active() below, so it only actually shows while the Dig tool is selected.
+    viewscreens = 'dwarfmode',
     frame = {w = WIN_W, h = 10},                  -- h recomputed each update (full height - margins)
     overlay_onupdate_max_freq_seconds = 0,
 }
