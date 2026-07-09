@@ -100,45 +100,39 @@ local function announce(msg)
     pcall(dfhack.gui.showAnnouncement, 'mood-burrow: ' .. msg, COLOR_LIGHTMAGENTA, true)
 end
 
--- one sync pass, fully stateless: the mood burrow's unit list is made to contain
--- EXACTLY the citizens in a managed strange mood who haven't picked their first
--- item yet. Anyone else (mood over, first item claimed, manually added) is removed.
+-- is the unit assigned to burrow id `bid`? Checked on the UNIT side (unit.burrows):
+-- that is the vector the game's own assignment UI maintains on this build --
+-- burrow.units stays empty for manually-assigned burrows, so it can't be trusted
+-- as the membership authority. setAssignedUnit keeps both sides in step anyway.
+local function in_burrow(u, bid)
+    for _, id in ipairs(u.burrows) do
+        if id == bid then return true end
+    end
+    return false
+end
+
+-- one sync pass, fully stateless, keyed on unit.burrows: every citizen in a
+-- managed strange mood who hasn't picked their first item is in the mood burrow;
+-- every other citizen (mood over, first item claimed, manually added) is not.
 local function do_sync()
     syncs = syncs + 1
     local b = mood_burrow()
     if not b then return 0 end
 
-    local want = {}
-    for _, u in ipairs(dfhack.units.getCitizens()) do
-        if MANAGED_MOOD[u.mood] and not first_item_picked(u) then
-            want[u.id] = true
-        end
-    end
-
     local changed = 0
-    for i = #b.units - 1, 0, -1 do
-        local id = b.units[i]
-        if want[id] then
-            want[id] = nil                       -- already assigned; keep
-        else
-            local u = df.unit.find(id)
-            if u then
-                dfhack.burrows.setAssignedUnit(b, u, false)
-                announce(('%s released from %s (first item claimed / mood over)')
-                    :format(dfhack.units.getReadableName(u), burrow_label(b)))
-            else
-                b.units:erase(i)                 -- dangling id
-            end
-            changed = changed + 1
-        end
-    end
-    for id in pairs(want) do
-        local u = df.unit.find(id)
-        if u then
+    for _, u in ipairs(dfhack.units.getCitizens()) do
+        local should = MANAGED_MOOD[u.mood] and not first_item_picked(u)
+        local is = in_burrow(u, b.id)
+        if should and not is then
             dfhack.burrows.setAssignedUnit(b, u, true)
             announce(('%s confined to %s for the mood\'s first item')
                 :format(dfhack.units.getReadableName(u), burrow_label(b)))
             last_confined = dfhack.units.getReadableName(u)
+            changed = changed + 1
+        elseif is and not should then
+            dfhack.burrows.setAssignedUnit(b, u, false)
+            announce(('%s released from %s (first item claimed / mood over)')
+                :format(dfhack.units.getReadableName(u), burrow_label(b)))
             changed = changed + 1
         end
     end
