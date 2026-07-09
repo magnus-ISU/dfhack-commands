@@ -29,7 +29,8 @@ local gui = require('gui')
 
 local function mi() return df.global.game.main_interface end
 local function scr() return dfhack.gui.getDFViewscreen(true) end
-local TOP_MARGIN, BOT_MARGIN = 10, 4      -- rows of negative space kept clear, top / bottom
+local TOP_MARGIN, BOT_MARGIN = 14, 4      -- rows of negative space kept clear, top / bottom
+local LEFT_MARGIN = 5                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; two columns inside
 local COL_W = 17                          -- each column's cell width
 
@@ -76,7 +77,7 @@ local ENTRIES = {
     {'Cabinet',      {'Furniture', 'Cabinet'}},
     {'Coffin',       {'Furniture', 'Burial'}},
     {'Statue',       {'Furniture', 'Statue'}},
-    {'Slab',         {'Furniture', 'Slab'}},
+    {'Slab',         {'Furniture', 'Slab'}, {noplan = true}},   -- native slab chooser, no planner
     {'Traction bed', {'Furniture', 'Traction bench'}},
     {'Bookcase',     {'Furniture', 'Bookcase'}},
     {'Display case', {'Furniture', 'Display'}},
@@ -184,10 +185,34 @@ local function click_exact(label)
     return false
 end
 
+-- buildingplan's placement overlay has a persistent "show Planner / hide Planner" toggle. When
+-- it reads "show Planner" the planner is HIDDEN (regular placement); "hide Planner" means it's
+-- SHOWN (the buildingplan filter panel). Ensure it matches `want`: click the toggle only when the
+-- current state differs. The state persists across placements, so this usually no-ops after the
+-- first building. Slabs pass want=false so DF's own "which slab" chooser is used instead.
+local function planner_toggle(want)
+    local gps = df.global.gps
+    local W, H = gps.dimx, gps.dimy
+    for y = 0, H - 1 do
+        local s = readrow(y, W)
+        local hide = s:find('hide Planner', 1, true)
+        local show = s:find('show Planner', 1, true)
+        if hide or show then
+            local is_shown = hide ~= nil
+            if is_shown ~= want then
+                local br = s:find('%[', (hide or show))   -- the [ ] toggle after the label
+                if br then gps.mouse_x = br; gps.mouse_y = y; gui.simulateInput(scr(), '_MOUSE_L') end
+            end
+            return
+        end
+    end
+end
+
 -- open the build menu and click through `path` (category -> [subcategory] -> building). Each step
 -- is deferred a few frames so DF re-renders the next level before we read/click it. Fed keys and
--- injected clicks must run inside DF's frame loop, hence the timeouts.
-local function navigate(path)
+-- injected clicks must run inside DF's frame loop, hence the timeouts. Once in placement, force the
+-- buildingplan planner on (off for `noplan` items, e.g. slabs). Two attempts absorb render lag.
+local function navigate(path, noplan)
     mi().main_designation_selected = df.main_designation_type.NONE   -- drop the Dig tool
     dfhack.timeout(1, 'frames', function() gui.simulateInput(scr(), 'D_BUILDING') end)
     local d = 4
@@ -196,6 +221,9 @@ local function navigate(path)
         dfhack.timeout(d, 'frames', function() click_exact(L) end)
         d = d + 3
     end
+    local want = not noplan
+    dfhack.timeout(d + 4, 'frames', function() planner_toggle(want) end)
+    dfhack.timeout(d + 9, 'frames', function() planner_toggle(want) end)
 end
 
 -- ---- overlay -----------------------------------------------------------------
@@ -203,13 +231,14 @@ end
 DigBuilding = defclass(DigBuilding, overlay.OverlayWidget)
 DigBuilding.ATTRS{
     desc = 'While the Dig tool is active, a left-hand picker to place any building.',
-    default_pos = {x = 1, y = TOP_MARGIN + 1},   -- left edge; 10 rows of clear space above
+    default_pos = {x = LEFT_MARGIN + 1, y = TOP_MARGIN + 1},   -- 5 cols in, 14 rows down
     default_enabled = true,
     -- broad 'dwarfmode' match: selecting the Dig tool switches focus to dwarfmode/Designate/DIG_DIG,
     -- so a narrow 'dwarfmode/Default' overlay would never render on the dig screen. Visibility is
     -- gated to dig_active() below, so it only actually shows while the Dig tool is selected.
     viewscreens = 'dwarfmode',
     frame = {w = WIN_W, h = 10},                  -- h recomputed each update (full height - margins)
+    version = 2,                                   -- bumped: moved 5 right / 4 down (resets saved pos)
     overlay_onupdate_max_freq_seconds = 0,
 }
 
@@ -278,7 +307,7 @@ function DigBuilding:onInput(keys)
             return true
         end
         local e = self:entry_at(x, y)
-        if e then navigate(e[2]) end
+        if e then navigate(e[2], e[3] and e[3].noplan) end
         return true                           -- consume any click within the window
     end
     return false
