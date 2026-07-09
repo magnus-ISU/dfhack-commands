@@ -16,10 +16,11 @@ dwarf-rts -- on the Squads screen:
     no longer fought -- nothing re-selects behind your back.
   * All left-button map commands resolve on mouse-UP (the raw button is polled each
     frame), so a click is cleanly told apart from a drag and nothing fires on press.
-      - A DRAG (a box) always acts, selected or not: with hostiles inside it orders the
-        selection to attack every hostile within +/-3 z-levels (Shift+drag folds them into
-        the current kill order); with NO hostiles it's a selection/conscription gesture
-        (below) -- so you can always box-select squads/members or draft civilians.
+      - A DRAG (a box) always acts, selected or not. SELECTING YOUR OWN takes priority: if the
+        box holds any of your dwarves it's a selection/conscription gesture (below); only a box
+        with NONE of your own orders the selection to attack every hostile inside within +/-3
+        z-levels (Shift+drag folds them into the current kill order). You can always attack by
+        boxing from a tile/z-level with no allies in it.
       - A PLAIN CLICK (no tile change between press and release) depends on selection:
         with a squad/member SELECTED it commands -- ATTACKS a hostile on that tile (Shift
         appends), else SELECTS your own dwarf under the cursor, else MOVES there. With
@@ -50,7 +51,8 @@ dwarf-rts -- on the Squads screen:
     it closes, standing every squad down (all move/attack/patrol/burrow-defense
     orders are dismissed on the close that actually goes through -- BOTH squad-level and
     per-member individual orders).
-  * Drag a box over your own DWARVES (no hostiles in it) to select them (`box_select`):
+  * Drag a box over your own DWARVES to select them -- takes priority even with hostiles in
+    the box (`box_select`):
       - members of several squads -> select those whole squads
       - members of one squad: the WHOLE squad if every member is boxed, else just the
         boxed members (expands that squad into its member view -- map clicks then issue
@@ -1147,12 +1149,13 @@ function DwarfRtsClickMove:overlay_onupdate()
                     gui.simulateInput(dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
                     self.passthrough = false
                 end
-            elseif box_attack(sq, self.press, rel, shift) == 0 then
-                -- a drag that hit no hostiles is a SELECTION gesture: pick the boxed
-                -- squads / members (box_select), or -- if it covers only loose civilians
-                -- -- draft them, then (deferred) trigger the real list refresh so
-                -- apply_pending_select can select the new Conscription squads.
+            else
+                -- SELECT/CONSCRIPT takes priority over attacking: if the box holds any of your
+                -- own dwarves (squadded members, whole squads, or loose civilians to draft), that
+                -- wins -- you can always attack instead by boxing from a tile/z-level with no allies
+                -- in it. Only a box with NO dwarves of yours falls through to a group attack.
                 acted = box_select(sq, self.press, rel)
+                if not acted then box_attack(sq, self.press, rel, shift) end
             end
             if acted == 'conscript' then
                 dfhack.timeout(1, 'frames', refresh_squad_list)
@@ -1329,27 +1332,28 @@ local BOX_PENS = {
 }
 local DIM_PEN = {fg = COLOR_WHITE, bg = COLOR_BLACK}
 
--- what would this box act on? enemies (within +/-3 z, as box_attack) win over our own
--- adult dwarves (exact z, as the select/conscript scans); neither -> nothing.
+-- what would this box act on? our own adult dwarves (exact z, as the select/conscript scans)
+-- win over enemies (within +/-3 z, as box_attack) -- selecting allies takes priority, since you
+-- can attack from a box with no allies in it; neither -> nothing.
 local function classify_box(p1, p2)
     local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
     local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
     local ze1, ze2 = p1.z - 3, p1.z + 3
     local za1, za2 = math.min(p1.z, p2.z), math.max(p1.z, p2.z)
-    local ally = false
+    local enemy = false
     for _, u in ipairs(df.global.world.units.active) do
         local p = u.pos
         if p.x >= x1 and p.x <= x2 and p.y >= y1 and p.y <= y2 then
-            if p.z >= ze1 and p.z <= ze2 and is_enemy(u) then
-                return 'enemy'                  -- attack takes priority over selection
-            end
-            if not ally and p.z >= za1 and p.z <= za2
+            if p.z >= za1 and p.z <= za2
                 and dfhack.units.isCitizen(u) and dfhack.units.isActive(u)
                 and not dfhack.units.isDead(u) and dfhack.units.isAdult(u)
-            then ally = true end
+            then
+                return 'ally'                   -- selection takes priority over attack
+            end
+            if not enemy and p.z >= ze1 and p.z <= ze2 and is_enemy(u) then enemy = true end
         end
     end
-    return ally and 'ally' or 'none'
+    return enemy and 'enemy' or 'none'
 end
 
 local function draw_drag_box(p1, p2, pen)
