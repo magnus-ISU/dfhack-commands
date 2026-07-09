@@ -3,168 +3,199 @@
 --[[
 Companion to dig-shapes. While NORMAL MINING MODE is active (the Dig tool selected,
 main_designation_selected == DIG_DIG) on dwarfmode/Default, a picker window docks on the LEFT
-listing every buildable thing -- workshops, furnaces, constructions, doors/hatches/grates/bars,
-trade depot, well, farm plot, military buildings, traps, cages/chains, machines, siege engines,
-and all furniture.
+listing every buildable thing -- workshops, furnaces, constructions, doors/hatches, machines,
+traps, cages/restraints, military buildings, trade depot, and all furniture.
 
-Clicking an entry drops the Dig tool and enters that building's PLACEMENT action (buildingplan
-mode -- materials reserved per your buildingplan filters; click to place; build-more on). This is
-driven by simulating the building's native interface key (HOTKEY_BUILDING_*), so it goes through
-DF's own placement flow.
+Clicking an entry drives DF's OWN build menu straight to that building's native placement action:
+it drops the Dig tool, opens the build menu (the D_BUILDING toolbar key), then clicks through the
+category (and subcategory) to the building by matching the on-screen button text and injecting a
+real mouse click at it. So you land in the exact native placement/buildingplan flow -- including,
+for a SLAB, DF's own "which slab" chooser with no buildingplan interference (nothing special is
+done for slabs; the native flow already does the right thing).
 
-  * EXCEPTION -- SLAB: instead of buildingplan it should ask which specific slab item to use, with
-    build-more always on. (The native slab flow already prompts for the slab; the buildingplan /
-    build-more specifics are being verified live -- see TODO below.)
+  (Why drive the native menu instead of jumping straight in? In v50 the build menu is entirely
+  mouse/button-driven -- the HOTKEY_BUILDING_* interface keys are NOT wired to fed input, and
+  setting the build mode by hand opens an empty menu with no buttons. Clicking the rendered
+  buttons is the only path that works, so we replicate the clicks.)
 
 Layout: two columns, vertically SCROLLABLE when the list overflows. The window leaves 10 rows of
 negative space at the TOP and 4 rows at the BOTTOM uncovered.
 
 Registered automatically as overlay `dig-building.picker`. Reposition with `gui/overlay`.
-
-TODO (needs live click-testing after the crash-restart):
-  * confirm simulate-key placement path (whether A_BUILDING must be fed first).
-  * slab: custom "which slab item" chooser + force build-more, no buildingplan.
 ]]
 
 local overlay = require('plugins.overlay')
 local gui = require('gui')
 
 local function mi() return df.global.game.main_interface end
+local function scr() return dfhack.gui.getDFViewscreen(true) end
 local TOP_MARGIN, BOT_MARGIN = 10, 4      -- rows of negative space kept clear, top / bottom
 local WIN_W = 34                          -- window width; two columns inside
-local COL_W = 16                          -- each column's text width
+local COL_W = 17                          -- each column's cell width
 
--- Every buildable thing, in display order, as {label, key}. `key` is the DF interface key that
--- selects that building directly (verified present in df.interface_key on this build). `slab=true`
--- marks the special-cased slab entry.
-local BUILDINGS = {
-    -- workshops
-    {'Carpenter',    'HOTKEY_BUILDING_WORKSHOP_CARPENTER'},
-    {'Mason',        'HOTKEY_BUILDING_WORKSHOP_MASON'},
-    {'Craftsdwarf',  'HOTKEY_BUILDING_WORKSHOP_CRAFTSMAN'},
-    {'Jeweler',      'HOTKEY_BUILDING_WORKSHOP_JEWELER'},
-    {'Metalsmith',   'HOTKEY_BUILDING_WORKSHOP_METALSMITH'},
-    {'Mechanic',     'HOTKEY_BUILDING_WORKSHOP_MECHANIC'},
-    {'Siege wksp',   'HOTKEY_BUILDING_WORKSHOP_SIEGE'},
-    {'Bowyer',       'HOTKEY_BUILDING_WORKSHOP_BOWYER'},
-    {'Butcher',      'HOTKEY_BUILDING_WORKSHOP_BUTCHER'},
-    {'Tanner',       'HOTKEY_BUILDING_WORKSHOP_TANNER'},
-    {'Leatherworks', 'HOTKEY_BUILDING_WORKSHOP_LEATHER'},
-    {'Clothier',     'HOTKEY_BUILDING_WORKSHOP_CLOTHES'},
-    {'Dyer',         'HOTKEY_BUILDING_WORKSHOP_DYER'},
-    {'Fishery',      'HOTKEY_BUILDING_WORKSHOP_FISHERY'},
-    {'Still',        'HOTKEY_BUILDING_WORKSHOP_STILL'},
-    {'Kitchen',      'HOTKEY_BUILDING_WORKSHOP_KITCHEN'},
-    {'Farmer',       'HOTKEY_BUILDING_WORKSHOP_FARMER'},
-    {'Quern',        'HOTKEY_BUILDING_WORKSHOP_QUERN'},
-    {'Millstone',    'HOTKEY_BUILDING_WORKSHOP_MILLSTONE'},
-    {'Magma mill',   'HOTKEY_BUILDING_WORKSHOP_LAVAMILL'},
-    {'Loom',         'HOTKEY_BUILDING_WORKSHOP_LOOM'},
-    {'Ashery',       'HOTKEY_BUILDING_WORKSHOP_ASHERY'},
-    {'Kennel',       'HOTKEY_BUILDING_KENNEL'},
-    -- furnaces
-    {'Wood furnace', 'HOTKEY_BUILDING_FURNACE_WOOD'},
-    {'Smelter',      'HOTKEY_BUILDING_FURNACE_SMELTER'},
-    {'Glass furnace','HOTKEY_BUILDING_FURNACE_GLASS'},
-    {'Kiln',         'HOTKEY_BUILDING_FURNACE_KILN'},
-    {'Magma smelter','HOTKEY_BUILDING_FURNACE_SMELTER_LAVA'},
-    {'Magma glass',  'HOTKEY_BUILDING_FURNACE_GLASS_LAVA'},
-    {'Magma kiln',   'HOTKEY_BUILDING_FURNACE_KILN_LAVA'},
-    -- constructions
-    {'Wall',         'HOTKEY_BUILDING_CONSTRUCTION_WALL'},
-    {'Floor',        'HOTKEY_BUILDING_CONSTRUCTION_FLOOR'},
-    {'Ramp',         'HOTKEY_BUILDING_CONSTRUCTION_RAMP'},
-    {'Stairs',       'HOTKEY_BUILDING_CONSTRUCTION_STAIR_UPDOWN'},
-    {'Fortificatn',  'HOTKEY_BUILDING_CONSTRUCTION_FORTIFICATION'},
-    {'Track',        'HOTKEY_BUILDING_CONSTRUCTION_TRACK'},
-    {'Track stop',   'HOTKEY_BUILDING_CONSTRUCTION_TRACK_STOP'},
-    -- doors / portals / windows
-    {'Door',         'HOTKEY_BUILDING_DOOR'},
-    {'Floodgate',    'HOTKEY_BUILDING_FLOODGATE'},
-    {'Hatch',        'HOTKEY_BUILDING_HATCH'},
-    {'Wall grate',   'HOTKEY_BUILDING_GRATE_WALL'},
-    {'Floor grate',  'HOTKEY_BUILDING_GRATE_FLOOR'},
-    {'Vert bars',    'HOTKEY_BUILDING_BARS_VERTICAL'},
-    {'Floor bars',   'HOTKEY_BUILDING_BARS_FLOOR'},
-    {'Glass window', 'HOTKEY_BUILDING_WINDOW_GLASS'},
-    {'Gem window',   'HOTKEY_BUILDING_WINDOW_GEM'},
-    {'Bridge',       'HOTKEY_BUILDING_BRIDGE'},
-    -- furniture
-    {'Bed',          'HOTKEY_BUILDING_BED'},
-    {'Chair',        'HOTKEY_BUILDING_CHAIR'},
-    {'Table',        'HOTKEY_BUILDING_TABLE'},
-    {'Coffin',       'HOTKEY_BUILDING_COFFIN'},
-    {'Cabinet',      'HOTKEY_BUILDING_CABINET'},
-    {'Chest',        'HOTKEY_BUILDING_BOX'},
-    {'Statue',       'HOTKEY_BUILDING_STATUE'},
-    {'Armor stand',  'HOTKEY_BUILDING_ARMORSTAND'},
-    {'Weapon rack',  'HOTKEY_BUILDING_WEAPONRACK'},
-    {'Slab',         'HOTKEY_BUILDING_SLAB', slab = true},
-    {'Nest box',     'HOTKEY_BUILDING_NEST_BOX'},
-    {'Bookcase',     'HOTKEY_BUILDING_BOOKCASE'},
-    {'Hive',         'HOTKEY_BUILDING_HIVE'},
-    {'Display case', 'HOTKEY_BUILDING_DISPLAY_FURNITURE'},
-    {'Offering',     'HOTKEY_BUILDING_OFFERING_PLACE'},
-    {'Traction bed', 'HOTKEY_BUILDING_TRACTION_BENCH'},
-    -- structures / zones-of-work
-    {'Well',         'HOTKEY_BUILDING_WELL'},
-    {'Farm plot',    'HOTKEY_BUILDING_FARMPLOT'},
-    {'Trade depot',  'HOTKEY_BUILDING_TRADEDEPOT'},
-    {'Support',      'HOTKEY_BUILDING_SUPPORT'},
-    {'Archery targ', 'HOTKEY_BUILDING_ARCHERYTARGET'},
-    {'Dirt road',    'HOTKEY_BUILDING_ROAD_DIRT'},
-    {'Paved road',   'HOTKEY_BUILDING_ROAD_PAVED'},
-    -- cages / chains / animals
-    {'Cage',         'HOTKEY_BUILDING_CAGE'},
-    {'Restraint',    'HOTKEY_BUILDING_CHAIN'},
-    {'Animal trap',  'HOTKEY_BUILDING_ANIMALTRAP'},
-    -- machines
-    {'Screw pump',   'HOTKEY_BUILDING_MACHINE_SCREW_PUMP'},
-    {'Water wheel',  'HOTKEY_BUILDING_MACHINE_WATER_WHEEL'},
-    {'Windmill',     'HOTKEY_BUILDING_MACHINE_WINDMILL'},
-    {'Gear assembly','HOTKEY_BUILDING_MACHINE_GEAR_ASSEMBLY'},
-    {'Vert axle',    'HOTKEY_BUILDING_MACHINE_AXLE_VERTICAL'},
-    {'Horiz axle',   'HOTKEY_BUILDING_MACHINE_AXLE_HORIZONTAL'},
-    {'Rollers',      'HOTKEY_BUILDING_MACHINE_ROLLERS'},
-    -- siege engines
-    {'Ballista',     'HOTKEY_BUILDING_SIEGEENGINE_BALLISTA'},
-    {'Catapult',     'HOTKEY_BUILDING_SIEGEENGINE_CATAPULT'},
-    -- traps
-    {'Lever',        'HOTKEY_BUILDING_TRAP_LEVER'},
-    {'Pressure plt', 'HOTKEY_BUILDING_TRAP_TRIGGER'},
-    {'Cage trap',    'HOTKEY_BUILDING_TRAP_CAGE'},
-    {'Stonefall',    'HOTKEY_BUILDING_TRAP_STONE'},
-    {'Weapon trap',  'HOTKEY_BUILDING_TRAP_WEAPON'},
-    {'Spike trap',   'HOTKEY_BUILDING_TRAP_SPIKE'},
-    {'Instrument',   'HOTKEY_BUILDING_INSTRUMENT'},
+-- Every buildable thing, in display order: {disp, path}. `path` is the sequence of on-screen
+-- button labels to click (category -> [subcategory] -> building), matched EXACTLY against the
+-- rendered menu text. `disp` is the (possibly shortened) label shown in the picker.
+local ENTRIES = {
+    -- Workshops (direct)
+    {'Carpenter',    {'Workshops', 'Carpenter'}},
+    {'Mason',        {'Workshops', 'Stoneworker'}},
+    {'Craftsdwarf',  {'Workshops', 'Crafts'}},
+    {'Jeweler',      {'Workshops', 'Jeweler'}},
+    {'Metalsmith',   {'Workshops', 'Metalsmith'}},
+    {'Magma forge',  {'Workshops', 'Magma forge'}},
+    {'Mechanic',     {'Workshops', 'Mechanic'}},
+    {'Siege wksp',   {'Workshops', 'Siege'}},
+    {'Bowyer',       {'Workshops', 'Bowyer'}},
+    {'Ashery',       {'Workshops', 'Ashery'}},
+    {'Soap maker',   {'Workshops', "Soap Maker's Workshop"}},
+    {'Screw press',  {'Workshops', 'Screw Press'}},
+    -- Workshops / Clothing and leather (subcategory -- pick the shop natively)
+    {'Cloth/leather',{'Workshops', 'Clothing and leather'}},
+    -- Workshops / Farming
+    {'Farm plot',    {'Workshops', 'Farming', 'Farm plot'}},
+    {'Still',        {'Workshops', 'Farming', 'Still'}},
+    {'Butcher',      {'Workshops', 'Farming', 'Butcher'}},
+    {'Tanner',       {'Workshops', 'Farming', 'Tanner'}},
+    {'Fishery',      {'Workshops', 'Farming', 'Fishery'}},
+    {'Kitchen',      {'Workshops', 'Farming', 'Kitchen'}},
+    {'Farmer',       {'Workshops', 'Farming', 'Farmer'}},
+    -- Workshops / Furnaces
+    {'Wood furnace', {'Workshops', 'Furnaces', 'Wood furnace'}},
+    {'Smelter',      {'Workshops', 'Furnaces', 'Smelter'}},
+    {'Glass furnace',{'Workshops', 'Furnaces', 'Glass furnace'}},
+    {'Kiln',         {'Workshops', 'Furnaces', 'Kiln'}},
+    {'Magma smelter',{'Workshops', 'Furnaces', 'Magma smelter'}},
+    {'Magma glass',  {'Workshops', 'Furnaces', 'Magma glass'}},
+    {'Magma kiln',   {'Workshops', 'Furnaces', 'Magma kiln'}},
+    -- Furniture
+    {'Bed',          {'Furniture', 'Bed'}},
+    {'Chair',        {'Furniture', 'Chair'}},
+    {'Table',        {'Furniture', 'Table'}},
+    {'Chest',        {'Furniture', 'Chest'}},
+    {'Cabinet',      {'Furniture', 'Cabinet'}},
+    {'Coffin',       {'Furniture', 'Burial'}},
+    {'Statue',       {'Furniture', 'Statue'}},
+    {'Slab',         {'Furniture', 'Slab'}},
+    {'Traction bed', {'Furniture', 'Traction bench'}},
+    {'Bookcase',     {'Furniture', 'Bookcase'}},
+    {'Display case', {'Furniture', 'Display'}},
+    {'Offering',     {'Furniture', 'Offering place'}},
+    {'Instrument',   {'Furniture', 'Instrument'}},
+    -- Doors / hatches
+    {'Door',         {'Doors/hatches', 'Door'}},
+    {'Hatch',        {'Doors/hatches', 'Hatch'}},
+    -- Constructions
+    {'Wall',         {'Constructions', 'Wall'}},
+    {'Reinf. wall',  {'Constructions', 'Reinforced Wall'}},
+    {'Floor',        {'Constructions', 'Floor'}},
+    {'Ramp',         {'Constructions', 'Ramp'}},
+    {'Stairs',       {'Constructions', 'Stairs'}},
+    {'Bridge',       {'Constructions', 'Bridge'}},
+    {'Paved road',   {'Constructions', 'Paved road'}},
+    {'Dirt road',    {'Constructions', 'Dirt road'}},
+    {'Fortificatn',  {'Constructions', 'Fortification'}},
+    {'Wall grate',   {'Constructions', 'Wall grate'}},
+    {'Floor grate',  {'Constructions', 'Floor grate'}},
+    {'Vert bars',    {'Constructions', 'Vertical bars'}},
+    {'Floor bars',   {'Constructions', 'Floor bars'}},
+    {'Glass window', {'Constructions', 'Glass window'}},
+    {'Gem window',   {'Constructions', 'Gem window'}},
+    {'Support',      {'Constructions', 'Support'}},
+    {'Track',        {'Constructions', 'Track'}},
+    {'Track stop',   {'Constructions', 'Track stop'}},
+    -- Machines / fluids
+    {'Lever',        {'Machines/fluids', 'Lever'}},
+    {'Well',         {'Machines/fluids', 'Well'}},
+    {'Floodgate',    {'Machines/fluids', 'Floodgate'}},
+    {'Screw pump',   {'Machines/fluids', 'Screw pump'}},
+    {'Water wheel',  {'Machines/fluids', 'Water wheel'}},
+    {'Windmill',     {'Machines/fluids', 'Windmill'}},
+    {'Gear assembly',{'Machines/fluids', 'Gear assembly'}},
+    {'Horiz axle',   {'Machines/fluids', 'Horizontal axle'}},
+    {'Vert axle',    {'Machines/fluids', 'Vertical axle'}},
+    {'Millstone',    {'Machines/fluids', 'Millstone'}},
+    {'Rollers',      {'Machines/fluids', 'Rollers'}},
+    -- Cages / restraints
+    {'Cage',         {'Cages/restraints', 'Cage'}},
+    {'Restraint',    {'Cages/restraints', 'Rope/chain'}},
+    {'Animal trap',  {'Cages/restraints', 'Animal trap'}},
+    -- Traps
+    {'Pressure plt', {'Traps', 'Pressure plate'}},
+    {'Cage trap',    {'Traps', 'Cage'}},
+    {'Stonefall',    {'Traps', 'Stone-fall'}},
+    {'Weapon trap',  {'Traps', 'Weapon'}},
+    {'Spike trap',   {'Traps', 'Upright weapon/spike'}},
+    -- Military
+    {'Archery targ', {'Military', 'Archery target'}},
+    {'Weapon rack',  {'Military', 'Weapon rack'}},
+    {'Armor stand',  {'Military', 'Armor stand'}},
+    {'Ballista',     {'Military', 'Ballista'}},
+    {'Catapult',     {'Military', 'Catapult'}},
+    {'Bolt thrower', {'Military', 'Bolt thrower'}},
+    -- direct (no submenu)
+    {'Trade depot',  {'Trade depot'}},
 }
 
--- keep only entries whose interface key actually exists on this build (defensive against
--- version drift -- a missing key would otherwise silently do nothing on click)
-local ENTRIES = {}
-for _, e in ipairs(BUILDINGS) do
-    if df.interface_key[e[2]] ~= nil then
-        ENTRIES[#ENTRIES + 1] = {label = e[1], key = e[2], slab = e.slab}
+-- ---- native-menu driver ------------------------------------------------------
+
+-- read one screen row as a string
+local function readrow(y, W)
+    local row = {}
+    for x = 0, W - 1 do
+        local ok, t = pcall(dfhack.screen.readTile, x, y)
+        local c = (ok and t and t.ch) or 32
+        if c < 32 or c > 126 then c = 32 end
+        row[x + 1] = string.char(c)
     end
+    return table.concat(row)
 end
 
--- ---- placement trigger -------------------------------------------------------
+-- split a row into button segments (labels are separated by 2+ spaces; a label's own internal
+-- single spaces stay intact). Returns {text, start_x(0-indexed)} for each segment.
+local function segments(s)
+    local out, x = {}, 1
+    while x <= #s do
+        local a = s:find('%S', x); if not a then break end
+        local b = s:find('%s%s', a)
+        local e = b and (b - 1) or #s
+        out[#out + 1] = {text = (s:sub(a, e):gsub('%s+$', '')), sx = a - 1}
+        x = e + 1
+    end
+    return out
+end
 
--- select a building for placement by feeding its native interface key. The key is fed from a
--- 1-frame timeout (NOT synchronously in onInput) so it lands inside DF's own frame loop -- the
--- proven pattern dwarf-rts uses to (re)open the squads panel; a synchronous/out-of-loop feed
--- doesn't drive the building interface.
-local function start_placement(entry)
-    -- drop the Dig tool so we're not mining and placing at once
-    mi().main_designation_selected = df.main_designation_type.NONE
-    dfhack.timeout(1, 'frames', function()
-        local scr = dfhack.gui.getDFViewscreen(true)
-        -- open the build interface, then jump to the specific building (its key enters placement)
-        gui.simulateInput(scr, 'A_BUILDING')
-        gui.simulateInput(scr, entry.key)
-    end)
-    -- NOTE (slab): the native slab flow prompts for the specific slab itself; forcing build-more
-    -- and bypassing buildingplan for slabs is a live-test TODO.
+-- find the button whose text is EXACTLY `label` (in the menu region, x>=40) and inject a click on
+-- its center. Returns true if clicked. Exact-segment match so "Wall" != "Reinforced Wall".
+local function click_exact(label)
+    local gps = df.global.gps
+    local W, H = gps.dimx, gps.dimy
+    for y = 0, H - 1 do
+        local s = readrow(y, W)
+        for _, seg in ipairs(segments(s)) do
+            if seg.text == label and seg.sx >= 40 then
+                gps.mouse_x = seg.sx + math.floor(#label / 2)
+                gps.mouse_y = y
+                gui.simulateInput(scr(), '_MOUSE_L')
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- open the build menu and click through `path` (category -> [subcategory] -> building). Each step
+-- is deferred a few frames so DF re-renders the next level before we read/click it. Fed keys and
+-- injected clicks must run inside DF's frame loop, hence the timeouts.
+local function navigate(path)
+    mi().main_designation_selected = df.main_designation_type.NONE   -- drop the Dig tool
+    dfhack.timeout(1, 'frames', function() gui.simulateInput(scr(), 'D_BUILDING') end)
+    local d = 4
+    for _, label in ipairs(path) do
+        local L = label
+        dfhack.timeout(d, 'frames', function() click_exact(L) end)
+        d = d + 3
+    end
 end
 
 -- ---- overlay -----------------------------------------------------------------
@@ -175,7 +206,7 @@ DigBuilding.ATTRS{
     default_pos = {x = 1, y = TOP_MARGIN + 1},   -- left edge; 10 rows of clear space above
     default_enabled = true,
     viewscreens = 'dwarfmode/Default',
-    frame = {w = WIN_W, h = 10},                  -- h is recomputed each update (full height - margins)
+    frame = {w = WIN_W, h = 10},                  -- h recomputed each update (full height - margins)
     overlay_onupdate_max_freq_seconds = 0,
 }
 
@@ -187,7 +218,6 @@ function DigBuilding:init()
     self.scroll = 0
 end
 
--- rows available for the list = window height (no border; we draw our own title row)
 function DigBuilding:list_rows()
     return math.max(1, self.frame.h - 1)   -- minus 1 for the title row
 end
@@ -199,7 +229,6 @@ end
 
 function DigBuilding:overlay_onupdate()
     self.visible = dig_active()
-    -- full height minus the top and bottom negative-space margins
     local h = df.global.gps.dimy - TOP_MARGIN - BOT_MARGIN
     if h ~= self.frame.h then self.frame.h = h end
     if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
@@ -209,54 +238,45 @@ function DigBuilding:onRenderBody(dc)
     if not self.visible then return end
     local rows = self:list_rows()
     local ms = self:max_scroll()
-    -- title row with scroll affordances
-    dc:seek(0, 0):pen(COLOR_GREY):string('Build')
+    dc:seek(0, 0):pen(COLOR_GREY):string('Build (click):')
     if ms > 0 then
         dc:seek(WIN_W - 6, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
         dc:seek(WIN_W - 1, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('+')
     end
-    -- two-column list
     for r = 0, rows - 1 do
         local line = self.scroll + r
         for c = 0, 1 do
-            local idx = line * 2 + c + 1
-            local e = ENTRIES[idx]
+            local e = ENTRIES[line * 2 + c + 1]
             if e then
-                dc:seek(c * COL_W, r + 1):pen(e.slab and COLOR_YELLOW or COLOR_WHITE)
-                    :string(e.label:sub(1, COL_W - 1))
+                dc:seek(c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1))
             end
         end
     end
 end
 
--- map a local (x,y) inside the body to an entry, or nil
 function DigBuilding:entry_at(x, y)
-    if y < 1 then return nil end                    -- title row
+    if y < 1 then return nil end
     local r = y - 1
     if r >= self:list_rows() then return nil end
     local c = (x >= COL_W) and 1 or 0
-    local idx = (self.scroll + r) * 2 + c + 1
-    return ENTRIES[idx]
+    return ENTRIES[(self.scroll + r) * 2 + c + 1]
 end
 
 function DigBuilding:onInput(keys)
     if not self.visible then return false end
-    -- mouse wheel scrolls the list
     if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1); return true end
     if keys.CONTEXT_SCROLL_DOWN then self.scroll = math.min(self:max_scroll(), self.scroll + 1); return true end
-
     if keys._MOUSE_L then
         local x, y = self:getMousePos()
-        if not x then return false end              -- click outside the window: let it pass through
-        -- title-row scroll buttons
+        if not x then return false end        -- click outside the window: pass through to the map
         if y == 0 then
             if x >= WIN_W - 6 and x <= WIN_W - 2 then self.scroll = math.max(0, self.scroll - 1)
             elseif x >= WIN_W - 1 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
             return true
         end
         local e = self:entry_at(x, y)
-        if e then start_placement(e) end
-        return true                                 -- consume any click within the window
+        if e then navigate(e[2]) end
+        return true                           -- consume any click within the window
     end
     return false
 end
