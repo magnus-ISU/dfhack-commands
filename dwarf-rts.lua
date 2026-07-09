@@ -1188,8 +1188,18 @@ function DwarfRtsClickMove:onInput(keys)
             and df.global.gps.mouse_x >= df.global.gps.dimx - WINDOW_COLS
             and top == 'dwarfmode/Default'
         then
-            sq.open = true                             -- onupdate's open edge selects all
-            return true
+            -- Open the panel exactly as the native Squads button does: feed DF its own
+            -- D_SQUADS key so it RUNS its open logic and (re)builds squad_id. Just flipping
+            -- sq.open=true does NOT run that rebuild (the same reason refresh_squad_list has
+            -- to re-key the panel), so the FIRST time -- before the panel has ever been
+            -- opened natively, when squad_id is still empty -- a flag-flip opened a stale,
+            -- empty panel with nothing to select. Deferred a frame (like refresh_squad_list)
+            -- to avoid feeding input while we're mid-input. onupdate's open edge then
+            -- selects-all / reorders as usual once sq.open flips true.
+            dfhack.timeout(1, 'frames', function()
+                gui.simulateInput(dfhack.gui.getDFViewscreen(true), 'D_SQUADS')
+            end)
+            return true                                -- consume the right-click that opened it
         end
         return false
     end

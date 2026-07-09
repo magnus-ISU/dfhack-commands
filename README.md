@@ -75,7 +75,16 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `statue-redirect` | overlay+enableable | ✅ done | Selecting a statue redirects you to the statue **item's sheet** (DF's full prose description; press native "View" to go back). Also adds a **Remove** button on any built item's sheet that deconstructs its building. `enable statue-redirect` |
 | `item-description` | overlay | ✅ done | Redraws an item view-sheet's description in place using up to **half the screen height** — DF's own box truncates long ones (artifacts, decorated items, books, engraved slabs) to ~8 rows |
 | `empty-labor-notification` | register | ✅ done | Notify-panel warning when a Work Detail is "Only Selected Does This" but has **no usable worker** (nothing selected, the selected dwarves died/left, or they're all on Military duty). Click → the offending details + their labors. The pack's "Military" detail is exempt |
-| `dig-shapes` | overlay | 🟡 partial | RTS map interactions (overlay `dig-shapes.watcher`): **right-click** the exposed map → enter mining (Dig) mode; **shaped Dig boxes** are reclassified on completion — a 1×1×N column → staircase, a selection through open air → **real constructed walls/floors** (bottom-up), a box of only constructions → designated for **Remove**, tree tiles → chop, natural rock → ordinary mining. Guarded so clicks on panels/notifications/other overlays aren't hijacked. **TODO — incomplete:** should also let you **build furniture / workshops / buildings** from the map, not just dig and construct walls/floors/stairs |
+| `dig-shapes` | overlay | ✅ done | RTS map interactions (overlay `dig-shapes.watcher`): **right-click** the exposed map → enter mining (Dig) mode; **shaped Dig boxes** are reclassified on completion — a 1×1×N column → staircase, a selection through open air → **real constructed walls/floors** (bottom-up), a box of only constructions → designated for **Remove**, tree tiles → chop, natural rock → ordinary mining. Guarded so clicks on panels/notifications/other overlays aren't hijacked. (Building placement moved to `dig-building`.) |
+| `dig-building` | overlay | 🟡 wip | Companion to `dig-shapes`: while the **Dig tool is active** (normal mining mode), a **building picker** window docks on the **left** listing every buildable thing — workshops, furnaces, constructions (wall/floor/ramp/stair/fortification/track), doors/hatches/grates/bars, trade depot, well, farm plot, military buildings, traps, cages/chains/restraints, machines, siege engines, and all furniture. Two columns, vertically **scrollable** when it overflows; the window leaves **10 rows of negative space at the top and 4 at the bottom** uncovered. Clicking an entry drops the Dig tool and enters that building's **placement action in buildingplan mode** (materials reserved per your buildingplan filters; click to place; build-more-after-placement on). **Exception — slabs:** instead of buildingplan it asks **which specific slab item** to use, and always keeps build-more enabled. **WIP:** live click-testing pending |
+
+---
+
+## Known bugs
+
+| Script | Bug | Status |
+| --- | --- | --- |
+| `dwarf-rts` | The **first time** you open the Squads screen in a session, it must be opened with the native **Squads toolbar button** — right-clicking the right-hand side of the screen won't open it that first time (it works on every subsequent open). Cause: the right-click opened the panel by flag-flipping `squads.open`, which skips DF's open logic that builds `squad_id` (empty until a native open). Fix: right-click now feeds DF's own `D_SQUADS` key so it runs the real open. | 🔧 fixed (pending live test) |
 
 ---
 
@@ -218,8 +227,9 @@ press-poller + onInput; reuse it for the mining/building feature.
 
 ### 🟡 RTS mining + building mode (requested, **incomplete**) — `dig-shapes.lua`
 
-**Still TODO:** this only handles digging and constructing walls/floors/stairs so far — it should
-also let you **place furniture, workshops, and other buildings** directly from the map.
+`dig-shapes.lua` handles digging and constructing walls/floors/stairs from the map. Placing
+**furniture, workshops, and other buildings** is handled by its companion **`dig-building.lua`**
+(the left-hand building picker — see its own entry below).
 
 All of this lives in **`dig-shapes.lua`** (overlay `dig-shapes.watcher`), gated through
 `map_pos_if_clear()` — strict `getMousePos()` is nil over any panel, `current_hover` flags DF
