@@ -32,8 +32,9 @@ pick what to wear themselves. Gear is made in the uniform's metal (steel). But w
 the soldiers don't have enough wearable/usable pieces for a slot (desired steel + backup
 stock < the number who need it), the service also stocks a BACKUP version of that piece
 -- armour, shield, AND weapon -- so nobody is left without something to equip. The backup
-metal is IRON when there's iron to spare after the steel we still owe (iron ore + iron
-bars - iron for the outstanding steel > 0), else COPPER; iron gear is far better, and
+metal is IRON when there's iron to spare after the steel we still owe (iron ore x4 [4
+bars per smelted boulder] + iron bars - iron for the outstanding steel > 0), else
+COPPER; iron gear is far better, and
 picking iron also replaces copper backups. NOT gated on steel supply -- copper/iron fills
 the gap while steel forges; it stops once steel + backup covers everyone. (Uniform-copper
 pieces like the crossbow are skipped -- the main loop makes those.)
@@ -169,11 +170,24 @@ local function add_to_slot(u, slot, item_type, subtype, mattype, matindex, matcl
     return true
 end
 
+-- an item (bar / ore boulder) that is REALLY on hand -- one a forge job could claim.
+-- Excludes items built into a building (e.g. the bars of a steel bridge), items inside
+-- a constructed wall/floor, a merchant's goods, and forbidden/dumped/inaccessible ones.
+-- Without this, bars locked in a bridge satisfied the bar reserve on paper while the
+-- real stock was already gone.
+local function on_hand(it)
+    local f = it.flags
+    return not (f.in_building or f.construction or f.trader or f.forbid
+        or f.dump or f.garbage_collect or f.encased or f.on_fire)
+end
+
 -- how many metal (mattype 0) bars of each inorganic index the fort has on hand
 local function metal_bar_counts()
     local c = {}
     for _, it in ipairs(df.global.world.items.all) do
-        if it:getType() == df.item_type.BAR and it:getMaterial() == 0 and not it.flags.melt then
+        if it:getType() == df.item_type.BAR and it:getMaterial() == 0 and not it.flags.melt
+            and on_hand(it)
+        then
             local mi = it:getMaterialIndex()
             c[mi] = (c[mi] or 0) + 1
         end
@@ -1178,7 +1192,7 @@ local function equip_workers(units, sub, key, done_field)
         if not_fort_stock(it) then goto next end
         local t = it:getType()
         if t == df.item_type.BAR and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
-            steel_bars = steel_bars + 1
+            if on_hand(it) then steel_bars = steel_bars + 1 end
         elseif t == df.item_type.WEAPON and it:getSubtype() == sub
             and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
             if it.flags.melt then
@@ -1471,9 +1485,14 @@ local function run_cycle()
         if not_fort_stock(it) then goto next_item end
         local t = it:getType()
         if t == df.item_type.BAR then
-            bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
+            if on_hand(it) then
+                bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
+            end
         elseif t == df.item_type.BOULDER then
-            if it:getMaterial() == 0 and iron_ores[it:getMaterialIndex()] then iron_ore_count = iron_ore_count + 1 end
+            if it:getMaterial() == 0 and iron_ores[it:getMaterialIndex()] and on_hand(it) then
+                -- smelting one ore boulder yields 4 bars, so count it as 4 iron
+                iron_ore_count = iron_ore_count + 4
+            end
         elseif t == df.item_type.WOOD and not it.flags.melt then
             logs = logs + 1                                  -- for the wood-shield stand-in
         elseif t == df.item_type.SKIN_TANNED then
@@ -1740,7 +1759,13 @@ local function run_cycle()
     local pig_bars = bars[barkey(0, pig_idx or -1)] or 0
     local iron_for_steel = steel_short + math.max(0, steel_short - pig_bars)
     local iron_left = ((bars[barkey(0, iron_idx or -1)] or 0) + iron_ore_count) - iron_for_steel
-    local backup_idx = (iron_idx and iron_left > 0) and iron_idx or copper_idx
+    -- iron backup gear needs actual BARS at the forge: ore boulders keep iron "to spare"
+    -- on paper (iron_left), but with the bars completely run out nothing can be forged --
+    -- the budget check below would just veto every order and copper would never be tried.
+    -- So iron is only picked while at least one iron item is forgeable RIGHT NOW (bars
+    -- beyond the reserve); otherwise copper still gets made while the ore waits to smelt.
+    local iron_forgeable = iron_idx and (budget[barkey(0, iron_idx)] or 0) >= BARS_PER_ITEM
+    local backup_idx = (iron_left > 0 and iron_forgeable) and iron_idx or copper_idx
     if backup_idx then
         local bmk = barkey(0, backup_idx)
         local backup_stock = bstock[backup_idx] or {}
@@ -1786,7 +1811,8 @@ local function run_cycle()
             local mt, mi, mc
             if logs > 0 then
                 mt, mi, mc = -1, -1, df.entity_material_category.Wood
-            elseif iron_idx and ((bars[barkey(0, iron_idx)] or 0) > 0 or iron_ore_count > 0) then
+            elseif iron_idx and (bars[barkey(0, iron_idx)] or 0) > 0 then
+                -- iron only on actual bars: ore alone can't fill the order (see backup metal)
                 mt, mi, mc = 0, iron_idx, -1
             elseif copper_idx then
                 mt, mi, mc = 0, copper_idx, -1
