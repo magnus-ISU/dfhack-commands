@@ -56,6 +56,11 @@ local FIXED = {
     {'crown', 'CROWN', 'MakeCrown'}, {'scepter', 'SCEPTER', 'MakeScepter'},
     {'figurine', 'FIGURINE', 'MakeFigurine'}, {'goblet', 'GOBLET', 'MakeGoblet'},
     {'toy', 'TOY', 'MakeToy'}, {'flask', 'FLASK', 'MakeFlask'}, {'totem', 'TOTEM', 'MakeTotem'},
+    {'quern', 'QUERN', 'ConstructQuern'}, {'millstone', 'MILLSTONE', 'ConstructMillstone'},
+    {'slab', 'SLAB', 'ConstructSlab'}, {'splint', 'SPLINT', 'ConstructSplint'},
+    {'crutch', 'CRUTCH', 'ConstructCrutch'}, {'traction bench', 'TRACTION_BENCH', 'ConstructTractionBench'},
+    {'pipe section', 'PIPE_SECTION', 'MakePipeSection'}, {'anvil', 'ANVIL', 'ForgeAnvil'},
+    {'window', 'WINDOW', 'MakeWindow'}, {'animal trap', 'ANIMALTRAP', 'MakeAnimalTrap'},
 }
 
 -- subtype-bearing item classes: itemdef vector -> {job, item_type}
@@ -72,6 +77,18 @@ local SUBTYPED = {
 -- glass) and never forced.
 local SPECIAL = {
     {job = 'CollectSand',     names = {'collect sand', 'gather sand', 'sand'}},
+    {job = 'CollectWebs',     names = {'collect webs', 'collect web', 'gather webs', 'collect silk', 'gather silk'}},
+    {job = 'CollectClay',     names = {'collect clay', 'gather clay'}},
+    {job = 'CollectHiveProducts', names = {'collect hive products', 'collect honey', 'harvest hive', 'gather hive'}},
+    {job = 'ButcherAnimal',   names = {'butcher animal', 'butcher an animal', 'butcher'}},
+    {job = 'WeaveCloth',      names = {'weave cloth', 'weave', 'make cloth'}},
+    {job = 'MakeCharcoal',    names = {'make charcoal', 'burn charcoal', 'charcoal'}},
+    {job = 'MakeAsh',         names = {'make ash', 'burn ash'}},
+    {job = 'MakeLye',         names = {'make lye', 'lye'}},
+    {job = 'MakePotashFromLye', names = {'make potash from lye', 'potash from lye'}},
+    {job = 'MakePotashFromAsh', names = {'make potash from ash', 'make potash', 'potash'}},
+    {job = 'ExtractMetalStrands', names = {'extract metal strands', 'extract strands', 'process adamantine'}},
+    {job = 'MintCoins',       names = {'mint coins', 'make coins', 'mint'}},
     {job = 'MilkCreature',    names = {'milk creature', 'milk animal', 'milk'}},
     {job = 'ShearCreature',   names = {'shear creature', 'shear animal', 'shear'}},
     {job = 'MeltMetalObject', names = {'melt metal object', 'melt object', 'melt item', 'melt'}},
