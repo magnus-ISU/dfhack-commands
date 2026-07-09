@@ -2,21 +2,25 @@
 --@module = true
 --[[
 On the stockpile category-edit screen (focus dwarfmode/Stockpile/Some/Customize)
-this adds a single button in the very bottom-left corner:
+this adds controls in the bottom-left corner. Each button TOGGLES only its own
+group on/off, so you can compose a pile (binnables + food, food + drink, etc.):
 
-    * all binnables  -- configures the selected stockpile to accept exactly the
-                        item categories that live in a bin, barrel, bag, or pot.
+    * all binnables -- the container categories, WITHOUT food/drink: Ammo, Armor,
+                       Bars/Blocks, Cloth, Coins, Finished goods, Gems, Leather,
+                       Sheets, Weapons.
+    * all food      -- everything edible EXCEPT seeds and drinks, with the
+                       "Extract (animal)" category trimmed to just milk & honey
+                       (the rest is procedural venom/poison/extract clutter).
+    * all drink     -- Drink (plant) + Drink (animal).
+    * quality       -- a tri-state that overwrites the quality options in Armor,
+                       Finished goods, Furniture and Weapons/trap comps:
+                         all        -- every quality
+                         masterwork -- only masterwork
+                         inferior   -- everything except masterwork
 
-"Binnable" = every category that uses a container. Enabled:
-    Ammo, Armor, Bars/Blocks, Cloth, Coins, Finished goods, Food, Gems,
-    Leather, Sheets, Weapons
-Disabled (no container -- loose on the floor / in cages):
-    Animals, Corpses, Furniture, Refuse, Stone, Wood
-
-So the click both turns the binnable categories fully ON and turns the
-non-binnable ones OFF -- the pile ends up holding exactly the container goods,
-no matter what it held before. Implemented by importing DFHack's own per-category
-library presets (cat_*.dfstock), so it tracks item subtypes across versions.
+Category toggles use DFHack's per-category library presets (cat_*.dfstock);
+food/drink/quality are edited directly. Also: clicking an already-selected
+main category (or middle-column sub-category) again toggles it all on/off.
 
 Registered automatically as overlay `binnable-stockpile.button`.
 Reposition with `gui/overlay`.
@@ -26,53 +30,210 @@ local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local stockpiles = require('plugins.stockpiles')
 
--- Category library presets that use a container (bin / barrel / bag / pot).
-local BINNABLE = {
-    'cat_ammo', 'cat_armor', 'cat_bars_blocks', 'cat_cloth', 'cat_coins',
-    'cat_finished_goods', 'cat_food', 'cat_gems', 'cat_leather', 'cat_sheets',
-    'cat_weapons',
-}
-
--- Everything else: never stored in a container, so we clear it.
-local NON_BINNABLE = {
-    'cat_animals', 'cat_corpses', 'cat_furniture', 'cat_refuse', 'cat_stone',
-    'cat_wood',
-}
-
-local function apply_binnables()
+-- ---- shared helpers -------------------------------------------------------
+local function set_elem(v, i, on)
+    if type(v[i]) == 'boolean' then v[i] = on else v[i] = on and 1 or 0 end
+end
+local function set_vec(v, on) for i = 0, #v - 1 do set_elem(v, i, on) end end
+local function vec_any_on(v)
+    for i = 0, #v - 1 do local e = v[i]
+        if (type(e) == 'boolean' and e) or (type(e) == 'number' and e ~= 0) then return true end end
+    return false
+end
+-- any enabled element across every field of a category-settings struct
+local function cat_any_on(s)
+    if not s then return false end
+    for _, v in pairs(s) do
+        if type(v) == 'boolean' and v then return true end
+        if type(v) == 'userdata' then
+            local ok, l = pcall(function() return #v end)
+            if ok and l > 0 and vec_any_on(v) then return true end
+        end
+    end
+    return false
+end
+-- The stockpile being customized. dfhack.gui.getSelectedStockpile is flaky on this screen (returns
+-- nil intermittently), so when the customize screen is open we find the building whose settings IS
+-- the working copy the screen edits (cs.sp) -- matching by address is reliable.
+local function get_sp()
+    local cs = df.global.game.main_interface.custom_stockpile
+    if cs.open then
+        local target = select(2, df.sizeof(cs.sp))
+        for _, b in ipairs(df.global.world.buildings.all) do
+            if b:getType() == df.building_type.Stockpile and select(2, df.sizeof(b.settings)) == target then
+                return b
+            end
+        end
+    end
     local sp = dfhack.gui.getSelectedStockpile(true)
-    if not sp then
-        dfhack.printerr('binnable-stockpile: no stockpile selected')
-        return
+    if not sp then dfhack.printerr('binnable-stockpile: no stockpile selected') end
+    return sp
+end
+
+-- quality overwrite for a set of categories. quality_core/quality_total are 7-wide:
+-- 0 Ordinary .. 5 Masterful (masterwork) .. 6 Artifact.
+local QUALITY = {                         -- indices 0..6, 1-based here
+    all      = {true, true, true, true, true, true,  true},
+    master   = {false, false, false, false, false, true,  true},    -- masterwork + artifact
+    inferior = {true, true, true, true, true, false, false},        -- everything below masterwork
+}
+local function set_quality(sp, mode, cats)
+    local set = QUALITY[mode]; if not set then return end
+    for _, cat in ipairs(cats) do
+        local s = sp.settings[cat]
+        if s then
+            for _, qf in ipairs({'quality_core', 'quality_total'}) do
+                local v = s[qf]
+                if v and #v >= 7 then for i = 0, 6 do set_elem(v, i, set[i + 1]) end end
+            end
+        end
     end
-    -- enable the binnable categories (whole-category on), disable the rest
-    for _, name in ipairs(BINNABLE) do
-        stockpiles.import_settings('library/' .. name, {id = sp.id, mode = 'enable'})
+end
+
+-- ---- binnables (container categories, WITHOUT food/drink) ------------------
+-- "all binnables" OVERWRITES the pile to a binnables pile: it turns the container categories fully
+-- ON and the non-container ones OFF, and resets their quality to "all". It deliberately leaves the
+-- food category alone, so food/drink (their own toggles) compose on top -- and a binnables pile no
+-- longer drags in cat_food's procedural venom/ink/forgotten-beast extract clutter.
+local BINNABLE = {'cat_ammo', 'cat_armor', 'cat_bars_blocks', 'cat_cloth', 'cat_coins',
+    'cat_finished_goods', 'cat_gems', 'cat_leather', 'cat_sheets', 'cat_weapons'}
+local NON_BINNABLE = {'cat_animals', 'cat_corpses', 'cat_furniture', 'cat_refuse', 'cat_stone', 'cat_wood'}
+local CAT_FIELD = {cat_ammo = 'ammo', cat_armor = 'armor', cat_bars_blocks = 'bars_blocks',
+    cat_cloth = 'cloth', cat_coins = 'coins', cat_finished_goods = 'finished_goods',
+    cat_gems = 'gems', cat_leather = 'leather', cat_sheets = 'sheet', cat_weapons = 'weapons'}
+
+-- Toggle: if it's ALREADY a full binnables pile (every binnable category on) turn those categories
+-- OFF; otherwise OVERWRITE into a binnables pile (all binnable categories on, non-container ones off,
+-- quality reset to "all"). Checking "every" (not "any") is what makes a half-configured pile overwrite
+-- to full instead of getting wiped. Food is left alone, so food/drink compose on top.
+local function apply_binnables()
+    local sp = get_sp(); if not sp then return end
+    local all_on = true
+    for _, cat in ipairs(BINNABLE) do
+        if not cat_any_on(sp.settings[CAT_FIELD[cat]]) then all_on = false; break end
     end
-    for _, name in ipairs(NON_BINNABLE) do
-        stockpiles.import_settings('library/' .. name, {id = sp.id, mode = 'disable'})
+    if all_on then
+        for _, cat in ipairs(BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        print('binnable-stockpile: binnables OFF')
+    else
+        for _, cat in ipairs(BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'enable'}) end
+        for _, cat in ipairs(NON_BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        set_quality(sp, 'all', {'armor', 'finished_goods', 'weapons'})
+        print('binnable-stockpile: set to all binnables')
     end
-    print('binnable-stockpile: set stockpile #' .. sp.id .. ' to all binnables')
+end
+
+-- ---- food + drink (both live in the single food category) ------------------
+local DRINK_FIELDS = {drink_plant = true, drink_animal = true}
+
+-- extract-animal ("Extract (animal)") = organic category CreatureLiquid, indexed parallel to
+-- mat_table.organic. Keep only MILK + HONEY; the rest is procedural venom/poison/extract clutter.
+local function set_extracts_milk_honey(f)
+    local mt = df.global.world.raws.mat_table
+    local c = df.organic_mat_category.CreatureLiquid
+    local types, idxs = mt.organic_types[c], mt.organic_indexes[c]
+    local la = f.liquid_animal
+    for i = 0, #la - 1 do
+        local mi = dfhack.matinfo.decode(types[i], idxs[i])
+        local id = mi and mi.material and mi.material.id
+        set_elem(la, i, id == 'MILK' or id == 'HONEY')
+    end
+end
+
+-- The food vectors are empty until the food category is touched. Populate them if needed, starting
+-- from all-OFF so the food/drink toggles only turn on what they mean to (and don't clobber a group
+-- the other button owns).
+local function ensure_food(sp)
+    local f = sp.settings.food
+    if #f.drink_plant > 0 then return f end
+    stockpiles.import_settings('library/cat_food', {id = sp.id, mode = 'enable'})
+    for k, v in pairs(f) do
+        if type(v) == 'boolean' then f[k] = false
+        elseif type(v) == 'userdata' then local ok = pcall(function() return #v end); if ok then set_vec(v, false) end end
+    end
+    return f
+end
+
+-- iterate the food fields we manage as "food" (everything except the two drink fields)
+local function food_fields(f, fn)
+    for k, v in pairs(f) do
+        if not DRINK_FIELDS[k] and (type(v) == 'boolean' or type(v) == 'userdata') then fn(k, v) end
+    end
+end
+
+-- toggle non-drink food: all edible food EXCEPT seeds and drinks, extract-animal = milk/honey
+local function apply_food()
+    local sp = get_sp(); if not sp then return end
+    local f = ensure_food(sp)
+    local on = false
+    food_fields(f, function(k, v)
+        if not on then
+            if type(v) == 'boolean' then on = v
+            else local ok, l = pcall(function() return #v end); on = ok and l > 0 and vec_any_on(v) end
+        end
+    end)
+    if on then
+        food_fields(f, function(k, v) if type(v) == 'boolean' then f[k] = false else set_vec(v, false) end end)
+    else
+        food_fields(f, function(k, v)
+            if k ~= 'seeds' then if type(v) == 'boolean' then f[k] = true else set_vec(v, true) end end
+        end)
+        set_extracts_milk_honey(f)
+    end
+    print('binnable-stockpile: food ' .. (on and 'OFF' or 'ON'))
+end
+
+-- toggle drinks (Drink (plant) + Drink (animal))
+local function apply_drink()
+    local sp = get_sp(); if not sp then return end
+    local f = ensure_food(sp)
+    local on = vec_any_on(f.drink_plant) or vec_any_on(f.drink_animal)
+    set_vec(f.drink_plant, not on); set_vec(f.drink_animal, not on)
+    print('binnable-stockpile: drink ' .. (on and 'OFF' or 'ON'))
+end
+
+-- ---- quality tri-state (armor / finished goods / furniture / weapons+trapcomps) -----------
+local QUALITY_CATS = {'armor', 'finished_goods', 'furniture', 'weapons'}
+local function apply_quality(mode)
+    local sp = get_sp(); if not sp then return end
+    set_quality(sp, mode, QUALITY_CATS)
+    print('binnable-stockpile: quality -> ' .. mode)
 end
 
 BinnableButton = defclass(BinnableButton, overlay.OverlayWidget)
 BinnableButton.ATTRS{
-    desc = 'Stockpile screen button: set the pile to accept all binnable/barrelable items.',
+    desc = 'Stockpile screen: toggle binnables / food / drink groups, and a quality tri-state.',
     default_pos = {x = 8, y = -5},   -- bottom-left area, clear of the native buttons
     default_enabled = true,
     viewscreens = 'dwarfmode/Stockpile/Some/Customize',
-    frame = {w = 26, h = 1},
-    version = 2,   -- bumped so the moved default position takes effect
+    frame = {w = 26, h = 4},
+    version = 5,   -- bumped so the new size/position takes effect
 }
 
 function BinnableButton:init()
     self:addviews{
         widgets.TextButton{
-            view_id = 'binnables',
-            frame = {t = 0, l = 0, w = 26, h = 1},
-            label = 'all binnables',
-            key = 'CUSTOM_CTRL_B',
-            on_activate = apply_binnables,
+            view_id = 'binnables', frame = {t = 0, l = 0, w = 26, h = 1},
+            label = 'all binnables', key = 'CUSTOM_CTRL_B', on_activate = apply_binnables,
+        },
+        widgets.TextButton{
+            view_id = 'food', frame = {t = 1, l = 0, w = 26, h = 1},
+            label = 'all food', key = 'CUSTOM_CTRL_F', on_activate = apply_food,
+        },
+        widgets.TextButton{
+            view_id = 'drink', frame = {t = 2, l = 0, w = 26, h = 1},
+            label = 'all drink', key = 'CUSTOM_CTRL_D', on_activate = apply_drink,
+        },
+        widgets.CycleHotkeyLabel{
+            view_id = 'quality', frame = {t = 3, l = 0, w = 26, h = 1},
+            label = 'quality', key = 'CUSTOM_CTRL_Q',
+            options = {
+                {label = '(set)', value = 'none'},
+                {label = 'all', value = 'all'},
+                {label = 'masterwork', value = 'master'},
+                {label = 'inferior', value = 'inferior'},
+            },
+            on_change = function(new) if new ~= 'none' then apply_quality(new) end end,
         },
     }
 end
@@ -155,34 +316,14 @@ local function none_x(y, x0)
     end
 end
 
--- the cs.sp vector backing the selected sub-category. The col2 list shows the settings struct's
--- len>0 vector fields in declaration order (empty fields are hidden; boolean/special subs carry a
--- non-NONE sub_mode_ptr_type), so the Nth NONE-type sub is the Nth len>0 vector field. Positional,
--- so it stays correct even when two fields share a length (e.g. fish vs unprepared_fish).
-local function sub_vector(cs)
-    local mn = main_cat_name(cs)
-    local s = mn and cs.sp[mn]
-    if not s then return end
-    local fields = {}
-    for _, v in pairs(s) do
-        if type(v) == 'userdata' then
-            local ok, l = pcall(function() return #v end)
-            if ok and l > 0 then fields[#fields + 1] = v end
-        end
-    end
-    local pos = 0
-    for i = 0, #cs.sub_mode - 1 do
-        if cs.sub_mode_ptr_type[i] == df.stock_pile_pointer_type.NONE then
-            if cs.sub_mode[i] == cs.cur_sub_mode then return fields[pos + 1] end
-            pos = pos + 1
-        end
-    end
-end
-
-local function any_elem_on(field)
-    for i = 0, #field - 1 do
-        local e = field[i]
-        if (type(e) == 'boolean' and e) or (type(e) == 'number' and e ~= 0) then return true end
+-- Is any item in the currently-selected sub-category enabled? Read straight from the live col3
+-- item list (spec_item[].set_pointer points at the real setting byte, 0 = off). This is robust
+-- where a positional field map isn't: subs like Stone/clay|Metal|Gem are three slices of ONE
+-- field, and Color / Total quality then land on the wrong field -- but their col3 items are always
+-- exactly what's shown, so reading those directly gives the right on/off state every time.
+local function sub_any_on(cs)
+    for i = 0, cs.cur_spec_item_sz - 1 do
+        if cs.spec_item[i].set_pointer.value ~= 0 then return true end
     end
     return false
 end
@@ -208,23 +349,21 @@ function CategoryToggle:onInput(keys)
         if cols and all_y and my > all_y then
             -- second click on the SAME middle-column (sub-category) row: redirect this real click onto
             -- col3's All/None so the native screen toggles the sub. Only for 3-column categories.
-            if cols[3] and self.prev and my == self.prev.my and mx >= cols[2] and mx < cols[3] then
-                local field = sub_vector(cs)
-                if field then
-                    -- Direction = flip the current state. cs.sp lags a frame behind a just-applied
-                    -- toggle, so on rapid re-clicks of the SAME sub we trust our own last-applied
-                    -- state instead of the stale read -- keeps 3rd/4th clicks alternating, not no-op.
-                    local key = cs.cur_main_mode .. '/' .. cs.cur_sub_mode
-                    local current
-                    if self.applied and self.applied.key == key then current = self.applied.state
-                    else current = any_elem_on(field) end
-                    local target_on = not current
-                    -- target on -> col3 "All"; target off -> col3 "None"
-                    df.global.gps.mouse_x = target_on and cols[3] or (none_x(all_y, cols[3] + 3) or cols[3])
-                    df.global.gps.mouse_y = all_y
-                    self.applied = {key = key, state = target_on}
-                    self.restore = {mx = mx, my = my}   -- put the cursor back next frame (see below)
-                end
+            if cols[3] and self.prev and my == self.prev.my and mx >= cols[2] and mx < cols[3]
+               and cs.cur_spec_item_sz > 0 then
+                -- Direction = flip the current state. cs.sp lags a frame behind a just-applied
+                -- toggle, so on rapid re-clicks of the SAME sub we trust our own last-applied
+                -- state instead of the stale read -- keeps 3rd/4th clicks alternating, not no-op.
+                local key = cs.cur_main_mode .. '/' .. cs.cur_sub_mode
+                local current
+                if self.applied and self.applied.key == key then current = self.applied.state
+                else current = sub_any_on(cs) end
+                local target_on = not current
+                -- target on -> col3 "All"; target off -> col3 "None"
+                df.global.gps.mouse_x = target_on and cols[3] or (none_x(all_y, cols[3] + 3) or cols[3])
+                df.global.gps.mouse_y = all_y
+                self.applied = {key = key, state = target_on}
+                self.restore = {mx = mx, my = my}   -- put the cursor back next frame (see below)
             end
             self.prev = {mx = mx, my = my}
             -- also record the pre-click main category for the col1 re-click test judged next frame
