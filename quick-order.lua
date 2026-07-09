@@ -112,10 +112,7 @@ local function build_vocab()
         local vec = df.global.world.raws.itemdefs[vecname]
         for i = 0, #vec - 1 do
             local def = vec[i]
-            add_job(v, def.name, spec[1], spec[2], def.subtype, true)
-            if def.name_plural and def.name_plural ~= def.name then
-                add_job(v, def.name_plural, spec[1], spec[2], def.subtype, true)
-            end
+            add_job(v, def.name, spec[1], spec[2], def.subtype, true)   -- singular only (scorer handles plurals)
         end
     end
     for _, sp in ipairs(SPECIAL) do
@@ -165,6 +162,13 @@ local function build_vocab()
             v[#v + 1] = {name = norm(r.name), kind = 'reaction',
                          job = df.job_type.CustomReaction, reaction_name = r.code,
                          item_type = -1, item_subtype = -1, needs_mat = false}
+        end
+    end
+    -- cache each entry's name tokens + singulars once, so ranking never re-tokenizes
+    for _, e in ipairs(v) do
+        e.ntoks, e.nsings = {}, {}
+        for w in e.name:gmatch('%S+') do
+            e.ntoks[#e.ntoks + 1] = w; e.nsings[#e.nsings + 1] = singular(w)
         end
     end
     vocab = v
@@ -250,6 +254,27 @@ local function score_name(query, name)
     end
     local sc = 90 - (#n - matched) * 4 - gaps * 2
     if #q == #n then sc = sc + 6 end          -- query covered the whole name
+    return math.max(sc, 1)
+end
+
+-- same scorer but on PRE-TOKENIZED inputs (query tokens + singulars, and a vocab entry's
+-- cached name tokens/singulars). Hot path -- nothing is allocated or re-tokenized per call.
+local function score_toks(qtoks, qsings, ntoks, nsings)
+    local nq, nn = #qtoks, #ntoks
+    if nq == 0 or nq > nn then return 0 end
+    local i, matched, gaps = 1, 0, 0
+    for x = 1, nq do
+        local qt, qs = qtoks[x], qsings[x]
+        local lqt, lqs = #qt, #qs
+        local found
+        for k = i, nn do
+            if ntoks[k]:sub(1, lqt) == qt or nsings[k]:sub(1, lqs) == qs then found = k; break end
+        end
+        if not found then return 0 end
+        matched = matched + 1; gaps = gaps + (found - i); i = found + 1
+    end
+    local sc = 90 - (nn - matched) * 4 - gaps * 2
+    if nq == nn then sc = sc + 6 end
     return math.max(sc, 1)
 end
 
@@ -339,64 +364,34 @@ local WORDNUM = {one=1,two=2,three=3,four=4,five=5,six=6,seven=7,eight=8,nine=9,
 local VERB = {make=1, prepare=1, cook=1, construct=1, forge=1, craft=1, build=1,
     produce=1, manufacture=1, create=1}
 
-local STRONG = 80   -- a whole-phrase match this good wins outright (no material split)
-
 local function slice(t, a, b) local o = {}; for k = a, b do o[#o + 1] = t[k] end; return o end
 
-local function parse(input)
+-- split raw input into (repeating, amount, item+material tokens), dropping a leading
+-- r/rN, a numeric/spelled amount, and a redundant leading verb ("make lavish meal").
+local function parse_head(input)
     local tokens = toks_of(input)
-    if #tokens == 0 then return nil, 'empty' end
-
     local repeating = false
-    local t1 = tokens[1]
-    local rnum = t1:match('^r(%d+)$')
-    if t1 == 'r' then repeating = true; table.remove(tokens, 1)
-    elseif rnum then repeating = true; tokens[1] = rnum end
-
+    if tokens[1] then
+        local rnum = tokens[1]:match('^r(%d+)$')
+        if tokens[1] == 'r' then repeating = true; table.remove(tokens, 1)
+        elseif rnum then repeating = true; tokens[1] = rnum end
+    end
     local amount
     for idx, w in ipairs(tokens) do
         if w:match('^%d+$') then amount = tonumber(w); table.remove(tokens, idx); break
         elseif WORDNUM[w] then amount = WORDNUM[w]; table.remove(tokens, idx); break end
     end
-    amount = amount or 1
-
     if #tokens > 1 and VERB[tokens[1]] then table.remove(tokens, 1) end
-    if #tokens == 0 then return nil, 'no item' end
+    return repeating, amount or 1, tokens
+end
 
-    local function ret(item, left, iscore)
-        return {repeating = repeating, amount = amount, item = item, left = left, iscore = iscore}
+-- how well a span of item words matches a vocab entry (cached tokens; bare-noun alias)
+local function item_score(sp, item)
+    if #sp.toks == 1 then
+        local a = ALIAS[sp.sings[1]]
+        if a and item.name == a then return 100 end
     end
-
-    -- 1) whole phrase as the item/reaction. A strong match wins outright, so
-    --    "make steel bars" -> the reaction, never "steel" + "bars"->barrel.
-    local witem, wscore = best_item(tokens)
-    if witem and wscore >= STRONG then return ret(witem, {}, wscore) end
-
-    -- 2) otherwise split: material may sit before OR after the item ("steel bed",
-    --    "cut gems from glass"). Every boundary, both directions; material must
-    --    resolve (or we fall back to ignoring those words, heavily penalised).
-    local best
-    local function consider(item_toks, mat_toks, item, iscore)
-        local m, ignored = {kind = 'none'}, 0
-        if #mat_toks > 0 then
-            local r = resolve_material(mat_toks, item, most_in_stock)
-            if r then m = r else ignored = #mat_toks end   -- unresolvable words -> ignore (penalised)
-        end
-        local total = iscore + #item_toks * 3 - #mat_toks - ignored * 10
-        if not best or total > best.total then
-            best = {total = total, item = item, left = (m.kind == 'none') and {} or mat_toks,
-                    iscore = iscore}
-        end
-    end
-    for cut = 1, #tokens - 1 do
-        local L, Rt = slice(tokens, 1, cut), slice(tokens, cut + 1, #tokens)
-        local ia, sa = best_item(Rt); if ia and sa > 0 then consider(Rt, L, ia, sa) end   -- material first
-        local ib, sb = best_item(L);  if ib and sb > 0 then consider(L, Rt, ib, sb) end   -- material after
-    end
-    if witem and wscore > 0 then consider(tokens, {}, witem, wscore) end   -- whole phrase, no material
-
-    if not best then return nil, 'no item recognized' end
-    return ret(best.item, best.left, best.iscore)
+    return score_toks(sp.toks, sp.sings, item.ntoks, item.nsings)
 end
 
 -- can a metal/stone of this mat_index be forged into this item class?
@@ -433,22 +428,37 @@ local WEAPONISH = {}   -- forged, metal-only goods
 for _, t in ipairs({'WEAPON', 'AMMO'}) do if df.item_type[t] then WEAPONISH[df.item_type[t]] = true end end
 local SHIELD_T = df.item_type.SHIELD
 
--- legality of a concrete inorganic (mt=0) on a restricted item
-local function legal_inorganic(item, mi)
+-- weapons with the CAN_STONE flag (short sword, dagger, spear...) can be KNAPPED from
+-- stone at the craftsdwarf's -- so "obsidian short sword" is legal even though obsidian
+-- can't be forged. Cached per weapon subtype.
+local weapon_can_stone_set
+local function weapon_can_stone(item)
+    if item.item_type ~= df.item_type.WEAPON then return false end
+    if not weapon_can_stone_set then
+        weapon_can_stone_set = {}
+        local wv = df.global.world.raws.itemdefs.weapons
+        for i = 0, #wv - 1 do if wv[i].flags.CAN_STONE then weapon_can_stone_set[wv[i].subtype] = true end end
+    end
+    return weapon_can_stone_set[item.item_subtype] or false
+end
+
+-- can a concrete inorganic (mat_index) actually be made into this item?
+local function can_make_inorganic(item, mi)
     local ir = df.inorganic_raw.find(mi)
-    local ismetal = ir and ir.material.flags.IS_METAL
-    if WEAPONISH[item.item_type] or ARMOR_DEFVEC[item.item_type] then
-        if not mat_makes(item.item_type, mi) then
-            return false, ('%s cannot be made into %s'):format(
-                (ir and ir.id:lower():gsub('_', ' ')) or 'that', item.name)
-        end
-    end
-    if item.item_type == SHIELD_T and not ismetal then
-        return false, item.name .. ' can only be metal or wood'
-    end
-    if ismetal then
-        local af = armor_flags(item)
-        if af and not af.METAL then return false, item.name .. ' cannot be made of metal' end
+    if not ir then return false end
+    local f = ir.material.flags
+    local it = item.item_type
+    if it == df.item_type.WEAPON then
+        if f.ITEMS_WEAPON or f.ITEMS_WEAPON_RANGED or f.ITEMS_DIGGER then return true end
+        return (f.IS_STONE and weapon_can_stone(item)) or false      -- knapped stone weapon
+    elseif it == df.item_type.AMMO then
+        return f.ITEMS_AMMO or false
+    elseif ARMOR_DEFVEC[it] then
+        if not f.ITEMS_ARMOR then return false end                    -- stone can't make armour
+        if f.IS_METAL then local af = armor_flags(item); if af and not af.METAL then return false end end
+        return true
+    elseif it == SHIELD_T then
+        return f.IS_METAL or false                                    -- shields: metal (wood via category)
     end
     return true
 end
@@ -461,13 +471,23 @@ local function legal_material(item, m)
     if m.kind == 'specific' or (m.kind == 'class' and m.picked) then
         local mt = m.kind == 'specific' and m.mat_type or m.picked.mat_type
         local mi = m.kind == 'specific' and m.mat_index or m.picked.mat_index
-        if mt ~= 0 then return false, item.name .. ' cannot be made of that material' end
-        return legal_inorganic(item, mi)
+        if mt ~= 0 or not can_make_inorganic(item, mi) then
+            local nm = (mt == 0 and df.inorganic_raw.find(mi) and df.inorganic_raw.find(mi).id:lower():gsub('_', ' ')) or 'that material'
+            return false, ('%s cannot be made of %s'):format(item.name, nm)
+        end
+        return true
     elseif m.kind == 'class' then                -- no concrete pick: judge the class
-        if m.class ~= 'metal' then return false, item.name .. ' cannot be made of ' .. m.class end
-        return true                              -- metal is legal; stock is create_order's problem
+        if m.class == 'metal' then
+            if ARMOR_DEFVEC[it] then local af = armor_flags(item); if af and not af.METAL then return false, item.name .. ' cannot be made of metal' end end
+            return true
+        elseif m.class == 'stone' then
+            if it == df.item_type.WEAPON and weapon_can_stone(item) then return true end
+            return false, item.name .. ' cannot be made of stone'
+        else
+            return false, item.name .. ' cannot be made of ' .. m.class
+        end
     elseif m.kind == 'category' then             -- wood / leather / cloth / silk / yarn
-        if WEAPONISH[it] then return false, item.name .. ' must be metal' end
+        if WEAPONISH[it] then return false, item.name .. ' must be metal or stone' end
         if it == SHIELD_T then
             if m.category ~= 'wood' then return false, item.name .. ' can only be metal or wood' end
             return true
@@ -483,34 +503,56 @@ local function legal_material(item, m)
     return true
 end
 
+-- cached per-class stock tally (mat_index -> stack count). The world scan is expensive,
+-- so we keep it for a few seconds -- material abundance changes slowly.
+local stock_cache = {}
+local function stock_counts(class, constraint)
+    local key = class .. '/' .. tostring(constraint)
+    local now = dfhack.getTickCount()
+    local c = stock_cache[key]
+    if c and (now - c.t) < 3000 then return c end
+    local list = (class == 'stone' and df.global.world.items.other.BOULDER)
+        or (class == 'metal' and df.global.world.items.other.BAR) or nil
+    local counts, fallback = {}, {}
+    if list then
+        local econ = (class == 'stone') and df.global.plotinfo.economic_stone or nil
+        for _, it in ipairs(list) do
+            if it.mat_type == 0 and ((constraint ~= 'magma') or is_magma_safe(0, it.mat_index))
+                and (class ~= 'metal' or (df.inorganic_raw.find(it.mat_index)
+                     and df.inorganic_raw.find(it.mat_index).material.flags.IS_METAL))
+            then
+                fallback[it.mat_index] = (fallback[it.mat_index] or 0) + it.stack_size
+                if not (econ and econ[it.mat_index]) then
+                    counts[it.mat_index] = (counts[it.mat_index] or 0) + it.stack_size
+                end
+            end
+        end
+    end
+    c = {t = now, counts = counts, fallback = fallback}
+    stock_cache[key] = c
+    return c
+end
+
 -- pick the most-abundant concrete material of a class in stock that can make this item.
--- stone -> boulders, metal -> bars, glass -> the raw-glass materials.
+-- The world scan is cached; the per-item can_make filter runs on the cached tally.
 function most_in_stock(class, constraint, item)
     if class == 'glass' then
         local mats = build_material_vocab()
         return mats['clear glass'] and {mat_type = mats['clear glass'].mat_type,
             mat_index = mats['clear glass'].mat_index, name = 'clear glass', count = 0}
     end
-    local list = (class == 'stone' and df.global.world.items.other.BOULDER)
-        or (class == 'metal' and df.global.world.items.other.BAR) or nil
-    if not list then return nil end
-    local econ = (class == 'stone') and df.global.plotinfo.economic_stone or nil
-    local counts, fallback = {}, {}
-    for _, it in ipairs(list) do
-        if it.mat_type == 0 and ((constraint ~= 'magma') or is_magma_safe(0, it.mat_index))
-            and (class ~= 'metal' or (df.inorganic_raw.find(it.mat_index)
-                 and df.inorganic_raw.find(it.mat_index).material.flags.IS_METAL))
-            and (not item or item.item_type == -1 or mat_makes(item.item_type, it.mat_index))
-        then
-            fallback[it.mat_index] = (fallback[it.mat_index] or 0) + it.stack_size
-            if not (econ and econ[it.mat_index]) then
-                counts[it.mat_index] = (counts[it.mat_index] or 0) + it.stack_size
+    local c = stock_counts(class, constraint)
+    local function pick(t)
+        local b, bn
+        for mi, n in pairs(t) do
+            if (not item or item.item_type == -1 or can_make_inorganic(item, mi)) and (not bn or n > bn) then
+                b, bn = mi, n
             end
         end
+        return b, bn
     end
-    local function pick(t) local b, bn; for mi, n in pairs(t) do if not bn or n > bn then b, bn = mi, n end end; return b, bn end
-    local best, bestn = pick(counts)
-    if not best then best, bestn = pick(fallback) end
+    local best, bestn = pick(c.counts)
+    if not best then best, bestn = pick(c.fallback) end
     if not best then return nil end
     local ir = df.inorganic_raw.find(best)
     return {mat_type = 0, mat_index = best,
@@ -518,8 +560,7 @@ function most_in_stock(class, constraint, item)
 end
 
 -- bare (no-material) items that should default to WOOD -- either wood-only (bed) or
--- containers that can't be made of stone (barrel/bucket/bin/cage) so a stone default
--- would be an invalid order
+-- containers that can't be made of stone (barrel/bucket/bin/cage)
 local DEFAULT_WOOD = {}
 for _, n in ipairs({'bed', 'barrel', 'bucket', 'bin', 'cage', 'weapon rack', 'armor stand'}) do
     DEFAULT_WOOD[n] = true
@@ -529,50 +570,138 @@ for _, t in ipairs({'WEAPON', 'AMMO', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES
     METAL_ITEMS[df.item_type[t]] = true
 end
 
--- when a material-requiring job is given no material, pick a sensible default
+-- when a material-requiring job is given no material, pick a sensible default CLASS (no
+-- world scan -- the concrete material is chosen later, only for the order that's created)
 local function default_material(item)
     if DEFAULT_WOOD[item.name] then return {kind = 'category', category = 'wood'} end
-    -- body armour: honour what the piece can actually be (a cloak is leather/cloth, not metal)
     local af = armor_flags(item)
-    if af then
-        if not af.METAL then
-            if af.LEATHER then return {kind = 'category', category = 'leather'} end
-            if af.SOFT then return {kind = 'category', category = 'cloth'} end
-        end
+    if af and not af.METAL then
+        if af.LEATHER then return {kind = 'category', category = 'leather'} end
+        if af.SOFT then return {kind = 'category', category = 'cloth'} end
     end
-    if METAL_ITEMS[item.item_type] then
-        local p = most_in_stock('metal', nil, item)
-        if p then return {kind = 'specific', name = p.name, mat_type = p.mat_type, mat_index = p.mat_index} end
-    end
-    local p = most_in_stock('stone', nil, item)
-    if p then return {kind = 'specific', name = p.name, mat_type = p.mat_type, mat_index = p.mat_index} end
-    return {kind = 'category', category = 'wood'}   -- last resort
+    if METAL_ITEMS[item.item_type] then return {kind = 'class', class = 'metal'} end
+    return {kind = 'class', class = 'stone'}
 end
 
--- ---- resolve (parse + material) ------------------------------------------
+-- ---- resolve / rank (parse + material + legality) ------------------------
 
--- returns a resolved plan {amount, repeating, item, mat, matname, desc} or nil,err
-local function resolve(input)
-    local p, err = parse(input)
-    if not p then return nil, err end
-    local item = p.item
-    local mat, matname
+-- Build a legal plan for `item` made with material words `mattoks`, or nil if the
+-- material is unresolvable OR illegal for the item (this is what keeps illegal combos
+-- like "obsidian shoe" out of the suggestions entirely).
+-- returns plan, or (nil) for an invalid split, or (nil, reason) when the split matched
+-- but the material is illegal for the item (so the caller can report why)
+local function build_plan(item, mattoks)
     if item.kind == 'reaction' or item.mat then
-        -- reaction bakes its own material; raw-glass items carry a baked mat
-        mat = {kind = 'none'}
-    else
-        local m, merr = resolve_material(p.left, item, most_in_stock)
-        if not m then return nil, merr end
-        if m.kind == 'none' and item.needs_mat then m = default_material(item) end
-        local ok, why = legal_material(item, m)
-        if not ok then return nil, why end
-        mat = m
-        if m.kind == 'specific' then matname = m.name
-        elseif m.kind == 'category' then matname = 'any ' .. m.category
-        elseif m.kind == 'class' then matname = m.picked and m.picked.name or nil end
+        -- a reaction / baked-material item takes NO material descriptor; leftover words
+        -- mean this isn't the right interpretation (e.g. "iron cloak" is not "make iron bars")
+        if #mattoks > 0 then return nil end
+        return {item = item, mat = {kind = 'none'}}
     end
-    return {amount = p.amount, repeating = p.repeating, item = item, iscore = p.iscore,
-            mat = mat, matname = matname, left = p.left}
+    -- no material words -> skip the (allocating) resolver entirely; this is the common case
+    local m = (#mattoks == 0) and {kind = 'none'} or resolve_material(mattoks, item, nil)
+    if not m then return nil end
+    if m.kind == 'none' and item.needs_mat then m = default_material(item) end
+    local ok, why = legal_material(item, m)
+    if not ok then return nil, why end
+    local matname
+    if m.kind == 'specific' then matname = m.name
+    elseif m.kind == 'category' then matname = 'any ' .. m.category
+    elseif m.kind == 'class' then matname = ('any %s%s'):format(m.constraint and (m.constraint .. '-safe ') or '', m.class) end
+    return {item = item, mat = m, matname = matname}
+end
+
+-- fill in a concrete material for a class plan (world scan) -- only for the plan(s) we
+-- actually show or create, so the per-keystroke ranking stays cheap
+local function enrich(plan)
+    if plan and plan.mat and plan.mat.kind == 'class' and not plan.mat.picked then
+        local p = most_in_stock(plan.mat.class, plan.mat.constraint, plan.item)
+        if p then plan.mat.picked = p; plan.matname = p.name end
+    end
+    return plan
+end
+
+-- the order-identity signature of a plan, so different phrasings of the same order dedup
+local function plan_sig(plan)
+    local it = plan.item
+    if it.kind == 'reaction' then return 'rxn:' .. it.reaction_name end
+    local m = it.mat or plan.mat
+    local mk = it.mat and (it.mat.mat_type .. ':' .. it.mat.mat_index)
+        or (m.kind == 'specific' and (m.mat_type .. ':' .. m.mat_index))
+        or (m.kind == 'category' and ('cat:' .. m.category))
+        or (m.kind == 'class' and ('cls:' .. m.class)) or 'any'
+    return ('job:%d/%d/%s'):format(it.job, it.item_subtype or -1, mk)
+end
+
+-- rank all vocab entries against the item+material tokens; sorted list of legal
+-- {plan, score}, best first, deduped by order identity. Illegal combos are dropped.
+-- returns (sorted legal {plan,score} list, best-illegal {s,why}). The illegal note lets
+-- resolve() say WHY the closest match is invalid ("sword cannot be made of stone")
+-- instead of silently substituting an unrelated legal item.
+local function rank(tokens)
+    local nT = #tokens
+    -- precompute the (item span, material span) splits ONCE -- they depend only on the query,
+    -- not on the vocab entry, so we never allocate slices inside the per-entry loop
+    local splits, seen = {}, {}
+    for cut = 0, nT do
+        for dir = 1, 2 do
+            local itemtoks, mattoks
+            if dir == 1 then itemtoks, mattoks = slice(tokens, cut + 1, nT), slice(tokens, 1, cut)
+            else itemtoks, mattoks = slice(tokens, 1, cut), slice(tokens, cut + 1, nT) end
+            local k = table.concat(itemtoks, ' ') .. '\1' .. table.concat(mattoks, ' ')
+            if #itemtoks > 0 and not seen[k] then
+                seen[k] = true
+                local sings = {}
+                for x = 1, #itemtoks do sings[x] = singular(itemtoks[x]) end
+                splits[#splits + 1] = {toks = itemtoks, sings = sings, mat = mattoks}
+            end
+        end
+    end
+
+    local acc, illegal = {}, nil
+    for _, it in ipairs(build_vocab()) do
+        for _, sp in ipairs(splits) do
+            local s = item_score(sp, it)
+            if s > 0 then
+                local plan, why = build_plan(it, sp.mat)
+                if plan then
+                    local total = s + #sp.toks * 3 - #sp.mat
+                    if #sp.mat == 0 and s >= 60 then total = total + 14 end   -- favour whole-phrase
+                    local key = plan_sig(plan)
+                    if not acc[key] or total > acc[key].score then
+                        acc[key] = {plan = plan, score = total, s = s}
+                    end
+                elseif why and (not illegal or s > illegal.s) then
+                    illegal = {s = s, why = why}
+                end
+            end
+        end
+    end
+    local out = {}
+    for _, e in pairs(acc) do out[#out + 1] = e end
+    table.sort(out, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return #a.plan.item.name < #b.plan.item.name
+    end)
+    return out, illegal
+end
+
+-- if the closest ITEM match was rejected for legality and it matched the query better than
+-- the best legal plan, that illegal item is what the user meant -> surface its reason instead
+-- of a tangential legal match ("obsidian war hammer" -> the reason, not an obsidian instrument)
+local function illegal_wins(ranked, illegal)
+    return illegal and (#ranked == 0 or illegal.s > ranked[1].s)
+end
+
+-- returns the best resolved plan {amount, repeating, item, mat, matname, iscore, ranked} or nil,err
+local function resolve(input)
+    local repeating, amount, tokens = parse_head(input)
+    if #tokens == 0 then return nil, 'no item' end
+    local ranked, illegal = rank(tokens)
+    if illegal_wins(ranked, illegal) then return nil, illegal.why end
+    if #ranked == 0 then return nil, 'no match' end
+    local top = enrich(ranked[1].plan)
+    return {amount = amount, repeating = repeating, item = top.item, mat = top.mat,
+            matname = top.matname, iscore = ranked[1].score, ranked = ranked}
 end
 
 -- a short human description of a resolved plan
@@ -581,7 +710,7 @@ local function plan_desc(plan)
     if plan.item.kind == 'reaction' then base = plan.item.name
     elseif plan.matname then base = plan.matname .. ' ' .. plan.item.name
     else base = plan.item.name end
-    return ('%s%dx %s'):format(plan.repeating and 'r' or '', plan.amount, base)
+    return ('%s%dx %s'):format(plan.repeating and 'r' or '', plan.amount or 1, base)
 end
 
 -- ---- order creation ------------------------------------------------------
@@ -607,11 +736,12 @@ function create_order(input)
         elseif m.kind == 'category' then
             o.material_category[m.category] = true
         elseif m.kind == 'class' then
-            if not m.picked then
+            local picked = m.picked or most_in_stock(m.class, m.constraint, item)
+            if not picked then
                 o:delete()
                 return nil, ('no %s%s in stock'):format(m.constraint and (m.constraint .. '-safe ') or '', m.class)
             end
-            o.mat_type, o.mat_index = m.picked.mat_type, m.picked.mat_index
+            o.mat_type, o.mat_index = picked.mat_type, picked.mat_index
         end
     end
 
@@ -636,36 +766,19 @@ function dry_run(input)
             desc = plan_desc(plan)}
 end
 
--- top N candidate item/reaction names for a raw query (for autocomplete)
+-- up to N legal candidate order descriptions for a raw query (for autocomplete)
 function candidates(input, n)
-    local tokens = toks_of(input)
-    -- strip a leading r / amount so autocomplete reflects the item words
-    if tokens[1] and (tokens[1] == 'r' or tokens[1]:match('^r?%d+$')) then table.remove(tokens, 1) end
-    for idx, w in ipairs(tokens) do
-        if w:match('^%d+$') or WORDNUM[w] then table.remove(tokens, idx); break end
-    end
+    local repeating, amount, tokens = parse_head(input)
     if #tokens == 0 then return {} end
-    -- score every vocab entry against the best right-hand span
-    local scored = {}
-    for _, it in ipairs(build_vocab()) do
-        local best = 0
-        for cut = 0, #tokens - 1 do
-            local right = {}
-            for k = cut + 1, #tokens do right[#right + 1] = tokens[k] end
-            local s = #right > 0 and score_name(table.concat(right, ' '), it.name) or 0
-            if s > best then best = s end
-        end
-        if best > 0 then scored[#scored + 1] = {name = it.name, score = best, kind = it.kind} end
-    end
-    table.sort(scored, function(a, b)
-        if a.score ~= b.score then return a.score > b.score end
-        return #a.name < #b.name
-    end)
-    local out = {}
-    local seen = {}
-    for _, e in ipairs(scored) do
-        if not seen[e.name] then seen[e.name] = true; out[#out + 1] = e end
-        if #out >= (n or 3) then break end
+    local ranked, illegal = rank(tokens)
+    if illegal_wins(ranked, illegal) then return {} end   -- intended item is illegal: no suggestions
+    local out, seen = {}, {}
+    for _, e in ipairs(ranked) do
+        enrich(e.plan)
+        local d = plan_desc({item = e.plan.item, matname = e.plan.matname,
+                             amount = amount, repeating = repeating})
+        if not seen[d] then seen[d] = true; out[#out + 1] = d end
+        if #out >= (n or 5) then break end
     end
     return out
 end
@@ -677,65 +790,80 @@ local function is_mouse_key(keys)
         or keys.CONTEXT_SCROLL_UP or keys.CONTEXT_SCROLL_DOWN
 end
 
+local HINT = 'e.g. "3 steel short swords", "collect sand", "r2 gabbro mechanism"'
+
 QuickOrderOverlay = defclass(QuickOrderOverlay, overlay.OverlayWidget)
 QuickOrderOverlay.ATTRS{
     desc = 'Type "3 steel swords" / "make soap from tallow" to create a manager order by text.',
-    default_pos = {x = 113, y = -7},
+    default_pos = {x = 113, y = -6},
     default_enabled = true,
     viewscreens = 'dwarfmode/Info/WORK_ORDERS/Default',
-    frame = {w = 42, h = 6},
-    version = 2,
+    frame = {w = 42, h = 5},                       -- base height (no suggestions); grows upward
+    overlay_onupdate_max_freq_seconds = 0,
+    version = 3,
 }
 
 function QuickOrderOverlay:init()
     self:addviews{
         widgets.Panel{
-            frame = {t = 0, l = 0, r = 0, h = 6},
+            frame = {t = 0, l = 0, r = 0, b = 0},  -- fill the (dynamically sized) widget
             frame_style = gui.MEDIUM_FRAME,
             frame_background = gui.CLEAR_PEN,
             frame_title = 'new order',
             subviews = {
-                widgets.Label{                          -- autocomplete, ABOVE the field
+                widgets.Label{                     -- suggestions / hint, ABOVE the field (fills the top)
                     view_id = 'auto',
-                    frame = {t = 0, l = 0, r = 0, h = 1},
-                    text = {{text = '', pen = COLOR_GRAY}},
+                    frame = {t = 0, l = 0, r = 0, b = 2},
+                    text = {{text = HINT, pen = COLOR_GRAY}},
                 },
-                widgets.EditField{
+                widgets.EditField{                 -- the field sits just above the bottom (stable)
                     view_id = 'edit',
-                    frame = {t = 1, l = 0, r = 0},
+                    frame = {b = 1, l = 0, r = 0, h = 1},
                     label_text = '> ',
                     on_change = self:callback('on_change'),
                     on_submit = self:callback('submit'),
                 },
-                widgets.Label{
+                widgets.Label{                     -- submit feedback, bottom line
                     view_id = 'status',
-                    frame = {t = 3, l = 0, r = 0},
-                    text = {{text = 'e.g. "3 steel short swords", "collect sand", "r2 gabbro mechanism"',
-                             pen = COLOR_GRAY}},
+                    frame = {b = 0, l = 0, r = 0, h = 1},
+                    text = {{text = '', pen = COLOR_GRAY}},
                 },
             },
         },
     }
 end
 
--- live autocomplete: show what the text currently resolves to, plus a couple of
--- alternative matches, above the field
+-- the box is `nsug + 4` tall (border 2 + suggestions + field + status), min 5. Height is
+-- applied in overlay_onupdate so the framework's frame-change detector re-lays it out.
+function QuickOrderOverlay:set_suggestions(tokens, nsug)
+    self.subviews.auto:setText(tokens)
+    self._want_h = math.max(1, nsug) + 4
+end
+
+-- live autocomplete: each legal candidate on its own line; the top one (what Enter makes)
+-- in green. Illegal/no-match inputs show the reason in red -- and are never suggested.
 function QuickOrderOverlay:on_change(text)
-    local auto = self.subviews.auto
-    if not text or text == '' then auto:setText({{text = '', pen = COLOR_GRAY}}); return end
-    local r = dry_run(text)
-    if r and not r.error then
-        auto:setText({{text = '\215 ' .. r.desc, pen = COLOR_GREEN}})
-    else
-        local cands = candidates(text, 3)
-        if #cands > 0 then
-            local names = {}
-            for _, c in ipairs(cands) do names[#names + 1] = c.name end
-            auto:setText({{text = '? ' .. table.concat(names, '  |  '), pen = COLOR_YELLOW}})
-        else
-            auto:setText({{text = '? no match', pen = COLOR_LIGHTRED}})
-        end
+    if not text or text == '' then
+        self:set_suggestions({{text = HINT, pen = COLOR_GRAY}}, 0)
+        return
     end
+    local cands = candidates(text, 5)
+    if #cands == 0 then
+        local r = dry_run(text)
+        self:set_suggestions({{text = '\215 ' .. (r.error or 'no match'), pen = COLOR_LIGHTRED}}, 1)
+        return
+    end
+    local tokens = {}
+    for i, d in ipairs(cands) do
+        if i > 1 then tokens[#tokens + 1] = NEWLINE end   -- bare string separator -> real line break
+        tokens[#tokens + 1] = {text = (i == 1 and '\215 ' or '  ') .. d,
+                               pen = (i == 1) and COLOR_GREEN or COLOR_GRAY}
+    end
+    self:set_suggestions(tokens, #cands)
+end
+
+function QuickOrderOverlay:overlay_onupdate()
+    if self._want_h and self.frame.h ~= self._want_h then self.frame.h = self._want_h end
 end
 
 function QuickOrderOverlay:render(dc)
@@ -752,7 +880,7 @@ function QuickOrderOverlay:submit(text)
     if desc then
         self.subviews.status:setText({{text = '+ ' .. desc, pen = COLOR_GREEN}})
         self.subviews.edit:setText('')
-        self.subviews.auto:setText({{text = '', pen = COLOR_GRAY}})
+        self:set_suggestions({{text = HINT, pen = COLOR_GRAY}}, 0)
     else
         self.subviews.status:setText({{text = 'x ' .. (err or 'failed'), pen = COLOR_LIGHTRED}})
     end
@@ -760,6 +888,7 @@ end
 
 function QuickOrderOverlay:onInput(keys)
     local edit = self.subviews.edit
+    if edit.focus and keys.LEAVESCREEN then edit:setFocus(false); return true end   -- Esc unfocuses
     if keys._MOUSE_R and edit.focus then edit:setFocus(false); return true end
     if QuickOrderOverlay.super.onInput(self, keys) then return true end
     if keys._MOUSE_L and edit.focus then edit:setFocus(false); return false end
