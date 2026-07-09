@@ -5,11 +5,15 @@
 --@module = true
 --[[
     quick-order <text>            dry-run: print what it resolved to
-    quick-order --create <text>   actually create the order (one-time)
+    quick-order --create <text>   actually create the order
 
 Grammar:
   [r] <amount?> <material descriptor?> <item-or-job>
-  * leading r / rN  -> repeating
+  * leading r / rN  -> repeating "keep N in stock" order: checked DAILY, gated on a
+                       condition so it only runs while fewer than N of the output item
+                       exist (counts the OUTPUT item -- any material, matching subtype --
+                       never the inputs). Jobs with no single countable product
+                       (collect sand, mint coins, butcher...) fall back to a monthly repeat.
   * amount: digits, rN, or a spelled number (one..twenty, a/an); default 1
   * material descriptor: a category (wood/wooden/cloth), a class (stone/rock/metal/
     glass), a specific material (gabbro/steel), and/or a property (magma safe)
@@ -727,7 +731,14 @@ local function plan_desc(plan)
     if plan.item.kind == 'reaction' then base = plan.item.name
     elseif plan.matname then base = plan.matname .. ' ' .. plan.item.name
     else base = plan.item.name end
-    return ('%s%dx %s'):format(plan.repeating and 'r' or '', plan.amount or 1, base)
+    local amount = plan.amount or 1
+    if plan.repeating then
+        if (plan.item.item_type or -1) >= 0 then
+            return ('keep %dx %s stocked'):format(amount, base)   -- daily, only if below N
+        end
+        return ('%dx %s (monthly)'):format(amount, base)          -- uncountable job: plain repeat
+    end
+    return ('%dx %s'):format(amount, base)
 end
 
 -- ---- order creation ------------------------------------------------------
@@ -763,7 +774,24 @@ function create_order(input)
     end
 
     o.amount_total, o.amount_left = plan.amount, plan.amount
-    o.frequency = plan.repeating and df.workquota_frequency_type.Monthly or df.workquota_frequency_type.OneTime
+    if plan.repeating then
+        -- Repeating = "keep `amount` of the OUTPUT item in stock". Checked DAILY, but a stock
+        -- condition gates it so it only runs while we have fewer than `amount` of the item
+        -- (any material, matching subtype). Never looks at the input materials.
+        local it = plan.item.item_type or -1
+        if it >= 0 then
+            o.frequency = df.workquota_frequency_type.Daily
+            o.item_conditions:insert('#', {new = df.manager_order_condition_item,
+                compare_type = df.logic_condition_type.LessThan, compare_val = plan.amount,
+                item_type = it, item_subtype = plan.item.item_subtype or -1,
+                mat_type = -1, mat_index = -1, reaction_class = ''})
+        else
+            -- SPECIAL jobs / reactions have no single countable output item -> plain monthly repeat
+            o.frequency = df.workquota_frequency_type.Monthly
+        end
+    else
+        o.frequency = df.workquota_frequency_type.OneTime
+    end
     o.status.validated = true
     o.status.active = true
 
