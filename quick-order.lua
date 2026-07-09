@@ -11,9 +11,11 @@ Grammar:
   [r] <amount?> <material descriptor?> <item-or-job>
   * leading r / rN  -> repeating "keep N in stock" order: checked DAILY, gated on a
                        condition so it only runs while fewer than N of the output item
-                       exist (counts the OUTPUT item -- any material, matching subtype --
-                       never the inputs). Jobs with no single countable product
-                       (collect sand, mint coins, butcher...) fall back to a monthly repeat.
+                       exist (counts the OUTPUT item -- matching subtype/material class,
+                       never the inputs). "collect webs" counts SILK THREAD (webs become
+                       silk thread when picked up). Jobs with no single countable product
+                       (collect sand, mint coins, butcher...) can't be kept in stock, so a
+                       repeating order on them is REFUSED (make a one-time order instead).
   * amount: digits, rN, or a spelled number (one..twenty, a/an); default 1
   * material descriptor: a category (wood/wooden/cloth), a class (stone/rock/metal/
     glass), a specific material (gabbro/steel), and/or a property (magma safe)
@@ -81,7 +83,10 @@ local SUBTYPED = {
 -- glass) and never forced.
 local SPECIAL = {
     {job = 'CollectSand',     names = {'collect sand', 'gather sand', 'sand'}},
-    {job = 'CollectWebs',     names = {'collect webs', 'collect web', 'gather webs', 'collect silk', 'gather silk'}},
+    -- webs become SILK THREAD the moment they're picked up, so a repeating collect-webs
+    -- order can "keep N in stock" by counting silk thread (item_type THREAD, silk material).
+    {job = 'CollectWebs',     names = {'collect webs', 'collect web', 'gather webs', 'collect silk', 'gather silk'},
+                              product = {item_type = 'THREAD', flags2 = {'silk'}}},
     {job = 'CollectClay',     names = {'collect clay', 'gather clay'}},
     {job = 'CollectHiveProducts', names = {'collect hive products', 'collect honey', 'harvest hive', 'gather hive'}},
     {job = 'ButcherAnimal',   names = {'butcher animal', 'butcher an animal', 'butcher'}},
@@ -120,9 +125,11 @@ local function add_job(v, name, job, itype, sub, needs_mat)
     if not name or name == '' then return end
     local j = df.job_type[job]
     if not j then return end
-    v[#v + 1] = {name = norm(name), kind = 'job', job = j,
-                 item_type = itype and df.item_type[itype] or -1,
-                 item_subtype = sub or -1, needs_mat = needs_mat and true or false}
+    local e = {name = norm(name), kind = 'job', job = j,
+               item_type = itype and df.item_type[itype] or -1,
+               item_subtype = sub or -1, needs_mat = needs_mat and true or false}
+    v[#v + 1] = e
+    return e
 end
 
 local function build_vocab()
@@ -138,7 +145,10 @@ local function build_vocab()
     end
     for _, sp in ipairs(SPECIAL) do
         if df.job_type[sp.job] then
-            for _, nm in ipairs(sp.names) do add_job(v, nm, sp.job, nil, -1, false) end
+            for _, nm in ipairs(sp.names) do
+                local e = add_job(v, nm, sp.job, nil, -1, false)
+                if e and sp.product then e.product = sp.product end   -- countable output for repeats
+            end
         end
     end
     -- meals: one PrepareMeal job, quality baked into mat_type (2 easy, 3 fine, 4 lavish;
@@ -725,6 +735,25 @@ local function resolve(input)
             matname = top.matname, iscore = ranked[1].score, ranked = ranked}
 end
 
+-- what item a repeating "keep N in stock" order should count. FIXED/SUBTYPED items count
+-- their own type+subtype; a SPECIAL job with a `product` spec (e.g. collect webs -> silk
+-- thread) counts that; everything else (reactions, most gather/process jobs) has no single
+-- countable product -> nil (can't be kept in stock, so we refuse to make a repeating order).
+local function count_spec(item)
+    if (item.item_type or -1) >= 0 then
+        return {item_type = item.item_type, item_subtype = item.item_subtype or -1}
+    end
+    local p = item.product
+    if p then
+        local it = df.item_type[p.item_type]
+        if it then
+            return {item_type = it, item_subtype = p.item_subtype or -1, flags2 = p.flags2,
+                    mat_type = p.mat_type or -1, mat_index = p.mat_index or -1}
+        end
+    end
+    return nil
+end
+
 -- a short human description of a resolved plan
 local function plan_desc(plan)
     local base
@@ -733,10 +762,10 @@ local function plan_desc(plan)
     else base = plan.item.name end
     local amount = plan.amount or 1
     if plan.repeating then
-        if (plan.item.item_type or -1) >= 0 then
+        if count_spec(plan.item) then
             return ('keep %dx %s stocked'):format(amount, base)   -- daily, only if below N
         end
-        return ('%dx %s (monthly)'):format(amount, base)          -- uncountable job: plain repeat
+        return ('%dx %s — can\'t keep in stock'):format(amount, base)  -- no countable product
     end
     return ('%dx %s'):format(amount, base)
 end
@@ -777,17 +806,21 @@ function create_order(input)
     if plan.repeating then
         -- Repeating = "keep `amount` of the OUTPUT item in stock". Checked DAILY, but a stock
         -- condition gates it so it only runs while we have fewer than `amount` of the item
-        -- (any material, matching subtype). Never looks at the input materials.
-        local it = plan.item.item_type or -1
-        if it >= 0 then
-            o.frequency = df.workquota_frequency_type.Daily
-            o.item_conditions:insert('#', {new = df.manager_order_condition_item,
-                compare_type = df.logic_condition_type.LessThan, compare_val = plan.amount,
-                item_type = it, item_subtype = plan.item.item_subtype or -1,
-                mat_type = -1, mat_index = -1, reaction_class = ''})
-        else
-            -- SPECIAL jobs / reactions have no single countable output item -> plain monthly repeat
-            o.frequency = df.workquota_frequency_type.Monthly
+        -- (matching subtype/material class). Never looks at the input materials. If the job
+        -- has no single countable product, we refuse rather than making a blind repeat.
+        local cs = count_spec(plan.item)
+        if not cs then
+            o:delete()
+            return nil, ('can\'t keep "%s" in stock: no countable product'):format(plan.item.name)
+        end
+        o.frequency = df.workquota_frequency_type.Daily
+        o.item_conditions:insert('#', {new = df.manager_order_condition_item,
+            compare_type = df.logic_condition_type.LessThan, compare_val = plan.amount,
+            item_type = cs.item_type, item_subtype = cs.item_subtype or -1,
+            mat_type = cs.mat_type or -1, mat_index = cs.mat_index or -1, reaction_class = ''})
+        if cs.flags2 then   -- material-class match (e.g. count only SILK thread, not plant thread)
+            local cond = o.item_conditions[#o.item_conditions - 1]
+            for _, fl in ipairs(cs.flags2) do cond.flags2[fl] = true end
         end
     else
         o.frequency = df.workquota_frequency_type.OneTime
