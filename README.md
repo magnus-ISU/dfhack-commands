@@ -51,21 +51,21 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `no-pausing` | enableable | ✅ done | Forces the game to never pause (overrides GUIs/events). Manual toggle |
 | `raid-status` | one-shot | 🟡 partial | Reports raiding parties (leader/target/goal/time-gone + rough travel estimate); auto-retrieves stuck units. **Planning-screen overlay TODO** |
 | `squad-buttons` | overlay | ✅ done | Squads-screen buttons: "Select all/no squads" (always), + "Target all invaders"/"Target all hostiles" while giving a kill order (native targeting; confirm as normal) |
-| `dwarf-rts` | overlay | 🟡 partial | RTS-style squad control on the Squads screen. **Done:** selecting any squad auto-selects all; left-clicking the map moves the selected squads there **without** leaving the game stuck in the paused move UI (flicks `giving_move_order` on for one frame, then clears it); left-clicking a hostile switches to kill mode + targets it (Shift appends), confirm to engage. Guards on `current_hover`/selection so command buttons and empty-selection clicks pass through. **TODO:** camera-follow; right-click → close + cancel order. See spec below. **NOTE:** auto-arming *move* mode on open was abandoned — `giving_move_order` pauses the game inherently |
-| `attack-invaders` | one-shot | 🔴 superseded | Direct kill-orders don't make squads engage. Use `squad-buttons` instead |
-| `quick-order` | overlay+module | 🟡 partial | "new order" text box on the Work Orders screen: freeform text → manager order ("3 steel swords", "four gabbro rock mechanisms", "10 raw green glass"). Fuzzy item/material resolve, magma-safe/most-in-stock picks, inserts at top. **One-time only — repeating (`r3 …`) + suggested conditions still TODO** |
+| `dwarf-rts` | overlay | ✅ done | RTS squad control on the Squads screen. Opening it selects all squads; keys 1-9 select a squad (press again to camera-follow its leader, then each further press follows the next member). A left-click commands the selection — attack a hostile on the tile (Shift appends), else select your own dwarf, else move there; with nothing selected the click passes through to DF. A left-drag box acts on its contents: attack hostiles within ±3 z (Shift folds them into the kill order), else select/conscript boxed dwarves (loose dwarves are drafted into a temporary "Conscription N" militia, auto-disbanded when the screen closes), else dig a box fully on stone, else chop a boxed tree. Right-click closes the window / backs out. Press-vs-drag is disambiguated so nothing fires on a plain press. **TODO:** click an individual squad member to open their unit sheet |
+| `labor-groups` | one-shot | ✅ done | Orders the Labor screen and creates any missing crafting Work Details (stone carving, metal/weapon/armour smithing, carpentry, stone/glass crafting, brewing, cooking, jewelry, + a group for every remaining moodable skill) — **non-destructive**: reorders details and refreshes icons, never deletes or reassigns, only creates ones that don't exist. Layout: dig/grow defaults first, crafts next, Cook/Brewer then Military last. `labor-groups` / `labor-groups dry` / `labor-groups once` |
+| `quick-order` | overlay+module | ✅ done | "new order" text box on the Work Orders screen: freeform text → manager order. Matches **every orderable job** — fort-permitted reactions, furniture, weapons/armour by subtype, and collection/processing jobs (collect webs/clay/sand, butcher, mint coins, make charcoal/ash/lye/potash, …) — with material + **legality** resolution (magma-safe, most-in-stock, CAN_STONE weapons; rejects impossible combos like obsidian shoes / iron cloaks). `r`/`rN` prefix → **repeating** (Monthly) order; amount as digits or a spelled number. Live autocomplete lists the legal matches one per row; Esc unfocuses; inserts at the top of the list |
 | `statue-description` | overlay | ✅ done | Shows the statue's exact description + value on its building info sheet |
 | `civ-alert-notification` | register | ✅ done | While the **civilian alert** is on, notify-panel warning `N citizens outside the fortress` — fort civilians (non-soldiers) whose tile isn't inside the alert's burrow(s). Clears when everyone's in or the alert is off; click cycles/zooms to each straggler. Gate: `plotinfo.alerts.civ_alert_idx` → active alert with ≥1 burrow (the "No alert" entry has none); inside-test via `dfhack.burrows.isAssignedTile(burrow, unit.pos)` |
 | `creature-description` | overlay | ✅ done | Shows the selected creature's description (bottom-left); great for forgotten beasts |
 | `auto-name` | enableable+service | ✅ done | Renames each migrant's FIRST name so a whole wave shares a starting letter — wave 1→A, wave 2→B, … (wraps after Z), each name unique within the wave and gender-correct. Names come from `dfhack-config/auto-name-names.txt` (editable: male block, blank line, female block; ~1390 mixed Greek/Roman/Norse/medieval names). Skips the original 7, nicknamed dwarves, and fort-born kids; waves grouped by the real in-game arrival event so grouping is exact. Works on an already-running fort (one-time retroactive pass, then watches for new waves); re-running does nothing already-handled. `enable auto-name` / `auto-name` / `auto-name scan` / `auto-name status` |
-| `binnable-stockpile` | overlay | ✅ done | "all binnables" button (bottom-left of the stockpile settings screen, `Ctrl-B`): sets the selected pile to accept exactly the container-stored categories — Ammo, Armor, Bars/Blocks, Cloth, Coins, Finished goods, Food, Gems, Leather, Sheets, Weapons ON; Animals/Corpses/Furniture/Refuse/Stone/Wood OFF. Imports DFHack's `cat_*.dfstock` library presets so it tracks subtypes across versions |
+| `binnable-stockpile` | overlay | ✅ done | Buttons bottom-left of the stockpile customize screen, each toggling only its own group so they compose: **all binnables** (`Ctrl-B`) overwrites the pile to the container categories (Ammo/Armor/Bars/Cloth/Coins/Finished goods/Gems/Leather/Sheets/Weapons), or toggles them off if already full — and resets their quality to "all"; **all food** (`Ctrl-F`) = everything edible except seeds and drinks, with the Extract (animal) category trimmed to just milk + honey (rest is procedural venom/extract clutter); **all drink** (`Ctrl-D`) = Drink (plant)+(animal); a **quality** tri-state (`Ctrl-Q`: all / masterwork / inferior) over armour/finished goods/furniture/weapons. Also: click an already-selected main category — or a middle-column sub-category — again to toggle it all on/off. Uses `cat_*.dfstock` presets + direct edits |
 | `auto-pasture` | overlay+service | ✅ done | Graze/Scavenge pasture toggles on the pen screen; background service pens new tame animals (grazers→graze pen, others→scavenge pen); overcrowding notify-panel warning whose click cycles/zooms/selects each overcrowded pen and opens its repaint UI |
 | `mood-burrow` | overlay+service | ✅ done | `[Mood burrow: <name>]` selector (top right of the burrow screen, click to cycle none→each burrow→none): a dwarf struck by a strange mood (fey/secretive/possessed/macabre — NOT fell) is confined to that burrow until the **first item** of the creation is claimed (first item = artifact base material, so a burrow with the forge + only steel bars ⇒ steel artifacts), then released to gather the rest anywhere. Burrow's unit list is fully managed (don't hand-assign to it); designation persists with the fort |
 | `training-barracks` | overlay+service | ✅ done | `[Basic training]` toggle on the Barracks zone screen: marks THIS barracks as the fort's basic-training barracks — every fort squad (current and future, via a background service) is assigned to **train** there, on both sides of the link (`squad.rooms` + `zone.squad_room_info`), touching only the train flag. Never designated automatically; toggling off stops future assignment but leaves existing ones. Designation + enabled state persist with the fort |
 | `embark-prep` | overlay | ✅ done | Embark "Prepare carefully" Dwarves tab (`setupdwarfgame/Dwarves`): three buttons that give the **selected** dwarf 1 point in each skill that affects an office — Manager→Organizer (`Ctrl-M`), Bookkeeper→Record Keeper (`Ctrl-K`), Broker→Appraiser+Comedian/Flatterer/Intimidator/Judge of Intent/Liar/Negotiator/Persuader (`Ctrl-B`, 8 picks) — skills already ≥1 aren't re-bought; overspending the 10-pick budget still sets the skills but is reported. Plus a **Preferences window** (lower-left) listing the selected dwarf's likes (materials/creatures/foods/items/plants/colors/shapes/art forms), updating with the selection. Data: `viewscreen_setupdwarfgamest.dwarf_info[selected_u].skilllevel[job_skill]` (0-5, each level = 1 of `skill_picks_left`); prefs via `s_unit[selected_u].status.current_soul.preferences` (NB fish/egg food prefs put the creature race id in `mattype`, `matindex=-1`; `dwarf_info.name` is empty pre-embark — use the unit) |
 | `embark-nobles` | one-shot | 🔴 **UNFINISHED — not in the pack** | Meant to fill **vacant** key fort positions by skill (chief medical dwarf, militia commander, broker, manager, bookkeeper, + expedition leader as a separate dwarf). **Removed from `magnus-scripts`** — it appears to interfere with position assignments and needs rework. Run `embark-nobles` by hand only if you want it (`embark-nobles dry` previews). **TODO: fix the assignment interference.** |
 | `inside-burrow` | enableable | ✅ done | Armed at embark (via magnus-scripts): when the fort has **no burrows yet**, watches for the **first tile any miner digs out** and seeds a one-tile burrow named `inside+` there, then disables itself. The trailing `+` makes DFHack's `burrow` plugin auto-expand it as you keep digging, so it grows to cover the whole fort interior. Does nothing if any burrow already exists. `inside-burrow status` reports state |
-| `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that **self-manages a manager order per gear piece in the exact item+material each soldier's uniform specifies**, queuing **one** unit at a time and deleting orders once met so **nothing is force-produced**. It forges **one soldier's set at a time, per metal** (steel finishes one soldier while silver/copper independently progresses another — so full sets, breastplates included, actually complete), **serves dwarves in the "Military" work detail first**, and **keeps 3 bars of each metal in reserve** for moods/other jobs. **Copper backup stock** (the uniform is never edited): gear is made in the uniform's metal (steel), but whenever the soldiers don't have enough wearable pieces for an armour slot in **any** metal (desired steel + copper stock < the number who need it), it also stocks a **copper** version of that piece (**armour, shield, and weapon** — a copper weapon beats an empty hand; pieces already specified as copper are skipped) so nobody's left naked or unarmed. **Not gated on steel supply** — even while steel is slowly forging, copper fills the gap; it stops once steel+copper covers everyone. Soldiers choose what to wear themselves. **Gear is SIZED per wearer:** a non-dwarf soldier (e.g. a human mercenary) gets armor forged to their size by setting the manager order's `specdata.race` to their race; requirements and stock are tracked per size (via each item's `maker_race`), so dwarf-sized armor never counts as covering a human, and their iron/copper backups are sized too. **Gauntlets and high boots are targeted as pairs (2 per soldier); gauntlets are handed, so it requires one masterwork of EACH hand (left+right), while boots need any 2 masterwork.** **Upgrade to masterwork** (`Shift-M`) upgrades **every soldier's pieces in parallel** (not one soldier at a time — so a later soldier's shield isn't blocked behind an earlier soldier's hard-to-masterwork gauntlet), and each cycle **melts enough surplus inferior copies to cover the masterwork shortfall** (out of bars → recycle the extras into bars; clears forbid so they actually melt). **Forge Steel Picks** (`Shift-P`, default OFF) keeps one steel pick per miner (Mining-labor dwarves) in stock, one at a time, honouring the masterwork toggle and recycling surplus steel gear into bars when out of steel. **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
+| `military-uniforms` | one-shot+enableable+overlay | ✅ done | Creates a "Steel - <weapon>" uniform template per typical weapon (short sword/war hammer/battle axe/spear/pick/mace/crossbow): full steel armour set + steel weapon, replace-clothing on; silver war hammer + copper crossbow w/ steel buckler. Deletes default metal uniforms (leather stays). Three toggles on the Equip screen overlay (`dwarfmode/Squads/Equipment/Default`): **Queue gear orders** (`Shift-G`) runs a daily service that **self-manages a manager order per gear piece in the exact item+material each soldier's uniform specifies**, queuing **one** unit at a time and deleting orders once met so **nothing is force-produced**. It forges **one soldier's set at a time, per metal** (steel finishes one soldier while silver/copper independently progresses another — so full sets, breastplates included, actually complete), **serves dwarves in the "Military" work detail first**, and **keeps 3 bars of each metal in reserve** for moods/other jobs. **Iron/copper backup stock** (the uniform is never edited): gear is made in the uniform's metal (steel), but whenever the soldiers don't have enough wearable pieces for an armour slot in the backup metal (desired steel + backup stock < the number who need it), it also stocks a backup version of that piece — **IRON** when there's iron to spare after the steel still owed (else **COPPER**) — (**armour, shield, and weapon** — a cheap weapon beats an empty hand; pieces already in the backup metal are skipped, and the **leather cloak is never metal-backed**, it's always leather) so nobody's left naked or unarmed. **Not gated on steel supply** — even while steel is slowly forging, the backup metal fills the gap; it stops once steel+backup covers everyone. Soldiers choose what to wear themselves. **Gear is SIZED per wearer:** a non-dwarf soldier (e.g. a human mercenary) gets armor forged to their size by setting the manager order's `specdata.race` to their race; requirements and stock are tracked per size (via each item's `maker_race`), so dwarf-sized armor never counts as covering a human, and their iron/copper backups are sized too. **Gauntlets and high boots are targeted as pairs (2 per soldier); gauntlets are handed, so it requires one masterwork of EACH hand (left+right), while boots need any 2 masterwork.** **Upgrade to masterwork** (`Shift-M`) upgrades **every soldier's pieces in parallel** (not one soldier at a time — so a later soldier's shield isn't blocked behind an earlier soldier's hard-to-masterwork gauntlet), and each cycle **melts enough surplus inferior copies to cover the masterwork shortfall** (out of bars → recycle the extras into bars; clears forbid so they actually melt). **Forge Steel Tools** (`Shift-P`, default OFF) keeps one steel pick per miner (Mining-labor dwarves) **and one steel axe per woodcutter** in stock — excluding military fighters, so squad-held picks/axes aren't miscounted — one at a time, honouring the masterwork toggle and recycling surplus steel gear into bars when out of steel. **Train surplus war dogs** (`Shift-D`) war-trains adult male dogs beyond `BREEDER_MALES` (2) breeders via the Pets/Livestock `training_assignments` list (`train_war`) — verified end-to-end (an Animal Trainer turns them into `TRAINED_WAR`). State persisted per site; generic per world. **TODO: auto-assign finished war dogs to squad members** (squad-pet data path still being mapped). |
 
 ---
 
@@ -104,44 +104,18 @@ auto-retrieves units stuck off-map.
 2. Optionally verify the travel estimate against a long live raid and refine
    (direction detection: outbound vs returning — needs cross-call state).
 
-### 🔴 attack-invaders — squads don't engage; build UI buttons instead
+### Overlay registration (learned)
 
-**Current approach (creates orders but they don't trigger attacks):**
-- Targets = `world.units.active` where `isInvader` and not dead and not
-  `flags1.caged`/`flags1.chained` (caged prisoners excluded — 30 of 33 were caged).
-- Fort squads = `world.squads.all[i]` where `entity_id == plotinfo.group_id`
-  (9 squads; `plotinfo.squads.list` was empty — use the world list).
-- For each squad: clear `squad.orders`, then insert a fresh
-  `df.squad_order_kill_listst:new()` with:
-  - `units` — int vector of target unit ids (accepts ints)
-  - `histfigs` — parallel int vector of histfig ids (or -1)
-  - `title`, `year`, `year_tick`. Other fields: `flags`, `issuer_hf`,
-    `recipient_hf`, `origin_army_controller`.
-
-**Problem:** orders land on the squads (verified) but the dwarves don't attack.
-Likely the squads aren't put on active duty by just adding the order (need an
-alert/schedule activation), or a required field/flag is missing, or DF only acts
-on kill orders created through its own targeting flow.
-
-**Fix = UI buttons (work *with* DF's native flow):**
-1. ✅ **DONE — `squad-buttons.lua`** overlay on the kill-target screen. While
-   `main_interface.squads.giving_kill_order` is true (focus
-   `dwarfmode/Squads/Default`), it shows "Target all invaders" / "Target all
-   hostiles" buttons that append unit ids to `main_interface.squads.kill_unid`
-   (verified: this marks the targets; the player then hits DF's "Confirm").
-   Hostiles = `isDanger` & not `isInvader` & not `isFortControlled`.
-2. ✅ **DONE — "Select all/no squads"** button (always shown on the squads
-   screen, focus `dwarfmode/Squads/Default`). Toggles every entry of
-   `main_interface.squads.squad_selected` (vector<bool>[9], parallel to
-   `squad_id`). Lives in the same `squad-buttons.killtargets` widget,
-   bottom-right (`overlay position` / `gui/overlay` to move).
-
-**Overlay registration (learned):** a `--@module = true` script with
-`OVERLAY_WIDGETS = {name=Widget}` in `dfhack-config/scripts/` is auto-discovered
-on DFHack start (`script-manager.foreach_module_script` scans all script paths).
-To pick it up mid-session, call `require('plugins.overlay').rescan()` from lua —
-the `overlay rescan` *command* form does not work. Model: `uniform-unstick.lua`
+A `--@module = true` script with `OVERLAY_WIDGETS = {name=Widget}` in
+`dfhack-config/scripts/` is auto-discovered on DFHack start
+(`script-manager.foreach_module_script` scans all script paths). To pick it up
+mid-session, call `require('plugins.overlay').rescan()` from lua — the `overlay
+rescan` *command* form does not work. Model: `uniform-unstick.lua`
 (`widgets.TextButton{label, key, on_activate}`, `overlay.OverlayWidget`).
+
+(The old `attack-invaders` approach — directly inserting `squad_order_kill_listst`
+orders — is gone: the orders landed on squads but dwarves never engaged. Driving
+DF's native targeting via `squad-buttons` is the working path.)
 
 ---
 
@@ -269,10 +243,15 @@ designations are correct. NOTE: the interactive box-capture + right-click paths 
 cursor (`getMousePos`), so they can only be fully exercised with a live cursor in-game — verify
 there. `tree → chop` via `designation.dig = Default` also wants an in-game confirmation.
 
-### 🟡 dwarf-rts — RTS-style squad control (`dwarf-rts.lua`)
+### ✅ dwarf-rts — RTS-style squad control (`dwarf-rts.lua`)
 
-The DF squad UI is clunky; this makes commanding squads feel like an RTS. Four
-behaviours:
+The DF squad UI is clunky; this makes commanding squads feel like an RTS.
+**STATUS: implemented** — behaviours 1-6 below are all live (the table entry up
+top describes the shipped behaviour). The one remaining TODO is clicking an
+individual squad member to open their **unit sheet** (view them, not command
+them). The spec below is kept for its data-model and gotcha references.
+
+Behaviours:
 
 1. **~~Open Squads → select all + movement mode.~~ ABANDONED.** `giving_move_order`
    *pauses the game inherently* and stays open until an order is placed/cancelled,
@@ -616,23 +595,29 @@ units out** of the unit list, so you only assign labors to civilians.
   could keep military units out of work details (un-assign + clear those labors).
   Not the same as a visual filter, but achieves the intent. Awaiting a decision.
 
-### auto-create labor groups (Work Details)
-One-shot/command to create Work Details (labor groups) for each of:
-stone carving, metal crafting, weaponsmithing, armorsmithing, carpentry, stone
-crafting, glass making, brewing, cooking, jewelry — each with the matching
-labor(s) enabled. Work Details live in
-`df.global.plotinfo.labor_info.work_details` (verify); create one per type with
-its `allowed_labors` set.
+### ✅ auto-create labor groups (Work Details) — DONE (`labor-groups.lua`)
+`labor-groups` creates the crafting Work Details (stone carving, metal/weapon/
+armour smithing, carpentry, stone/glass crafting, brewing, cooking, jewelry, +
+one for every remaining moodable skill) with the matching labor(s), and orders
+the whole Labor screen (dig/grow defaults first, crafts next, Cook/Brewer then
+Military last) — **non-destructively**: existing details are reordered and their
+icons refreshed, never deleted or reassigned; only missing ones are created.
+`labor-groups` / `labor-groups dry` (preview) / `labor-groups once` (magnus-scripts).
 
-### 🟡 work-orders quick text input ("3 steel swords") — PARTIAL (`quick-order.lua`)
+### ✅ work-orders quick text input ("3 steel swords") — DONE (`quick-order.lua`)
 
-**Built (one-time orders):** the `quick-order.entry` overlay "new order" box on
-`dwarfmode/Info/WORK_ORDERS/Default` (auto-focused, right of the DFHack search);
-parse (digits/spelled/rN, fuzzy item+material split), all three material kinds
-(category/concrete-class/specific), magma-safe + most-in-stock (non-economic,
-capability-filtered) picks, raw-glass colour items, and `create_order` inserting
-a one-time `manager_order` at the **top** of the list. Verified live.
-**Still TODO:** repeating orders (`r3 …`) + suggested conditions (Phase 5 below).
+**Built:** the `quick-order.entry` overlay "new order" box on
+`dwarfmode/Info/WORK_ORDERS/Default`. Parses digits/spelled amounts and the
+`r`/`rN` repeat prefix; a subsequence fuzzy matcher over the full orderable set
+(fort-permitted reactions + furniture + weapons/armour subtypes + collection/
+processing jobs), material resolution (category/class/specific, magma-safe,
+most-in-stock, plant materials, raw-glass colours), **material legality**
+(rejects impossible combos, allows CAN_STONE weapons), one-legal-match-per-row
+autocomplete, and `create_order` inserting at the **top** — **one-time OR
+repeating** (`r`/`rN` → `frequency = Monthly`). Verified live.
+**Still TODO:** *suggested conditions* — auto-adding an order's `item_conditions`
+(the "add suggested conditions" DF does when you make a repeating order); the
+frequency is set, but no conditions are attached yet.
 
 **Goal:** a text field on the Work Orders screen that turns freeform text into a
 manager order.
