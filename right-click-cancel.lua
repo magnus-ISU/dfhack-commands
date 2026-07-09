@@ -23,9 +23,10 @@ Mouse helpers for DF's designation and construction tools (overlay "right-click-
   * ALL gestures route through map_pos_if_clear(): the strict dfhack.gui.getMousePos() is nil
     over any UI (toolbar/panel/menu/notification), so a click on ANY UI element does the normal
     thing instead of designating -- plus we stand off DF hover elements and other DFHack overlays.
-  * RIGHT-DRAG a box REMOVES everything designated in it (dig/chop/gather designations and
-    in-progress buildings). While dragging, a red-X preview marks the tiles that will be
-    erased. A LEFT-press during a right-drag CANCELS the erase (and does not designate).
+  * RIGHT-DRAG a box REMOVES everything designated in it (dig/chop/gather designations,
+    smoothing/engraving/fortification designations + their queued jobs, and in-progress
+    buildings). While dragging, a red-X preview marks the tiles that will be erased. A
+    LEFT-press during a right-drag CANCELS the erase (and does not designate).
   * RIGHT single-click cancels whatever is designated under the cursor (a dig designation, a
     tree/plant marked for chop/gather, or an in-progress construction/building); a right
     click on an empty tile passes through (the game's normal "leave the tool").
@@ -90,8 +91,18 @@ end
 local function map_pos_if_clear()
     local pos = dfhack.gui.getMousePos()
     if not pos then return nil end
-    if df.global.game.main_interface.current_hover ~= -1 then return nil end
-    if over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then return nil end
+    local m = df.global.game.main_interface
+    if m.current_hover ~= -1 then return nil end
+    if m.current_hover_alert then return nil end       -- over a native DF notification/alert
+    -- DF sets current_hover_left_x to the left edge of whatever UI element the cursor is
+    -- over (the alert reads 4); it stays 0 over the open map. Non-zero => over UI.
+    if m.current_hover_left_x ~= 0 then return nil end
+    local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+    -- the protected notification area (same zone as dig-shapes/dwarf-rts): the left 2
+    -- columns + the top-left 4x4 corner, so notifications and alerts stay usable while a
+    -- designation tool is active
+    if mx < 2 or (mx < 4 and my < 4) then return nil end
+    if over_other_overlay(mx, my) then return nil end
     return pos
 end
 
@@ -124,6 +135,12 @@ for _, name in ipairs({'Dig', 'CarveUpwardStaircase', 'CarveDownwardStaircase',
     'CarveUpDownStaircase', 'CarveRamp', 'DigChannel'}) do DIG_JOB[df.job_type[name]] = true end
 local CHOP_JOB = {[df.job_type.FellTree] = true}
 local GATHER_JOB = {[df.job_type.GatherPlants] = true}
+-- smoothing, engraving and fortification-carving jobs (all driven by the same
+-- designation.smooth flag: smooth on rough stone, engrave/fortify on smooth stone)
+local SMOOTH_JOB = {}
+for _, name in ipairs({'DetailWall', 'DetailFloor', 'CarveFortification'}) do
+    SMOOTH_JOB[df.job_type[name]] = true
+end
 
 local function remove_jobs_at(pos, typeset)
     local removed = false
@@ -152,6 +169,21 @@ local function cancel_dig(pos)
         blk.flags.designated = true
     end
     if remove_jobs_at(pos, DIG_JOB) then had = true end
+    return had
+end
+
+-- un-designate smoothing / engraving / fortification-carving on the tile (all three
+-- live in designation.smooth), and remove any already-queued detailing job there
+local function cancel_smooth(pos)
+    local blk = dfhack.maps.getTileBlock(pos)
+    if not blk then return false end
+    local des = blk.designation[pos.x % 16][pos.y % 16]
+    local had = des.smooth ~= 0
+    if had then
+        des.smooth = 0
+        blk.flags.designated = true
+    end
+    if remove_jobs_at(pos, SMOOTH_JOB) then had = true end
     return had
 end
 
@@ -184,6 +216,7 @@ end
 
 local function cancel_at(pos)
     local did = cancel_dig(pos)
+    if cancel_smooth(pos) then did = true end
     if remove_jobs_at(pos, CHOP_JOB) then did = true end
     if remove_jobs_at(pos, GATHER_JOB) then did = true end
     if cancel_plant(pos) then did = true end

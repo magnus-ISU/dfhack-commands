@@ -236,10 +236,24 @@ end
 -- (current_hover) and any OTHER DFHack overlay (notifications, etc.) that draws over the map
 -- without blocking the viewport. Works for any UI element, present or future.
 --   Returns the map pos when the click is on the map, or nil when it's on UI (pass it through).
+-- the protected notification/alert area (same as dig-shapes' never-mine zone): the left
+-- 2 columns everywhere + the top-left 4x4 corner, where DF's notification icons and
+-- alerts live -- or the cursor over a native alert. Military-screen clicks (left OR
+-- right) are ignored here so notifications and alerts are always usable.
+local function over_notification_area(mx, my)
+    if df.global.game.main_interface.current_hover_alert then return true end
+    return mx < 2 or (mx < 4 and my < 4)
+end
+
 local function map_pos_if_clear(mx, my)
     local pos = dfhack.gui.getMousePos()               -- strict: nil over any UI
     if not pos then return nil end
-    if df.global.game.main_interface.current_hover ~= -1 then return nil end  -- DF hover element
+    local m = df.global.game.main_interface
+    if m.current_hover ~= -1 then return nil end       -- DF hover element
+    if over_notification_area(mx, my) then return nil end
+    -- DF sets current_hover_left_x to the left edge of whatever UI element the cursor is
+    -- over (the alert reads 4); it stays 0 over the open map. Non-zero => over UI.
+    if m.current_hover_left_x ~= 0 then return nil end
     if over_other_overlay(mx, my) then return nil end  -- another DFHack overlay (e.g. notify)
     return pos
 end
@@ -294,15 +308,6 @@ local function leader_hf(sq)
         if occ ~= -1 then return occ end
     end
     return -1
-end
-
--- close the unit info page DF opens off a portrait click, but only if it is the
--- topmost screen right now (never yank away anything else the player opened since)
-local function close_unit_sheet()
-    local f1 = dfhack.gui.getCurFocus(true)[1]
-    if f1 and f1:find('ViewSheets') then
-        gui.simulateInput(dfhack.gui.getDFViewscreen(true), 'LEAVESCREEN')
-    end
 end
 
 -- the minimap tooltip text for a hovered button id (its "what does this do" hint)
@@ -985,24 +990,21 @@ DwarfRtsClickMove.ATTRS{
 }
 
 function DwarfRtsClickMove:overlay_onupdate()
+    -- countdown for the notification-click shield (armed in onInput when a click over the
+    -- notification/alert area is passed through to DF)
+    if self.notif_shield and self.notif_shield > 0 then
+        self.notif_shield = self.notif_shield - 1
+    end
+
     -- a portrait was clicked last frame: DF has now set the sheet's active unit, so
-    -- follow it (DF's own follow mechanism; manual scrolling releases it natively)
+    -- follow it (DF's own follow mechanism; manual scrolling releases it natively).
+    -- The info page the click opened stays open.
     if self.follow_pending then
         self.follow_pending = nil
-        -- DF has now opened the portrait's unit info page and set its active unit.
-        -- (DF also zeroes follow_unit whenever it opens the sheet, which is why we
-        -- compare against follow_before -- captured in onInput, pre-click.)
         local uid = df.global.game.main_interface.view_sheets.active_id
         local u = uid and uid >= 0 and df.unit.find(uid)
         if u and not dfhack.units.isDead(u) then
-            df.global.plotinfo.follow_unit = uid       -- follow in both cases (DF zeroed it on open)
-            if self.follow_before ~= uid then
-                -- first click: close the page back out, so the click reads as
-                -- "follow", not "open sheet"
-                dfhack.timeout(1, 'frames', close_unit_sheet)
-            end
-            -- second click (already following this unit): leave the info page open
-            -- AND keep following it
+            df.global.plotinfo.follow_unit = uid       -- follow (DF zeroed it on open)
         end
     end
 
@@ -1019,14 +1021,36 @@ function DwarfRtsClickMove:overlay_onupdate()
     local sq = squads_ui()
     local open = sq.open
 
+    -- the panel was displaced by a designation tool (e.g. mining): reopen it as soon as
+    -- the tool is put away. Keyed ONLY off the designation returning to NONE -- the same
+    -- signal that armed the flag -- with no focus-string condition (the focus the frame
+    -- the tool closes is not reliably 'dwarfmode/Default').
+    local reopened = false
+    if self.reopen_after_designation and not open then
+        if df.global.game.main_interface.main_designation_selected == df.main_designation_type.NONE then
+            self.reopen_after_designation = nil
+            sq.open = true
+            open = true
+            reopened = true
+        end
+    elseif open then
+        self.reopen_after_designation = nil
+    end
+
     if open and not self.prev_open then
         -- panel just opened: DF has just (re)built squad_id in id order, so re-pin the list now
         -- (military, then civilian, then autotraining), before the frame renders.
         reorder_squad_list(sq)
+        if reopened then
+            -- reopened after a designation tool: come back with NOTHING selected, so a map
+            -- click doesn't immediately read as a squad command
+            for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
+            sq.viewing_squad_index = -1
+            sq.squad_hfid_selected:resize(0)
         -- RTS select-all, unless a conscription selection is pending. Autotraining AND
         -- civilian-militia squads are excluded -- they're rostered to train or to shelter, not
         -- to be commanded as a strike force by default.
-        if not pending_select then
+        elseif not pending_select then
             local training = autotraining_squads()
             for i = 0, #sq.squad_selected - 1 do
                 local sid = sq.squad_id[i]
@@ -1037,7 +1061,19 @@ function DwarfRtsClickMove:overlay_onupdate()
         -- panel just closed: if anything is still selected (a squad, or members in the
         -- expanded member view), veto the close and drop the selection instead (a second
         -- close, nothing selected now, goes through)
-        if self.armed_close then
+        if df.global.game.main_interface.main_designation_selected ~= df.main_designation_type.NONE then
+            -- the panel closed because the player switched to a map designation tool (e.g. the
+            -- dig-helper entering mining from the squads screen): that's not a stand-down, so
+            -- leave squad orders, selections and any temp squads intact -- and reopen the
+            -- panel once the tool is put away.
+            self.reopen_after_designation = true
+        elseif self.notif_shield and self.notif_shield > 0 then
+            -- the close came from a click that was really aimed at a notification/alert (we
+            -- passed it through so DF could activate/dismiss it): not a stand-down. Put the
+            -- panel straight back, orders and selection intact.
+            sq.open = true
+            open = true
+        elseif self.armed_close then
             -- remember the selection you're leaving with, so a main-map notification group-kill
             -- can still command these squads after the panel deselects + closes
             last_selection = {}
@@ -1049,10 +1085,6 @@ function DwarfRtsClickMove:overlay_onupdate()
             sq.viewing_squad_index = -1            -- collapse the member view too
             sq.squad_hfid_selected:resize(0)
             open = true
-        elseif df.global.game.main_interface.main_designation_selected ~= df.main_designation_type.NONE then
-            -- the panel closed because the player switched to a map designation tool (e.g. the
-            -- dig-helper entering mining from an idle squads screen): that's not a stand-down,
-            -- so leave squad orders and any temp squads intact.
         else
             clear_all_orders(sq)            -- close goes through: stand every squad down
             disband_conscription_squads()   -- ...and disband any temp Conscription squads
@@ -1081,6 +1113,8 @@ function DwarfRtsClickMove:overlay_onupdate()
         -- that unit) and never becomes an RTS command or drag box -- decided once, here on press
         self.press_allied = self.press ~= nil and allied_at(self.press) ~= nil
         self.press_ok = open and not busy(sq)
+            -- never while a designation tool is active (mining runs with the panel open)
+            and df.global.game.main_interface.main_designation_selected == df.main_designation_type.NONE
             -- We always poll on the squads map (so a DRAG box works whether or not anything
             -- is selected). A plain click only commands when something is selected; with
             -- nothing selected it's forwarded to the game as a normal click (see release).
@@ -1133,6 +1167,13 @@ function DwarfRtsClickMove:onInput(keys)
     -- a squads sub-screen (equipment / schedule) is up: stay out of it entirely so its
     -- buttons and the uniform/schedule editors work normally
     if squad_subscreen_open() then return false end
+
+    -- a designation tool is active (mining now runs with the squads panel still open): all
+    -- map input belongs to the tool -- DF's box designation, right-click-cancel's helpers,
+    -- dig-shapes' conversions -- so stand aside entirely until it's put away
+    if df.global.game.main_interface.main_designation_selected ~= df.main_designation_type.NONE then
+        return false
+    end
 
     local sq = squads_ui()
     local top = dfhack.gui.getCurFocus(true)[1] or ''
@@ -1195,15 +1236,40 @@ function DwarfRtsClickMove:onInput(keys)
         end
     end
 
+    -- a click (either button) over the notification/alert area belongs to DF -- left
+    -- activates, right DISMISSES the notification -- so pass it through untouched. Shield
+    -- the panel first: if DF's handling of that click also closes the squads panel (right
+    -- click doubles as "back out"), the close-guard reopens it without a stand-down.
+    if (keys._MOUSE_L or keys._MOUSE_R)
+        and over_notification_area(df.global.gps.mouse_x, df.global.gps.mouse_y)
+    then
+        self.notif_shield = 3   -- update frames of close protection
+        return false
+    end
+
     if keys._MOUSE_R then
-        -- right-click inside the right-anchored military window: attempt to close it
-        -- (the close-guard in onupdate then vetoes/deselects or closes+stands down)
+        -- right-click inside the right-anchored military window: attempt to close it (the
+        -- close-guard in onupdate deselects on the first click, closes+stands down on the
+        -- next). Closing the panel happens ONLY from here -- never from a map right-click.
         if df.global.gps.mouse_x >= df.global.gps.dimx - WINDOW_COLS then
             sq.open = false
             return true
         end
-        -- right-click on the map: leave it to DF (backs out the member view / closes the
-        -- panel via the close-guard). It no longer cycles the squad selection.
+        -- right-click on the exposed map: the first click deselects every squad (and backs
+        -- out the member view), with the panel staying open; a right-click with nothing
+        -- selected enters mining -- also with the panel staying open.
+        if map_pos_if_clear(df.global.gps.mouse_x, df.global.gps.mouse_y) then
+            if has_selection(sq) or has_indiv_selection(sq) or sq.viewing_squad_index >= 0 then
+                for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
+                sq.viewing_squad_index = -1
+                sq.squad_hfid_selected:resize(0)
+            else
+                df.global.game.main_interface.main_designation_selected =
+                    df.main_designation_type.DIG_DIG
+            end
+            return true
+        end
+        -- right-click over some other UI element (toolbar, menu, another overlay): leave it to DF
         return false
     end
 
@@ -1214,7 +1280,6 @@ function DwarfRtsClickMove:onInput(keys)
         local tip = hover_tooltip(df.global.game.main_interface.current_hover)
         if tip and tip:match('^View .* sheet') then
             self.follow_pending = true
-            self.follow_before = df.global.plotinfo.follow_unit  -- pre-click follow state
         end
         return false                                   -- UI button: let DF handle the click
     end

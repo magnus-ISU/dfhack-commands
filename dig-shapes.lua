@@ -38,7 +38,6 @@ local function fmt(p) return ('%d,%d,z%d'):format(p.x, p.y, p.z) end
 
 local function mi() return df.global.game.main_interface end
 local function enter_mining() mi().main_designation_selected = df.main_designation_type.DIG_DIG end
-local function squads_ui() return mi().squads end
 
 local WINDOW_COLS = 28   -- dwarf-rts's right-side squads window band; yield right-clicks there
 
@@ -375,14 +374,6 @@ end
 -- unconsumed right-click on dwarfmode/Default is cancelled by DF). So we yield (return false,
 -- letting DF/dwarf-rts handle it) whenever the cursor is over UI: the dwarf-rts right-side band,
 -- an announcement alert, another overlay, a DF hover element, or off the exposed map.
--- nothing selected on the open squads panel (no whole squad, no expanded member)?
-local function squads_idle()
-    local sq = squads_ui()
-    if not sq.open then return false end
-    for i = 0, #sq.squad_selected - 1 do if sq.squad_selected[i] then return false end end
-    return #sq.squad_hfid_selected == 0
-end
-
 function DigShapes:onInput(keys)
     -- Cancelling an IN-PROGRESS dig drag (right-click or Escape) must not be treated as
     -- completing the box. Flag it so overlay_onupdate discards the pending selection, and let
@@ -394,12 +385,11 @@ function DigShapes:onInput(keys)
 
     if keys._MOUSE_R then
         local focus = dfhack.gui.getCurFocus(true)[1] or ''
-        -- Enter mining on a right-click over the open map: from the normal view, OR while the
-        -- squads screen is open with NO squad selected. dwarf-rts forwards that (idle) right-click
-        -- to DF, so the dig-helper turns it into mining just like on the normal map. With a squad
-        -- selected we stay out so dwarf-rts's own right-click (back out / close) still works.
-        local from_squads = focus == 'dwarfmode/Squads/Default' and squads_idle()
-        if focus == 'dwarfmode/Default' or from_squads then
+        -- Enter mining on a right-click over the open map, from the normal view ONLY. On the
+        -- open squads screen a map right-click belongs to dwarf-rts (deselect, then close);
+        -- mining from there goes through the bottom toolbar instead (orders survive and the
+        -- panel reopens when the tool is put away -- dwarf-rts's designation close-guard).
+        if focus == 'dwarfmode/Default' then
             local mp = dfhack.gui.getMousePos()
             local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
             local m = mi()
@@ -412,9 +402,6 @@ function DigShapes:onInput(keys)
             local in_zone = mx < 2 or (mx < 4 and my < 4)
             if mp and m.current_hover == -1 and not m.current_hover_alert and not ooo
                 and not in_band and not on_ui and not in_zone then
-                -- coming from the squads screen: close the panel so the map takes clicks again.
-                -- dwarf-rts leaves squad orders intact because a designation tool is now active.
-                if from_squads then squads_ui().open = false end
                 enter_mining()
                 return true
             end
