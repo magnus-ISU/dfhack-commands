@@ -61,6 +61,7 @@ local FIXED = {
     {'bracelet', 'BRACELET', 'MakeBracelet'}, {'earring', 'EARRING', 'MakeEarring'},
     {'crown', 'CROWN', 'MakeCrown'}, {'scepter', 'SCEPTER', 'MakeScepter'},
     {'figurine', 'FIGURINE', 'MakeFigurine'}, {'goblet', 'GOBLET', 'MakeGoblet'},
+    {'mug', 'GOBLET', 'MakeGoblet'}, {'cup', 'GOBLET', 'MakeGoblet'},   -- mug/cup are goblet items
     {'toy', 'TOY', 'MakeToy'}, {'flask', 'FLASK', 'MakeFlask'}, {'totem', 'TOTEM', 'MakeTotem'},
     {'quern', 'QUERN', 'ConstructQuern'}, {'millstone', 'MILLSTONE', 'ConstructMillstone'},
     {'slab', 'SLAB', 'ConstructSlab'}, {'splint', 'SPLINT', 'ConstructSplint'},
@@ -778,6 +779,20 @@ end
 
 -- ---- order creation ------------------------------------------------------
 
+-- how many finished items ONE job of this order produces (so amount_total can count jobs, not
+-- items). Stone/metal blocks come 4 at a time; glass blocks 1; flasks and goblets/mugs 3.
+local function order_yield(o)
+    local jt = o.job_type
+    if jt == df.job_type.ConstructBlocks then
+        local mi = dfhack.matinfo.decode(o.mat_type, o.mat_index)
+        if mi and mi.material and mi.material.flags and mi.material.flags.IS_GLASS then return 1 end
+        return 4
+    elseif jt == df.job_type.MakeFlask or jt == df.job_type.MakeGoblet then
+        return 3
+    end
+    return 1
+end
+
 function create_order(input)
     local plan, err = resolve(input)
     if not plan then return nil, err end
@@ -808,12 +823,16 @@ function create_order(input)
         end
     end
 
-    o.amount_total, o.amount_left = plan.amount, plan.amount
+    -- amount_total counts JOBS, not finished items. Some jobs yield several per run (stone/metal
+    -- blocks 4, glass blocks 1, flasks + goblets/mugs 3), so divide the requested item count by the
+    -- yield and round up: "197 blocks" -> 50 jobs (200 blocks), not 197 jobs (788 blocks).
+    local jobs = math.ceil(plan.amount / order_yield(o))
+    o.amount_total, o.amount_left = jobs, jobs
     if plan.repeating then
         -- Repeating = "keep `amount` of the OUTPUT item in stock". Checked DAILY, but a stock
         -- condition gates it so it only runs while we have fewer than `amount` of the item
-        -- (matching subtype/material class). Never looks at the input materials. If the job
-        -- has no single countable product, we refuse rather than making a blind repeat.
+        -- (matching subtype AND the order's own material). Never looks at the input materials. If
+        -- the job has no single countable product, we refuse rather than making a blind repeat.
         local cs = count_spec(plan.item)
         if not cs then
             o:delete()
@@ -823,7 +842,10 @@ function create_order(input)
         o.item_conditions:insert('#', {new = df.manager_order_condition_item,
             compare_type = df.logic_condition_type.LessThan, compare_val = plan.amount,
             item_type = cs.item_type, item_subtype = cs.item_subtype or -1,
-            mat_type = cs.mat_type or -1, mat_index = cs.mat_index or -1, reaction_class = ''})
+            -- count the order's OWN material: "keep 50 obsidian blocks" must not be satisfied by
+            -- 50 granite blocks. (For webs -> silk thread the order has no material; flags2 below
+            -- handles the material class instead.)
+            mat_type = o.mat_type, mat_index = o.mat_index, reaction_class = ''})
         if cs.flags2 then   -- material-class match (e.g. count only SILK thread, not plant thread)
             local cond = o.item_conditions[#o.item_conditions - 1]
             for _, fl in ipairs(cs.flags2) do cond.flags2[fl] = true end
