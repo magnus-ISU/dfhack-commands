@@ -445,6 +445,7 @@ function DigBuilding:onInput(keys)
     if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1); return true end
     if keys.CONTEXT_SCROLL_DOWN then self.scroll = math.min(self:max_scroll(), self.scroll + 1); return true end
     if keys._MOUSE_L then
+        local x, y = self:getMousePos()       -- body-local coords, nil if the click is outside us
         if not x then return false end        -- click outside the window: pass through to the map
         local w = self.frame.w
         if y == 0 then                        -- scroll controls on the title/top border
