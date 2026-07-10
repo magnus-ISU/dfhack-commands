@@ -77,7 +77,7 @@ local ENTRIES = {
     {'Cabinet',      {'Furniture', 'Cabinet'}},
     {'Coffin',       {'Furniture', 'Burial'}},
     {'Statue',       {'Furniture', 'Statue'}},
-    {'Slab',         {'Furniture', 'Slab'}, {noplan = true, buildmore = true}},   -- native chooser, keep-building on
+    {'Slab',         {'Furniture', 'Slab'}, {noplan = true}},   -- native slab chooser (keep-building auto-toggle disabled: can't read its state yet)
     {'Traction bed', {'Furniture', 'Traction bench'}},
     {'Bookcase',     {'Furniture', 'Bookcase'}},
     {'Display case', {'Furniture', 'Display'}},
@@ -86,25 +86,25 @@ local ENTRIES = {
     -- Doors / hatches
     {'Door',         {'Doors/hatches', 'Door'}},
     {'Hatch',        {'Doors/hatches', 'Hatch'}},
-    -- Constructions
-    {'Wall',         {'Constructions', 'Wall'}},
-    {'Reinf. wall',  {'Constructions', 'Reinforced Wall'}},
-    {'Floor',        {'Constructions', 'Floor'}},
-    {'Ramp',         {'Constructions', 'Ramp'}},
-    {'Stairs',       {'Constructions', 'Stairs'}},
+    -- Constructions (sorted alphabetically by label -- easier to find a known name)
     {'Bridge',       {'Constructions', 'Bridge'}},
-    {'Paved road',   {'Constructions', 'Paved road'}},
     {'Dirt road',    {'Constructions', 'Dirt road'}},
-    {'Fortificatn',  {'Constructions', 'Fortification'}},
-    {'Wall grate',   {'Constructions', 'Wall grate'}},
-    {'Floor grate',  {'Constructions', 'Floor grate'}},
-    {'Vert bars',    {'Constructions', 'Vertical bars'}},
+    {'Floor',        {'Constructions', 'Floor'}},
     {'Floor bars',   {'Constructions', 'Floor bars'}},
-    {'Glass window', {'Constructions', 'Glass window'}},
+    {'Floor grate',  {'Constructions', 'Floor grate'}},
+    {'Fortificatn',  {'Constructions', 'Fortification'}},
     {'Gem window',   {'Constructions', 'Gem window'}},
+    {'Glass window', {'Constructions', 'Glass window'}},
+    {'Paved road',   {'Constructions', 'Paved road'}},
+    {'Ramp',         {'Constructions', 'Ramp'}},
+    {'Reinf. wall',  {'Constructions', 'Reinforced Wall'}},
+    {'Stairs',       {'Constructions', 'Stairs'}},
     {'Support',      {'Constructions', 'Support'}},
     {'Track',        {'Constructions', 'Track'}},
     {'Track stop',   {'Constructions', 'Track stop'}},
+    {'Vert bars',    {'Constructions', 'Vertical bars'}},
+    {'Wall',         {'Constructions', 'Wall'}},
+    {'Wall grate',   {'Constructions', 'Wall grate'}},
     -- Machines / fluids
     {'Lever',        {'Machines/fluids', 'Lever'}},
     {'Well',         {'Machines/fluids', 'Well'}},
@@ -280,6 +280,7 @@ end
 
 function DigBuilding:init()
     self.scroll = 0
+    self.cols = 2
 end
 
 -- rows available for entries = window height minus the top and bottom border rows
@@ -288,14 +289,23 @@ function DigBuilding:list_rows()
 end
 
 function DigBuilding:max_scroll()
-    local lines = math.ceil(#ENTRIES / 2)
+    local lines = math.ceil(#ENTRIES / self.cols)
     return math.max(0, lines - self:list_rows())
 end
 
 function DigBuilding:overlay_onupdate()
     self.visible = dig_active()
-    local h = df.global.gps.dimy - TOP_MARGIN - BOT_MARGIN
-    if h ~= self.frame.h then self.frame.h = h end
+    -- Size the panel to EXACTLY fit the list, and adapt to the screen. Start at 2 columns; if the
+    -- list is taller than the space between the top/bottom margins, add columns until it fits (up to
+    -- what the screen width allows). If it still can't fit, cap the height and let it scroll.
+    local gps = df.global.gps
+    local avail_rows = math.max(1, gps.dimy - TOP_MARGIN - BOT_MARGIN - 2)   -- entry rows (excl. borders)
+    local max_cols = math.max(1, math.floor((gps.dimx - LEFT_MARGIN - 2) / COL_W))
+    local cols = math.min(max_cols, math.max(2, math.ceil(#ENTRIES / avail_rows)))
+    self.cols = cols
+    local rows = math.min(math.ceil(#ENTRIES / cols), avail_rows)
+    self.frame.w = cols * COL_W + 2
+    self.frame.h = rows + 2
     if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
     -- return to the Dig screen once a picker-initiated build flow has fully closed
     if return_state ~= 'idle' then
@@ -316,7 +326,7 @@ end
 -- draw the picker as a bordered, opaque panel (so it doesn't blend into the map)
 function DigBuilding:onRenderBody(dc)
     if not self.visible then return end
-    local w, h = WIN_W, self.frame.h
+    local w, h, cols = self.frame.w, self.frame.h, self.cols
     local BG = {fg = COLOR_GREY, bg = COLOR_BLACK}
     for r = 0, h - 1 do dc:seek(0, r):pen(BG):string(string.rep(' ', w)) end   -- opaque background
     local hbar = string.rep(string.char(196), w - 2)                           -- box-drawing border
@@ -334,20 +344,20 @@ function DigBuilding:onRenderBody(dc)
     end
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
         local line = self.scroll + r
-        for c = 0, 1 do
-            local e = ENTRIES[line * 2 + c + 1]
+        for c = 0, cols - 1 do
+            local e = ENTRIES[line * cols + c + 1]
             if e then dc:seek(1 + c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1)) end
         end
     end
 end
 
--- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..2*COL_W
+-- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..cols*COL_W
 function DigBuilding:entry_at(x, y)
     if y < 1 or y >= self.frame.h - 1 then return nil end
     local r = y - 1
-    if r >= self:list_rows() or x < 1 or x > 2 * COL_W then return nil end
-    local c = (x - 1 >= COL_W) and 1 or 0
-    return ENTRIES[(self.scroll + r) * 2 + c + 1]
+    if r >= self:list_rows() or x < 1 or x > self.cols * COL_W then return nil end
+    local c = math.floor((x - 1) / COL_W)
+    return ENTRIES[(self.scroll + r) * self.cols + c + 1]
 end
 
 function DigBuilding:onInput(keys)
@@ -357,9 +367,10 @@ function DigBuilding:onInput(keys)
     if keys._MOUSE_L then
         local x, y = self:getMousePos()
         if not x then return false end        -- click outside the window: pass through to the map
+        local w = self.frame.w
         if y == 0 then                        -- scroll controls on the title/top border
-            if x >= WIN_W - 10 and x <= WIN_W - 6 then self.scroll = math.max(0, self.scroll - 1)
-            elseif x >= WIN_W - 5 and x <= WIN_W - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
+            if x >= w - 10 and x <= w - 6 then self.scroll = math.max(0, self.scroll - 1)
+            elseif x >= w - 5 and x <= w - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
             return true
         end
         local e = self:entry_at(x, y)
