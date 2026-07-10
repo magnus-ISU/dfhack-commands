@@ -30,9 +30,9 @@ local gui = require('gui')
 local function mi() return df.global.game.main_interface end
 local function scr() return dfhack.gui.getDFViewscreen(true) end
 local TOP_MARGIN, BOT_MARGIN = 14, 4      -- rows of negative space kept clear, top / bottom
-local LEFT_MARGIN = 5                      -- columns of negative space kept clear on the left
-local WIN_W = 34                          -- window width; two columns inside
-local COL_W = 17                          -- each column's cell width
+local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
+local WIN_W = 34                          -- window width; border + two columns inside
+local COL_W = 16                          -- each column's cell width (inside the border)
 
 -- Every buildable thing, in display order: {disp, path}. `path` is the sequence of on-screen
 -- button labels to click (category -> [subcategory] -> building), matched EXACTLY against the
@@ -77,7 +77,7 @@ local ENTRIES = {
     {'Cabinet',      {'Furniture', 'Cabinet'}},
     {'Coffin',       {'Furniture', 'Burial'}},
     {'Statue',       {'Furniture', 'Statue'}},
-    {'Slab',         {'Furniture', 'Slab'}, {noplan = true}},   -- native slab chooser, no planner
+    {'Slab',         {'Furniture', 'Slab'}, {noplan = true, buildmore = true}},   -- native chooser, keep-building on
     {'Traction bed', {'Furniture', 'Traction bench'}},
     {'Bookcase',     {'Furniture', 'Bookcase'}},
     {'Display case', {'Furniture', 'Display'}},
@@ -208,12 +208,37 @@ local function planner_toggle(want)
     end
 end
 
+-- "Keep building after placement" is a NATIVE placement checkbox whose box sits 5 columns LEFT of
+-- its label. We can click it but can't read its on/off state (it's a graphic sprite that reads as
+-- blank), so we click it once. Anchored to the label's LIVE position (found by text) so it survives
+-- screen resizes. Returns true once the label was found + clicked.
+local function keep_building_toggle()
+    local gps = df.global.gps
+    local W, H = gps.dimx, gps.dimy
+    for y = 0, H - 1 do
+        local i = readrow(y, W):find('Keep building after placement', 1, true)
+        if i then
+            gps.mouse_x = (i - 1) - 5   -- checkbox is 5 cols left of the label start
+            gps.mouse_y = y
+            gui.simulateInput(scr(), '_MOUSE_L')
+            return true
+        end
+    end
+    return false
+end
+
+-- tracks a picker-initiated build flow so we can return to the Dig screen when it closes:
+-- 'pending' (nav started) -> 'armed' (build menu seen open) -> back to Default => re-enter dig.
+local return_state = 'idle'
+
 -- open the build menu and click through `path` (category -> [subcategory] -> building). Each step
 -- is deferred a few frames so DF re-renders the next level before we read/click it. Fed keys and
 -- injected clicks must run inside DF's frame loop, hence the timeouts. Once in placement, force the
--- buildingplan planner on (off for `noplan` items, e.g. slabs). Two attempts absorb render lag.
-local function navigate(path, noplan)
+-- buildingplan planner on (off for `noplan` items, e.g. slabs), and for `buildmore` items also turn
+-- on "keep building after placement". Two attempts absorb render lag.
+local function navigate(path, noplan, buildmore)
     mi().main_designation_selected = df.main_designation_type.NONE   -- drop the Dig tool
+    return_state = 'pending'
     dfhack.timeout(1, 'frames', function() gui.simulateInput(scr(), 'D_BUILDING') end)
     local d = 4
     for _, label in ipairs(path) do
@@ -222,8 +247,15 @@ local function navigate(path, noplan)
         d = d + 3
     end
     local want = not noplan
-    dfhack.timeout(d + 4, 'frames', function() planner_toggle(want) end)
-    dfhack.timeout(d + 9, 'frames', function() planner_toggle(want) end)
+    local bm_done = false
+    local function settle()
+        planner_toggle(want)   -- idempotent (reads state), safe to run twice
+        -- keep-building can't be read, so click it exactly once (the first settle where the label
+        -- has rendered); the flag stops the second attempt from toggling it back off
+        if buildmore and not bm_done and keep_building_toggle() then bm_done = true end
+    end
+    dfhack.timeout(d + 4, 'frames', settle)
+    dfhack.timeout(d + 9, 'frames', settle)
 end
 
 -- ---- overlay -----------------------------------------------------------------
@@ -238,7 +270,7 @@ DigBuilding.ATTRS{
     -- gated to dig_active() below, so it only actually shows while the Dig tool is selected.
     viewscreens = 'dwarfmode',
     frame = {w = WIN_W, h = 10},                  -- h recomputed each update (full height - margins)
-    version = 2,                                   -- bumped: moved 5 right / 4 down (resets saved pos)
+    version = 3,                                   -- bumped: moved right / panel border (resets saved pos)
     overlay_onupdate_max_freq_seconds = 0,
 }
 
@@ -250,8 +282,9 @@ function DigBuilding:init()
     self.scroll = 0
 end
 
+-- rows available for entries = window height minus the top and bottom border rows
 function DigBuilding:list_rows()
-    return math.max(1, self.frame.h - 1)   -- minus 1 for the title row
+    return math.max(1, self.frame.h - 2)
 end
 
 function DigBuilding:max_scroll()
@@ -264,33 +297,56 @@ function DigBuilding:overlay_onupdate()
     local h = df.global.gps.dimy - TOP_MARGIN - BOT_MARGIN
     if h ~= self.frame.h then self.frame.h = h end
     if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
-end
-
-function DigBuilding:onRenderBody(dc)
-    if not self.visible then return end
-    local rows = self:list_rows()
-    local ms = self:max_scroll()
-    dc:seek(0, 0):pen(COLOR_GREY):string('Build (click):')
-    if ms > 0 then
-        dc:seek(WIN_W - 6, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
-        dc:seek(WIN_W - 1, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('+')
-    end
-    for r = 0, rows - 1 do
-        local line = self.scroll + r
-        for c = 0, 1 do
-            local e = ENTRIES[line * 2 + c + 1]
-            if e then
-                dc:seek(c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1))
+    -- return to the Dig screen once a picker-initiated build flow has fully closed
+    if return_state ~= 'idle' then
+        local foc = dfhack.gui.getCurFocus(true)[1] or ''
+        if return_state == 'pending' then
+            if foc:find('dwarfmode/Building', 1, true) then return_state = 'armed'
+            elseif dig_active() then return_state = 'idle' end   -- nav never opened the menu; reset
+        elseif return_state == 'armed' then
+            if foc == 'dwarfmode/Default'
+                    and mi().bottom_mode_selected == df.main_bottom_mode_type.NONE then
+                mi().main_designation_selected = df.main_designation_type.DIG_DIG
+                return_state = 'idle'
             end
         end
     end
 end
 
+-- draw the picker as a bordered, opaque panel (so it doesn't blend into the map)
+function DigBuilding:onRenderBody(dc)
+    if not self.visible then return end
+    local w, h = WIN_W, self.frame.h
+    local BG = {fg = COLOR_GREY, bg = COLOR_BLACK}
+    for r = 0, h - 1 do dc:seek(0, r):pen(BG):string(string.rep(' ', w)) end   -- opaque background
+    local hbar = string.rep(string.char(196), w - 2)                           -- box-drawing border
+    dc:seek(0, 0):pen(BG):string(string.char(218) .. hbar .. string.char(191))
+    dc:seek(0, h - 1):pen(BG):string(string.char(192) .. hbar .. string.char(217))
+    for r = 1, h - 2 do
+        dc:seek(0, r):pen(BG):string(string.char(179))
+        dc:seek(w - 1, r):pen(BG):string(string.char(179))
+    end
+    dc:seek(2, 0):pen(COLOR_WHITE):string(' Build ')                           -- title on the top border
+    local ms = self:max_scroll()
+    if ms > 0 then                                                             -- scroll controls on top border
+        dc:seek(w - 10, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
+        dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
+    end
+    for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
+        local line = self.scroll + r
+        for c = 0, 1 do
+            local e = ENTRIES[line * 2 + c + 1]
+            if e then dc:seek(1 + c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1)) end
+        end
+    end
+end
+
+-- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..2*COL_W
 function DigBuilding:entry_at(x, y)
-    if y < 1 then return nil end
+    if y < 1 or y >= self.frame.h - 1 then return nil end
     local r = y - 1
-    if r >= self:list_rows() then return nil end
-    local c = (x >= COL_W) and 1 or 0
+    if r >= self:list_rows() or x < 1 or x > 2 * COL_W then return nil end
+    local c = (x - 1 >= COL_W) and 1 or 0
     return ENTRIES[(self.scroll + r) * 2 + c + 1]
 end
 
@@ -301,13 +357,13 @@ function DigBuilding:onInput(keys)
     if keys._MOUSE_L then
         local x, y = self:getMousePos()
         if not x then return false end        -- click outside the window: pass through to the map
-        if y == 0 then
-            if x >= WIN_W - 6 and x <= WIN_W - 2 then self.scroll = math.max(0, self.scroll - 1)
-            elseif x >= WIN_W - 1 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
+        if y == 0 then                        -- scroll controls on the title/top border
+            if x >= WIN_W - 10 and x <= WIN_W - 6 then self.scroll = math.max(0, self.scroll - 1)
+            elseif x >= WIN_W - 5 and x <= WIN_W - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
             return true
         end
         local e = self:entry_at(x, y)
-        if e then navigate(e[2], e[3] and e[3].noplan) end
+        if e then navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore) end
         return true                           -- consume any click within the window
     end
     return false
