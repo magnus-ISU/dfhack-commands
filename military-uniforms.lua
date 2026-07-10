@@ -1452,7 +1452,14 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     for _, mv in ipairs(moves) do pcall(dfhack.military.addToSquad, mv.uid, mv.sid, -1) end
     for _, sid in ipairs(sids) do
         local sq = df.squad.find(sid)
-        if sq and sq.cur_routine_idx ~= routine[sid] then sq.cur_routine_idx = routine[sid] end
+        if sq then
+            local want = routine[sid]
+            -- Only auto-switch a squad to "Ready" when it is currently OFF-DUTY. A squad the player
+            -- has already put on a routine (e.g. a "Train" order) is left as-is, so it keeps
+            -- training instead of being forced back to "Ready".
+            if want == ridx and sq.cur_routine_idx ~= OFF_ROUTINE then want = sq.cur_routine_idx end
+            if sq.cur_routine_idx ~= want then sq.cur_routine_idx = want end
+        end
     end
 
     state.civ_need_squad = need_squad and true or false
