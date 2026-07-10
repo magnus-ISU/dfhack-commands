@@ -190,6 +190,9 @@ local ENTRIES = {
     {'Trade depot',  {'Trade depot'}},
 }
 
+-- one fully alphabetical list (by shown label) so anything is easy to find by name
+table.sort(ENTRIES, function(a, b) return a[1] < b[1] end)
+
 -- ---- native-menu driver ------------------------------------------------------
 
 -- read one screen row as a string
@@ -375,59 +378,52 @@ function DigBuilding:overlay_onupdate()
     end
 end
 
--- Draw the picker as a bordered, opaque panel, but RENDER BEHIND native game elements. Overlays
--- are always drawn on top of the viewscreen, so to fake "behind" we read the screen buffer (which
--- already holds the native content) and skip any cell the game drew something visible in (ch > 32).
--- The map is graphic tiles (ch 0) so it never blocks; native panels/announcements (text + frames)
--- do, and show right through the picker. The skipped cells are remembered as `native_mask` so
--- onInput can yield clicks to whatever is poking through.
+-- Is any cell of our frame covered by native content? Overlays always draw on top of the
+-- viewscreen, so to render BEHIND native panels we read the screen buffer (native content is
+-- already there when overlays render) and, if the game drew anything visible in ANY of our cells
+-- (ch > 32), we step aside entirely. The map is graphic tiles (ch 0), so it never triggers this;
+-- native panels/announcements (text + frames) do. Whole-panel (not per-cell) so panel BACKGROUNDS
+-- aren't covered either.
+function DigBuilding:covered_by_native()
+    local fr = self.frame_rect
+    if not fr then return false end
+    for y = fr.y1, fr.y2 do
+        for x = fr.x1, fr.x2 do
+            local ok, t = pcall(dfhack.screen.readTile, x, y)
+            if ok and t and t.ch and t.ch > 32 then return true end
+        end
+    end
+    return false
+end
+
+-- draw the picker as a bordered, opaque panel -- unless a native panel overlaps it (then hide it)
 function DigBuilding:onRenderBody(dc)
     if not self.visible then return end
+    self.covered = self:covered_by_native()
+    if self.covered then return end   -- a native panel overlaps us: get out of its way entirely
     local w, h, cols = self.frame.w, self.frame.h, self.cols
-    -- compose the panel into a cell buffer first
-    local buf = {}
-    local function put(x, y, ch, fg) buf[y] = buf[y] or {}; buf[y][x] = {ch = ch, fg = fg} end
-    for y = 0, h - 1 do for x = 0, w - 1 do put(x, y, 32, COLOR_GREY) end end   -- opaque background
-    put(0, 0, 218, COLOR_GREY); put(w - 1, 0, 191, COLOR_GREY)                  -- border corners
-    put(0, h - 1, 192, COLOR_GREY); put(w - 1, h - 1, 217, COLOR_GREY)
-    for x = 1, w - 2 do put(x, 0, 196, COLOR_GREY); put(x, h - 1, 196, COLOR_GREY) end
-    for y = 1, h - 2 do put(0, y, 179, COLOR_GREY); put(w - 1, y, 179, COLOR_GREY) end
-    local function text(x, y, s, fg) for i = 1, #s do put(x + i - 1, y, s:byte(i), fg) end end
-    text(2, 0, ' Build ', COLOR_WHITE)                                         -- title on the top border
+    local BG = {fg = COLOR_GREY, bg = COLOR_BLACK}
+    for r = 0, h - 1 do dc:seek(0, r):pen(BG):string(string.rep(' ', w)) end   -- opaque background
+    local hbar = string.rep(string.char(196), w - 2)                           -- box-drawing border
+    dc:seek(0, 0):pen(BG):string(string.char(218) .. hbar .. string.char(191))
+    dc:seek(0, h - 1):pen(BG):string(string.char(192) .. hbar .. string.char(217))
+    for r = 1, h - 2 do
+        dc:seek(0, r):pen(BG):string(string.char(179))
+        dc:seek(w - 1, r):pen(BG):string(string.char(179))
+    end
+    dc:seek(2, 0):pen(COLOR_WHITE):string(' Build ')                           -- title on the top border
     local ms = self:max_scroll()
     if ms > 0 then                                                             -- scroll controls on top border
-        text(w - 10, 0, ' [-] ', self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY)
-        text(w - 5, 0, '[+] ', self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY)
+        dc:seek(w - 10, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
+        dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
     end
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
         local line = self.scroll + r
         for c = 0, cols - 1 do
             local e = ENTRIES[line * cols + c + 1]
-            if e then text(1 + c * COL_W, r + 1, e[1]:sub(1, COL_W - 1), COLOR_WHITE) end
+            if e then dc:seek(1 + c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1)) end
         end
     end
-    -- blit, skipping cells where the game already drew visible native content (render behind it)
-    local ox, oy = self.frame_rect.x1, self.frame_rect.y1
-    local mask = {}
-    for y = 0, h - 1 do
-        local row = buf[y]
-        local nat = {}
-        for x = 0, w - 1 do
-            local ok, t = pcall(dfhack.screen.readTile, ox + x, oy + y)
-            if ok and t and t.ch and t.ch > 32 then nat[x] = true; mask[y * 256 + x] = true end
-        end
-        local x = 0
-        while x < w do
-            if nat[x] then x = x + 1
-            else
-                local fg = row[x].fg
-                local run = {}
-                while x < w and not nat[x] and row[x].fg == fg do run[#run + 1] = string.char(row[x].ch); x = x + 1 end
-                dc:seek(x - #run, y):pen({fg = fg, bg = COLOR_BLACK}):string(table.concat(run))
-            end
-        end
-    end
-    self.native_mask = mask
 end
 
 -- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..cols*COL_W
@@ -440,14 +436,10 @@ function DigBuilding:entry_at(x, y)
 end
 
 function DigBuilding:onInput(keys)
-    if not self.visible then return false end
-    local x, y = self:getMousePos()   -- body-local coords, nil if the cursor is outside the panel
-    -- Never steal input meant for something drawn over us: a cell where native content is poking
-    -- through (native_mask, recorded during render -> we're behind it here), a DF hover element, or
-    -- another overlay. Yield in those cases so the picker sits BEHIND all other panels.
-    if (x and self.native_mask and self.native_mask[y * 256 + x])
-        or mi().current_hover ~= -1
-        or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
+    -- yield everything while hidden or while a native panel overlaps us (covered, set in render),
+    -- or when the cursor is over a DF hover element / another overlay -- never steal their input
+    if not self.visible or self.covered then return false end
+    if mi().current_hover ~= -1 or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
         return false
     end
     if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1); return true end
