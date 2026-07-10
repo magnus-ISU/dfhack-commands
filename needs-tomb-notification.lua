@@ -389,9 +389,10 @@ local function create_make_slab_order(amount)
     mo.all:insert('#', o)
 end
 
--- Queue engrave orders for the listed dwarves, but only as many as there are
--- blank slabs to work on; for the rest, queue a "make rock slab" order instead
--- so blanks get produced. Returns: engraved, made (rock-slab shortfall), skipped.
+-- Queue an engrave order for EVERY listed dwarf who needs one, PLUS a "make rock slab" order for
+-- however many extra blanks those engravings need. An EngraveSlab job simply waits for a blank
+-- slab to exist, so we never cap engravings by the current blank count -- we queue them all and
+-- make sure enough blanks get produced. Returns: engraved, made (extra blanks), skipped.
 local function enqueue_memorial_slabs(list)
     local need, skipped = {}, 0
     for _, e in ipairs(list) do
@@ -404,23 +405,26 @@ local function enqueue_memorial_slabs(list)
         end
     end
 
-    -- blanks available for NEW engrave orders: existing engrave orders will each
-    -- consume a blank; already-queued make-slab orders will each add one
+    -- blanks available for the NEW engrave orders, measured BEFORE we add them: existing engrave
+    -- orders each consume a blank; already-queued make-slab orders each add one.
     local pending_engrave, pending_make = count_slab_orders()
     local free = count_blank_slabs() - pending_engrave + pending_make
-    if free < 0 then free = 0 end
 
-    local engraved = math.min(#need, free)
-    for i = 1, engraved do
+    -- always engrave for everyone who needs it
+    for i = 1, #need do
         create_slab_order(need[i].hf)
     end
 
-    local shortfall = #need - engraved
+    -- queue a "make rock slab" order for the shortfall so the extra blanks those engravings need
+    -- actually get produced (the engrave jobs just wait until a blank exists)
+    local shortfall = #need - free
     if shortfall > 0 then
         create_make_slab_order(shortfall)
+    else
+        shortfall = 0
     end
 
-    return engraved, shortfall, skipped
+    return #need, shortfall, skipped
 end
 
 -- ---------------------------------------------------------------------------

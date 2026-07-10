@@ -29,6 +29,58 @@ local gui = require('gui')
 
 local function mi() return df.global.game.main_interface end
 local function scr() return dfhack.gui.getDFViewscreen(true) end
+
+-- does overlay `w` match the current focus? (only yield to overlays actually drawn on this screen)
+local function widget_on_screen(w, vs)
+    local vss = w.viewscreens
+    if type(vss) == 'string' then vss = {vss} end
+    if type(vss) ~= 'table' then return false end
+    for _, fs in ipairs(vss) do
+        if type(fs) == 'string' then
+            local ok, m = pcall(dfhack.gui.matchFocusString, fs, vs)
+            if ok and m then return true end
+        end
+    end
+    return false
+end
+
+-- rects of OTHER overlays currently rendering that overlap `frect`. The picker renders BEHIND these
+-- and yields clicks to them, so it never covers or steals input from another panel (notifications).
+local function overlapping_overlays(frect)
+    local out = {}
+    local ok, db = pcall(function() return overlay.get_state().db end)
+    if not ok or not db then return out end
+    local vs = dfhack.gui.getDFViewscreen(true)
+    local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
+    for name, e in pairs(db) do
+        if name ~= 'dig-building.picker' and e.widget then
+            local w = e.widget
+            local r = w.frame_rect
+            local vis = w.visible
+            if type(vis) == 'function' then local _; _, vis = pcall(vis, w) end
+            if r and vis and r.x2 >= r.x1 and r.y2 >= r.y1                            -- valid, non-degenerate
+                and not (r.x1 <= 0 and r.y1 <= 0 and r.x2 >= fullw and r.y2 >= fullh) -- not full-screen
+                and r.x1 <= frect.x2 and r.x2 >= frect.x1                             -- overlaps frect
+                and r.y1 <= frect.y2 and r.y2 >= frect.y1
+                and widget_on_screen(w, vs) then                                      -- actually on-screen
+                out[#out + 1] = {x1 = r.x1, y1 = r.y1, x2 = r.x2, y2 = r.y2}
+            end
+        end
+    end
+    return out
+end
+
+local function in_any(ax, ay, rects)
+    for _, r in ipairs(rects) do
+        if ax >= r.x1 and ax <= r.x2 and ay >= r.y1 and ay <= r.y2 then return true end
+    end
+    return false
+end
+
+-- is the cursor over another on-screen overlay drawn above us? (yield clicks to it)
+local function over_other_overlay(mx, my)
+    return #overlapping_overlays({x1 = mx, y1 = my, x2 = mx, y2 = my}) > 0
+end
 local TOP_MARGIN, BOT_MARGIN = 14, 4      -- rows of negative space kept clear, top / bottom
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
@@ -323,32 +375,59 @@ function DigBuilding:overlay_onupdate()
     end
 end
 
--- draw the picker as a bordered, opaque panel (so it doesn't blend into the map)
+-- Draw the picker as a bordered, opaque panel, but RENDER BEHIND native game elements. Overlays
+-- are always drawn on top of the viewscreen, so to fake "behind" we read the screen buffer (which
+-- already holds the native content) and skip any cell the game drew something visible in (ch > 32).
+-- The map is graphic tiles (ch 0) so it never blocks; native panels/announcements (text + frames)
+-- do, and show right through the picker. The skipped cells are remembered as `native_mask` so
+-- onInput can yield clicks to whatever is poking through.
 function DigBuilding:onRenderBody(dc)
     if not self.visible then return end
     local w, h, cols = self.frame.w, self.frame.h, self.cols
-    local BG = {fg = COLOR_GREY, bg = COLOR_BLACK}
-    for r = 0, h - 1 do dc:seek(0, r):pen(BG):string(string.rep(' ', w)) end   -- opaque background
-    local hbar = string.rep(string.char(196), w - 2)                           -- box-drawing border
-    dc:seek(0, 0):pen(BG):string(string.char(218) .. hbar .. string.char(191))
-    dc:seek(0, h - 1):pen(BG):string(string.char(192) .. hbar .. string.char(217))
-    for r = 1, h - 2 do
-        dc:seek(0, r):pen(BG):string(string.char(179))
-        dc:seek(w - 1, r):pen(BG):string(string.char(179))
-    end
-    dc:seek(2, 0):pen(COLOR_WHITE):string(' Build ')                           -- title on the top border
+    -- compose the panel into a cell buffer first
+    local buf = {}
+    local function put(x, y, ch, fg) buf[y] = buf[y] or {}; buf[y][x] = {ch = ch, fg = fg} end
+    for y = 0, h - 1 do for x = 0, w - 1 do put(x, y, 32, COLOR_GREY) end end   -- opaque background
+    put(0, 0, 218, COLOR_GREY); put(w - 1, 0, 191, COLOR_GREY)                  -- border corners
+    put(0, h - 1, 192, COLOR_GREY); put(w - 1, h - 1, 217, COLOR_GREY)
+    for x = 1, w - 2 do put(x, 0, 196, COLOR_GREY); put(x, h - 1, 196, COLOR_GREY) end
+    for y = 1, h - 2 do put(0, y, 179, COLOR_GREY); put(w - 1, y, 179, COLOR_GREY) end
+    local function text(x, y, s, fg) for i = 1, #s do put(x + i - 1, y, s:byte(i), fg) end end
+    text(2, 0, ' Build ', COLOR_WHITE)                                         -- title on the top border
     local ms = self:max_scroll()
     if ms > 0 then                                                             -- scroll controls on top border
-        dc:seek(w - 10, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
-        dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
+        text(w - 10, 0, ' [-] ', self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY)
+        text(w - 5, 0, '[+] ', self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY)
     end
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
         local line = self.scroll + r
         for c = 0, cols - 1 do
             local e = ENTRIES[line * cols + c + 1]
-            if e then dc:seek(1 + c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1)) end
+            if e then text(1 + c * COL_W, r + 1, e[1]:sub(1, COL_W - 1), COLOR_WHITE) end
         end
     end
+    -- blit, skipping cells where the game already drew visible native content (render behind it)
+    local ox, oy = self.frame_rect.x1, self.frame_rect.y1
+    local mask = {}
+    for y = 0, h - 1 do
+        local row = buf[y]
+        local nat = {}
+        for x = 0, w - 1 do
+            local ok, t = pcall(dfhack.screen.readTile, ox + x, oy + y)
+            if ok and t and t.ch and t.ch > 32 then nat[x] = true; mask[y * 256 + x] = true end
+        end
+        local x = 0
+        while x < w do
+            if nat[x] then x = x + 1
+            else
+                local fg = row[x].fg
+                local run = {}
+                while x < w and not nat[x] and row[x].fg == fg do run[#run + 1] = string.char(row[x].ch); x = x + 1 end
+                dc:seek(x - #run, y):pen({fg = fg, bg = COLOR_BLACK}):string(table.concat(run))
+            end
+        end
+    end
+    self.native_mask = mask
 end
 
 -- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..cols*COL_W
@@ -362,10 +441,18 @@ end
 
 function DigBuilding:onInput(keys)
     if not self.visible then return false end
+    local x, y = self:getMousePos()   -- body-local coords, nil if the cursor is outside the panel
+    -- Never steal input meant for something drawn over us: a cell where native content is poking
+    -- through (native_mask, recorded during render -> we're behind it here), a DF hover element, or
+    -- another overlay. Yield in those cases so the picker sits BEHIND all other panels.
+    if (x and self.native_mask and self.native_mask[y * 256 + x])
+        or mi().current_hover ~= -1
+        or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
+        return false
+    end
     if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1); return true end
     if keys.CONTEXT_SCROLL_DOWN then self.scroll = math.min(self:max_scroll(), self.scroll + 1); return true end
     if keys._MOUSE_L then
-        local x, y = self:getMousePos()
         if not x then return false end        -- click outside the window: pass through to the map
         local w = self.frame.w
         if y == 0 then                        -- scroll controls on the title/top border
