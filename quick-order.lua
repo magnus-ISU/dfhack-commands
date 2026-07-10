@@ -140,7 +140,13 @@ local function build_vocab()
         local vec = df.global.world.raws.itemdefs[vecname]
         for i = 0, #vec - 1 do
             local def = vec[i]
-            add_job(v, def.name, spec[1], spec[2], def.subtype, true)   -- singular only (scorer handles plurals)
+            -- skip procedurally-generated, entity-sourced itemdefs (source_enid ~= -1) -- these are
+            -- instrument parts etc. ("zurko block", "ispig blocks") whose random names otherwise
+            -- pollute matching with un-orderable junk that outscores the real item.
+            local ok, senid = pcall(function() return def.source_enid end)
+            if not ok or senid == -1 then
+                add_job(v, def.name, spec[1], spec[2], def.subtype, true)   -- singular only (scorer handles plurals)
+            end
         end
     end
     for _, sp in ipairs(SPECIAL) do
