@@ -8,8 +8,10 @@ Registers a notification (name: "empty_labor") into DFHack's gui/notify panel, a
 to "Only Selected Does This" but has no living, civilian worker to actually do it -- because:
     * nothing is selected, or
     * the selected dwarves have all died / left, or
-    * the only selected dwarves have the Military labor (are in the "Military" work detail) --
-      they're off on military duty, so the labor still doesn't get done.
+    * the only selected dwarves are soldiers whose military SCHEDULE keeps them on active duty --
+      with no Ready (off-duty) month this month or next -- so the labor doesn't get done. A soldier
+      who cycles back to Ready within the next month (e.g. any squad on the even/odd-month routines)
+      still does the work in a Ready month, so those details are NOT flagged.
 Messages:
     * exactly one   -> 'Work detail "Masonry" has no available workers!'
     * more than one -> '3 work details have no available workers!'
@@ -33,31 +35,48 @@ local dlg = require('gui.dialogs')
 -- detection: details set to OnlySelectedDoesThis with no usable worker
 -- ---------------------------------------------------------------------------
 
--- Members of the "Military" work detail = the fort's active military, as curated by
--- military-labor (off-duty squads and non-leader trainees are NOT included, so those dwarves
--- still count as available labor). A dwarf "has the Military labor assigned" if it's in here.
-local function military_members()
-    local set = {}
-    local wds = df.global.plotinfo.labor_info.work_details
-    for i = 0, #wds - 1 do
-        if wds[i].name == MILITARY_DETAIL then
-            for _, uid in ipairs(wds[i].assigned_units) do set[uid] = true end
+-- A soldier still counts as an available worker if the MILITARY SCHEDULE will make them Ready
+-- (off-duty -- doing civilian jobs in their armour) this month or next. Any squad on the
+-- even-month/odd-month routines is Ready every other month, so a Ready month is always at most one
+-- month away and the labour still gets done; only a soldier who stays on active duty with no Ready
+-- month this month or next (e.g. Constant training) is treated as unavailable. We read the squad's
+-- own schedule, not the "Military" work-detail labor -- an active-duty soldier who cycles back to
+-- Ready soon should NOT trigger the warning.
+local MONTH_TICKS = 33600   -- 403200 game ticks/year / 12 months
+local function ready_soon(u)
+    local sqid = u.military and u.military.squad_id or -1
+    if sqid < 0 then return true end                    -- not in a squad -> a plain civilian worker
+    local sq = df.squad.find(sqid)
+    if not sq then return true end
+    local routine = sq.schedule.routine[sq.cur_routine_idx]
+    if not routine then return true end                 -- can't read a schedule -> don't warn
+    local pos = u.military.squad_position
+    local cur = math.floor((df.global.cur_year_tick or 0) / MONTH_TICKS) % 12
+    for _, m in ipairs{cur, (cur + 1) % 12} do          -- Ready this month or next = "within the next month"
+        local e = routine.month[m]
+        if e then
+            local oa = e.order_assignments
+            -- a month is "Ready" for this soldier when their position has no assigned order (-1);
+            -- fall back to "the month has no orders at all" if we can't index their position.
+            local ready = (pos >= 0 and pos < #oa) and (oa[pos].assigned_order_idx == -1)
+                or (not (pos >= 0 and pos < #oa) and #e.orders == 0)
+            if ready then return true end
         end
     end
-    return set
+    return false
 end
 
--- A detail's labor only gets done by a living worker the fort can actually put on it: a
--- citizen or resident (residents -- e.g. a joined "cursed hunter" -- aren't citizens but do
--- the work) that does NOT have the Military labor assigned (i.e. is not in the "Military"
--- work detail -- those dwarves are off on military duty). Dead/expelled units linger in
--- assigned_units but don't count either. All such "unworkable" details are flagged.
-local function has_available_worker(w, mil)
+-- A detail's labor only gets done by a living worker the fort can actually put on it: a citizen or
+-- resident (residents -- e.g. a joined "cursed hunter" -- aren't citizens but do the work) that is
+-- either not a soldier or is a soldier whose schedule makes them Ready within the next month (see
+-- ready_soon). Dead/expelled units linger in assigned_units but don't count. All such "unworkable"
+-- details are flagged.
+local function has_available_worker(w)
     for _, uid in ipairs(w.assigned_units) do
         local u = df.unit.find(uid)
         if u and not dfhack.units.isDead(u)
             and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u))
-            and not mil[uid] then                   -- not in the Military detail
+            and ready_soon(u) then
             return true
         end
     end
@@ -69,13 +88,12 @@ local function scan()
     local f = df.global.world.frame_counter or 0
     if f == cache.frame and cache.list then return cache.list end
     local out = {}
-    local mil = military_members()
     local wds = df.global.plotinfo.labor_info.work_details
     for i = 0, #wds - 1 do
         local w = wds[i]
         if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis
             and w.name ~= MILITARY_DETAIL                 -- the grouping detail itself; soldier-only by design
-            and not has_available_worker(w, mil) then
+            and not has_available_worker(w) then
             out[#out + 1] = w
         end
     end
@@ -116,9 +134,9 @@ local function show_dialog()
     local lines = {
         'These Work Details are set to "Only Selected Does This" but have no living worker to',
         'do them -- nothing selected, the selected dwarves have died/left, or the only ones',
-        'selected have the Military labor (are in the "Military" work detail, off on military',
-        'duty). Assign a free dwarf, switch to "Everybody Does This", or set "Nobody Does',
-        'This" to silence this warning.',
+        'selected are soldiers whose schedule keeps them on active duty (no Ready month this',
+        'month or next). Assign a free dwarf, switch to "Everybody Does This", or set "Nobody',
+        'Does This" to silence this warning.',
         '',
     }
     for _, w in ipairs(list) do
@@ -140,7 +158,7 @@ local function register()
         nmod.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
     -- (re)assign callbacks every time so re-running the script picks up edits
-    entry.desc = 'Notifies when an "Only Selected Does This" work detail has no usable worker (none, all dead, or only soldiers).'
+    entry.desc = 'Notifies when an "Only Selected Does This" work detail has no usable worker (none, all dead, or only soldiers who stay on active duty -- soldiers Ready within the next month still count).'
     entry.dwarf_fn = empty_labor_message
     entry.on_click = show_dialog
     -- the overlay gates on config.data[name].enabled; make sure it exists so it's on by default

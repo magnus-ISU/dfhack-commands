@@ -13,9 +13,11 @@ Grammar:
                        condition so it only runs while fewer than N of the output item
                        exist (counts the OUTPUT item -- matching subtype/material class,
                        never the inputs). "collect webs" counts SILK THREAD (webs become
-                       silk thread when picked up). Jobs with no single countable product
-                       (collect sand, mint coins, butcher...) can't be kept in stock, so a
-                       repeating order on them is REFUSED (make a one-time order instead).
+                       silk thread when picked up). "collect sand" counts SAND-bearing bags
+                       (native `sand_bearing` flag); "bin"/"barrel" count only EMPTY ones
+                       (native `empty` flag), so a shelf full of packed bins doesn't satisfy
+                       it. Jobs with no countable product (mint coins, butcher...) are still
+                       REFUSED (make a one-time order instead).
   * amount: digits, rN, or a spelled number (one..twenty, a/an); default 1
   * material descriptor: a category (wood/wooden/cloth), a class (stone/rock/metal/
     glass), a specific material (gabbro/steel), and/or a property (magma safe)
@@ -742,13 +744,29 @@ local function resolve(input)
             matname = top.matname, iscore = ranked[1].score, ranked = ranked}
 end
 
+-- Some repeating orders count a special native condition FLAG instead of a plain item count. DF's
+-- manager-order item condition exposes flags for exactly these: `empty` counts only EMPTY containers
+-- (an available bin/barrel, not one already packed full of goods), and `sand_bearing` counts bags of
+-- sand. So "keep 20 empty bins" / "keep 100 sand" become native LessThan conditions with the flag set
+-- -- no background service needed. Map job -> the flags1 field its repeat-count condition must set.
+local COUNT_FLAG1 = {
+    [df.job_type.ConstructBin] = 'empty',
+    [df.job_type.MakeBarrel]   = 'empty',
+    [df.job_type.CollectSand]  = 'sand_bearing',
+}
+
 -- what item a repeating "keep N in stock" order should count. FIXED/SUBTYPED items count
--- their own type+subtype; a SPECIAL job with a `product` spec (e.g. collect webs -> silk
--- thread) counts that; everything else (reactions, most gather/process jobs) has no single
--- countable product -> nil (can't be kept in stock, so we refuse to make a repeating order).
+-- their own type+subtype; jobs in COUNT_FLAG1 add a native condition flag (empty bins/barrels,
+-- sand-bearing bags) -- collect sand counts ANY sand-bearing item (item_type -1 + the flag); a
+-- SPECIAL job with a `product` spec (e.g. collect webs -> silk thread) counts that; everything else
+-- (reactions, most gather/process jobs) has no countable product -> nil (repeat refused).
 local function count_spec(item)
+    local f1 = COUNT_FLAG1[item.job]
     if (item.item_type or -1) >= 0 then
-        return {item_type = item.item_type, item_subtype = item.item_subtype or -1}
+        return {item_type = item.item_type, item_subtype = item.item_subtype or -1, flags1 = f1}
+    end
+    if f1 then   -- flag-only product (collect sand): count any item bearing the flag, any type/material
+        return {item_type = -1, item_subtype = -1, flags1 = f1}
     end
     local p = item.product
     if p then
@@ -849,6 +867,9 @@ function create_order(input)
         if cs.flags2 then   -- material-class match (e.g. count only SILK thread, not plant thread)
             local cond = o.item_conditions[#o.item_conditions - 1]
             for _, fl in ipairs(cs.flags2) do cond.flags2[fl] = true end
+        end
+        if cs.flags1 then   -- native condition flag: 'empty' (only empty bins/barrels) / 'sand_bearing'
+            o.item_conditions[#o.item_conditions - 1].flags1[cs.flags1] = true
         end
     else
         o.frequency = df.workquota_frequency_type.OneTime

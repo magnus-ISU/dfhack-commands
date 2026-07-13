@@ -15,9 +15,9 @@ Pieces that work together so you usually never think about pasturing:
      Animals already in a pasture are never moved by this.
 
   3. A background service that pens any unassigned tame fort animal (any age):
-     grazers -> graze pasture, non-grazers -> scavenge pasture. Caged animals are
-     freed and penned too -- EXCEPT caged non-grazers ("scavengers"), which are left
-     in their cages (they don't graze, so they won't starve there). Animals you
+     grazers -> graze pasture, non-grazers -> scavenge pasture. CAGED animals are
+     never auto-freed or penned -- caged creatures are in stasis (they don't eat or
+     graze, so none starve), and a trained/tamed captive stays put. Animals you
      deliberately remove are remembered and not re-grabbed. Chained/restrained
      animals are left alone.
 
@@ -188,12 +188,13 @@ local function do_assign()
         end
         if is_chained(unit) then goto continue end  -- restrained on purpose
         if known[unit.id] then goto continue end    -- deliberately left roaming
-        -- candidates include caged tame animals; assign_to_zone frees them
         local grazer = dfhack.units.isGrazer(unit)
-        -- leave caged non-grazers ("scavengers") in their cages: they don't graze, so they
-        -- won't starve whether caged or pastured -- don't pull every one out just to pen it.
-        -- (caged grazers ARE still freed + pastured, since they need grass to feed.)
-        if unit.flags1.caged and not grazer then goto continue end
+        -- NEVER auto-free a caged animal just to pasture it -- grazers included. Caged creatures
+        -- are in stasis in DF: they don't eat, drink, or graze, so NONE of them starve while caged
+        -- (that's the earlier "grazers would starve" worry, and it doesn't hold). Pulling a caged
+        -- animal out would undo the reason it's caged -- e.g. a trained/tamed captive kept for
+        -- training or as a menagerie. Leave every caged animal put; pasture it by hand if you want.
+        if unit.flags1.caged then goto continue end
         local zone = grazer and graze or scavenge
         if zone then
             assign_to_zone(unit, zone)

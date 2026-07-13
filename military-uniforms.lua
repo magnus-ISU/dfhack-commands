@@ -1503,6 +1503,7 @@ local function run_cycle()
     -- hand-split counts for handed types (gauntlets): stock_h[key][hand], mwstock_h[key][hand]
     local stock_h, mwstock_h = {}, {}
     local bstock = {}            -- bstock[material_index]["type/sub"] = existing iron/copper backup pieces
+    local bstock_h = {}          -- hand-split backup stock for handed types: bstock_h[mat][ts][hand]
     local iron_ore_count = 0
     local hides, flasks, backpacks, logs = 0, 0, 0, 0
     for _, it in ipairs(df.global.world.items.all) do
@@ -1571,6 +1572,12 @@ local function run_cycle()
                     if backup_by_ts[ts] then
                         bstock[mi_] = bstock[mi_] or {}
                         bstock[mi_][ts] = (bstock[mi_][ts] or 0) + 1
+                        if HANDED[t] then    -- track backup gauntlets per hand so a bare hand is seen
+                            bstock_h[mi_] = bstock_h[mi_] or {}
+                            bstock_h[mi_][ts] = bstock_h[mi_][ts] or {[0] = 0, [1] = 0}
+                            local bh = item_hand(it)
+                            bstock_h[mi_][ts][bh] = bstock_h[mi_][ts][bh] + 1
+                        end
                     end
                 end
             end
@@ -1578,11 +1585,14 @@ local function run_cycle()
         ::next_item::
     end
 
-    -- RE-EQUIP ON UPGRADE: when a better piece than what's in use becomes available (a freshly
-    -- forged masterwork -- or just any higher-quality item), set DF's per-slot dirty flag so it
-    -- re-runs equipment assignment and soldiers swap up. We fire only when the best AVAILABLE
-    -- (unassigned) quality for a needed piece RISES above what we last saw for that key, i.e. a
-    -- new, better piece was created -- so it's not re-triggered every cycle (no equip churn).
+    -- RE-EQUIP ON UPGRADE: when a freshly forged MASTERWORK piece becomes available, set DF's
+    -- per-slot dirty flag so it re-runs equipment assignment and soldiers swap up to it. We fire ONLY
+    -- when the best AVAILABLE (unassigned) quality reaches MASTERFUL and rises above what we last saw
+    -- for that key -- i.e. a new masterwork was created. We deliberately do NOT fire for lesser
+    -- quality bumps (a superior->exceptional piece): forcing a swap for every minor improvement made
+    -- soldiers repeatedly DROP a perfectly good piece to fetch a marginally better one, which is what
+    -- made the "properly outfitted" count bounce up and down. Basic (non-masterwork) gear is still
+    -- picked up -- DF fills empty uniform slots on its own; we just stop churning already-filled ones.
     state.best_q = state.best_q or {}
     local upd = df.global.plotinfo.equipment.update
     local seen_key = {}
@@ -1590,7 +1600,7 @@ local function run_cycle()
         seen_key[key] = true
         local cur = availq[key] or -1
         local field = UPDATE_FIELD[r.item_type]
-        if field and cur > (state.best_q[key] or -1) then
+        if field and cur >= df.item_quality.Masterful and cur > (state.best_q[key] or -1) then
             upd[field] = true
         end
         state.best_q[key] = cur
@@ -1793,6 +1803,7 @@ local function run_cycle()
     if backup_idx then
         local bmk = barkey(0, backup_idx)
         local backup_stock = bstock[backup_idx] or {}
+        local backup_stock_h = bstock_h[backup_idx] or {}
         for key, r in pairs(req) do
             local ts = r.item_type .. '/' .. r.subtype .. '/' .. r.size_race
             local already_backup = r.mat_type == 0 and r.mat_index == backup_idx
@@ -1800,13 +1811,25 @@ local function run_cycle()
                 drop_order('cu/' .. key)   -- can't be metal (cloak / soft armour): never a metal backup
             elseif backup_by_ts[ts] == key and not already_backup then   -- a backup-able piece
                 local cukey = 'cu/' .. key
-                local covered = (stock[key] or 0) + (backup_stock[ts] or 0)
+                -- coverage = steel stock + chosen-backup-metal stock. For HANDED gauntlets this MUST
+                -- be per HAND: a hand with no wearable piece leaves that hand bare even when the
+                -- pair-total looks covered -- and it blocks that hand's masterwork goal too -- so keep
+                -- stocking backups until BOTH hands are covered.
+                local short
+                if HANDED[r.item_type] then
+                    local perhand = r.count / 2
+                    local sh, bh = stock_h[key] or {}, backup_stock_h[ts] or {}
+                    short = ((sh[0] or 0) + (bh[0] or 0) < perhand)
+                         or ((sh[1] or 0) + (bh[1] or 0) < perhand)
+                else
+                    short = (stock[key] or 0) + (backup_stock[ts] or 0) < r.count
+                end
                 local o = state.orders[cukey] and order_by_id(state.orders[cukey])
                 if o and (o.mat_type ~= 0 or o.mat_index ~= backup_idx) then
                     drop_order(cukey); o = nil   -- backup metal switched -> remake in the new metal
                 end
                 local in_flight = o and o.amount_left > 0
-                if covered < r.count
+                if short
                     and (in_flight or (budget[bmk] or 0) >= BARS_PER_ITEM) then
                     if not in_flight then budget[bmk] = (budget[bmk] or 0) - BARS_PER_ITEM end
                     queue_one(cukey, {item_type = r.item_type, subtype = r.subtype,
@@ -1960,10 +1983,178 @@ local function register_civ_squad_notify()
 end
 register_civ_squad_notify()
 
+-- ---- notifications: gear completeness, measured against what soldiers actually WEAR ----------
+-- These read each squad member's real inventory (not just the order queue) so the counts always
+-- reflect the gear the military is using right now. A piece counts as equipped only if it is worn,
+-- wielded, or strapped (mode 2/1/10) -- a piece merely hauled or sitting in stock does not.
+local NOTE_GEAR = 'military_uniforms_gear'
+local NOTE_MW = 'military_uniforms_masterwork'
+local EQUIPPED_MODE = {[1] = true, [2] = true, [10] = true}    -- Weapon (wielded), Worn, Strapped
+local PAIR_ITEM = {}
+for _, nm in ipairs{'GLOVES', 'GAUNTLETS', 'SHOES', 'BOOTS'} do
+    if df.item_type[nm] then PAIR_ITEM[df.item_type[nm]] = true end   -- worn as a matched pair -> need 2
+end
+
+-- singular + plural name of a uniform piece (item_type + subtype), e.g. "gauntlet"/"gauntlets" --
+-- pulled from the itemdef so it reads like the game does; falls back to the item-type token.
+local PIECE_DEFVEC = {}
+for _, p in ipairs{{'ARMOR', 'armor'}, {'HELM', 'helms'}, {'PANTS', 'pants'}, {'GLOVES', 'gloves'},
+                   {'SHOES', 'shoes'}, {'SHIELD', 'shields'}, {'WEAPON', 'weapons'}, {'AMMO', 'ammo'}} do
+    if df.item_type[p[1]] then PIECE_DEFVEC[df.item_type[p[1]]] = p[2] end
+end
+local function piece_name(item_type, subtype)
+    local ln = PIECE_DEFVEC[item_type]
+    if ln and subtype >= 0 then
+        local vec = df.global.world.raws.itemdefs[ln]
+        if vec then
+            for i = 0, #vec - 1 do
+                if vec[i].subtype == subtype and vec[i].name ~= '' then
+                    return vec[i].name, (vec[i].name_plural ~= '' and vec[i].name_plural) or (vec[i].name .. 's')
+                end
+            end
+        end
+    end
+    local base = df.item_type[item_type]
+    base = base and base:lower():gsub('_', ' ') or 'item'
+    return base, base .. 's'
+end
+
+-- Walk every occupied fort-squad position and compare the assigned uniform (item type+subtype,
+-- pairs doubled) to what the occupant is actually wearing. Returns totals:
+--   soldiers  = squad members that have an assigned uniform
+--   missing   = members not wearing every assigned piece (a gap, of any kind)
+--   notmw     = members wearing every assigned piece but with some piece below masterwork quality
+-- plus the persisted done_queue / done_masterwork / masterwork flags (fort-wide stock coverage).
+-- Result is cached within a game tick so the two notifications don't each re-scan the fort.
+local _gear_cache, _gear_cache_tick
+local function analyze_gear()
+    local now = df.global.cur_year * 1200000 + df.global.cur_year_tick
+    if _gear_cache and _gear_cache_tick == now then return _gear_cache end
+    local IT = df.item_type
+    local fort = df.global.plotinfo.group_id
+    local soldiers, missing, notmw = 0, 0, 0
+    local miss_agg = {}   -- [item_type*100000+subtype] = total pieces of that type missing fort-wide
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for pi = 0, #sq.positions - 1 do
+                local pos = sq.positions[pi]
+                if pos.occupant >= 0 then
+                    local hf = df.historical_figure.find(pos.occupant)
+                    local u = hf and df.unit.find(hf.unit_id)
+                    if u and not u.flags1.inactive then
+                        local need, nkeys = {}, 0
+                        for slot = 0, 6 do
+                            local v = pos.equipment.uniform[slot]
+                            for j = 0, #v - 1 do
+                                local it = v[j]
+                                if it.item_type ~= IT.NONE and it.item_subtype >= 0 then
+                                    local k = it.item_type * 100000 + it.item_subtype
+                                    if not need[k] then nkeys = nkeys + 1 end
+                                    need[k] = (need[k] or 0) + (PAIR_ITEM[it.item_type] and 2 or 1)
+                                end
+                            end
+                        end
+                        if nkeys > 0 then
+                            soldiers = soldiers + 1
+                            local have, worstq = {}, {}
+                            for _, ie in ipairs(u.inventory) do
+                                if EQUIPPED_MODE[ie.mode] then
+                                    local it = ie.item
+                                    local k = it:getType() * 100000 + it:getSubtype()
+                                    if need[k] then
+                                        have[k] = (have[k] or 0) + 1
+                                        local q = it.getQuality and it:getQuality() or 0
+                                        if not worstq[k] or q < worstq[k] then worstq[k] = q end
+                                    end
+                                end
+                            end
+                            local short, below_mw = false, false
+                            for k, c in pairs(need) do
+                                local gap = c - (have[k] or 0)
+                                if gap > 0 then short = true; miss_agg[k] = (miss_agg[k] or 0) + gap end
+                                if (have[k] or 0) > 0 and (worstq[k] or 0) < 5 then below_mw = true end
+                            end
+                            if short then missing = missing + 1
+                            elseif below_mw then notmw = notmw + 1 end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- the item type with the most pieces missing fort-wide, and how many of it are short
+    local top_k, top_n
+    for k, n in pairs(miss_agg) do
+        if not top_n or n > top_n then top_k, top_n = k, n end
+    end
+    local common_name, common_plural
+    if top_k then common_name, common_plural = piece_name(math.floor(top_k / 100000), top_k % 100000) end
+    local st = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
+    _gear_cache = {soldiers = soldiers, missing = missing, notmw = notmw,
+                   common_count = top_n, common_name = common_name, common_plural = common_plural,
+                   done_queue = st.done_queue, done_masterwork = st.done_masterwork,
+                   masterwork = st.masterwork}
+    _gear_cache_tick = now
+    return _gear_cache
+end
+
+-- Line 1: N of M soldiers aren't wearing their full assigned uniform, plus the single item type with
+-- the most pieces short and how many of it are missing (e.g. "14/87 missing uniform items (8
+-- gauntlets)"). Colour reflects the phase: red while still being forged, yellow once all forged.
+local function gear_message()
+    if not dfhack.world.isFortressMode() then return end
+    local g = analyze_gear()
+    if g.missing <= 0 then return end
+    local n = g.common_count or 0
+    local label = ('%d %s'):format(n, (n == 1 and g.common_name or g.common_plural) or 'items')
+    return {{text = ('%d/%d missing uniform items (%s)'):format(g.missing, g.soldiers, label),
+        pen = g.done_queue and COLOR_YELLOW or COLOR_LIGHTRED}}
+end
+
+-- Line 2: only once "Upgrade to masterwork" is on AND every soldier's basic gear has been forged
+-- (done_queue) -- then count members who have all their pieces but not all at masterwork quality.
+local function masterwork_message()
+    if not dfhack.world.isFortressMode() then return end
+    local g = analyze_gear()
+    if not g.masterwork or not g.done_queue or g.notmw <= 0 then return end
+    return {{text = ('%d military dwarves not yet in full masterwork gear'):format(g.notmw),
+        pen = COLOR_YELLOW}}
+end
+
+local function register_gear_notify()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local specs = {
+        {name = NOTE_GEAR, fn = gear_message,
+         desc = 'Reports how many military dwarves are not wearing every piece of their assigned '
+             .. 'uniform, naming the item type with the most pieces short and how many (e.g. "8 gauntlets"). '
+             .. 'Red while gear is still being forged, yellow once it is all forged.'},
+        {name = NOTE_MW, fn = masterwork_message,
+         desc = 'Once "Upgrade to masterwork" is on and every soldier\'s basic gear is forged, '
+             .. 'reports how many military dwarves are not yet fully equipped in masterwork gear.'},
+    }
+    for _, spec in ipairs(specs) do
+        local entry = n.NOTIFICATIONS_BY_NAME[spec.name]
+        if not entry then
+            entry = {name = spec.name, version = 1, default = true}
+            table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+            n.NOTIFICATIONS_BY_NAME[spec.name] = entry
+        end
+        entry.desc = spec.desc
+        entry.dwarf_fn = spec.fn
+        if n.config and n.config.data and not n.config.data[spec.name] then
+            n.config.data[spec.name] = {enabled = true, version = 1}
+        end
+    end
+end
+register_gear_notify()
+
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
         register_civ_squad_notify()
+        register_gear_notify()
         if dfhack.world.isFortressMode() and service_on() then start_heartbeat() end
     elseif sc == SC_MAP_UNLOADED then
         stop_heartbeat(); state = nil
@@ -2058,6 +2249,64 @@ end
 
 OVERLAY_WIDGETS = {entry = MilitaryUniformOverlay}
 
+-- EXPERIMENTAL (`military-uniforms altsched`): add two fort schedules, "even month" and "odd
+-- month", right after "Ready" -- each trains on those months and stands Ready the rest -- and give
+-- EVERY fort squad matching 6-entry schedules. All squads must stay length-synced with the routine
+-- list, or the Schedule screen reads past the end of a squad's shorter list. Re-run after adding
+-- squads (this is NOT automatic -- it would clobber hand edits). Per-month entries are built from
+-- scratch: a train month is one squad_order_trainst (min_count 10) with 10 order_assignments ->
+-- order 0; a ready month has 10 order_assignments -> -1. BOTH use sleep_mode AnywhereAtWill (0) so
+-- soldiers sleep in their OWN bedrooms when they choose -- never InBarracksAtNeed (2, "sleep at
+-- need"), which parks them asleep in the barracks on the job instead of working while equipped.
+-- NB: `positions` is a vector<bool> -- it must be RESIZEd; inserting into a bit-packed vector<bool>
+-- segfaults DF.
+local function setup_alt_schedules()
+    local function set_assignments(e, idx)
+        e.order_assignments:resize(0)
+        for _ = 1, 10 do local mp = df.squad_month_positionst:new(); mp.assigned_order_idx = idx; e.order_assignments:insert('#', mp) end
+    end
+    local SLEEP_AT_WILL = df.squad_sleep_option_type.AnywhereAtWill   -- own bed, at will (never barracks-at-need)
+    local function make_train(e)
+        e.sleep_mode = SLEEP_AT_WILL; e.uniform_mode = 0; e.orders:resize(0)
+        local so = df.squad_schedule_order:new(); so.min_count = 10
+        local t = df.squad_order_trainst:new(); t.issuer_hf = -1; t.recipient_hf = -1; t.origin_army_controller = -1
+        so.order = t; so.positions:resize(10)
+        e.orders:insert('#', so)
+        set_assignments(e, 0)
+    end
+    local function make_ready(e)
+        e.sleep_mode = SLEEP_AT_WILL; e.uniform_mode = 0; e.orders:resize(0)
+        set_assignments(e, -1)
+    end
+    local function fill(sched, train_on_even)
+        for m = 0, 11 do
+            if ((m + 1) % 2 == 0) == train_on_even then make_train(sched.month[m]) else make_ready(sched.month[m]) end
+        end
+    end
+    local routines = df.global.plotinfo.alerts.routines
+    local maxid = -1; for i = 0, #routines - 1 do if routines[i].id > maxid then maxid = routines[i].id end end
+    local function ensure_routine(name)
+        for i = 0, #routines - 1 do if routines[i].name == name then return i end end
+        maxid = maxid + 1
+        local r = df.military_routinest:new(); r.id = maxid; r.name = name
+        routines:insert('#', r)
+        return #routines - 1
+    end
+    local eidx = ensure_routine('even month')
+    local oidx = ensure_routine('odd month')
+    local gid = df.global.plotinfo.group_id
+    local n = 0
+    for _, sq in ipairs(df.global.world.squads.all) do
+        if sq.entity_id == gid and #sq.schedule.routine >= 4 then
+            while #sq.schedule.routine <= oidx do sq.schedule.routine:insert('#', df.squad_routine_schedulest:new()) end
+            fill(sq.schedule.routine[eidx], true)    -- even month: train on even months, Ready on odd
+            fill(sq.schedule.routine[oidx], false)   -- odd month:  train on odd months,  Ready on even
+            n = n + 1
+        end
+    end
+    return n, eidx, oidx
+end
+
 if dfhack_flags.module then return end
 
 if dfhack_flags and dfhack_flags.enable ~= nil then
@@ -2095,6 +2344,13 @@ if args[1] == 'orders' then
     local n = 0
     for _ in pairs(state.orders) do n = n + 1 end
     print(('military-uniforms: %d gear order(s) standing (short of need)'):format(n))
+    return
+end
+if args[1] == 'altsched' then
+    local n, eidx, oidx = setup_alt_schedules()
+    print(('military-uniforms: "even month" (idx %d) + "odd month" (idx %d) schedules ready on %d fort squads.'):format(eidx, oidx, n))
+    print('  even month = train even months / Ready odd;  odd month = train odd months / Ready even.')
+    print('  Assign squads to them on the Schedule screen. Re-run after adding new squads.')
     return
 end
 

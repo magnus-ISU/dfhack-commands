@@ -8,6 +8,7 @@ cheapest / most renewable material the item can be made from:
     * craft / jewelry items (amulet, ring, ...) -> wood
     * furniture & wooden goods                  -> wood
     * metal gear (weapons, armor, ...)          -> copper
+    * coins (minted from a metal bar)           -> copper (else any metal bar)
     * stone-only goods (mechanisms, statues)    -> any (stone)
 
 If a mandate demands a specific material, that material is used instead.
@@ -50,6 +51,9 @@ local RAW = {
     {'HELM', 'MakeHelm', C, 'sub'}, {'PANTS', 'MakePants', C, 'sub'},
     {'GLOVES', 'MakeGloves', C, 'sub'}, {'SHOES', 'MakeShoes', C, 'sub'},
     {'TRAPCOMP', 'MakeTrapComponent', C, 'sub'}, {'CHAIN', 'MakeChain', C, 'fixed'},
+    -- coins: the MintCoins job strikes a stack from a metal bar (item implied -> 'fixed'); a
+    -- coin mandate rarely names a metal, so default to the cheap-metal policy (copper, else any bar)
+    {'COIN', 'MintCoins', C, 'fixed'},
     {'SHIELD', 'MakeShield', W, 'sub'}, {'AMMO', 'MakeAmmo', W, 'sub'},
     {'STATUE', 'ConstructStatue', A, 'fixed'}, {'TRAPPARTS', 'ConstructMechanisms', A, 'fixed'},
 }

@@ -45,37 +45,30 @@ end
 local SCAN_TTL_MS = 60000
 local cache = {frame = nil, t = nil, list = {}}
 
--- can this dead unit haunt the fort as a ghost (so it needs laying to rest)? -> it was a member
--- of the fort, of ANY race: either the fort civ (dwarves) OR a MEMBER/FORMER_MEMBER of the fort
--- GROUP (residents -- e.g. a human mercenary who joined). Checking the histfig group link (rather
--- than dfhack.units.isOwnGroup, which only matches a live MEMBER link) also catches the dead,
--- whose link may have flipped to FORMER_MEMBER.
--- only SAPIENT (intelligent, CAN_LEARN) creatures become ghosts -- tame animals never do, so
--- they must not be counted even though they belong to the fort.
+-- Only SAPIENT (intelligent, CAN_LEARN) creatures become ghosts -- tame animals never do, so they
+-- are never counted even when they belong to the fort.
 local function is_sapient(u)
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
     return caste ~= nil and caste.flags.CAN_LEARN or false
 end
 
-local function is_fort_member(u)
-    -- must be a MEMBER of the fortress GROUP -- NOT merely the fort civ. Mercenaries and other
-    -- hired hands share the fort's civ id (so a civ_id check wrongly flags them, e.g. a dead
-    -- human mercenary), but they are not group members and do not haunt the fort as ghosts.
-    -- Citizens/residents carry a MEMBER (or, once dead, possibly FORMER_MEMBER) link to the group.
-    local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
-    if not hf then return false end
-    local gid = df.global.plotinfo.group_id
-    for _, link in ipairs(hf.entity_links) do
-        if link.entity_id == gid then
-            local lt = link:getType()
-            if lt == df.histfig_entity_link_type.MEMBER
-                or lt == df.histfig_entity_link_type.FORMER_MEMBER then
-                return true
-            end
-        end
-    end
-    return false
+-- A dead unit whose loose corpse means it will haunt the fort as a ghost if not laid to rest. Only
+-- the fort's OWN people come back to haunt it -- so the FINAL list (below) requires a loose corpse
+-- to belong to the fort (isOwnCiv / isOwnGroup, which read stable data that survives death, unlike
+-- the resident/merchant unit flags). A dead FOREIGN visitor, mercenary or defeated attacker does NOT
+-- ghost your fort even if it has a historical figure (e.g. a passing human bard) -- those were the
+-- over-zealous false positives. `ghost_risk` here is just the first, cheap cut that drops the
+-- obviously-not-a-tomb cases before the membership test:
+--   * INVADERS (dead attackers) and the undead / opposed-to-life -- isInvader/isOpposedToLife stay
+--     reliable on the dead (verified: the fort's ~340 dead attackers all still test as invaders);
+--   * wild / unaffiliated creatures -- a cavern troll or feral beast that died here has NO
+--     civilization (civ_id < 0), whereas the fort's own dead carry the fort civ.
+-- (A GHOST already walking is exempt from the membership test -- it is surfaced no matter whose it
+-- was in life, so a rare visitor/merchant ghost is never missed.)
+local function ghost_risk(u)
+    return u.civ_id and u.civ_id >= 0
+        and not dfhack.units.isInvader(u) and not dfhack.units.isOpposedToLife(u)
 end
 
 local function scan()
@@ -112,12 +105,11 @@ local function scan()
         then
             local uid = it.unit_id
             local u = uid and uid >= 0 and df.unit.find(uid)
-            -- Anyone who can become a GHOST needs laying to rest: a dead member of the
-            -- fort GROUP -- citizen OR resident, of ANY race (e.g. a human mercenary who
-            -- joined) -- not just the fort race. isOwnGroup covers residents; we no longer
-            -- filter corpses by race. Require the unit to actually be dead (a CORPSEPIECE
-            -- can also be a limb lost by a LIVING unit, which must not count).
-            if u and dfhack.units.isDead(u) and is_sapient(u) and is_fort_member(u) then
+            -- Anyone who can become a GHOST needs laying to rest: any dead sapient at the
+            -- fort that isn't a hostile invader (or the undead) -- our citizens & residents,
+            -- plus visitors and caravan merchants who died here (see ghost_risk). Require the
+            -- unit to be actually dead (a CORPSEPIECE can also be a limb lost by a LIVING unit).
+            if u and dfhack.units.isDead(u) and is_sapient(u) and ghost_risk(u) then
                 local rec = info[uid]
                 if not rec then
                     rec = {unit = u, buried = false, unburied = false, pos = nil,
@@ -138,12 +130,15 @@ local function scan()
         end
     end
 
-    -- GHOSTS: a ghostly dead fort member is DEFINITIVELY not at rest -- even if some remains are
-    -- interred (a partial burial still leaves the ghost), or the body is gone entirely (no corpse
-    -- item at all). So catch ghosts straight from the (bounded) active-unit list, independent of
-    -- any loose corpse: they always need a slab/tomb until laid to rest.
+    -- GHOSTS: any ghost wandering the fort is DEFINITIVELY not at rest and needs a slab/tomb --
+    -- even if some remains are interred (a partial burial still leaves the ghost), or the body is
+    -- gone entirely (no corpse item at all). Do NOT require fort-GROUP membership here: a ghost in
+    -- the (bounded) active-unit list is on THIS map haunting THIS fort no matter who it was in life
+    -- -- e.g. a dead merchant, or a resident/mercenary whose histfig never carried a fort-group link
+    -- (is_fort_member would wrongly drop them -- exactly the bug that let a caravan merchant's ghost
+    -- slip past the alert). Ghosts are always dead & sapient, so those two guards are all we need.
     for _, u in ipairs(df.global.world.units.active) do
-        if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) and is_fort_member(u) then
+        if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) then
             local uid = u.id
             local rec = info[uid]
             if not rec then
@@ -166,11 +161,21 @@ local function scan()
     local list = {}
     for _, uid in ipairs(order) do
         local rec = info[uid]
-        if (rec.ghostly or (rec.unburied and not rec.buried))
-            and not memorialized[rec.unit.hist_figure_id] then
+        local hf = rec.unit.hist_figure_id
+        -- A loose CORPSE only comes back to haunt THIS fort if the dead unit BELONGS to the fort: its
+        -- own civilization (isOwnCiv) or its site group (isOwnGroup -- which also covers a foreign-civ
+        -- resident who joined). FOREIGN dead -- visitors, mercenaries passing through, defeated
+        -- attackers -- do NOT ghost your fort even when they have a historical figure (e.g. a visiting
+        -- human bard like "Ishas"), and were the over-zealous false positives. Both checks read stable
+        -- data, so they survive death (the resident/merchant unit FLAGS do not; civ_id does). A GHOST
+        -- already walking is ALWAYS surfaced no matter whose it was in life -- it is haunting this map
+        -- right now -- so a rare visitor/merchant ghost is never missed.
+        local belongs = dfhack.units.isOwnCiv(rec.unit) or dfhack.units.isOwnGroup(rec.unit)
+        if (rec.ghostly or (rec.unburied and not rec.buried and belongs))
+            and not memorialized[hf] then
             table.insert(list, {
                 unit_id = uid,
-                hf = rec.unit.hist_figure_id,
+                hf = hf,
                 name = unit_display_name(rec.unit),
                 pos = rec.pos,
             })
@@ -394,15 +399,16 @@ end
 -- slab to exist, so we never cap engravings by the current blank count -- we queue them all and
 -- make sure enough blanks get produced. Returns: engraved, made (extra blanks), skipped.
 local function enqueue_memorial_slabs(list)
-    local need, skipped = {}, 0
+    -- only engrave for the dead who have neither an engraved slab ready nor an engrave order queued;
+    -- count the two "already handled" cases separately so we can report them separately.
+    local need, have_slab, have_order = {}, 0, 0
     for _, e in ipairs(list) do
-        -- skip anyone who already has an engraved slab ready (just needs placing) or an engrave
-        -- order already queued -- only engrave for those with neither
-        if e.hf and e.hf >= 0 and not has_pending_slab_order(e.hf) and not has_engraved_slab(e.hf) then
-            table.insert(need, e)
-        else
-            skipped = skipped + 1
+        if e.hf and e.hf >= 0 then
+            if has_engraved_slab(e.hf) then have_slab = have_slab + 1        -- a slab already engraved (needs placing)
+            elseif has_pending_slab_order(e.hf) then have_order = have_order + 1  -- an engrave order already queued
+            else table.insert(need, e) end
         end
+        -- an entry with no historical figure can't be memorialized by slab; it's simply not queued
     end
 
     -- blanks available for the NEW engrave orders, measured BEFORE we add them: existing engrave
@@ -424,7 +430,7 @@ local function enqueue_memorial_slabs(list)
         shortfall = 0
     end
 
-    return #need, shortfall, skipped
+    return #need, shortfall, have_slab, have_order
 end
 
 -- ---------------------------------------------------------------------------
@@ -482,7 +488,7 @@ function MemorialScreen:init()
 end
 
 function MemorialScreen:queue_slabs()
-    local engraved, made, skipped = enqueue_memorial_slabs(self.list or {})
+    local engraved, made, have_slab, have_order = enqueue_memorial_slabs(self.list or {})
     local parts = {}
     if engraved > 0 then
         table.insert(parts, ('Queued %d memorial-slab engraving%s.'):format(
@@ -491,8 +497,11 @@ function MemorialScreen:queue_slabs()
     if made > 0 then
         table.insert(parts, ('Not enough blank slabs -- queued a "make rock slab" order for %d more.'):format(made))
     end
-    if skipped > 0 then
-        table.insert(parts, ('%d already have a slab ready or on order.'):format(skipped))
+    if have_slab > 0 then
+        table.insert(parts, ('%d already have a slab.'):format(have_slab))
+    end
+    if have_order > 0 then
+        table.insert(parts, ('%d already have an order.'):format(have_order))
     end
     if #parts == 0 then
         table.insert(parts, 'Nothing to do.')

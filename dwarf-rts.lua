@@ -517,6 +517,19 @@ local function order_selected_kill_group(ids)
     return n
 end
 
+-- Shared hook for the pack's OWN notify scripts (enemies-inside, agitated-typed) to reuse the
+-- same shift-click-with-squads-selected -> group-kill behavior as the wrapped vanilla ones,
+-- WITHOUT the on_click-wrapping dance (those scripts re-register their on_click on every world
+-- load, which would clobber a wrapper). They just call this on shift: given a list of unit ids,
+-- order the effective-selected squads to kill them. Returns true when squads were selected (so
+-- the caller consumes the shift-click), false when none are (caller falls through to zoom).
+-- Lives on dfhack.internal so it survives across map loads; absent if the overlay isn't loaded.
+function dfhack.internal.dwarf_rts_group_kill(ids)
+    if #effective_selected_squad_ids() == 0 then return false end
+    if ids and #ids > 0 then order_selected_kill_group(ids) end
+    return true
+end
+
 local NOTIFY_PREDS = {
     agitated_count = pred_agitated,
     invader_count  = pred_invader,

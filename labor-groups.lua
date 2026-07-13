@@ -11,7 +11,9 @@ Lays the Labor screen out as:
     3. the other defaults -- Hunters, Fisherdwarves, Plant gatherers, Haulers, Orderlies,
        Siege operators, plus anything else you added
     4. "Cook" and "Brewer" (farmer/plow icon) at the end of the list
-    5. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
+    5. an "Animal Trainer" detail (farmer/plow icon; "Only Selected Does This" + the animal-
+       training labor, so empty-labor-notification warns when you have no trainer assigned)
+    6. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
        your squads by the separate `military-labor` script)
 
 NON-DESTRUCTIVE: existing details are reordered (and their icons updated), never deleted
@@ -66,6 +68,14 @@ local END_GROUPS = {
 local MILITARY_NAME = 'Military'
 local MILITARY_ICON = 'SIEGE_OPERATORS'
 
+-- an "Animal Trainer" detail: the animal-training labor, farmer/plow icon, "Only Selected Does
+-- This" so the empty-labor-notification warning fires when nobody is assigned. Placed just
+-- before Military. Created if missing; an existing one is kept (mode preserved), only its icon
+-- and the training labor are (re)applied.
+local TRAINER_NAME = 'Animal Trainer'
+local TRAINER_ICON = 'PLANTERS'
+local TRAINER_LABOR = 'ANIMALTRAIN'
+
 -- every moodable skill -> its labor, for the coverage check (Miner/Stonecutter/Engraver
 -- ride on kept DF defaults; <none> has no labor). Reporting only.
 local MOODABLE = {
@@ -113,16 +123,23 @@ end
 -- the first craft detail ("Weaponsmithing") present, covering exactly its labor, with the
 -- icon we assign it. This reads the actual game state, so there's no separate persistent
 -- flag to create or drift out of sync.
+local function has_detail(name)
+    for i = 0, #wd - 1 do if wd[i].name == name then return true end end
+    return false
+end
 local function already_applied()
     local g = GROUPS[1]   -- {name = 'Weaponsmithing', labors = {'FORGE_WEAPON'}, icon = 'ENGRAVERS'}
+    local has_sig = false
     for i = 0, #wd - 1 do
         local w = wd[i]
         if w.name == g.name and w.icon == df.work_detail_icon_type[g.icon] then
             local labs = labors_of(w)
-            if #labs == #g.labors and labs[1] == g.labors[1] then return true end
+            if #labs == #g.labors and labs[1] == g.labors[1] then has_sig = true end
         end
     end
-    return false
+    -- also require the Animal Trainer detail, so `once` re-runs (non-destructively) to add it to
+    -- forts that were set up before it existed.
+    return has_sig and has_detail(TRAINER_NAME)
 end
 
 if once and already_applied() then
@@ -179,6 +196,8 @@ local function plan()
     for _, L in ipairs(TAIL) do local i = take_by_labor(L); if i then add_default(i) end end
     local mil_idx = by_name[MILITARY_NAME]
     if mil_idx then placed[mil_idx] = true end                  -- reserve military for last
+    local trainer_idx = by_name[TRAINER_NAME]
+    if trainer_idx then placed[trainer_idx] = true end          -- reserve Animal Trainer (before Military)
     for _, g in ipairs(END_GROUPS) do                           -- reserve cook/brewer for the end
         local i = by_name[g.name]
         if i then placed[i] = true end
@@ -198,6 +217,13 @@ local function plan()
         else
             rows[#rows + 1] = {name = g.name, icon_name = g.icon, mode_name = 'EverybodyDoesThis', status = 'NEW'}
         end
+    end
+    if trainer_idx then                                         -- Animal Trainer: before Military
+        rows[#rows + 1] = {idx = trainer_idx, name = TRAINER_NAME, icon_name = TRAINER_ICON,
+                           mode_name = df.work_detail_mode[wd[trainer_idx].flags.mode], status = 'kept', trainer = true}
+    else
+        rows[#rows + 1] = {name = TRAINER_NAME, icon_name = TRAINER_ICON,
+                           mode_name = 'OnlySelectedDoesThis', status = 'NEW', trainer = true}
     end
     if mil_idx then
         rows[#rows + 1] = {idx = mil_idx, name = MILITARY_NAME, icon_name = MILITARY_ICON,
@@ -220,12 +246,15 @@ if not dry then
         if r.idx then
             h = wd[r.idx]
             h.icon = df.work_detail_icon_type[r.icon_name]
-            if not r.military then h.flags.mode = df.work_detail_mode[r.mode_name] end
+            if not r.military and not r.trainer then h.flags.mode = df.work_detail_mode[r.mode_name] end
         else
             h = df.work_detail:new()
             h.name = r.name
             if r.military then
                 h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- members synced by military-labor
+            elseif r.trainer then
+                h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- pick your trainer(s); warns if none
+                h.allowed_labors[TRAINER_LABOR] = true
             else
                 h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- new craft
                 for _, list in ipairs({GROUPS, END_GROUPS}) do
@@ -245,6 +274,10 @@ if not dry then
                 if wd[i].name == g.name then for _, l in ipairs(g.labors) do wd[i].allowed_labors[l] = true end end
             end
         end
+    end
+    -- ensure the Animal Trainer detail carries the animal-training labor (additive, idempotent)
+    for i = 0, #wd - 1 do
+        if wd[i].name == TRAINER_NAME then wd[i].allowed_labors[TRAINER_LABOR] = true end
     end
     -- rewrite the vector in the new order: erase every slot (erase does NOT delete the
     -- object -- we hold each handle), then reinsert. Nothing is freed, nothing is reset.

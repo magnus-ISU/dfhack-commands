@@ -137,12 +137,13 @@ if ({...})[1] == 'disable' then
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
-        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready', 'empty_labor', 'civ_alert_outside'}) do
+        for _, nm in ipairs({'needs_tomb', 'mandates_active', 'mandates_expiring', 'raids', 'planner_orders', 'trader_ready', 'empty_labor', 'civ_alert_outside', 'enemies_inside', 'agitated_typed'}) do
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
         end
-        -- trader-notification suppressed DFHack's stock "traders_ready" alert; restore it
-        if n.config and n.config.data and n.config.data['traders_ready'] then
-            n.config.data['traders_ready'].enabled = true
+        -- trader-notification suppressed DFHack's stock "traders_ready" alert; restore it.
+        -- agitated-animals-notification hid the stock "agitated_count" line; restore that too.
+        for _, nm in ipairs({'traders_ready', 'agitated_count'}) do
+            if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = true end
         end
         if n.config and n.config.write then n.config:write() end
     end)
@@ -160,9 +161,11 @@ try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notifica
 try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
 try('raid-notification', function() dfhack.run_script('raid-notification') end)
 try('trader-notification', function() dfhack.run_script('trader-notification') end)
+try('broker-ready (broker squad -> Ready while requested at depot)', function() dfhack.run_script('broker-ready') end)
 try('empty-labor-notification', function() dfhack.run_script('empty-labor-notification') end)
 try('civ-alert-notification', function() dfhack.run_script('civ-alert-notification') end)
 try('enemies-inside-notification', function() dfhack.run_script('enemies-inside-notification') end)
+try('agitated-animals-notification', function() dfhack.run_script('agitated-animals-notification') end)
 try('planner-orders', function() dfhack.run_script('planner-orders') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
@@ -187,7 +190,9 @@ if lovely then
     -- standing orders (1 = on/auto, 0 = off): enforce off every session
     df.global.standing_orders_auto_loom = 0
     df.global.standing_orders_auto_collect_webs = 0
-    print('  [ok] standing orders: no automatic weaving, no automatic web collection')
+    -- fish only in designated fishing zones (1 = on), so fishers don't wander the whole map
+    df.global.standing_orders_zoneonly_fish = 1
+    print('  [ok] standing orders: no automatic weaving, no automatic web collection, fish only in zones')
 
     -- rename each migrant wave to a shared starting letter (A, B, C, ...); enabling
     -- also does the one-time retroactive pass and keeps watching for new waves

@@ -9,7 +9,9 @@ The companion to civ-alert-notification. When the CIVILIAN ALERT is on (its burr
 counting hostiles -- invaders, other dangerous creatures, and agitated animals (one line for all
 three) -- whose tile is INSIDE any of the alert's burrow(s), i.e. threats that have breached the
 safe zone. Shows only while the alert is on and at least one enemy is inside; clears when the
-burrow is clear or the alert is switched off. Clicking it zooms to each enemy in turn.
+burrow is clear or the alert is switched off. Clicking it zooms to each enemy in turn; SHIFT-
+clicking it (with squads selected via the dwarf-rts overlay) orders those squads to attack the
+enemies that got inside -- same as shift-clicking "N invaders" / "N hostiles".
 
 Enemy test: dfhack.units.isDanger (invaders / hostiles / crazed / undead / megabeasts) OR
 isAgitated (agitated wildlife), and NOT isHidden and NOT caged -- an undetected ambusher/sneaker
@@ -77,15 +79,28 @@ local function message()
     return {{text = text, pen = COLOR_RED}}
 end
 
--- click: cycle-zoom through each enemy (zoom + follow), one per click
+-- click: cycle-zoom through each enemy (zoom + follow), one per click.
+-- SHIFT-click (with squads selected via the dwarf-rts overlay): order every selected squad to
+-- kill exactly the enemies inside the fortress -- same idea as shift-clicking "N invaders" /
+-- "N hostiles" / "N agitated animals", but surgically targeting only the ones who breached the
+-- safe zone. Falls through to the zoom if the overlay isn't loaded or no squads are selected.
 local cycle = 0
-local function on_click()
+local function on_click(state, shift)
     local list = enemies_inside()
-    if #list == 0 then return end
+    if #list == 0 then return state end
+    if shift then
+        local gk = dfhack.internal.dwarf_rts_group_kill
+        if gk then
+            local ids = {}
+            for _, u in ipairs(list) do ids[#ids + 1] = u.id end
+            if gk(ids) then return state end   -- squads were selected -> commanded them
+        end
+    end
     cycle = (cycle % #list) + 1
     local u = list[cycle]
     dfhack.gui.revealInDwarfmodeMap(xyz2pos(u.pos.x, u.pos.y, u.pos.z), true, true)
     df.global.plotinfo.follow_unit = u.id
+    return state
 end
 
 -- ---- registration (mirrors the pack's other notify scripts) -----------------

@@ -103,8 +103,12 @@ local ENTRIES = {
     {'Ashery',       {'Workshops', 'Ashery'}},
     {'Soap maker',   {'Workshops', "Soap Maker's Workshop"}},
     {'Screw press',  {'Workshops', 'Screw Press'}},
-    -- Workshops / Clothing and leather (subcategory -- pick the shop natively)
-    {'Cloth/leather',{'Workshops', 'Clothing and leather'}},
+    -- Workshops / Clothing and leather (broken out into individual shops -- the shop appears in the
+    -- right-hand column after the "Clothing and leather" subcategory is selected)
+    {'Leather works',{'Workshops', 'Clothing and leather', 'Leather'}},
+    {'Loom',         {'Workshops', 'Clothing and leather', 'Loom'}},
+    {'Clothier',     {'Workshops', 'Clothing and leather', 'Clothes'}},
+    {'Dyer',         {'Workshops', 'Clothing and leather', 'Dyer'}},
     -- Workshops / Farming
     {'Farm plot',    {'Workshops', 'Farming', 'Farm plot'}},
     {'Still',        {'Workshops', 'Farming', 'Still'}},
@@ -113,13 +117,17 @@ local ENTRIES = {
     {'Fishery',      {'Workshops', 'Farming', 'Fishery'}},
     {'Kitchen',      {'Workshops', 'Farming', 'Kitchen'}},
     {'Farmer',       {'Workshops', 'Farming', 'Farmer'}},
+    {'Quern',        {'Workshops', 'Farming', 'Quern'}},
+    {'Nest box',     {'Workshops', 'Farming', 'Nest box'}},
+    {'Hive',         {'Workshops', 'Farming', 'Hive'}},
+    {'Vermin catcher', {'Workshops', 'Farming', "Vermin Catcher's Shop"}},
     -- Workshops / Furnaces
     {'Wood furnace', {'Workshops', 'Furnaces', 'Wood furnace'}},
     {'Smelter',      {'Workshops', 'Furnaces', 'Smelter'}},
     {'Glass furnace',{'Workshops', 'Furnaces', 'Glass furnace'}},
     {'Kiln',         {'Workshops', 'Furnaces', 'Kiln'}},
     {'Magma smelter',{'Workshops', 'Furnaces', 'Magma smelter'}},
-    {'Magma glass',  {'Workshops', 'Furnaces', 'Magma glass'}},
+    {'Magma glass furnace', {'Workshops', 'Furnaces', 'Magma glass furnace'}},
     {'Magma kiln',   {'Workshops', 'Furnaces', 'Magma kiln'}},
     -- Furniture
     {'Bed',          {'Furniture', 'Bed'}},
@@ -442,8 +450,17 @@ function DigBuilding:onInput(keys)
     if mi().current_hover ~= -1 or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
         return false
     end
-    if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1); return true end
-    if keys.CONTEXT_SCROLL_DOWN then self.scroll = math.min(self:max_scroll(), self.scroll + 1); return true end
+    -- mouse wheel: only scroll our list when the cursor is actually over the picker AND the list
+    -- overflows. Otherwise pass it through so DF still gets the wheel for z-level changes -- stealing
+    -- it unconditionally (as before) broke z-scrolling everywhere while the Dig tool was selected.
+    if keys.CONTEXT_SCROLL_UP or keys.CONTEXT_SCROLL_DOWN then
+        if self:getMousePos() and self:max_scroll() > 0 then
+            if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1)
+            else self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
+            return true
+        end
+        return false
+    end
     if keys._MOUSE_L then
         local x, y = self:getMousePos()       -- body-local coords, nil if the click is outside us
         if not x then return false end        -- click outside the window: pass through to the map
