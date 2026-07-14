@@ -60,6 +60,10 @@ accepting creates it (all conditioned so they only run when sensible):
     needs ash + an empty bucket), render fat (keep under 20 tallow, needs fat) -- so the
     chain self-sustains instead of draining a one-time batch.
   - Melting: a melt order when items are marked for melting but nothing melts them.
+  - Adamantine: once you have raw adamantine, three keep-1-in-stock orders -- extract raw
+    adamantine into thread (Craftsdwarf's Workshop), smelt thread into wafers (ADAMANTINE_WAFERS
+    at a Smelter), and weave thread into cloth (Loom) -- each targeting adamantine specifically
+    (mat 0/25) and gated so they only run while their input is on hand.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
 Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
@@ -450,6 +454,8 @@ local FIXED_WS = {
     BITUMINOUS_COAL_TO_COKE = {label = 'a Smelter',            fu = df.furnace_type.Smelter},
     LIGNITE_TO_COKE       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     SmeltOre              = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
+    ExtractMetalStrands   = {label = "a Craftsdwarf's Workshop", ws = df.workshop_type.Craftsdwarfs},
+    ADAMANTINE_WAFERS     = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     PIG_IRON_MAKING       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     STEEL_MAKING          = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     MeltMetalObject       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
@@ -919,6 +925,17 @@ local function smelt_order_exists(idx)
     return false
 end
 
+-- an order of this job_type already targeting inorganic material (mt, mi)? (used to tell an
+-- adamantine WeaveCloth/ExtractMetalStrands order apart from silk/yarn/other weaves)
+local function order_exists_mat(job_type, mt, mi)
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        local o = all[i]
+        if o.job_type == job_type and o.mat_type == mt and o.mat_index == mi then return true end
+    end
+    return false
+end
+
 local function melt_count()
     local n = 0
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do if it.flags.melt then n = n + 1 end end
@@ -1220,6 +1237,53 @@ STANDING = {
                     conds = {C('GreaterThan', 0, df.item_type.NONE)}}
                 return missing_shops({'MeltMetalObject'})
             end}}
+    end,
+    function()   -- adamantine: keep 1 thread / 1 wafer / 1 cloth once you have raw adamantine
+        local ADAM = 25                                   -- ADAMANTINE inorganic index
+        if not boulder_present(ADAM) then return {} end   -- only while raw adamantine is on hand
+        local THREAD, CLOTH = df.item_type.THREAD, df.item_type.CLOTH
+        local out = {}
+        -- extraction: raw adamantine -> adamantine thread (keep 1), at a Craftsdwarf's Workshop
+        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, ADAM) then
+            out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
+                note = 'Extracts adamantine strands from raw adamantine into thread at a\n'
+                    .. "Craftsdwarf's Workshop -- keeps 1 adamantine thread in stock, running while\n"
+                    .. 'you have raw adamantine to extract.',
+                build = function()
+                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = ADAM,
+                        amount = 1, frequency = Daily, conds = {
+                            C('LessThan', 1, THREAD, 0, ADAM),      -- keep 1 adamantine thread
+                            C('AtLeast', 1, BOULDER, 0, ADAM)}}     -- while raw adamantine is on hand
+                    return missing_shops({'ExtractMetalStrands'})
+                end}
+        end
+        -- wafers: smelt adamantine thread -> wafers (keep 1), via the ADAMANTINE_WAFERS reaction
+        if not reaction_ordered('ADAMANTINE_WAFERS') then
+            out[#out + 1] = {name = 'Adamantine wafers', shops = {'ADAMANTINE_WAFERS'},
+                note = 'Smelts adamantine thread into wafers at a Smelter -- keeps 1 adamantine wafer\n'
+                    .. 'in stock, running while you have adamantine thread to smelt.',
+                build = function()
+                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'ADAMANTINE_WAFERS',
+                        amount = 1, frequency = Daily, conds = {
+                            C('LessThan', 1, BAR, 0, ADAM),         -- keep 1 adamantine wafer (a bar)
+                            C('GreaterThan', 0, THREAD, 0, ADAM)}}  -- while adamantine thread is on hand
+                    return missing_shops({'ADAMANTINE_WAFERS'})
+                end}
+        end
+        -- cloth: weave adamantine thread -> cloth (keep 1), at a Loom
+        if not order_exists_mat(df.job_type.WeaveCloth, 0, ADAM) then
+            out[#out + 1] = {name = 'Adamantine cloth', shops = {'WeaveCloth'},
+                note = 'Weaves adamantine thread into cloth at a Loom -- keeps 1 adamantine cloth in\n'
+                    .. 'stock, running while you have adamantine thread to weave.',
+                build = function()
+                    add_order{job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
+                        amount = 1, frequency = Daily, conds = {
+                            C('LessThan', 1, CLOTH, 0, ADAM),       -- keep 1 adamantine cloth
+                            C('GreaterThan', 0, THREAD, 0, ADAM)}}  -- while adamantine thread is on hand
+                    return missing_shops({'WeaveCloth'})
+                end}
+        end
+        return out
     end,
 }
 
