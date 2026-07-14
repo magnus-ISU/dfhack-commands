@@ -1923,14 +1923,40 @@ local function hb_gen(set)
     if set ~= nil then dfhack.internal.military_uniforms_hb_gen = set end
     return dfhack.internal.military_uniforms_hb_gen or 0
 end
+
+-- Give every workshop job that came from one of OUR gear orders "top priority" (job.flags.do_now --
+-- exactly what the workshop's "Make top priority" toggle sets), so the forge does auto-gear pieces
+-- before other queued work. A job carries the manager order id it was assigned from (job.order_id),
+-- so we match our tracked orders EXACTLY -- no guessing by type. Idempotent (skip jobs already set);
+-- a bounded walk of the active job list so a corrupt list can never hang the game.
+local function prioritize_gear_jobs()
+    load_state()
+    if not state.orders or not next(state.orders) then return end
+    local ours = {}
+    for _, id in pairs(state.orders) do ours[id] = true end
+    local link = df.global.world.jobs.list.next
+    local guard = 0
+    while link and guard < 4000 do
+        guard = guard + 1
+        local j = link.item
+        if j and j.order_id and ours[j.order_id] and not j.flags.do_now then
+            j.flags.do_now = true
+        end
+        link = link.next
+    end
+end
+
 local function start_heartbeat()
     last_run = nil
     local my = hb_gen() + 1
     hb_gen(my)
+    local prio = 0
     local function hb()
         if not service_on() or my ~= hb_gen() then return end
         local now = df.global.cur_year * 403200 + df.global.cur_year_tick
         if not last_run or now - last_run >= DAY_TICKS then last_run = now; run_cycle() end
+        prio = prio + 1
+        if prio >= 50 then prio = 0; pcall(prioritize_gear_jobs) end   -- ~1s: our gear jobs -> top priority
         dfhack.timeout(1, 'frames', hb)
     end
     hb()
@@ -2043,6 +2069,7 @@ local function analyze_gear()
                     local hf = df.historical_figure.find(pos.occupant)
                     local u = hf and df.unit.find(hf.unit_id)
                     if u and not u.flags1.inactive then
+                        -- need[k] = {n = count, mt/mi = the material the uniform demands for this piece}
                         local need, nkeys = {}, 0
                         for slot = 0, 6 do
                             local v = pos.equipment.uniform[slot]
@@ -2050,8 +2077,11 @@ local function analyze_gear()
                                 local it = v[j]
                                 if it.item_type ~= IT.NONE and it.item_subtype >= 0 then
                                     local k = it.item_type * 100000 + it.item_subtype
-                                    if not need[k] then nkeys = nkeys + 1 end
-                                    need[k] = (need[k] or 0) + (PAIR_ITEM[it.item_type] and 2 or 1)
+                                    if not need[k] then
+                                        nkeys = nkeys + 1
+                                        need[k] = {n = 0, mt = it.mattype, mi = it.matindex}
+                                    end
+                                    need[k].n = need[k].n + (PAIR_ITEM[it.item_type] and 2 or 1)
                                 end
                             end
                         end
@@ -2062,7 +2092,15 @@ local function analyze_gear()
                                 if EQUIPPED_MODE[ie.mode] then
                                     local it = ie.item
                                     local k = it:getType() * 100000 + it:getSubtype()
-                                    if need[k] then
+                                    local rq = need[k]
+                                    -- MATERIAL-AWARE: when the uniform demands an EXACT material (matindex >= 0,
+                                    -- e.g. steel), the worn piece only satisfies the slot if it IS that material.
+                                    -- A stopgap iron/copper backup does NOT count as wearing the correct thing --
+                                    -- otherwise a backup-wearer reads as satisfied, then flips to "missing" during
+                                    -- the walk when they swap up to steel (the count bouncing you saw). Pieces with
+                                    -- no exact material (a leather cloak: matindex -1) still match by type+subtype.
+                                    if rq and (rq.mi < 0
+                                        or (it:getMaterial() == rq.mt and it:getMaterialIndex() == rq.mi)) then
                                         have[k] = (have[k] or 0) + 1
                                         local q = it.getQuality and it:getQuality() or 0
                                         if not worstq[k] or q < worstq[k] then worstq[k] = q end
@@ -2070,8 +2108,8 @@ local function analyze_gear()
                                 end
                             end
                             local short, below_mw = false, false
-                            for k, c in pairs(need) do
-                                local gap = c - (have[k] or 0)
+                            for k, rq in pairs(need) do
+                                local gap = rq.n - (have[k] or 0)
                                 if gap > 0 then short = true; miss_agg[k] = (miss_agg[k] or 0) + gap end
                                 if (have[k] or 0) > 0 and (worstq[k] or 0) < 5 then below_mw = true end
                             end
@@ -2112,12 +2150,14 @@ local function gear_message()
         pen = g.done_queue and COLOR_YELLOW or COLOR_LIGHTRED}}
 end
 
--- Line 2: only once "Upgrade to masterwork" is on AND every soldier's basic gear has been forged
--- (done_queue) -- then count members who have all their pieces but not all at masterwork quality.
+-- Line 2: only once "Upgrade to masterwork" is on AND EVERY soldier is already in their complete
+-- uniform (missing == 0) -- then count members who have all their pieces but not all at masterwork
+-- quality. Gating on missing == 0 (not just done_queue) keeps this line from ever overlapping the
+-- "missing uniform items" line above: while anyone still lacks a piece, only that line shows.
 local function masterwork_message()
     if not dfhack.world.isFortressMode() then return end
     local g = analyze_gear()
-    if not g.masterwork or not g.done_queue or g.notmw <= 0 then return end
+    if not g.masterwork or g.missing > 0 or g.notmw <= 0 then return end
     return {{text = ('%d military dwarves not yet in full masterwork gear'):format(g.notmw),
         pen = COLOR_YELLOW}}
 end
