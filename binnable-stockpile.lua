@@ -338,10 +338,21 @@ CategoryToggle.ATTRS{
     overlay_onupdate_max_freq_seconds = 0,
 }
 
+-- is the click on our OWN all-binnables/food/drink/quality buttons (a separate overlay)? Those sit
+-- bottom-left, overlapping the main-category column, so without this guard clicking "all food"
+-- would be misread as a re-click on the selected category and toggle it. Both overlays live on the
+-- same screen, so the button overlay's frame_rect is valid here.
+local function over_buttons(mx, my)
+    local e = overlay.get_state().db['binnable-stockpile.button']
+    local r = e and e.widget and e.widget.frame_rect
+    return (r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2) and true or false
+end
+
 function CategoryToggle:onInput(keys)
     if keys._MOUSE_L then
         local cs = df.global.game.main_interface.custom_stockpile
         local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+        if over_buttons(mx, my) then return false end   -- a click on our buttons, not a category re-click
         local cols, all_y = all_columns()
         -- Only act on clicks in the list area (below the "All/None" header row). This deliberately
         -- ignores clicks ON the header -- including the phantom click DF replays at the position we
