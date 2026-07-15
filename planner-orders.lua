@@ -1239,21 +1239,24 @@ STANDING = {
             end}}
     end,
     function()   -- adamantine: keep 1 thread / 1 wafer / 1 cloth once you have raw adamantine
-        local ADAM = 25                                   -- ADAMANTINE inorganic index
-        if not boulder_present(ADAM) then return {} end   -- only while raw adamantine is on hand
+        -- TWO distinct inorganics: RAW_ADAMANTINE is the mined boulder (the extract INPUT);
+        -- ADAMANTINE is the processed material (thread / wafer / cloth -- the products).
+        local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
+        if not RAW or not ADAM then return {} end
+        if not boulder_present(RAW) then return {} end    -- only while raw adamantine is on hand
         local THREAD, CLOTH = df.item_type.THREAD, df.item_type.CLOTH
         local out = {}
         -- extraction: raw adamantine -> adamantine thread (keep 1), at a Craftsdwarf's Workshop
-        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, ADAM) then
+        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW) then
             out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
                 note = 'Extracts adamantine strands from raw adamantine into thread at a\n'
                     .. "Craftsdwarf's Workshop -- keeps 1 adamantine thread in stock, running while\n"
                     .. 'you have raw adamantine to extract.',
                 build = function()
-                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = ADAM,
+                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
                         amount = 1, frequency = Daily, conds = {
-                            C('LessThan', 1, THREAD, 0, ADAM),      -- keep 1 adamantine thread
-                            C('AtLeast', 1, BOULDER, 0, ADAM)}}     -- while raw adamantine is on hand
+                            C('LessThan', 1, THREAD, 0, ADAM),      -- keep 1 adamantine thread (product)
+                            C('AtLeast', 1, BOULDER, 0, RAW)}}      -- while RAW adamantine is on hand
                     return missing_shops({'ExtractMetalStrands'})
                 end}
         end
