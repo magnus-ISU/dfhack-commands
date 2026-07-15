@@ -28,9 +28,11 @@ Activates the "always-on" helpers in this pack:
                                  by hand to force a re-apply.)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (1x1 Tomb zone on each coffin, 1x1 Pasture zone on each nest box)
+    * auto-elf-chop             (enables the autochop gate that respects the elven tree limit)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
+    * plan-tile                 (overlay: left-drag during building placement -> tile a grid of it)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
@@ -130,9 +132,11 @@ if ({...})[1] == 'disable' then
     try('disable military-uniforms (gear service)', function() dfhack.run_command('disable', 'military-uniforms') end)
     try('disable inside-burrow', function() dfhack.run_command('disable', 'inside-burrow') end)
     try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
+    try('disable auto-elf-chop', function() dfhack.run_command('disable', 'auto-elf-chop') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
+    try('disable plan-tile overlay', function() dfhack.run_command('overlay', 'disable', 'plan-tile.tile') end)
     try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'auto-name') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
@@ -178,12 +182,14 @@ try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_comm
 try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
 try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'auto-tomb') end)
+try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'auto-elf-chop') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
 try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'item-description.expand') end)
 try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
 try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('dig-shapes') end)
+try('plan-tile (drag to tile many buildings during placement)', function() dfhack.run_script('plan-tile') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if lovely then

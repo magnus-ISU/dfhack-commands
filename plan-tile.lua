@@ -1,0 +1,262 @@
+-- Drag to place many workshops/furniture at once during building-plan placement.
+--@module = true
+--[[
+plan-tile
+
+While you're placing a building (the buildingplan placement screen), LEFT-DRAG a box on the map to
+lay down a whole GRID of that building in one gesture instead of clicking each one. The buildings are
+tiled by their FOOTPRINT: a 1x1 statue every 1 tile, a 3x3 Carpenter's every 3 tiles, a 5x5 Trade
+Depot every 5 tiles -- so they sit edge-to-edge without overlapping.
+
+It is purely additive and never swallows a click:
+  * DFHack's own placement puts the FIRST building where you press (a plain click still places one,
+    exactly as before). On release, this fills the rest of the dragged box with copies aligned to
+    that first one, stepping by the footprint. Overlapping/blocked cells are silently skipped
+    (constructBuilding refuses occupied tiles), so nothing double-places.
+  * It only engages for fixed-footprint buildings that have NO native area drag (workshops,
+    furniture, machines...). Walls, floors, farm plots, bridges and the like already have DF's own
+    build-more area UI, so `cur_building_has_no_area()` is false for them and this stays out of the
+    way -- no conflict.
+  * It stays out when buildingplan is in "choose items by hand" mode (the extra copies would have no
+    hand-picked items), leaving you the normal one-at-a-time flow.
+
+Each placed copy is registered with buildingplan (same material filters as the one you placed), so
+they respect your filters and get suspended until materials are available, just like a normal plan.
+
+Loaded as an overlay (`plan-tile.tile` on the building-placement screen); auto-enabled on `overlay
+rescan`.
+]]
+
+local overlay = require('plugins.overlay')
+local guidm = require('gui.dwarfmode')
+local utils = require('utils')
+
+local uibs = df.global.buildreq          -- the live "building being placed" state
+local MAX_BUILDINGS = 400                 -- safety cap on a single drag
+
+-- ---- map-click guard (mirrors right-click-cancel / dwarf-rts) --------------
+-- the map tile under the cursor, or nil if the cursor is over ANY UI (panels, the buildingplan
+-- filter overlay, notifications, the protected top-left corner) so those clicks aren't hijacked.
+local function widget_on_screen(w, vs)
+    local vss = w.viewscreens
+    if type(vss) == 'string' then vss = {vss} end
+    if type(vss) ~= 'table' then return false end
+    for _, fs in ipairs(vss) do
+        if type(fs) == 'string' then
+            local ok, m = pcall(dfhack.gui.matchFocusString, fs, vs)
+            if ok and m then return true end
+        end
+    end
+    return false
+end
+
+local function over_other_overlay(mx, my)
+    local vs = dfhack.gui.getDFViewscreen(true)
+    local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
+    for name, e in pairs(overlay.get_state().db) do
+        if name ~= 'plan-tile.tile' then
+            local w = e.widget
+            local r = w.frame_rect
+            if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2
+                and not (r.x1 <= 0 and r.y1 <= 0 and r.x2 >= fullw and r.y2 >= fullh)
+                and widget_on_screen(w, vs)
+            then
+                local ok, vis = pcall(function() return utils.getval(w.visible) end)
+                if ok and vis then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function map_pos_if_clear()
+    local pos = dfhack.gui.getMousePos()
+    if not pos then return nil end
+    local m = df.global.game.main_interface
+    if m.current_hover ~= -1 then return nil end
+    if m.current_hover_alert then return nil end
+    if m.current_hover_left_x ~= 0 then return nil end
+    local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+    if mx < 2 or (mx < 4 and my < 4) then return nil end
+    if over_other_overlay(mx, my) then return nil end
+    return pos
+end
+
+-- ---- building-plan placement introspection --------------------------------
+
+-- placement screen is up and a real building is selected?
+local function placement_active()
+    return df.global.game.main_interface.bottom_mode_selected == df.main_bottom_mode_type.BUILDING_PLACEMENT
+        and uibs.building_type ~= -1
+end
+
+-- the current building's footprint (its natural size), min 1x1
+local function footprint()
+    local ok, w, h = pcall(dfhack.buildings.getCorrectSize, 1, 1,
+        uibs.building_type, uibs.building_subtype, uibs.custom_type, uibs.direction)
+    if not ok then return 1, 1 end
+    return math.max(1, w or 1), math.max(1, h or 1)
+end
+
+-- fixed-footprint building with no native area drag? (workshop / furniture / machine, NOT a
+-- construction / farm plot / bridge / road, which have their own build-more UI). Mirrors
+-- buildingplan's own cur_building_has_no_area().
+local function has_no_area()
+    if uibs.building_type == df.building_type.Construction then return false end
+    local filters = dfhack.buildings.getFiltersByType({},
+        uibs.building_type, uibs.building_subtype, uibs.custom_type)
+    return filters and filters[1] and (not filters[1].quantity or filters[1].quantity > 0) and true or false
+end
+
+-- buildingplan in "choose items by hand" mode? (then we stay out)
+local function choosing_items()
+    local ok, v = pcall(function()
+        return require('plugins.buildingplan').getChooseItems(
+            uibs.building_type, uibs.building_subtype, uibs.custom_type)
+    end)
+    return ok and v and v ~= 0
+end
+
+-- should we handle drags right now?
+local function engaged()
+    return placement_active() and has_no_area() and not choosing_items()
+end
+
+-- ---- the grid ------------------------------------------------------------
+
+-- centres of every building in the grid from anchor A toward release B, stepping by footprint.
+-- Cell (0,0) is A itself (the one DFHack already placed on press). Capped at MAX_BUILDINGS.
+local function grid_centres(cap, rel)
+    local fw, fh = cap.fw, cap.fh
+    local dx, dy = rel.x - cap.anchor.x, rel.y - cap.anchor.y
+    local nx = math.floor(math.abs(dx) / fw)
+    local ny = math.floor(math.abs(dy) / fh)
+    -- clamp so nx*ny stays under the cap
+    while (nx + 1) * (ny + 1) > MAX_BUILDINGS do
+        if nx >= ny then nx = nx - 1 else ny = ny - 1 end
+    end
+    local sx = dx >= 0 and 1 or -1
+    local sy = dy >= 0 and 1 or -1
+    local out = {}
+    for i = 0, nx do for j = 0, ny do
+        out[#out + 1] = {x = cap.anchor.x + i * fw * sx, y = cap.anchor.y + j * fh * sy,
+                         is_anchor = (i == 0 and j == 0)}
+    end end
+    return out
+end
+
+-- place every grid cell except the anchor (already placed by DFHack's own overlay).
+local function place_grid(cap, rel)
+    local centres = grid_centres(cap, rel)
+    local fw, fh, z = cap.fw, cap.fh, cap.anchor.z
+    local blds = {}
+    for _, c in ipairs(centres) do
+        if not c.is_anchor then
+            local corner = xyz2pos(c.x - fw // 2, c.y - fh // 2, z)
+            local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = corner,
+                type = cap.type, subtype = cap.subtype, custom = cap.custom,
+                width = fw, height = fh, direction = cap.direction, filters = cap.filters})
+            if ok and bld then
+                -- copy the extra config fields the corresponding types need (harmless otherwise)
+                for k in pairs(bld) do
+                    if k == 'track_stop_info' then utils.assign(bld.track_stop_info, uibs.track_stop) end
+                    if k == 'speed' then bld.speed = uibs.speed end
+                    if k == 'plate_info' then utils.assign(bld.plate_info, uibs.plate_info) end
+                end
+                blds[#blds + 1] = bld
+            end
+        end
+    end
+    if #blds > 0 then
+        local buildingplan = require('plugins.buildingplan')
+        for _, bld in ipairs(blds) do buildingplan.addPlannedBuilding(bld) end
+        buildingplan.scheduleCycle()
+    end
+    return #blds
+end
+
+-- ---- overlay -------------------------------------------------------------
+
+PlanTile = defclass(PlanTile, overlay.OverlayWidget)
+PlanTile.ATTRS{
+    desc = 'Left-drag during building placement to lay a whole grid of that building at once.',
+    default_pos = {x = -1, y = -1},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Building/Placement',
+    frame = {w = 1, h = 1},           -- invisible; onupdate/onRenderFrame still see map-wide input
+    overlay_onupdate_max_freq_seconds = 0,
+}
+
+-- watch the left mouse button: capture the building on press, place the grid on release.
+function PlanTile:overlay_onupdate()
+    local ld = df.global.enabler.mouse_lbut_down
+    if not engaged() then
+        self.cap = nil
+        self.lbut = ld
+        return
+    end
+    if ld == 1 and self.lbut ~= 1 then                 -- press: snapshot what we're placing
+        local pos = map_pos_if_clear()
+        if pos then
+            local fw, fh = footprint()
+            self.cap = {
+                anchor = copyall(pos), fw = fw, fh = fh,
+                type = uibs.building_type, subtype = uibs.building_subtype,
+                custom = uibs.custom_type, direction = uibs.direction,
+                filters = dfhack.buildings.getFiltersByType({},
+                    uibs.building_type, uibs.building_subtype, uibs.custom_type),
+            }
+        else
+            self.cap = nil
+        end
+    elseif ld ~= 1 and self.lbut == 1 then             -- release: fill the box
+        if self.cap then
+            local rel = dfhack.gui.getMousePos()
+            if rel and rel.z == self.cap.anchor.z then
+                local n = place_grid(self.cap, rel)
+                if n > 0 then
+                    print(('plan-tile: placed %d more %s'):format(n,
+                        n == 1 and 'building' or 'buildings'))
+                end
+            end
+            self.cap = nil
+        end
+    end
+    self.lbut = ld
+end
+
+-- live preview: paint every grid cell's footprint while the button is held and dragging.
+-- reuse buildingplan's own "good placement" green tile so it matches DF's placement ghost.
+local ok_pens, bp_pens = pcall(require, 'plugins.buildingplan.pens')
+local PREVIEW_PEN = (ok_pens and bp_pens and bp_pens.GOOD_TILE_PEN)
+    or dfhack.pen.parse{ch = 'X', fg = COLOR_GREEN, keep_lower = true}
+
+function PlanTile:onRenderFrame(dc, rect)
+    if not (self.cap and df.global.enabler.mouse_lbut_down == 1) then return end
+    local cur = dfhack.gui.getMousePos()
+    if not cur or cur.z ~= self.cap.anchor.z then return end
+    local vp = guidm.Viewport.get()
+    if vp.z ~= self.cap.anchor.z then return end
+    local fw, fh, z = self.cap.fw, self.cap.fh, self.cap.anchor.z
+    for _, c in ipairs(grid_centres(self.cap, cur)) do
+        for ty = c.y - fh // 2, c.y - fh // 2 + fh - 1 do
+            for tx = c.x - fw // 2, c.x - fw // 2 + fw - 1 do
+                local pos = {x = tx, y = ty, z = z}
+                if vp:isVisible(pos) then
+                    local s = vp:tileToScreen(pos)
+                    dfhack.screen.paintTile(PREVIEW_PEN, s.x, s.y, nil, nil, true)
+                end
+            end
+        end
+    end
+end
+
+OVERLAY_WIDGETS = {tile = PlanTile}
+
+if not dfhack_flags.module then
+    require('plugins.overlay').rescan()
+    dfhack.run_command('overlay', 'enable', 'plan-tile.tile')
+    print('plan-tile: overlay enabled.')
+    print('  During building placement, left-drag a box to place a grid of that building,')
+    print('  tiled by its footprint (every 3 tiles for a 3x3 workshop, etc.).')
+end
