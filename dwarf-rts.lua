@@ -178,11 +178,16 @@ end
 --     current_hover == -1 -- so without this guard onInput swallows the clicks (the
 --     uniform never gets assigned) AND the mouse-up poller fires stray station/move
 --     orders on the selected squads. This is THE reason you couldn't equip a new squad.
+--   * the ESC menu (main_interface.options -- Settings / Save and Exit / Abandon...) and its
+--     Settings sub-screen are the SAME situation: drawn over the map, focus stays
+--     'dwarfmode/Squads/Default', their buttons report current_hover == -1, so without this
+--     guard onInput would swallow the click and you couldn't hit Settings / Save and Exit.
 -- Detected via each dialog's own open flag, so it's independent of focus strings (and
 -- harmless for the viewscreen cases if squads.open happens to stay true -- no edge fires).
 local function squad_subscreen_open()
     local mi = df.global.game.main_interface
     return mi.squad_equipment.open or mi.squad_schedule.open or mi.assign_uniform.open
+        or mi.options.open or mi.settings.open
 end
 
 -- does this widget belong to the screen we're actually on right now? (matchFocusString
