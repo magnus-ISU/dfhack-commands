@@ -217,6 +217,48 @@ local function scan_and_queue()
     return queued, existing, skipped
 end
 
+-- the active manager order currently fulfilling this Make mandate, or nil
+local function order_for_mandate(m)
+    local map = MAP[m.item_type]
+    if not map then return nil end
+    local it, sub = order_target(m, map)
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        local o = all[i]
+        if o.job_type == map.job and o.item_type == it and o.item_subtype == sub and o.status.active then
+            return o
+        end
+    end
+end
+
+-- Run every mandate order's workshop jobs at TOP priority (job.flags.do_now -- what the "Make top
+-- priority" toggle sets). Noble mandates have a DEADLINE and a punishment for missing it, and the
+-- forge is often saturated with other prioritized work -- notably military-uniforms marks ALL its
+-- gear jobs do_now -- which otherwise starves the mandate so the item never gets made. Matched by
+-- job.order_id so only mandate orders' jobs are touched. Mirrors military-uniforms' own pass.
+local function prioritize_mandate_jobs()
+    local ids = {}
+    local mandates = df.global.world.mandates.all
+    for i = 0, #mandates - 1 do
+        local m = mandates[i]
+        if m.mode == df.mandate_type.Make and m.amount_remaining > 0 then
+            local o = order_for_mandate(m)
+            if o then ids[o.id] = true end
+        end
+    end
+    if not next(ids) then return end
+    local link = df.global.world.jobs.list.next
+    local guard = 0
+    while link and guard < 6000 do
+        guard = guard + 1
+        local j = link.item
+        if j and j.order_id and ids[j.order_id] and not j.flags.do_now then
+            j.flags.do_now = true
+        end
+        link = link.next
+    end
+end
+
 -- ---- enable / background service machinery --------------------------------
 
 enabled = enabled or false
@@ -229,6 +271,7 @@ end
 local function do_cycle()
     if not dfhack.world.isFortressMode() then return end
     local queued = scan_and_queue()
+    prioritize_mandate_jobs()
     if #queued > 0 then
         print(('auto-mandate: queued %d order%s for new mandates:'):format(
             #queued, #queued == 1 and '' or 's'))
@@ -258,6 +301,7 @@ local function start()
     last_run = nil               -- run on the next heartbeat
     hb_gen = hb_gen + 1
     local my_gen = hb_gen
+    local prio = 0
     local function heartbeat()
         if not enabled or my_gen ~= hb_gen then return end   -- stale/stopped: end loop
         local now = now_abs()
@@ -265,6 +309,9 @@ local function start()
             last_run = now
             do_cycle()
         end
+        -- keep mandate jobs top-priority ~once a second (jobs get posted between daily cycles)
+        prio = prio + 1
+        if prio >= 50 then prio = 0; pcall(prioritize_mandate_jobs) end
         dfhack.timeout(1, 'frames', heartbeat)
     end
     heartbeat()
@@ -313,6 +360,7 @@ else
         qerror('auto-mandate only works in fortress mode')
     end
     local queued, existing, skipped = scan_and_queue()
+    prioritize_mandate_jobs()
     if #queued == 0 and #existing == 0 and #skipped == 0 then
         print('auto-mandate: no production mandates to fill.')
     else
