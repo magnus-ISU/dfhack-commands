@@ -133,6 +133,7 @@ if ({...})[1] == 'disable' then
     try('disable inside-burrow', function() dfhack.run_command('disable', 'inside-burrow') end)
     try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
     try('disable auto-elf-chop', function() dfhack.run_command('disable', 'auto-elf-chop') end)
+    try('disable tarrasque', function() dfhack.run_command('disable', 'tarrasque') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
