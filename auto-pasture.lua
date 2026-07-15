@@ -49,6 +49,8 @@ known = known or nil
 known_pens = known_pens or nil   -- pen ids we've already seen (for new-pen detection)
 pens_seeded = pens_seeded or false
 pen_cache = pen_cache or nil      -- pen id -> {grass=, tiles=}; refreshed each cycle
+-- "Pause this confirmation" was chosen on the caged-animal release dialog -> stop asking (this session)
+graze_confirm_paused = graze_confirm_paused or false
 
 local function load_state()
     if not state then
@@ -402,6 +404,7 @@ end
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state, known, known_pens, pens_seeded, pen_cache = nil, nil, nil, false, nil
+        graze_confirm_paused = false
         load_state()
         if dfhack.world.isFortressMode() then
             scan_new_pens()          -- seed existing pens (no retroactive designation)
@@ -483,7 +486,97 @@ function AutoPastureOverlay:render(dc)
     AutoPastureOverlay.super.render(self, dc)
 end
 
-OVERLAY_WIDGETS = {pasture = AutoPastureOverlay}
+-- ---- [Graze]/[Scavenge] button: pasture a tamed/trained animal out of its cage ------------
+
+-- the tamed-or-trained animal held in the cage item on the current ITEM view sheet, or nil.
+-- (A caged creature is viewed via its cage ITEM sheet -- the creature is a CONTAINS_UNIT ref.)
+local function viewed_caged_animal()
+    local vs = df.global.game.main_interface.view_sheets
+    if not vs.open or vs.active_sheet ~= df.view_sheet_type.ITEM then return end
+    local it = df.item.find(vs.active_id)
+    if not it or it:getType() ~= df.item_type.CAGE then return end
+    for i = 0, #it.general_refs - 1 do
+        local r = it.general_refs[i]
+        if r:getType() == df.general_ref_type.CONTAINS_UNIT then
+            local u = df.unit.find(r.unit_id)
+            -- tamed (Domesticated) OR trained (SemiWild..MasterfullyTrained); NOT wild-untamed
+            if u and dfhack.units.isAlive(u) and dfhack.units.isAnimal(u)
+                and u.training_level >= df.animal_training_level.SemiWild
+                and u.training_level <= df.animal_training_level.Domesticated then
+                return u
+            end
+        end
+    end
+end
+
+-- the pasture this animal belongs in: graze pen for grazers, scavenge pen for the rest (or nil)
+local function pasture_for(u)
+    load_state()
+    return valid_pasture(dfhack.units.isGrazer(u) and state.graze_id or state.scavenge_id)
+end
+
+-- release the caged animal and assign it to its pasture. assign_to_zone frees it from the cage,
+-- so DF hauls it out and to the pen; mark it known so the auto-service leaves our manual choice be.
+local function graze_caged_animal(u)
+    local zone = pasture_for(u)
+    if not zone then return false end
+    assign_to_zone(u, zone)
+    if not known then known = {} end
+    known[u.id] = true
+    return true
+end
+
+CageGrazeOverlay = defclass(CageGrazeOverlay, overlay.OverlayWidget)
+CageGrazeOverlay.ATTRS{
+    desc = 'On a caged tame/trained animal: a [Graze]/[Scavenge] button to pasture it.',
+    default_pos = {x = -48, y = 9},                  -- same spot as statue-redirect's Remove button
+    default_enabled = true,
+    viewscreens = 'dwarfmode/ViewSheets/ITEM',
+    frame = {w = 12, h = 1},
+    version = 1,
+    overlay_onupdate_max_freq_seconds = 0,
+}
+
+function CageGrazeOverlay:init()
+    -- two buttons, one shown at a time: [Graze] for grazers, [Scavenge] for everything else
+    self:addviews{
+        widgets.TextButton{view_id = 'graze', frame = {t = 0, l = 0}, label = '[Graze]',
+            auto_width = true, on_activate = self:callback('activate'), visible = false},
+        widgets.TextButton{view_id = 'scav', frame = {t = 0, l = 0}, label = '[Scavenge]',
+            auto_width = true, on_activate = self:callback('activate'), visible = false},
+    }
+end
+
+function CageGrazeOverlay:overlay_onupdate()
+    local u = viewed_caged_animal()
+    -- only offer it when the matching pasture actually exists to assign to
+    self.unit = (u and pasture_for(u)) and u or nil
+    local grazer = self.unit and dfhack.units.isGrazer(self.unit)
+    self.subviews.graze.visible = self.unit ~= nil and grazer
+    self.subviews.scav.visible = self.unit ~= nil and not grazer
+    self.visible = self.unit ~= nil
+end
+
+function CageGrazeOverlay:activate()
+    local u = self.unit
+    if not u then return end
+    -- fully tame (Domesticated) livestock: just do it. Trained-but-not-fully-tame: confirm first,
+    -- since letting it out of the cage is riskier (it can be skittish).
+    if u.training_level == df.animal_training_level.Domesticated or graze_confirm_paused then
+        graze_caged_animal(u)
+        return
+    end
+    local grazer = dfhack.units.isGrazer(u)
+    require('gui.dialogs').showYesNoPrompt('Release from cage?',
+        'This animal is trained but not fully tame. Release it from its cage and put it in the '
+            .. (grazer and 'graze' or 'scavenge') .. ' pasture?',
+        COLOR_WHITE,
+        function() graze_caged_animal(u) end,                                 -- Yes
+        nil,                                                                  -- No: just close
+        function() graze_confirm_paused = true; graze_caged_animal(u) end)    -- Pause this confirmation
+end
+
+OVERLAY_WIDGETS = {pasture = AutoPastureOverlay, cagegraze = CageGrazeOverlay}
 
 -- exported so it can be driven via reqscript (the `enable` command goes through
 -- run_script, which on this build can serve a stale cached copy)
