@@ -232,10 +232,17 @@ local function build_material_vocab()
     local i = 0
     while df.inorganic_raw.find(i) do
         local ir = df.inorganic_raw.find(i)
-        local name = ir.id:lower():gsub('_', ' ')
         local f = ir.material.flags
-        m[name] = {mat_type = 0, mat_index = i,
-                   is_metal = f.IS_METAL or false, is_stone = f.IS_STONE or false}
+        local entry = {mat_type = 0, mat_index = i,
+                       is_metal = f.IS_METAL or false, is_stone = f.IS_STONE or false}
+        -- key on the id ("PEWTER_LAY" -> "pewter lay") AND on the material's DISPLAY name
+        -- ("lay pewter"). The display name is what the player types/sees, and for alloys it's
+        -- word-reordered from the id (fine/trifle/lay pewter), so keying on the id alone missed them.
+        m[ir.id:lower():gsub('_', ' ')] = entry
+        local ok, sn = pcall(function() return ir.material.state_name.Solid end)
+        if ok and type(sn) == 'string' and sn ~= '' and not m[sn:lower()] then
+            m[sn:lower()] = entry
+        end
         i = i + 1
     end
     for _, g in ipairs({{'clear glass', 'GLASS_CLEAR'}, {'green glass', 'GLASS_GREEN'},
