@@ -11,7 +11,7 @@ While a merchant caravan is at your trade depot and ready to trade, it shows:
     "Trader is ready to trade for N days"
 where N counts down as the caravan's remaining time at the depot ticks away. With
 more than one caravan present it reads "Traders are ready to trade for N days"
-(N = the longest still-present).
+(N = the SOONEST to leave, so you know your real deadline to trade with everyone).
 
 Clicking the notification zooms the map to your trade depot.
 
@@ -47,12 +47,14 @@ local function trader_message()
     if not dfhack.world.isFortressMode() then return end
     local ready = ready_caravans()
     if #ready == 0 then return end
-    -- countdown: time_remaining ticks down while they're at the depot
-    local max_ticks = 0
+    -- countdown: time_remaining ticks down while they're at the depot. With several caravans
+    -- present, report the SOONEST to leave (the smallest remaining) -- that's the deadline that
+    -- matters if you want to trade with everyone before someone packs up.
+    local min_ticks
     for _, c in ipairs(ready) do
-        if c.time_remaining > max_ticks then max_ticks = c.time_remaining end
+        if not min_ticks or c.time_remaining < min_ticks then min_ticks = c.time_remaining end
     end
-    local days = math.max(1, math.ceil(max_ticks / TICKS_PER_DAY))
+    local days = math.max(1, math.ceil(min_ticks / TICKS_PER_DAY))
     local who = #ready == 1 and 'Trader is' or 'Traders are'
     return ('%s ready to trade for %d day%s'):format(who, days, days == 1 and '' or 's')
 end
