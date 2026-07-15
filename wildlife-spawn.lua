@@ -3,14 +3,20 @@
 --[[
 wildlife-spawn
 
-A minimal, working spawn primitive. On DFHack 53.15-r1 / DF v0.53.15 the stock
-`modtools/create-unit` is broken -- it drives DF's old arena-spawn machinery, but that was
-removed (`world.arena_spawn` is gone, and the `D_LOOK_ARENA_CREATURE` keybinding no longer
-exists). Instead we use **`dfhack.units.create(race, caste)`** -- a Bay12 entry point that
-builds a *complete* unit (race, caste, name, soul, initialized body and mind) -- and then put
-it into play ourselves as a WILD animal: give it a map position, register it, make it active.
+*** WARNING: THIS DOES NOT ACTUALLY WORK / IS NOT PROVEN. ***
+The `dfhack.units.create` + teleport approach below produces a unit object, but the result is NOT
+a properly working in-play creature (it does not behave like a real wild animal / does not really
+integrate into play). Treat `spawn()` as an UNSOLVED primitive -- do not rely on it (in particular,
+tarrasque's off-map / no-unit revival path must NOT assume this works). A real spawn path still has
+to be found.
 
-This is what the migration features (wandering wildlife / migration waves) will call.
+Background (why the obvious route was tried): on DFHack 53.15-r1 / DF v0.53.15 the stock
+`modtools/create-unit` is also broken -- it drives DF's old arena-spawn machinery, but that was
+removed (`world.arena_spawn` is gone, and the `D_LOOK_ARENA_CREATURE` keybinding no longer
+exists). So this tried **`dfhack.units.create(race, caste)`** -- a Bay12 entry point that builds a
+unit object (race, caste, name, soul, body, mind) -- and then tried to put it into play as a WILD
+animal (give it a map position, register it, make it active). That last part is the part that
+does not really work.
 
 Usage:
     wildlife-spawn <CREATURE_ID> [count] [caste]

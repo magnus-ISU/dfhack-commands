@@ -526,6 +526,12 @@ local function graze_caged_animal(u)
     return true
 end
 
+-- !!! KNOWN ISSUE (unresolved): the recent rework of this overlay -- switching the buttons from
+-- TextButton to plain HotkeyLabels (to drop BannerPanel's red "[ ]" brackets) and adding the
+-- [Butcher] row -- DID NOT ACTUALLY FUNCTION in-game (the buttons do not work as claimed). A probe
+-- showed the state resolving correctly, but the on-screen result was broken. Needs re-investigation:
+-- likely the HotkeyLabel-in-overlay click/render, the 2-row frame (h=2), or the version bump. The
+-- previous TextButton version worked but had the ugly red banner brackets. DO NOT trust this as-is.
 CageGrazeOverlay = defclass(CageGrazeOverlay, overlay.OverlayWidget)
 CageGrazeOverlay.ATTRS{
     desc = 'On a caged tame/trained animal: [Graze]/[Scavenge] to pasture it, [Butcher] to slaughter.',

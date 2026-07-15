@@ -27,6 +27,58 @@ WARNING: a revived beast is a live forgotten beast again -- in whatever cavern i
 several at once (or `revive all`) can put a lot of them back in play, so start small.
 ]]
 
+--[[
+====================================================================================================
+PLANNED REDESIGN (requested by the user; NOT YET IMPLEMENTED). The code below this block is a FIRST
+CUT that revives dead beasts IN PLACE up to a target count -- it does NOT meet the requirements below
+and needs to be rewritten. Recorded here so it survives a context reset.
+
+REQUIREMENTS:
+  * Schedule, not a target: on the WINTER SOLSTICE (= 1st of Obsidian, month 12 day 1; tick within the
+    year = (12-1)*28*1200 = 369600) of EACH year, EACH dead forgotten beast independently rolls a
+    1/100 chance to revive. Remove the "target living count" logic entirely.
+  * Revive OUTSIDE the fortress.  *** CORRECTION -- READ THIS ***  Cavern pathing tiles that the fort
+    can REACH are NOT "outside the fortress." The breached caverns are part of the fort's accessible
+    area, so dropping a live beast on a walkable cavern tile (what an earlier plan of mine proposed,
+    and what my "far cavern z-level" placement test was doing) is WRONG. "Outside" must mean somewhere
+    the fort cannot immediately reach: an unbreached / disconnected cavern region, off the embark, or
+    keep the beast ABSTRACT (historical figure only, no local unit) so it re-enters the world
+    elsewhere. HOW to place it "outside" is an OPEN PROBLEM (see below).
+  * Retain records: keep the DEATH event (who killed it + the year) -- do NOT delete it -- set the
+    histfig died_year back to -1, and log a REVIVAL event (when it revived). full-heal -r already does
+    the died_year flip + adds a history_event_hist_figure_revivedst; just confirm it leaves the death
+    event intact. A small script-side log (killer / death year / revive year) would be a bonus.
+  * Work in ADVENTURE mode too (revive far from the adventurer). So: do NOT gate on fortress mode, and
+    persist state at WORLD level (dfhack.persistent world data -- saveSiteData is fort-only). Behavior
+    should be UNIFORM across modes; the fort/adventure difference just falls out of what is loaded.
+  * Enabled by `magnus-scripts lovely` ONLY (move it out of the base magnus-scripts batch into the
+    lovely block), or standalone via `enable tarrasque`.
+  * Revive off-map deaths too: beasts that died with NO lingering unit.
+  * Material randomization: LEFT OUT. An FB's material is woven into the caste's TISSUE definitions
+    (the creature's `.material` list is empty, #materials == 0), not a simple field -- too risky.
+
+TWO REVIVAL PATHS (split by whether a unit still exists):
+  * Has a lingering (killed) unit  -> resurrect with `full-heal -r`. This DOES produce a live beast
+    (proven: revived FORGOTTEN_BEAST_1 / "gu Ostad" earlier -- it came back alive and wandering).
+  * No unit / died off-map         -> must CREATE a unit for the beast's creature, link it to the
+    existing histfig (unit.hist_figure_id / hf.unit_id), mark it hostile, and place it.
+    *** wildlife-spawn.spawn is NOT a working primitive for this (see its own docs -- it does not
+    really work). A real spawn path still has to be found. *** OPEN PROBLEM.
+
+KEY FACTS (this world): 75 FBs total (one per underground region -- finite, per the wiki). At last
+check ~4 alive / 71 dead; 69 of the dead still have a killed unit (resurrect-able), 2 died off-map
+(no unit). ALL living FBs are active units already in the caverns -- the fort has met them all -- so
+there is NO abstract "waiting" pool and DF sends no more on its own (that's why attacks stopped).
+Identify FBs by creature_id matching ^FORGOTTEN_BEAST_%d+$. Map here is 192x192x162.
+
+OPEN PROBLEMS to solve before this is correct:
+  1. "Outside the fortress" placement -- cavern tiles the fort can reach are NOT outside (see above).
+  2. A working spawn primitive for the no-unit / off-map beasts (wildlife-spawn.spawn does not work).
+  3. Whether marking a histfig alive WITHOUT spawning a unit actually makes DF re-introduce the beast
+     at a fort that has already met every FB -- UNVERIFIED, and it may never re-send it.
+====================================================================================================
+]]
+
 local GLOBAL_KEY = 'tarrasque'
 local CHECK_DAYS = 28              -- background survey cadence (~once a game month)
 local DEFAULT_TARGET = 5          -- keep at least this many forgotten beasts alive
