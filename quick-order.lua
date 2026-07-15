@@ -507,23 +507,37 @@ local function can_make_inorganic(item, mi)
     elseif it == SHIELD_T then
         return f.IS_METAL or false                                    -- shields: metal (wood via category)
     end
+    -- everything else (furniture, crafts, containers, tools...): a METAL must be forgeable into
+    -- hard items (ITEMS_HARD). Pure alloy-ingredient metals like bismuth (no ITEMS_HARD) can't --
+    -- only their alloys (bismuth BRONZE) can. Stone and other inorganics pass (made at the mason's).
+    if f.IS_METAL and not f.ITEMS_HARD then return false end
     return true
 end
 
 -- is the resolved material m legal for this item? returns true, or false + reason.
--- Only weapons/ammo, body armour, and shields are policed; furniture/crafts take anything.
+-- A CONCRETE material (typed, or class-picked from stock) is checked for EVERY item (so a metal
+-- that can't be forged into items -- bismuth -- is rejected for a pedestal, not just for a sword).
+-- Bare class/category words are only policed on weapons/ammo/armour/shields; furniture/crafts take
+-- any class.
 local function legal_material(item, m)
     local it = item.item_type
-    if not (WEAPONISH[it] or ARMOR_DEFVEC[it] or it == SHIELD_T) then return true end
+    local policed = WEAPONISH[it] or ARMOR_DEFVEC[it] or it == SHIELD_T
     if m.kind == 'specific' or (m.kind == 'class' and m.picked) then
         local mt = m.kind == 'specific' and m.mat_type or m.picked.mat_type
         local mi = m.kind == 'specific' and m.mat_index or m.picked.mat_index
-        if mt ~= 0 or not can_make_inorganic(item, mi) then
-            local nm = (mt == 0 and df.inorganic_raw.find(mi) and df.inorganic_raw.find(mi).id:lower():gsub('_', ' ')) or 'that material'
-            return false, ('%s cannot be made of %s'):format(item.name, nm)
+        if mt == 0 then                          -- concrete inorganic (stone/metal): must fit the item
+            if not can_make_inorganic(item, mi) then
+                local nm = (df.inorganic_raw.find(mi) and df.inorganic_raw.find(mi).id:lower():gsub('_', ' ')) or 'that material'
+                return false, ('%s cannot be made of %s'):format(item.name, nm)
+            end
+            return true
         end
+        -- concrete non-inorganic (glass): fine for furniture/crafts, not for forged combat items
+        if policed then return false, ('%s cannot be made of that material'):format(item.name) end
         return true
-    elseif m.kind == 'class' then                -- no concrete pick: judge the class
+    end
+    if not policed then return true end          -- bare class/category on furniture/crafts: anything goes
+    if m.kind == 'class' then                    -- no concrete pick: judge the class
         if m.class == 'metal' then
             if ARMOR_DEFVEC[it] then local af = armor_flags(item); if af and not af.METAL then return false, item.name .. ' cannot be made of metal' end end
             return true
