@@ -532,18 +532,24 @@ CageGrazeOverlay.ATTRS{
     default_pos = {x = -48, y = 9},                  -- same spot as statue-redirect's Remove button
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
-    frame = {w = 12, h = 1},
-    version = 1,
+    frame = {w = 15, h = 1},
+    version = 2,
     overlay_onupdate_max_freq_seconds = 0,
 }
 
 function CageGrazeOverlay:init()
-    -- two buttons, one shown at a time: [Graze] for grazers, [Scavenge] for everything else
+    -- one button shown at a time: [Graze] for grazers / [Scavenge] otherwise. A GREEN variant with
+    -- a trailing check mark shows instead when the animal is ALREADY assigned to a pasture.
+    local CHECK = string.char(251)   -- CP437 check mark
+    local function btn(id, lbl, pen)
+        return widgets.TextButton{view_id = id, frame = {t = 0, l = 0}, label = lbl,
+            text_pen = pen, auto_width = true, on_activate = self:callback('activate'), visible = false}
+    end
     self:addviews{
-        widgets.TextButton{view_id = 'graze', frame = {t = 0, l = 0}, label = '[Graze]',
-            auto_width = true, on_activate = self:callback('activate'), visible = false},
-        widgets.TextButton{view_id = 'scav', frame = {t = 0, l = 0}, label = '[Scavenge]',
-            auto_width = true, on_activate = self:callback('activate'), visible = false},
+        btn('graze', '[Graze]'),
+        btn('graze_in', '[Graze] ' .. CHECK, COLOR_GREEN),
+        btn('scav', '[Scavenge]'),
+        btn('scav_in', '[Scavenge] ' .. CHECK, COLOR_GREEN),
     }
 end
 
@@ -551,10 +557,14 @@ function CageGrazeOverlay:overlay_onupdate()
     local u = viewed_caged_animal()
     -- only offer it when the matching pasture actually exists to assign to
     self.unit = (u and pasture_for(u)) and u or nil
-    local grazer = self.unit and dfhack.units.isGrazer(self.unit)
-    self.subviews.graze.visible = self.unit ~= nil and grazer
-    self.subviews.scav.visible = self.unit ~= nil and not grazer
-    self.visible = self.unit ~= nil
+    u = self.unit
+    local grazer = u ~= nil and dfhack.units.isGrazer(u)
+    local inpen = u ~= nil and is_pastured(u)          -- already assigned to a pasture?
+    self.subviews.graze.visible    = u ~= nil and grazer and not inpen
+    self.subviews.graze_in.visible = u ~= nil and grazer and inpen
+    self.subviews.scav.visible     = u ~= nil and not grazer and not inpen
+    self.subviews.scav_in.visible  = u ~= nil and not grazer and inpen
+    self.visible = u ~= nil
 end
 
 function CageGrazeOverlay:activate()
