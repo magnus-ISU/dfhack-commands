@@ -140,7 +140,7 @@ local ENTRIES = {
     {'Slab',         {'Furniture', 'Slab'}, {noplan = true}},   -- native slab chooser (keep-building auto-toggle disabled: can't read its state yet)
     {'Traction bed', {'Furniture', 'Traction bench'}},
     {'Bookcase',     {'Furniture', 'Bookcase'}},
-    {'Display case', {'Furniture', 'Display'}},
+    {'Display case', {'Furniture', 'Display'}, {alias = 'pedestal'}},
     {'Offering',     {'Furniture', 'Offering place'}},
     {'Instrument',   {'Furniture', 'Instrument'}},
     -- Doors / hatches
@@ -321,6 +321,40 @@ local function navigate(path, noplan, buildmore)
     dfhack.timeout(d + 9, 'frames', settle)
 end
 
+-- fuzzy subsequence match: every char of `needle` appears in `hay` IN ORDER (case-insensitive).
+-- So "tradep" or "trddpt" both match "Trade Depot".
+local function fuzzy(needle, hay)
+    if needle == '' then return true end
+    needle, hay = needle:lower(), hay:lower()
+    local j = 1
+    for i = 1, #hay do
+        if hay:byte(i) == needle:byte(j) then
+            j = j + 1
+            if j > #needle then return true end
+        end
+    end
+    return false
+end
+
+-- an entry matches if the search fuzzy-matches its shown label, any of its build-menu path
+-- segments, or an explicit search alias (e[3].alias, a string or list) -- so the Mason entry
+-- (path {"Workshops","Stoneworker"}) is found by "mason"/"stoneworker", and "pedestal" finds
+-- the Display case. DF's own name for a thing, plus any synonym, counts as a search term.
+local function entry_matches(e, needle)
+    if fuzzy(needle, e[1]) then return true end
+    for _, seg in ipairs(e[2]) do
+        if fuzzy(needle, seg) then return true end
+    end
+    local alias = e[3] and e[3].alias
+    if alias then
+        if type(alias) == 'string' then alias = {alias} end
+        for _, a in ipairs(alias) do
+            if fuzzy(needle, a) then return true end
+        end
+    end
+    return false
+end
+
 -- ---- overlay -----------------------------------------------------------------
 
 DigBuilding = defclass(DigBuilding, overlay.OverlayWidget)
@@ -344,6 +378,30 @@ end
 function DigBuilding:init()
     self.scroll = 0
     self.cols = 2
+    self.search = ''
+end
+
+-- entries whose label fuzzy-matches the current search. Returns a set (by ENTRIES index) plus a
+-- list of matching indices (for counting + "one match -> Enter selects it"). Empty search = no match.
+function DigBuilding:compute_matches()
+    local set, list = {}, {}
+    if self.search ~= '' then
+        for i = 1, #ENTRIES do
+            if entry_matches(ENTRIES[i], self.search) then set[i] = true; list[#list + 1] = i end
+        end
+    end
+    return set, list
+end
+
+-- scroll so the first match is on screen, so you can see what you're narrowing toward
+function DigBuilding:scroll_to_match()
+    if self.search == '' then return end
+    local _, list = self:compute_matches()
+    if #list == 0 then return end
+    local line = math.floor((list[1] - 1) / self.cols)
+    if line < self.scroll then self.scroll = line
+    elseif line >= self.scroll + self:list_rows() then self.scroll = line - self:list_rows() + 1 end
+    self.scroll = math.max(0, math.min(self.scroll, self:max_scroll()))
 end
 
 -- rows available for entries = window height minus the top and bottom border rows
@@ -357,7 +415,9 @@ function DigBuilding:max_scroll()
 end
 
 function DigBuilding:overlay_onupdate()
+    self.search = self.search or ''
     self.visible = dig_active()
+    if not self.visible then self.search = '' end          -- reset the filter when the picker closes
     -- Size the panel to EXACTLY fit the list, and adapt to the screen. Start at 2 columns; if the
     -- list is taller than the space between the top/bottom margins, add columns until it fits (up to
     -- what the screen width allows). If it still can't fit, cap the height and let it scroll.
@@ -425,11 +485,38 @@ function DigBuilding:onRenderBody(dc)
         dc:seek(w - 10, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
         dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
     end
+    -- fuzzy-search box on the top border, right after " Build " (auto-focused -- just type). Shows
+    -- the typed text + a cursor + the live match count; green = exactly one match (Enter selects it).
+    local mset, mlist = self:compute_matches()
+    local fx1, fx2 = 9, (ms > 0) and (w - 11) or (w - 2)
+    if fx2 >= fx1 then
+        local fw = fx2 - fx1 + 1
+        if self.search == '' then
+            dc:seek(fx1, 0):pen(COLOR_DARKGREY):string(('type to filter'):sub(1, fw))
+        else
+            local n = #mlist
+            local cnt = (' (%d)'):format(n)
+            local body = self.search .. '_'
+            if #body + #cnt > fw then body = body:sub(1, math.max(0, fw - #cnt)) end
+            local pen = (n == 1) and COLOR_GREEN or (n == 0 and COLOR_LIGHTRED or COLOR_YELLOW)
+            dc:seek(fx1, 0):pen(pen):string((body .. cnt):sub(1, fw))
+        end
+    end
+    local single = #mlist == 1
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
         local line = self.scroll + r
         for c = 0, cols - 1 do
-            local e = ENTRIES[line * cols + c + 1]
-            if e then dc:seek(1 + c * COL_W, r + 1):pen(COLOR_WHITE):string(e[1]:sub(1, COL_W - 1)) end
+            local idx = line * cols + c + 1
+            local e = ENTRIES[idx]
+            if e then
+                -- empty search: all white. Otherwise matches are bright (green if it's the sole
+                -- match, so you see what Enter picks), non-matches dimmed.
+                local pen
+                if self.search == '' then pen = COLOR_WHITE
+                elseif mset[idx] then pen = single and COLOR_GREEN or COLOR_LIGHTGREEN
+                else pen = COLOR_DARKGREY end
+                dc:seek(1 + c * COL_W, r + 1):pen(pen):string(e[1]:sub(1, COL_W - 1))
+            end
         end
     end
 end
@@ -444,9 +531,32 @@ function DigBuilding:entry_at(x, y)
 end
 
 function DigBuilding:onInput(keys)
-    -- yield everything while hidden or while a native panel overlaps us (covered, set in render),
-    -- or when the cursor is over a DF hover element / another overlay -- never steal their input
+    -- yield everything while hidden or while a native panel overlaps us (covered, set in render)
     if not self.visible or self.covered then return false end
+    self.search = self.search or ''
+
+    -- keyboard: the border search box is auto-focused whenever the picker is showing. Backspace edits,
+    -- Enter picks the sole match. Space is deliberately NOT captured (it stays DF's pause; fuzzy
+    -- subsequence matching means you never need to type the spaces in "Trade Depot" anyway).
+    if keys._STRING == 0 then                                     -- backspace
+        self.search = self.search:sub(1, -2); self:scroll_to_match(); return true
+    elseif keys._STRING and keys._STRING >= 33 then               -- a printable, non-space char
+        self.search = self.search .. string.char(keys._STRING); self:scroll_to_match(); return true
+    end
+    if keys.SELECT then                                           -- Enter: select if exactly one match
+        local _, mlist = self:compute_matches()
+        if #mlist == 1 then
+            local e = ENTRIES[mlist[1]]
+            self.search = ''
+            navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore)
+            return true
+        end
+        return false                                             -- 0 or many matches: leave Enter to DF
+    end
+    if keys.LEAVESCREEN and self.search ~= '' then self.search = ''; return true end   -- Esc clears filter
+
+    -- from here on it's mouse handling: yield when the cursor is over a DF hover element / another
+    -- overlay -- never steal their input
     if mi().current_hover ~= -1 or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
         return false
     end
@@ -471,7 +581,7 @@ function DigBuilding:onInput(keys)
             return true
         end
         local e = self:entry_at(x, y)
-        if e then navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore) end
+        if e then self.search = ''; navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore) end
         return true                           -- consume any click within the window
     end
     return false
