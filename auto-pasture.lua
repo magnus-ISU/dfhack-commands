@@ -528,46 +528,68 @@ end
 
 CageGrazeOverlay = defclass(CageGrazeOverlay, overlay.OverlayWidget)
 CageGrazeOverlay.ATTRS{
-    desc = 'On a caged tame/trained animal: a [Graze]/[Scavenge] button to pasture it.',
+    desc = 'On a caged tame/trained animal: [Graze]/[Scavenge] to pasture it, [Butcher] to slaughter.',
     default_pos = {x = -48, y = 9},                  -- same spot as statue-redirect's Remove button
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
-    frame = {w = 15, h = 1},
-    version = 2,
+    frame = {w = 15, h = 2},
+    version = 3,   -- bumped: added the [Butcher] row + dropped the TextButton red banner brackets
     overlay_onupdate_max_freq_seconds = 0,
 }
 
+local CHECK = string.char(251)   -- CP437 check mark
+
+local function is_slaughter_marked(u)
+    local m = false
+    pcall(function() m = u.flags2.slaughter end)
+    return m
+end
+
 function CageGrazeOverlay:init()
-    -- one button shown at a time: [Graze] for grazers / [Scavenge] otherwise. A GREEN variant with
-    -- a trailing check mark shows instead when the animal is ALREADY assigned to a pasture.
-    local CHECK = string.char(251)   -- CP437 check mark
-    local function btn(id, lbl, pen)
-        return widgets.TextButton{view_id = id, frame = {t = 0, l = 0}, label = lbl,
-            text_pen = pen, auto_width = true, on_activate = self:callback('activate'), visible = false}
+    -- plain clickable labels (NOT TextButton -- that wraps content in red "[ ]" banner brackets, which
+    -- doubled up with the label's own brackets). Top row: one pasture button ([Graze] for grazers /
+    -- [Scavenge] otherwise). Below it: [Butcher]. A GREEN variant with a trailing check mark shows
+    -- when the state is already set (in a pasture / marked for slaughter).
+    local function btn(id, row, lbl, pen, cb)
+        return widgets.HotkeyLabel{view_id = id, frame = {t = row, l = 0}, label = lbl,
+            text_pen = pen, on_activate = cb, visible = false}
     end
     self:addviews{
-        btn('graze', '[Graze]'),
-        btn('graze_in', '[Graze] ' .. CHECK, COLOR_GREEN),
-        btn('scav', '[Scavenge]'),
-        btn('scav_in', '[Scavenge] ' .. CHECK, COLOR_GREEN),
+        btn('graze',      0, '[Graze]',              COLOR_WHITE, self:callback('assign')),
+        btn('graze_in',   0, '[Graze] ' .. CHECK,    COLOR_GREEN, self:callback('assign')),
+        btn('scav',       0, '[Scavenge]',           COLOR_WHITE, self:callback('assign')),
+        btn('scav_in',    0, '[Scavenge] ' .. CHECK, COLOR_GREEN, self:callback('assign')),
+        btn('butcher',    1, '[Butcher]',            COLOR_WHITE, self:callback('butcher')),
+        btn('butcher_in', 1, '[Butcher] ' .. CHECK,  COLOR_GREEN, self:callback('butcher')),
     }
 end
 
 function CageGrazeOverlay:overlay_onupdate()
     local u = viewed_caged_animal()
-    -- only offer it when the matching pasture actually exists to assign to
-    self.unit = (u and pasture_for(u)) and u or nil
-    u = self.unit
-    local grazer = u ~= nil and dfhack.units.isGrazer(u)
-    local inpen = u ~= nil and is_pastured(u)          -- already assigned to a pasture?
-    self.subviews.graze.visible    = u ~= nil and grazer and not inpen
-    self.subviews.graze_in.visible = u ~= nil and grazer and inpen
-    self.subviews.scav.visible     = u ~= nil and not grazer and not inpen
-    self.subviews.scav_in.visible  = u ~= nil and not grazer and inpen
+    self.unit = u
     self.visible = u ~= nil
+    local grazer = u ~= nil and dfhack.units.isGrazer(u)
+    local has_pen = u ~= nil and pasture_for(u) ~= nil    -- a matching pasture is designated to assign to
+    local inpen = u ~= nil and is_pastured(u)             -- already assigned to a pasture
+    local marked = u ~= nil and is_slaughter_marked(u)    -- already marked for slaughter
+    -- pasture button (top row): only when the matching pen exists
+    self.subviews.graze.visible    = u ~= nil and grazer and has_pen and not inpen
+    self.subviews.graze_in.visible = u ~= nil and grazer and has_pen and inpen
+    self.subviews.scav.visible     = u ~= nil and not grazer and has_pen and not inpen
+    self.subviews.scav_in.visible  = u ~= nil and not grazer and has_pen and inpen
+    -- butcher button (row below): always, for any caged tame/trained animal
+    self.subviews.butcher.visible    = u ~= nil and not marked
+    self.subviews.butcher_in.visible = u ~= nil and marked
 end
 
-function CageGrazeOverlay:activate()
+-- mark / unmark the caged animal for slaughter (toggle)
+function CageGrazeOverlay:butcher()
+    local u = self.unit
+    if not u then return end
+    pcall(function() u.flags2.slaughter = not is_slaughter_marked(u) end)
+end
+
+function CageGrazeOverlay:assign()
     local u = self.unit
     if not u then return end
     -- fully tame (Domesticated) livestock: just do it. Trained-but-not-fully-tame: confirm first,
