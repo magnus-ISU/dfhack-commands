@@ -180,6 +180,41 @@ function do_check()
     end
 end
 
+-- ---- notify-panel line ------------------------------------------------------
+-- The console print in do_check is invisible in normal play, so surface the gate
+-- where it's seen: a yellow "Elven lumber limit reached (3/3) -- tree cutting
+-- paused" line while the year's allowance is used up. Click shows the details.
+local function register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local NAME = 'elf_lumber_gate'
+    local entry = n.NOTIFICATIONS_BY_NAME[NAME]
+    if not entry then
+        entry = {name = NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NAME] = entry
+    end
+    entry.desc = 'Shows when the elven lumber limit has paused tree cutting (auto-elf-chop).'
+    entry.dwarf_fn = function()
+        if not dfhack.world.isFortressMode() or not enabled then return end
+        local g = gate_status()
+        if g.remaining > 0 then return end
+        return {{text = ('Elven lumber limit reached (%d/%d) -- tree cutting paused')
+            :format(g.limit, g.limit), pen = COLOR_YELLOW}}
+    end
+    entry.on_click = function()
+        local g = gate_status()
+        require('gui.dialogs').showMessage('auto-elf-chop',
+            ('The elves allow %d tree%s this year and all have been cut.\n'
+                .. 'autochop stays paused until the agreement renews\n'
+                .. '(a new year / the next elven negotiation).\n\nLimit source: %s')
+            :format(g.limit, g.limit == 1 and '' or 's', g.source))
+    end
+    if n.config and n.config.data and not n.config.data[NAME] then
+        n.config.data[NAME] = {enabled = true, version = 1}
+    end
+end
+
 local function start()
     enabled = true
     last_want = nil
@@ -192,6 +227,7 @@ local function start()
         if n >= CHECK_FRAMES then n = 0; pcall(do_check) end
         dfhack.timeout(1, 'frames', heartbeat)
     end
+    register_notification()
     pcall(do_check)
     heartbeat()
 end
@@ -207,7 +243,10 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state, last_want, quota_cache = nil, nil, nil
         load_state()
-        if dfhack.world.isFortressMode() and state.enabled then start() end
+        if dfhack.world.isFortressMode() then
+            register_notification()
+            if state.enabled then start() end
+        end
     elseif sc == SC_MAP_UNLOADED then
         stop()
         state, last_want, quota_cache = nil, nil, nil
