@@ -128,6 +128,15 @@ local function is_diggable_wall(pos)
 end
 -- a tile that already has an up-stair carved into it (a staircase continuing up from below)
 local function is_up_stair(pos) return shape_of(pos) == SH.STAIR_UP end
+-- a natural floor (incl. rock-strewn / plant-covered) that a DOWN stair can be CARVED into --
+-- DF digs down through a floor natively, no construction or materials needed
+local function is_carveable_floor(pos)
+    local s = shape_of(pos)
+    if s ~= SH.FLOOR and s ~= SH.PEBBLES and s ~= SH.BOULDER
+        and s ~= SH.SAPLING and s ~= SH.SHRUB then return false end
+    local m = material_of(pos)
+    return m ~= TM.TREE and m ~= TM.CONSTRUCTION and not construction_here(pos)
+end
 
 -- is pos a wall? natural/completed wall (WALL shape) OR a placed (even in-progress) wall
 -- construction whose tile may still read as EMPTY.
@@ -251,6 +260,16 @@ local function make_staircase(x, y, z1, z2)
         elseif is_diggable_wall(pos) then
             set_dig(pos, dig_val)
             log(('  stair CARVE dig=%s @%s'):format(df.tile_dig_designation[dig_val], fmt(pos)))
+        elseif is_carveable_floor(pos) and z > z1 then
+            -- a natural FLOOR in the column (usually the tile you stand on when digging DOWN):
+            -- carve a DOWN stair into it -- DF digs through floors natively. This used to fall
+            -- through to the constructed-stair path, which demanded building materials (and a
+            -- build job) for what a miner can simply dig, so "dig down from here" never carved.
+            -- The up-connection comes from the tile below being carved up/up-down. The column's
+            -- BOTTOM tile (z == z1) is excluded: a down stair there would dig deeper than asked;
+            -- a floor at the bottom still needs a constructed up stair to climb out of.
+            set_dig(pos, DV.DownStair)
+            log(('  stair CARVE floor dig=DownStair @%s'):format(fmt(pos)))
         elseif is_tree(pos) then
             set_dig(pos, DV.Default); log('  stair CHOP tree @' .. fmt(pos))
         elseif is_buildable_open(pos) then
