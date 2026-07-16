@@ -526,20 +526,23 @@ local function graze_caged_animal(u)
     return true
 end
 
--- !!! KNOWN ISSUE (unresolved): the recent rework of this overlay -- switching the buttons from
--- TextButton to plain HotkeyLabels (to drop BannerPanel's red "[ ]" brackets) and adding the
--- [Butcher] row -- DID NOT ACTUALLY FUNCTION in-game (the buttons do not work as claimed). A probe
--- showed the state resolving correctly, but the on-screen result was broken. Needs re-investigation:
--- likely the HotkeyLabel-in-overlay click/render, the 2-row frame (h=2), or the version bump. The
--- previous TextButton version worked but had the ugly red banner brackets. DO NOT trust this as-is.
+-- (Resolved) The earlier "HotkeyLabel rework doesn't work in-game" mystery: the version-3 script
+-- FAILED TO LOAD -- `function CageGrazeOverlay:assign()` collides with defclass's reserved method
+-- name `assign` (class.lua errors at definition time), so every reqscript threw and the game kept
+-- the old version-2 widget (TextButton, no [Butcher] row). Method renamed to `pasture`. The
+-- HotkeyLabel approach itself is fine. Two more defects fixed along the way: the labels had no
+-- frame w/h, so the row-0 pasture label's frame spanned both rows (its hover/click zone covered
+-- [Butcher]); and the overlay sat at the exact position of statue-redirect's Remove button on the
+-- same viewscreen -- for a BUILT cage both were visible and a [Graze] click could arm Remove
+-- (deconstructing the cage on the next click). Now one row lower, directly under Remove.
 CageGrazeOverlay = defclass(CageGrazeOverlay, overlay.OverlayWidget)
 CageGrazeOverlay.ATTRS{
     desc = 'On a caged tame/trained animal: [Graze]/[Scavenge] to pasture it, [Butcher] to slaughter.',
-    default_pos = {x = -48, y = 9},                  -- same spot as statue-redirect's Remove button
+    default_pos = {x = -48, y = 10},   -- directly BELOW statue-redirect's Remove button (y=9, h=1)
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
-    frame = {w = 15, h = 2},
-    version = 3,   -- bumped: added the [Butcher] row + dropped the TextButton red banner brackets
+    frame = {w = 12, h = 2},           -- widest label: '[Scavenge] <check>' = 12 cols
+    version = 4,   -- v3 = [Butcher] row + no banner brackets; v4 = frame fixes + moved below Remove
     overlay_onupdate_max_freq_seconds = 0,
 }
 
@@ -556,15 +559,17 @@ function CageGrazeOverlay:init()
     -- doubled up with the label's own brackets). Top row: one pasture button ([Graze] for grazers /
     -- [Scavenge] otherwise). Below it: [Butcher]. A GREEN variant with a trailing check mark shows
     -- when the state is already set (in a pasture / marked for slaughter).
+    -- Each label gets an explicit w AND h=1: a frame with t but no h spans to the overlay's bottom,
+    -- so the row-0 button would also cover (and hover/click over) the [Butcher] row.
     local function btn(id, row, lbl, pen, cb)
-        return widgets.HotkeyLabel{view_id = id, frame = {t = row, l = 0}, label = lbl,
-            text_pen = pen, on_activate = cb, visible = false}
+        return widgets.HotkeyLabel{view_id = id, frame = {t = row, l = 0, w = #lbl, h = 1},
+            label = lbl, text_pen = pen, on_activate = cb, visible = false}
     end
     self:addviews{
-        btn('graze',      0, '[Graze]',              COLOR_WHITE, self:callback('assign')),
-        btn('graze_in',   0, '[Graze] ' .. CHECK,    COLOR_GREEN, self:callback('assign')),
-        btn('scav',       0, '[Scavenge]',           COLOR_WHITE, self:callback('assign')),
-        btn('scav_in',    0, '[Scavenge] ' .. CHECK, COLOR_GREEN, self:callback('assign')),
+        btn('graze',      0, '[Graze]',              COLOR_WHITE, self:callback('pasture')),
+        btn('graze_in',   0, '[Graze] ' .. CHECK,    COLOR_GREEN, self:callback('pasture')),
+        btn('scav',       0, '[Scavenge]',           COLOR_WHITE, self:callback('pasture')),
+        btn('scav_in',    0, '[Scavenge] ' .. CHECK, COLOR_GREEN, self:callback('pasture')),
         btn('butcher',    1, '[Butcher]',            COLOR_WHITE, self:callback('butcher')),
         btn('butcher_in', 1, '[Butcher] ' .. CHECK,  COLOR_GREEN, self:callback('butcher')),
     }
@@ -595,7 +600,9 @@ function CageGrazeOverlay:butcher()
     pcall(function() u.flags2.slaughter = not is_slaughter_marked(u) end)
 end
 
-function CageGrazeOverlay:assign()
+-- NB: this method can NOT be called `assign` -- defclass reserves that name (class.lua), and the
+-- collision makes the ENTIRE script error out at load, silently leaving the previous widget live.
+function CageGrazeOverlay:pasture()
     local u = self.unit
     if not u then return end
     -- fully tame (Domesticated) livestock: just do it. Trained-but-not-fully-tame: confirm first,
