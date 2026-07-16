@@ -178,7 +178,8 @@ local function group_animals(animals, mode)
         local n = #g.units
         local tag = g.invader and ' (invader)' or ''
         if mode == VIEW.INDIVIDUALS then
-            g.label = dfhack.units.getReadableName(g.rep) .. tag
+            local gen = g.sex == 1 and ' (male)' or (g.sex == 0 and ' (female)' or '')
+            g.label = dfhack.units.getReadableName(g.rep) .. gen .. tag
         elseif mode == VIEW.GENDERS then
             local gen = g.sex == 1 and 'male' or (g.sex == 0 and 'female' or 'unknown-sex')
             g.label = ('%s %s%s x%d'):format(species_name(g.rep, false), gen, tag, n)
