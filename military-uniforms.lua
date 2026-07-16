@@ -445,6 +445,7 @@ end
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local gui = require('gui')
+local utils = require('utils')
 
 local GLOBAL_KEY = 'military-uniforms'
 local DAY_TICKS = 1200
@@ -1465,6 +1466,142 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     state.civ_need_squad = need_squad and true or false
 end
 
+-- ---- unstick stalled equipment ------------------------------------------------
+-- Two DF failure modes leave "N missing uniform items" stuck at a permanent floor
+-- (diagnosed live: 4 soldiers stuck for years with 250+ spare steel gauntlets/boots
+-- in the bins):
+--   1. STALLED PICKUP: DF assigns a uniform item to a squad position but never
+--      generates the "Pickup equipment" job -- the assigned piece sits in its bin
+--      forever (not forbidden, not claimed, simply never fetched).
+--   2. STALE PARTIAL MATCH: a slot demanding an exact material got a wrong-material
+--      partial match when nothing better existed (a copper axe on a steel uniform),
+--      and DF never re-solves the slot when the demanded material later appears.
+-- Weekly remedy: (1) UNASSIGN any uniform item that is neither carried by its
+-- soldier nor being fetched by an active job, and dirty that slot so DF re-solves
+-- it fresh (uniform-unstick's manual fix, automated); (2) dirty any exact-material
+-- slot stuck on a wrong-material piece while a free piece of the demanded material
+-- exists in real fort stock. Both act only on genuinely stuck slots, so this cannot
+-- reintroduce the swap churn the masterwork-only dirtying was designed to stop.
+local UNSTICK_DAYS = 7
+local OTHER_VEC = {
+    [df.item_type.ARMOR]  = df.items_other_id.ARMOR,
+    [df.item_type.HELM]   = df.items_other_id.HELM,
+    [df.item_type.PANTS]  = df.items_other_id.PANTS,
+    [df.item_type.GLOVES] = df.items_other_id.GLOVES,
+    [df.item_type.SHOES]  = df.items_other_id.SHOES,
+    [df.item_type.SHIELD] = df.items_other_id.SHIELD,
+    [df.item_type.WEAPON] = df.items_other_id.WEAPON,
+}
+
+-- the BEST free piece of exactly this spec's material in real fort stock (not assigned
+-- to any squad position, not held, not forbidden/artifact/foreign-held), or nil
+local function best_free_exact_piece(spec, assigned_any)
+    local vec_id = OTHER_VEC[spec.item_type]
+    if not vec_id then return nil end
+    local vec = df.global.world.items.other[vec_id]
+    local best
+    for i = 0, #vec - 1 do
+        local it = vec[i]
+        if it:getSubtype() == spec.item_subtype
+            and it:getMaterial() == spec.mattype and it:getMaterialIndex() == spec.matindex
+            and not it.flags.artifact and not it.flags.forbid and not it.flags.trader
+            and not it.flags.in_job and not assigned_any[it.id]
+            and not dfhack.items.getHolderUnit(it) and not not_fort_stock(it) then
+            if not best or it:getQuality() > best:getQuality() then best = it end
+        end
+    end
+    return best
+end
+
+local function unstick_stalled_gear()
+    local now_day = df.global.cur_year * 336 + df.global.cur_year_tick // 1200
+    if state.last_unstick and now_day - state.last_unstick < UNSTICK_DAYS
+        and now_day >= state.last_unstick then
+        return
+    end
+    state.last_unstick = now_day
+    local fort = df.global.plotinfo.group_id
+    local upd = df.global.plotinfo.equipment.update
+    -- every item currently assigned to any fort squad position, and the positions
+    local assigned_any, posns = {}, {}
+    for si = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[si]
+        if sq.entity_id == fort then
+            for pi = 0, #sq.positions - 1 do
+                local pos = sq.positions[pi]
+                if pos.occupant >= 0 then
+                    posns[#posns + 1] = pos
+                    for _, iid in ipairs(pos.equipment.assigned_items) do assigned_any[iid] = true end
+                end
+            end
+        end
+    end
+    local unstuck, resolves = 0, 0
+    for _, pos in ipairs(posns) do
+        local hf = df.historical_figure.find(pos.occupant)
+        local u = hf and df.unit.find(hf.unit_id)
+        if u and not u.flags1.inactive then
+            local carried = {}
+            for _, ie in ipairs(u.inventory) do carried[ie.item.id] = true end
+            for slot = 0, 6 do
+                local specs = pos.equipment.uniform[slot]
+                for j = 0, #specs - 1 do
+                    local spec = specs[j]
+                    local have_exact, worn_q = false, -1
+                    for k = #spec.assigned - 1, 0, -1 do
+                        local iid = spec.assigned[k]
+                        local it = df.item.find(iid)
+                        if not it then
+                            spec.assigned:erase(k)   -- item no longer exists: clean up
+                            utils.erase_sorted(pos.equipment.assigned_items, iid)
+                        elseif carried[iid] then
+                            if spec.matindex < 0 or (it:getMaterial() == spec.mattype
+                                and it:getMaterialIndex() == spec.matindex) then
+                                have_exact = true
+                            else
+                                worn_q = math.max(worn_q, it:getQuality())
+                            end
+                        elseif not it.flags.in_job then
+                            -- assigned, not carried, and nothing is fetching it: stalled
+                            spec.assigned:erase(k)
+                            utils.erase_sorted(pos.equipment.assigned_items, iid)
+                            local f = UPDATE_FIELD[spec.item_type]
+                            if f then upd[f] = true end
+                            unstuck = unstuck + 1
+                        end
+                    end
+                    -- exact-material slot stuck on a wrong-material partial match (e.g. the
+                    -- script's own copper backup axe after steel arrived): DF never re-solves
+                    -- these on its own -- an equal-quality incumbent always wins -- and merely
+                    -- dirtying the slot was proven insufficient. Swap the assignment DIRECTLY
+                    -- to the best free exact piece (as good or better), which verified live:
+                    -- DF generates the pickup job and the soldier swaps up.
+                    if not have_exact and spec.matindex >= 0 and #spec.assigned > 0 then
+                        local rep = best_free_exact_piece(spec, assigned_any)
+                        if rep and rep:getQuality() >= worn_q then
+                            for k = #spec.assigned - 1, 0, -1 do
+                                local old = spec.assigned[k]
+                                spec.assigned:erase(k)
+                                utils.erase_sorted(pos.equipment.assigned_items, old)
+                            end
+                            spec.assigned:insert('#', rep.id)
+                            utils.insert_sorted(pos.equipment.assigned_items, rep.id)
+                            assigned_any[rep.id] = true
+                            local f = UPDATE_FIELD[spec.item_type]
+                            if f then upd[f] = true end
+                            resolves = resolves + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if unstuck > 0 or resolves > 0 then
+        print(('military-uniforms: unstuck %d stalled uniform assignment%s; swapped %d wrong-material slot%s')
+            :format(unstuck, unstuck == 1 and '' or 's', resolves, resolves == 1 and '' or 's'))
+    end
+end
+
 local function run_cycle()
     if not dfhack.world.isFortressMode() then return end
     load_state()
@@ -1482,6 +1619,10 @@ local function run_cycle()
     if not state.queue then return end
     local ent = fort_entity()
     if ent then ensure_cloaks(ent) end   -- every soldier carries a leather cloak (templates + positions)
+    -- weekly: free stalled assignments / re-solve stale slots (log failures -- a silent
+    -- pcall here once hid a missing-require for a whole session)
+    local ok_us, err_us = pcall(unstick_stalled_gear)
+    if not ok_us then dfhack.printerr('military-uniforms: unstick pass failed: ' .. tostring(err_us)) end
     local copper_idx = inorganic_idx('COPPER')
     local iron_idx, pig_idx, steel_idx = inorganic_idx('IRON'), inorganic_idx('PIG_IRON'), inorganic_idx('STEEL')
     local iron_ores = iron_ore_set(iron_idx)
@@ -2081,7 +2222,21 @@ local function analyze_gear()
                                         nkeys = nkeys + 1
                                         need[k] = {n = 0, mt = it.mattype, mi = it.matindex}
                                     end
-                                    need[k].n = need[k].n + (PAIR_ITEM[it.item_type] and 2 or 1)
+                                    -- pairs are demanded against the soldier's ACTUAL anatomy: a war
+                                    -- amputee with one hand can only ever wear one gauntlet (DF strips
+                                    -- a second assignment), and one foot means one boot -- demanding 2
+                                    -- made maimed veterans read as "missing items" forever
+                                    local qty = 1
+                                    if PAIR_ITEM[it.item_type] then
+                                        if it.item_type == IT.GLOVES then
+                                            qty = math.min(2, u.status2.limbs_grasp_count)
+                                        elseif it.item_type == IT.SHOES then
+                                            qty = math.min(2, u.status2.limbs_stand_count)
+                                        else
+                                            qty = 2
+                                        end
+                                    end
+                                    need[k].n = need[k].n + qty
                                 end
                             end
                         end
