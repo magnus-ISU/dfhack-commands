@@ -4,15 +4,16 @@
 When the CIVILIAN ALERT is enabled (you've toggled the "civilian alert" on, so
 civilians should be sheltering in its burrow), this raises a notify-panel entry:
 
-    N citizens outside the fortress
+    5 citizens, 3 military outside the fortress
 
-counting fort civilians (non-soldiers) whose tile is NOT inside any of the
-alert's burrow(s) -- i.e. dwarves who haven't reached safety yet. It shows only
-while the alert is on and at least one civilian is still out; it clears when
-everyone's inside or the alert is switched off.
+counting fort members whose tile is NOT inside any of the alert's burrow(s),
+split into civilians (dwarves who haven't reached safety yet) and military (the
+"Military" work detail -- not expected to shelter, shown so you know where your
+soldiers are). Red while any civilian is still exposed; yellow when only the
+military is out. It clears when everyone's inside or the alert is switched off.
 
-Clicking it zooms to each straggler in turn (and selects them), so you can find
-who's lagging.
+Clicking it zooms to each one in turn (civilians first, then military), so you
+can find who's lagging.
 
 DF data (verified): df.global.plotinfo.alerts.civ_alert_idx indexes the active
 alert in .list; the default "No alert" has no burrows, so an active alert WITH
@@ -61,47 +62,60 @@ local function military_labor_set()
     return {}
 end
 
--- a fort civilian who should be sheltering: a living, on-map citizen who is not a serving soldier
--- (i.e. not in the "Military" work detail; being in a squad is not enough -- civilian militia counts)
-local function is_shelterable(u, mil)
+-- a living, on-map citizen (soldier or not)
+local function is_countable(u)
     return dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) and not dfhack.units.isDead(u)
-        and dfhack.units.isActive(u) and not mil[u.id] and u.pos.x >= 0
+        and dfhack.units.isActive(u) and u.pos.x >= 0
 end
 
--- fort civilians whose tile is NOT inside any alert burrow
-local function citizens_outside()
+-- fort members whose tile is NOT inside any alert burrow, split into civilians and
+-- military (the "Military" work detail = the real standing military; a civilian-militia
+-- dwarf still counts as a citizen). Military aren't expected to shelter -- they're shown
+-- so you know where your soldiers are while the alert is up.
+local function units_outside()
     local a = active_civ_alert()
-    if not a then return {} end
+    if not a then return {}, {} end
     local burrows = alert_burrows(a)
-    if #burrows == 0 then return {} end
+    if #burrows == 0 then return {}, {} end
     local mil = military_labor_set()
-    local out = {}
+    local civ_out, mil_out = {}, {}
     for _, u in ipairs(df.global.world.units.active) do
-        if is_shelterable(u, mil) then
+        if is_countable(u) then
             local inside = false
             for _, b in ipairs(burrows) do
                 if dfhack.burrows.isAssignedTile(b, u.pos) then inside = true; break end
             end
-            if not inside then out[#out + 1] = u end
+            if not inside then
+                local t = mil[u.id] and mil_out or civ_out
+                t[#t + 1] = u
+            end
         end
     end
-    return out
+    return civ_out, mil_out
 end
 
--- notification line (only while the alert is on and someone is still out)
+-- notification line (only while the alert is on and someone is still out):
+-- "5 citizens, 3 military outside the fortress" (either part alone when the other is 0)
 local function message()
     if not dfhack.world.isFortressMode() then return end
     if not active_civ_alert() then return end
-    local n = #citizens_outside()
-    if n == 0 then return end
-    local text = ('%d citizen%s outside the fortress'):format(n, n == 1 and '' or 's')
-    return {{text = text, pen = COLOR_LIGHTRED}}
+    local civ, mil = units_outside()
+    if #civ == 0 and #mil == 0 then return end
+    local parts = {}
+    if #civ > 0 then parts[#parts + 1] = ('%d citizen%s'):format(#civ, #civ == 1 and '' or 's') end
+    if #mil > 0 then parts[#parts + 1] = ('%d military'):format(#mil) end
+    local text = table.concat(parts, ', ') .. ' outside the fortress'
+    -- red while civilians are still exposed; yellow when only the military is out (expected)
+    return {{text = text, pen = #civ > 0 and COLOR_LIGHTRED or COLOR_YELLOW}}
 end
 
--- click: cycle-zoom through each straggler (zoom + select), one per click
+-- click: cycle-zoom through everyone still out (civilians first, then military)
 local cycle = 0
 local function on_click()
-    local list = citizens_outside()
+    local civ, mil = units_outside()
+    local list = {}
+    for _, u in ipairs(civ) do list[#list + 1] = u end
+    for _, u in ipairs(mil) do list[#list + 1] = u end
     if #list == 0 then return end
     cycle = (cycle % #list) + 1
     local u = list[cycle]
