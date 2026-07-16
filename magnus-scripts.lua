@@ -210,6 +210,11 @@ if lovely then
     try('statue-redirect (auto-open statue details)',
         function() dfhack.run_command('enable', 'statue-redirect') end)
 
+    -- dead forgotten beasts / titans / bronze colossi roll 1/100 each winter solstice to
+    -- revive and later RETURN as a real attack (the megabeast pool never runs dry)
+    try('tarrasque (solstice megabeast revival)',
+        function() dfhack.run_command('enable', 'tarrasque') end)
+
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
     local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
 
