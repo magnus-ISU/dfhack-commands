@@ -122,42 +122,79 @@ local function engaged()
     return placement_active() and has_no_area() and not choosing_items()
 end
 
+-- read the on-screen characters of row `y` (left `w` columns), for finding the Planner toggle
+local function readrow(y, w)
+    local t = {}
+    for x = 0, w - 1 do
+        local ok, tile = pcall(dfhack.screen.readTile, x, y)
+        t[#t + 1] = (ok and tile and tile.ch and tile.ch > 0) and string.char(tile.ch) or ' '
+    end
+    return table.concat(t)
+end
+
+-- is the buildingplan PLANNER actually on for this placement? Its filter panel shows a
+-- "hide Planner" toggle when the planner is ON, "show Planner" when it's OFF (plain DF
+-- placement). If it's off we must stay out -- otherwise we'd turn a normal building into a
+-- row of *planned* ones. Only read at mouse-down (a full-panel scan), never per frame.
+local function planner_on()
+    local gps = df.global.gps
+    for y = 0, gps.dimy - 1 do                 -- full-width scan (matches dig-building's planner_toggle)
+        local s = readrow(y, gps.dimx)
+        if s:find('hide Planner', 1, true) then return true end
+        if s:find('show Planner', 1, true) then return false end
+    end
+    return false                              -- toggle not found: don't engage (the safe default)
+end
+
 -- ---- the grid ------------------------------------------------------------
 
--- centres of every building in the grid from anchor A toward release B, stepping by footprint.
--- Cell (0,0) is A itself (the one DFHack already placed on press). Capped at MAX_BUILDINGS.
-local function grid_centres(cap, rel)
-    local fw, fh = cap.fw, cap.fh
-    local dx, dy = rel.x - cap.anchor.x, rel.y - cap.anchor.y
-    local nx = math.floor(math.abs(dx) / fw)
-    local ny = math.floor(math.abs(dy) / fh)
-    -- clamp so nx*ny stays under the cap
+-- DFHack's PlannerOverlay places ONE building where you press. Find it (our exact type, at the
+-- mouse-down tile) so we can tile the rest FLUSH with its real footprint -- reading its actual
+-- corner avoids any guesswork about how the game rounds a workshop's origin.
+local function find_anchor_bld(cap)
+    local best
+    for _, b in ipairs(df.global.world.buildings.all) do
+        if b:getType() == cap.type and b:getSubtype() == cap.subtype
+                and b:getCustomType() == cap.custom and b.z == cap.anchor.z
+                and math.abs((b.x1 + b.x2) / 2 - cap.anchor.x) <= 1.5
+                and math.abs((b.y1 + b.y2) / 2 - cap.anchor.y) <= 1.5 then
+            if not best or b.id > best.id then best = b end
+        end
+    end
+    return best
+end
+
+-- top-left corners of every building in the grid, tiled FLUSH from the first building's corner
+-- (ox, oy) toward the release tile, stepping by footprint. (0,0) is the first building itself.
+local function grid_corners(ox, oy, fw, fh, rel)
+    local ocx, ocy = ox + fw // 2, oy + fh // 2          -- first building's centre (~ mouse-down)
+    local nx = math.floor(math.abs(rel.x - ocx) / fw)
+    local ny = math.floor(math.abs(rel.y - ocy) / fh)
     while (nx + 1) * (ny + 1) > MAX_BUILDINGS do
         if nx >= ny then nx = nx - 1 else ny = ny - 1 end
     end
-    local sx = dx >= 0 and 1 or -1
-    local sy = dy >= 0 and 1 or -1
+    local sx = (rel.x >= ocx) and 1 or -1
+    local sy = (rel.y >= ocy) and 1 or -1
     local out = {}
     for i = 0, nx do for j = 0, ny do
-        out[#out + 1] = {x = cap.anchor.x + i * fw * sx, y = cap.anchor.y + j * fh * sy,
-                         is_anchor = (i == 0 and j == 0)}
+        out[#out + 1] = {x = ox + i * fw * sx, y = oy + j * fh * sy, is_anchor = (i == 0 and j == 0)}
     end end
     return out
 end
 
--- place every grid cell except the anchor (already placed by DFHack's own overlay).
+-- place every grid cell except the first (which DFHack's overlay already placed at mouse-down).
 local function place_grid(cap, rel)
-    local centres = grid_centres(cap, rel)
+    local o = find_anchor_bld(cap)                         -- the building DFHack placed
     local fw, fh, z = cap.fw, cap.fh, cap.anchor.z
+    local ox = o and o.x1 or cap.ox                        -- flush reference = its real corner
+    local oy = o and o.y1 or cap.oy
     local blds = {}
-    for _, c in ipairs(centres) do
+    for _, c in ipairs(grid_corners(ox, oy, fw, fh, rel)) do
         if not c.is_anchor then
-            local corner = xyz2pos(c.x - fw // 2, c.y - fh // 2, z)
-            local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = corner,
+            local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = xyz2pos(c.x, c.y, z),
                 type = cap.type, subtype = cap.subtype, custom = cap.custom,
                 width = fw, height = fh, direction = cap.direction, filters = cap.filters})
             if ok and bld then
-                -- copy the extra config fields the corresponding types need (harmless otherwise)
                 for k in pairs(bld) do
                     if k == 'track_stop_info' then utils.assign(bld.track_stop_info, uibs.track_stop) end
                     if k == 'speed' then bld.speed = uibs.speed end
@@ -196,16 +233,24 @@ function PlanTile:overlay_onupdate()
         return
     end
     if ld == 1 and self.lbut ~= 1 then                 -- press: snapshot what we're placing
-        local pos = map_pos_if_clear()
+        -- only engage when the buildingplan planner is actually on (else it's a plain building
+        -- and we must not turn it into a row of planned ones)
+        local pos = planner_on() and map_pos_if_clear() or nil
         if pos then
             local fw, fh = footprint()
-            self.cap = {
+            local cap = {
                 anchor = copyall(pos), fw = fw, fh = fh,
                 type = uibs.building_type, subtype = uibs.building_subtype,
                 custom = uibs.custom_type, direction = uibs.direction,
                 filters = dfhack.buildings.getFiltersByType({},
                     uibs.building_type, uibs.building_subtype, uibs.custom_type),
             }
+            -- flush reference for the preview: DFHack's building (placed this same press) if we can
+            -- read it, else the corner it would use (cursor - footprint/2). place_grid re-reads it.
+            local o = find_anchor_bld(cap)
+            cap.ox = o and o.x1 or (pos.x - fw // 2)
+            cap.oy = o and o.y1 or (pos.y - fh // 2)
+            self.cap = cap
         else
             self.cap = nil
         end
@@ -238,9 +283,9 @@ function PlanTile:onRenderFrame(dc, rect)
     local vp = guidm.Viewport.get()
     if vp.z ~= self.cap.anchor.z then return end
     local fw, fh, z = self.cap.fw, self.cap.fh, self.cap.anchor.z
-    for _, c in ipairs(grid_centres(self.cap, cur)) do
-        for ty = c.y - fh // 2, c.y - fh // 2 + fh - 1 do
-            for tx = c.x - fw // 2, c.x - fw // 2 + fw - 1 do
+    for _, c in ipairs(grid_corners(self.cap.ox, self.cap.oy, fw, fh, cur)) do
+        for ty = c.y, c.y + fh - 1 do
+            for tx = c.x, c.x + fw - 1 do
                 local pos = {x = tx, y = ty, z = z}
                 if vp:isVisible(pos) then
                     local s = vp:tileToScreen(pos)
