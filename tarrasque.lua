@@ -32,10 +32,11 @@ WHAT REVIVAL DOES:
     DEATH event (killer, year) is retained -- legends keep the whole story.
   * Nemesis record: created if missing, with the natural megabeast flags (BRAG_ON_KILL,
     KILL_QUEST, CHAT_WORTHY, FLASHES, DO_NOT_CULL) -- death leaves an existing record intact.
-  * Beast with a LOADED dead unit (it died here): only once it has been dead over a year; its
-    CORPSE/CORPSEPIECE items are deleted (never artifacts, never goods crafted from it), the unit
-    is resurrected via `full-heal -r` and instantly OFFLOADED (flags1.inactive) -- alive but not
-    in play, exactly like a caravan member who left the map.
+  * Beast with a LOADED dead unit (it died here): only once it has been dead over a year (a
+    pacing cooldown -- freshly slain beasts don't return the same season); the unit is
+    resurrected via `full-heal -r` and instantly OFFLOADED (flags1.inactive) -- alive but not
+    in play, exactly like a caravan member who left the map. Its remains in the fort are LEFT
+    ALONE: trophies of the first kill stay even as the beast walks again.
   * Forgotten beasts get their hidden army back via the LEAVE-DANCE: the revived unit is staged
     (invisible) at a map edge with the emigration leave flags; within a few ticks DF MINTS THE
     ARMY ITSELF (hand-built army objects are never selected by the native event, even when
@@ -68,7 +69,7 @@ local utils = require('utils')
 local GLOBAL_KEY = 'tarrasque'
 local REVIVE_CHANCE = 100          -- 1-in-N per dead beast per year
 local SOLSTICE_TICK = (12 - 1) * 28 * 1200   -- 1st of Obsidian = tick 369600
-local MIN_DEAD_YEARS = 1           -- fort-killed beasts must be dead over a year (remains rule)
+local MIN_DEAD_YEARS = 1           -- fort-killed beasts must be dead over a year (pacing cooldown)
 
 -- ---- beast identification ---------------------------------------------------
 -- race index -> 'fb' (cavern forgotten beast) or 'mega' (surface titan/colossus).
@@ -210,24 +211,6 @@ local function ensure_nemesis(hf)
     end
     set_beast_flags(hf, nem)
     return nem
-end
-
--- delete the beast's raw remains: CORPSE/CORPSEPIECE items of its unit. Artifacts are never
--- touched, and anything CRAFTED from the beast (totems, bone gear, ...) is a different item type
--- and is never touched either. Returns count removed.
-local function delete_remains(unit_id)
-    local removed = 0
-    for _, vid in ipairs({df.items_other_id.CORPSE, df.items_other_id.CORPSEPIECE}) do
-        local vec = df.global.world.items.other[vid]
-        for i = #vec - 1, 0, -1 do
-            local it = vec[i]
-            if it.unit_id == unit_id and not it.flags.artifact then
-                dfhack.items.remove(it)
-                removed = removed + 1
-            end
-        end
-    end
-    return removed
 end
 
 -- the local map's cavern layer ids, discovered ones first
@@ -375,7 +358,7 @@ local function revive_beast(hfid)
         return false, name .. ': its remains lie at an unloaded site'
     end
     if u and (df.global.cur_year - hf.died_year) < MIN_DEAD_YEARS then
-        return false, name .. ': dead less than a year -- its remains are too fresh'
+        return false, name .. ': dead less than a year -- too soon to stir'
     end
 
     local killer = find_killer(hfid)
@@ -383,9 +366,10 @@ local function revive_beast(hfid)
                    killer = killer, revived = df.global.cur_year}
 
     if u then
-        -- fort-killed: clear the remains, resurrect the real unit, and shelve it out of play.
-        -- full-heal -r flips died_year/ghost, heals the body and logs the revival event itself.
-        entry.remains_deleted = delete_remains(u.id)
+        -- fort-killed: resurrect the real unit and shelve it out of play. full-heal -r flips
+        -- died_year/ghost, heals the body and logs the revival event itself. Any remains in
+        -- the fort are deliberately LEFT ALONE -- trophies of the first kill stay in history
+        -- even as the beast walks again.
         dfhack.run_command('full-heal', '-r', '--unit', tostring(u.id))
         if u.flags2.killed or hf.died_year >= 0 then
             return false, name .. ': resurrection failed'
@@ -570,7 +554,7 @@ else
     print(('tarrasque: %s'):format(enabled and 'ENABLED (1/100 revival roll each 1 Obsidian)' or 'disabled'))
     for _, c in ipairs({{'fb', 'forgotten beasts'}, {'mega', 'titans/colossi'}}) do
         local t = s[c[1]]
-        print(('  %-17s %d alive (%d awaiting return), %d dead (%d revivable here, %d gone without remains, %d elsewhere)')
+        print(('  %-17s %d alive (%d awaiting return), %d dead (%d revivable here, %d unreachable in history, %d at other sites)')
             :format(c[2] .. ':', t.alive, t.awaiting, t.dead, #t.dead_loaded, #t.dead_nounit, t.dead_elsewhere))
     end
     print(('  last solstice roll: %s'):format(state.last_roll_year >= 0 and ('year ' .. state.last_roll_year) or 'never'))
