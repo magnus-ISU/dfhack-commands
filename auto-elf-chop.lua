@@ -147,7 +147,9 @@ local function gate_status()
         end
     end
     local cut = trees_cut_this_year()
-    return {limit = state.limit, remaining = math.max(0, state.limit - cut),
+    -- remaining is NOT clamped: negative = trees cut PAST the limit (the elves are angered);
+    -- the agreement's own quota_remaining goes negative the same way
+    return {limit = state.limit, remaining = state.limit - cut,
             source = state.mode == 'manual' and 'manual' or 'manual (no elf agreement found)'}
 end
 
@@ -177,41 +179,48 @@ function do_check()
         last_want = want
         print(('auto-elf-chop: %d/%d lumber allowance remaining -- autochop %s'):format(
             g.remaining, g.limit, want and 'ENABLED' or 'DISABLED (limit reached)'))
+        -- a REAL in-game announcement on each gate transition (the autonestbox/mood style:
+        -- ticker + announcement log), not just the console/notify-panel
+        if want then
+            dfhack.gui.showAnnouncement(
+                ('The elves permit more lumber (%d of %d remaining) -- tree cutting resumed.')
+                    :format(g.remaining, g.limit), COLOR_LIGHTGREEN, true)
+        else
+            dfhack.gui.showAnnouncement(
+                ('The elven lumber limit is reached (%d trees this year) -- tree cutting paused.')
+                    :format(g.limit), COLOR_YELLOW, true)
+        end
+    end
+    -- OVER the limit: trees felled past the agreement (remaining < 0) anger the elves.
+    -- Announce when the overshoot first appears and again whenever it grows (e.g. manual
+    -- chop designations keep felling while autochop is gated); once per new high, no nag.
+    local over = -(g.remaining)
+    if over > 0 then
+        if state.over_year ~= df.global.cur_year or (state.over_announced or 0) < over then
+            state.over_year = df.global.cur_year
+            state.over_announced = over
+            save_state()
+            dfhack.gui.showAnnouncement(
+                ('The elven lumber limit is EXCEEDED by %d tree%s (%d felled, %d permitted) -- the elves will not forget this.')
+                    :format(over, over == 1 and '' or 's', g.limit + over, g.limit), COLOR_LIGHTRED, true)
+        end
+    elseif state.over_announced and state.over_announced > 0 and state.over_year ~= df.global.cur_year then
+        state.over_announced = 0    -- new year / renewed agreement: rearm the warning
+        save_state()
     end
 end
 
--- ---- notify-panel line ------------------------------------------------------
--- The console print in do_check is invisible in normal play, so surface the gate
--- where it's seen: a yellow "Elven lumber limit reached (3/3) -- tree cutting
--- paused" line while the year's allowance is used up. Click shows the details.
-local function register_notification()
+-- unregister the old persistent notify-panel line (replaced by the transition/over-limit
+-- ANNOUNCEMENTS above; a live session may still carry the entry from an earlier version)
+local function unregister_notification()
     local ok, n = pcall(reqscript, 'internal/notify/notifications')
     if not ok or not n then return end
     local NAME = 'elf_lumber_gate'
-    local entry = n.NOTIFICATIONS_BY_NAME[NAME]
-    if not entry then
-        entry = {name = NAME, version = 1, default = true}
-        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
-        n.NOTIFICATIONS_BY_NAME[NAME] = entry
-    end
-    entry.desc = 'Shows when the elven lumber limit has paused tree cutting (auto-elf-chop).'
-    entry.dwarf_fn = function()
-        if not dfhack.world.isFortressMode() or not enabled then return end
-        local g = gate_status()
-        if g.remaining > 0 then return end
-        return {{text = ('Elven lumber limit reached (%d/%d) -- tree cutting paused')
-            :format(g.limit, g.limit), pen = COLOR_YELLOW}}
-    end
-    entry.on_click = function()
-        local g = gate_status()
-        require('gui.dialogs').showMessage('auto-elf-chop',
-            ('The elves allow %d tree%s this year and all have been cut.\n'
-                .. 'autochop stays paused until the agreement renews\n'
-                .. '(a new year / the next elven negotiation).\n\nLimit source: %s')
-            :format(g.limit, g.limit == 1 and '' or 's', g.source))
-    end
-    if n.config and n.config.data and not n.config.data[NAME] then
-        n.config.data[NAME] = {enabled = true, version = 1}
+    if n.NOTIFICATIONS_BY_NAME[NAME] then
+        n.NOTIFICATIONS_BY_NAME[NAME] = nil
+        for i = #n.NOTIFICATIONS_BY_IDX, 1, -1 do
+            if n.NOTIFICATIONS_BY_IDX[i].name == NAME then table.remove(n.NOTIFICATIONS_BY_IDX, i) end
+        end
     end
 end
 
@@ -227,7 +236,7 @@ local function start()
         if n >= CHECK_FRAMES then n = 0; pcall(do_check) end
         dfhack.timeout(1, 'frames', heartbeat)
     end
-    register_notification()
+    unregister_notification()
     pcall(do_check)
     heartbeat()
 end
@@ -244,7 +253,7 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
         state, last_want, quota_cache = nil, nil, nil
         load_state()
         if dfhack.world.isFortressMode() then
-            register_notification()
+            unregister_notification()
             if state.enabled then start() end
         end
     elseif sc == SC_MAP_UNLOADED then
