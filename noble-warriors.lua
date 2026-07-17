@@ -10,6 +10,10 @@ noble actually wears their regalia into battle.
 
 Rules:
   * idempotent -- a symbol already assigned in the uniform is left alone
+  * RECLAIMS the noble's rightful items: any OTHER squad position that has one of the
+    symbols assigned (as a hand-picked specific item, or picked up by DF's uniform
+    solver against a filter) gets it unassigned, and that slot is dirtied so the other
+    soldier re-solves a replacement
   * skipped: vacant positions, dead holders, holders not in a squad, and symbol items
     that don't fit a uniform slot (figurines, scepters, ...)
   * NEVER runs automatically -- one-shot command only, not wired into magnus-scripts
@@ -40,7 +44,63 @@ local UPDATE_FIELD = {[0] = 'armor', [1] = 'helm', [2] = 'pants', [3] = 'gloves'
 
 if not dfhack.world.isFortressMode() then qerror('noble-warriors needs a loaded fortress') end
 
+local utils = require('utils')
+
 local dry = ({...})[1] == 'dry'
+
+-- strip every reference to item id from OTHER squad positions (the noble's rightful
+-- gear may be assigned to some other warrior -- hand-picked or via DF's solver).
+-- Returns a list of 'name (squad)' strings for reporting.
+local function reclaim_elsewhere(item_id, own_pos, apply)
+    local fort = df.global.plotinfo.group_id
+    local freed = {}
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for pi = 0, #sq.positions - 1 do
+                local pos = sq.positions[pi]
+                if pos ~= own_pos and pos.occupant >= 0 then
+                    local touched = false
+                    for slot = 0, 6 do
+                        local v = pos.equipment.uniform[slot]
+                        for j = #v - 1, 0, -1 do
+                            local sp = v[j]
+                            if sp.item == item_id then
+                                -- someone else's hand-picked specific assignment: remove the spec
+                                touched = true
+                                if apply then
+                                    for k = #sp.assigned - 1, 0, -1 do
+                                        utils.erase_sorted(pos.equipment.assigned_items, sp.assigned[k])
+                                        sp.assigned:erase(k)
+                                    end
+                                    v:erase(j)
+                                end
+                            else
+                                -- solver-assigned against a filter spec: release just the item
+                                for k = #sp.assigned - 1, 0, -1 do
+                                    if sp.assigned[k] == item_id then
+                                        touched = true
+                                        if apply then
+                                            sp.assigned:erase(k)
+                                            utils.erase_sorted(pos.equipment.assigned_items, item_id)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if touched then
+                        local hf = df.historical_figure.find(pos.occupant)
+                        freed[#freed + 1] = ('%s (%s)'):format(
+                            hf and dfhack.translation.translateName(hf.name) or '?',
+                            dfhack.translation.translateName(sq.name))
+                    end
+                end
+            end
+        end
+    end
+    return freed
+end
 
 local ent
 for _, e in ipairs(df.global.world.entities.all) do
@@ -103,6 +163,14 @@ for asn_id, artifact_ids in pairs(symbols_by_asn) do
                     print(('  ~ %s: no uniform slot for %s -- skipped'):format(label,
                         dfhack.items.getDescription(it, 0, true)))
                 else
+                    -- reclaim the item from any OTHER warrior currently assigned it
+                    local freed = reclaim_elsewhere(it.id, spos, not dry)
+                    for _, who in ipairs(freed) do
+                        print(('  < reclaimed %s from %s'):format(
+                            dfhack.items.getDescription(it, 0, true), who))
+                        local f = UPDATE_FIELD[slot]
+                        if f and not dry then df.global.plotinfo.equipment.update[f] = true end
+                    end
                     local have = false
                     for j = 0, #spos.equipment.uniform[slot] - 1 do
                         if spos.equipment.uniform[slot][j].item == it.id then have = true end
