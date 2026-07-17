@@ -290,10 +290,11 @@ local function cloak_subtype(ent)
     return cloak_sub_cache or nil
 end
 
--- give every military soldier a leather cloak WITHOUT re-assigning uniforms: add it (slot 0) to
--- the owned "Steel - *" templates AND to each fort squad position's resolved uniform. Idempotent
--- and self-healing (re-adds if DF re-derives a position from its template). The civilian uniform
--- is skipped (it has no cloak).
+-- make sure the owned "Steel - *" uniform TEMPLATES include a leather cloak (slot 0).
+-- Templates ONLY: squad positions pick the cloak up when their uniform is applied from a
+-- template; this function must never write into a squad position's resolved gear (it used
+-- to, which meant silently modifying every squad member's uniform every day -- removed).
+-- The civilian uniform is skipped (it has no cloak).
 local function ensure_cloaks(ent)
     local sub = cloak_subtype(ent)
     if not sub then return end
@@ -310,33 +311,11 @@ local function ensure_cloaks(ent)
             end
         end
     end
-    local fort = df.global.plotinfo.group_id
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for p = 0, #sq.positions - 1 do
-                local pos = sq.positions[p]
-                if pos.occupant >= 0 then
-                    local v = pos.equipment.uniform[0]
-                    local has = false
-                    for j = 0, #v - 1 do
-                        if v[j].item_type == df.item_type.ARMOR and v[j].item_subtype == sub then
-                            has = true; break
-                        end
-                    end
-                    if not has then
-                        local spec = df.squad_uniform_spec:new()
-                        spec.item = -1
-                        spec.item_type = df.item_type.ARMOR
-                        spec.item_subtype = sub
-                        spec.material_class = df.entity_material_category.Leather
-                        spec.mattype, spec.matindex, spec.color = -1, -1, -1
-                        v:insert('#', spec)
-                    end
-                end
-            end
-        end
-    end
+    -- NOTE: this used to ALSO inject a cloak spec into every occupied squad POSITION in the
+    -- fort. That was wrong -- the script must never modify a squad's assigned gear on its own.
+    -- Cloaks belong in the uniform TEMPLATES it creates (above); a squad picks them up when
+    -- its uniform is (re)applied from the template. Existing position specs are left as they
+    -- are -- stripping them can't distinguish template-copied cloaks from injected ones.
 end
 
 -- resolve the regular-shield subtype (not a buckler) once
@@ -1088,6 +1067,9 @@ end
 -- ---- enable state: toggles, persisted ---------------------------------------
 
 state = state or nil
+-- gear picture from the most recent cycle (persoldier/req/stock/stock_h), consumed by
+-- civilian_arrange() -- the `civilian-militia` command's engine
+civ_snapshot = civ_snapshot or nil
 
 local function load_state()
     if not state then
@@ -1363,11 +1345,18 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     for _, sid in ipairs(sids) do
         M = M + (squads[sid].leader and 1 or 0) + #squads[sid].pinned + #squads[sid].movable
     end
+    -- PINNED members (a custom uniform with hand-assigned specific items, e.g. noble-warriors'
+    -- symbols of office) count as EQUIPPED without reserving stock: their `needs` derive from
+    -- the uniform's leftover FILTER specs checked against FREE stock, so a fully hand-kitted
+    -- noble used to read as unequippable and doom their squad to No-Orders.
     local S = 0
     do
         local av, avh = fresh()
-        for _, sid in ipairs(sids) do local L = squads[sid].leader; if L and reserve_set(L.needs, av, avh) then S = S + 1 end end
-        for _, sid in ipairs(sids) do for _, p in ipairs(squads[sid].pinned) do if reserve_set(p.needs, av, avh) then S = S + 1 end end end
+        for _, sid in ipairs(sids) do
+            local L = squads[sid].leader
+            if L and (L.pinned or reserve_set(L.needs, av, avh)) then S = S + 1 end
+        end
+        for _, sid in ipairs(sids) do for _, p in ipairs(squads[sid].pinned) do S = S + 1 end end
         for _, m in ipairs(movpool) do if reserve_set(m.needs, av, avh) then S = S + 1 end end
     end
     local avail = #sids
@@ -1389,14 +1378,25 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
         local anchors = {}
         if g.leader then anchors[#anchors + 1] = g.leader end
         for _, p in ipairs(g.pinned) do anchors[#anchors + 1] = p end
-        local can = g.leader ~= nil and ready_made < R
+        -- a squad anchored by a PINNED member can't be consolidated away (pinned members
+        -- never move), so it earns Ready on its own merits, outside the ceil(S/10) cap --
+        -- otherwise a hand-kitted noble's one-man squad loses the Ready slots to lower
+        -- squad ids and gets planned No-Orders forever
+        local has_pinned = (g.leader and g.leader.pinned) or #g.pinned > 0
+        local can = g.leader ~= nil and (ready_made < R or has_pinned)
         local ca, cah = clone(av, avh)
         if can then
-            for _, a in ipairs(anchors) do if not reserve_set(a.needs, ca, cah) then can = false; break end end
+            for _, a in ipairs(anchors) do
+                -- pinned anchors are hand-kitted: no stock reservation needed
+                if not a.pinned and not reserve_set(a.needs, ca, cah) then can = false; break end
+            end
         end
         if can then
             av, avh = ca, cah                            -- commit the anchor reservations
-            routine[sid] = ridx; ready_made = ready_made + 1
+            routine[sid] = ridx
+            -- pinned-anchored squads are Ready "for free": they don't consume a slot of the
+            -- consolidation budget R (which was sized for the movable population)
+            if not has_pinned then ready_made = ready_made + 1 end
             local filled = #anchors
             for _, a in ipairs(anchors) do target[a.unit_id] = sid; used[a.unit_id] = true end
             local order = {}
@@ -1454,12 +1454,15 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     for _, sid in ipairs(sids) do
         local sq = df.squad.find(sid)
         if sq then
-            local want = routine[sid]
-            -- Only auto-switch a squad to "Ready" when it is currently OFF-DUTY. A squad the player
-            -- has already put on a routine (e.g. a "Train" order) is left as-is, so it keeps
-            -- training instead of being forced back to "Ready".
-            if want == ridx and sq.cur_routine_idx ~= OFF_ROUTINE then want = sq.cur_routine_idx end
-            if sq.cur_routine_idx ~= want then sq.cur_routine_idx = want end
+            -- RESPECT MANUAL ROUTINES: only ever flip a squad between Off-duty and Ready.
+            -- A squad the player put on ANY other routine (training, even/odd month, custom)
+            -- is never touched -- previously a squad planned No-Orders had its hand-set
+            -- schedule stomped back to Off-duty every pass.
+            local cur = sq.cur_routine_idx
+            if cur == OFF_ROUTINE or cur == ridx then
+                local want = routine[sid]
+                if cur ~= want then sq.cur_routine_idx = want end
+            end
         end
     end
 
@@ -1618,7 +1621,7 @@ local function run_cycle()
     end
     if not state.queue then return end
     local ent = fort_entity()
-    if ent then ensure_cloaks(ent) end   -- every soldier carries a leather cloak (templates + positions)
+    if ent then ensure_cloaks(ent) end   -- cloaks in the owned uniform TEMPLATES (never positions)
     -- weekly: free stalled assignments / re-solve stale slots (log failures -- a silent
     -- pcall here once hid a missing-require for a whole session)
     local ok_us, err_us = pcall(unstick_stalled_gear)
@@ -2028,10 +2031,12 @@ local function run_cycle()
     ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
     ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
 
-    -- CIVILIAN MILITIA: pack members between civilian squads so each Ready squad holds only fully-
-    -- equipped members (each person kits up as their own set is forged); ask for another squad if
-    -- the split needs more squads than exist. See arrange_civilian_squads.
-    arrange_civilian_squads(persoldier, req, stock, stock_h)
+    -- CIVILIAN MILITIA: routine swapping + member shuffling are NO LONGER part of the automatic
+    -- cycle -- too brittle to run unattended (it kept overriding hand-set squad schedules). The
+    -- cycle only SNAPSHOTS its gear picture here; the separate `civilian-militia` command applies
+    -- an arrangement on demand via civilian_arrange() below. Uniform templates are still created
+    -- automatically as before.
+    civ_snapshot = {persoldier = persoldier, req = req, stock = stock, stock_h = stock_h}
 
     -- completion flags for the overlay's "Done" label: queue = every soldier has each piece
     -- (by stock, hand-aware); masterwork = every piece is masterwork. Vacuously done if no
@@ -2111,6 +2116,25 @@ end
 
 -- set a toggle; runs the cycle now and (re)starts/stops the shared heartbeat so
 -- it ticks whenever either service (gear queueing or war-dog training) is on
+-- Run one civilian-militia arrangement pass (the `civilian-militia` command's engine): runs a
+-- gear cycle first so the stock/requirement snapshot is fresh, then packs civilian squads and
+-- flips their routines (Off-duty <-> Ready only; hand-set routines are never touched).
+-- dry = print the plan, change nothing.
+function civilian_arrange(dry)
+    if not dfhack.world.isFortressMode() then qerror('civilian_arrange needs a loaded fortress') end
+    load_state()
+    if not state.queue then
+        qerror('the gear service ("Queue gear orders") is off -- no gear snapshot to plan from')
+    end
+    run_cycle()
+    if not civ_snapshot then qerror('no gear snapshot (no squads with uniforms?)') end
+    _G.MU_DRY_ARRANGE = dry and true or nil
+    local ok, err = pcall(arrange_civilian_squads,
+        civ_snapshot.persoldier, civ_snapshot.req, civ_snapshot.stock, civ_snapshot.stock_h)
+    _G.MU_DRY_ARRANGE = nil
+    if not ok then qerror(tostring(err)) end
+end
+
 function set_toggle(name, val)
     load_state()
     state[name] = val
