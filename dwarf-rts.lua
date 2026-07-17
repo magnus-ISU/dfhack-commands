@@ -625,13 +625,15 @@ local function same_tile(a, b)
 end
 
 -- drag-box offensive command: every selected squad attacks all enemies inside the
--- dragged rectangle, within +/-3 z-levels of the drag. append=true (Shift+drag)
--- folds the box's hostiles into the current kill order instead of replacing it. An
--- empty box (no hostiles) is a no-op -- it leaves each squad's existing order alone.
+-- dragged rectangle, within 3 z-levels of the drag (the drag's z +/-1 -- targets the
+-- player can't see shouldn't be folded into the order; a wider window made squads
+-- chase unseen enemies down through the fort). append=true (Shift+drag) folds the
+-- box's hostiles into the current kill order instead of replacing it. An empty box
+-- (no hostiles) is a no-op -- it leaves each squad's existing order alone.
 local function box_attack(ui, p1, p2, append)
     local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
     local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
-    local z1, z2 = p1.z - 3, p1.z + 3
+    local z1, z2 = p1.z - 1, p1.z + 1
     local ids = {}
     local U = df.global.world.units.active
     for i = 0, #U - 1 do
@@ -1361,12 +1363,12 @@ local BOX_PENS = {
 local DIM_PEN = {fg = COLOR_WHITE, bg = COLOR_BLACK}
 
 -- what would this box act on? our own adult dwarves (exact z, as the select/conscript scans)
--- win over enemies (within +/-3 z, as box_attack) -- selecting allies takes priority, since you
--- can attack from a box with no allies in it; neither -> nothing.
+-- win over enemies (within the drag z +/-1, as box_attack) -- selecting allies takes priority,
+-- since you can attack from a box with no allies in it; neither -> nothing.
 local function classify_box(p1, p2)
     local x1, x2 = math.min(p1.x, p2.x), math.max(p1.x, p2.x)
     local y1, y2 = math.min(p1.y, p2.y), math.max(p1.y, p2.y)
-    local ze1, ze2 = p1.z - 3, p1.z + 3
+    local ze1, ze2 = p1.z - 1, p1.z + 1
     local za1, za2 = math.min(p1.z, p2.z), math.max(p1.z, p2.z)
     local enemy = false
     for _, u in ipairs(df.global.world.units.active) do
