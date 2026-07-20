@@ -22,6 +22,9 @@ What it leaves alone:
   * the original 7 (the embark group)
   * any dwarf that already has a nickname
   * dwarves born in the fort (only actual migrants are renamed)
+  * REAL historical figures -- a migrant flagged important, or one that was a former
+    member of another entity (e.g. came from another fort) or has held a noble
+    position -- keeps its own name
   * any migrant it has already named (so it never renames twice)
 
 Waves are identified by the dwarves' real in-game arrival time (the historical
@@ -184,6 +187,24 @@ local function pick_name(sex, letter, wave_used, global_used)
     return pick_from(g.all, wave_used, global_used), false
 end
 
+-- A migrant that came from ANOTHER FORT keeps its own name. The tell: its histfig has an
+-- entity link (member / former member / squad / position) to a SITE GOVERNMENT that is NOT
+-- this fort -- i.e. it lived at some other fortress. A freshly-generated wave migrant has
+-- site-government links only to THIS fort (plus civ/religion/guild links, which don't count).
+local function keep_original_name(u, hf)
+    if not hf then return false end
+    local my_group = df.global.plotinfo.group_id
+    for _, l in ipairs(hf.entity_links) do
+        if l.entity_id ~= my_group then
+            local ent = df.historical_entity.find(l.entity_id)
+            if ent and ent.type == df.historical_entity_type.SiteGovernment then
+                return true          -- belonged to another fortress -> leave the name alone
+            end
+        end
+    end
+    return false
+end
+
 local function set_first_name(u, name)
     u.name.first_name = name
     u.name.has_name = true
@@ -244,8 +265,16 @@ local function process()
         if u.hist_figure_id >= 0 and not processed[u.id] and not skip[u.id]
             and (nick == nil or nick == '')
         then
-            table.insert(candidates, u)
-            wanted[u.hist_figure_id] = true
+            local hf = df.historical_figure.find(u.hist_figure_id)
+            if keep_original_name(u, hf) then
+                -- a real historical figure (e.g. from another fort): never rename, and
+                -- remember it so it isn't re-examined every scan
+                table.insert(s.skip, u.id)
+                skip[u.id] = true
+            else
+                table.insert(candidates, u)
+                wanted[u.hist_figure_id] = true
+            end
         end
     end
     if #candidates == 0 then return {} end

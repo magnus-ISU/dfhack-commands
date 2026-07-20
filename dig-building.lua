@@ -81,8 +81,10 @@ end
 local function over_other_overlay(mx, my)
     return #overlapping_overlays({x1 = mx, y1 = my, x2 = mx, y2 = my}) > 0
 end
-local TOP_MARGIN, BOT_MARGIN = 12, 6      -- rows of negative space kept clear, top / bottom
-                                          -- (start 2 higher; keep >=6 clear at the bottom)
+-- Top margin is DYNAMIC: prefer MAX_TOP (window sits lower, less over the top UI), but
+-- drop toward MIN_TOP only as far as needed to reach the fewest columns the screen allows.
+local MIN_TOP, MAX_TOP = 5, 12
+local TOP_MARGIN, BOT_MARGIN = MAX_TOP, 6  -- TOP_MARGIN = initial/default; recomputed live
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
 local COL_W = 16                          -- each column's cell width (inside the border)
@@ -372,7 +374,7 @@ end
 DigBuilding = defclass(DigBuilding, overlay.OverlayWidget)
 DigBuilding.ATTRS{
     desc = 'While the Dig tool is active, a left-hand picker to place any building.',
-    default_pos = {x = LEFT_MARGIN + 1, y = TOP_MARGIN + 1},   -- 5 cols in, 14 rows down
+    default_pos = {x = LEFT_MARGIN + 1, y = TOP_MARGIN + 1},   -- LEFT_MARGIN cols in, TOP_MARGIN rows down
     default_enabled = true,
     -- broad 'dwarfmode' match: selecting the Dig tool switches focus to dwarfmode/Designate/DIG_DIG,
     -- so a narrow 'dwarfmode/Default' overlay would never render on the dig screen. Visibility is
@@ -443,13 +445,27 @@ function DigBuilding:overlay_onupdate()
     -- list is taller than the space between the top/bottom margins, add columns until it fits (up to
     -- what the screen width allows). If it still can't fit, cap the height and let it scroll.
     local gps = df.global.gps
-    local avail_rows = math.max(1, gps.dimy - TOP_MARGIN - BOT_MARGIN - 2)   -- entry rows (excl. borders)
     local max_cols = math.max(1, math.floor((gps.dimx - LEFT_MARGIN - 2) / COL_W))
-    local cols = math.min(max_cols, math.max(2, math.ceil(#ENTRIES / avail_rows)))
+    -- columns needed for a given top margin (entry rows excl. borders = dimy-top-bot-2)
+    local function cols_for(top)
+        local ar = math.max(1, gps.dimy - top - BOT_MARGIN - 2)
+        return math.min(max_cols, math.max(2, math.ceil(#ENTRIES / ar))), ar
+    end
+    -- fewest columns the screen allows (using the most space -- smallest top margin),
+    -- then the LARGEST top margin (up to MAX_TOP) that still achieves that column count,
+    -- so the window sits as low as it can while keeping the tightest layout.
+    local best_cols = cols_for(MIN_TOP)
+    local top = MIN_TOP
+    for t = MAX_TOP, MIN_TOP + 1, -1 do
+        if (cols_for(t)) <= best_cols then top = t; break end
+    end
+    local cols, avail_rows = cols_for(top)
     self.cols = cols
     local rows = math.min(math.ceil(#ENTRIES / cols), avail_rows)
     self.frame.w = cols * COL_W + 2
     self.frame.h = rows + 2
+    self.frame.t = top                        -- reposition: dynamic top margin
+    self.frame.l = LEFT_MARGIN
     if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
     -- return to the Dig screen once a picker-initiated build flow has fully closed
     if return_state ~= 'idle' then

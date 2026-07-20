@@ -15,7 +15,9 @@ Pieces that work together so you usually never think about pasturing:
      Animals already in a pasture are never moved by this.
 
   3. A background service that pens any unassigned tame fort animal (any age):
-     grazers -> graze pasture, non-grazers -> scavenge pasture. CAGED animals are
+     grazers -> graze pasture ONLY (never the scavenge pen -- they'd starve; a grazer
+     is left roaming until a graze pasture exists), non-grazers -> scavenge pasture.
+     CAGED animals are
      never auto-freed or penned -- caged creatures are in stasis (they don't eat or
      graze, so none starve), and a trained/tamed captive stays put. Animals you
      deliberately remove are remembered and not re-grabbed. Chained/restrained
@@ -197,7 +199,11 @@ local function do_assign()
         -- animal out would undo the reason it's caged -- e.g. a trained/tamed captive kept for
         -- training or as a menagerie. Leave every caged animal put; pasture it by hand if you want.
         if unit.flags1.caged then goto continue end
-        local zone = grazer and graze or scavenge
+        -- grazers go ONLY to the graze pasture, NEVER the scavenge one (they'd starve on
+        -- a grassless pen). If no graze pasture exists yet, a grazer is left roaming until
+        -- one is set. Non-grazers go to the scavenge pasture.
+        local zone
+        if grazer then zone = graze else zone = scavenge end
         if zone then
             assign_to_zone(unit, zone)
             known[unit.id] = true
