@@ -281,6 +281,9 @@ local function is_enemy(u)
         and not dfhack.units.isHidden(u)
         and not dfhack.units.isFortControlled(u)
         and not u.flags1.merchant and not u.flags1.diplomat
+        -- caged/chained creatures are contained, not combatants: a drag-box over the
+        -- stockpile must never send squads to butcher your caged goblins/wildlife
+        and not u.flags1.caged and not u.flags1.chained
 end
 
 -- the live enemy standing on a map tile, if any

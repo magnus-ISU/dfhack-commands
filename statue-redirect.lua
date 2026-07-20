@@ -123,11 +123,11 @@ end
 RemoveOverlay = defclass(RemoveOverlay, overlay.OverlayWidget)
 RemoveOverlay.ATTRS{
     desc = 'Adds a Remove (deconstruct) button on a built item sheet.',
-    default_pos = {x = -48, y = 9},   -- top-right area
+    default_pos = {x = -48, y = 11},  -- below auto-pasture's cage buttons (rows 9-10)
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
     frame = {w = 8, h = 1},
-    version = 1,
+    version = 2,   -- v2: moved below the cage [Graze]/[Butcher] buttons
     overlay_onupdate_max_freq_seconds = 0,
 }
 

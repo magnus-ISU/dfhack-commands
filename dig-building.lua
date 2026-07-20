@@ -81,7 +81,8 @@ end
 local function over_other_overlay(mx, my)
     return #overlapping_overlays({x1 = mx, y1 = my, x2 = mx, y2 = my}) > 0
 end
-local TOP_MARGIN, BOT_MARGIN = 14, 4      -- rows of negative space kept clear, top / bottom
+local TOP_MARGIN, BOT_MARGIN = 12, 6      -- rows of negative space kept clear, top / bottom
+                                          -- (start 2 higher; keep >=6 clear at the bottom)
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
 local COL_W = 16                          -- each column's cell width (inside the border)
@@ -95,7 +96,7 @@ local ENTRIES = {
     {'Mason',        {'Workshops', 'Stoneworker'}},
     {'Craftsdwarf',  {'Workshops', 'Crafts'}},
     {'Jeweler',      {'Workshops', 'Jeweler'}},
-    {'Metalsmith',   {'Workshops', 'Metalsmith'}},
+    {'Metalsmith',   {'Workshops', 'Metalsmith'}, {alias = {'forge', 'smithy'}}},
     {'Magma forge',  {'Workshops', 'Magma forge'}},
     {'Mechanic',     {'Workshops', 'Mechanic'}},
     {'Siege wksp',   {'Workshops', 'Siege'}},
@@ -118,7 +119,7 @@ local ENTRIES = {
     {'Kitchen',      {'Workshops', 'Farming', 'Kitchen'}},
     {'Farmer',       {'Workshops', 'Farming', 'Farmer'}},
     {'Quern',        {'Workshops', 'Farming', 'Quern'}},
-    {'Nest box',     {'Workshops', 'Farming', 'Nest box'}},
+    {'Nest box',     {'Workshops', 'Farming', 'Nest box'}, {alias = 'nestbox'}},
     {'Hive',         {'Workshops', 'Farming', 'Hive'}},
     {'Vermin catcher', {'Workshops', 'Farming', "Vermin Catcher's Shop"}},
     -- Workshops / Furnaces
@@ -131,21 +132,21 @@ local ENTRIES = {
     {'Magma kiln',   {'Workshops', 'Furnaces', 'Magma kiln'}},
     -- Furniture
     {'Bed',          {'Furniture', 'Bed'}},
-    {'Chair',        {'Furniture', 'Chair'}},
-    {'Table',        {'Furniture', 'Table'}},
-    {'Chest',        {'Furniture', 'Chest'}},
-    {'Cabinet',      {'Furniture', 'Cabinet'}},
-    {'Coffin',       {'Furniture', 'Burial'}},
+    {'Chair',        {'Furniture', 'Chair'}, {alias = {'throne', 'seat'}}},
+    {'Table',        {'Furniture', 'Table'}, {alias = 'desk'}},
+    {'Chest',        {'Furniture', 'Chest'}, {alias = {'coffer', 'box'}}},
+    {'Cabinet',      {'Furniture', 'Cabinet'}, {alias = {'dresser', 'wardrobe'}}},
+    {'Coffin',       {'Furniture', 'Burial'}, {alias = {'sarcophagus', 'casket', 'tomb', 'grave'}}},
     {'Statue',       {'Furniture', 'Statue'}},
-    {'Slab',         {'Furniture', 'Slab'}, {noplan = true}},   -- native slab chooser (keep-building auto-toggle disabled: can't read its state yet)
+    {'Slab',         {'Furniture', 'Slab'}, {noplan = true, alias = 'memorial'}},   -- native slab chooser (keep-building auto-toggle disabled: can't read its state yet)
     {'Traction bed', {'Furniture', 'Traction bench'}},
-    {'Bookcase',     {'Furniture', 'Bookcase'}},
+    {'Bookcase',     {'Furniture', 'Bookcase'}, {alias = 'bookshelf'}},
     {'Display case', {'Furniture', 'Display'}, {alias = 'pedestal'}},
-    {'Offering',     {'Furniture', 'Offering place'}},
+    {'Offering',     {'Furniture', 'Offering place'}, {alias = {'altar', 'shrine'}}},
     {'Instrument',   {'Furniture', 'Instrument'}},
     -- Doors / hatches
     {'Door',         {'Doors/hatches', 'Door'}},
-    {'Hatch',        {'Doors/hatches', 'Hatch'}},
+    {'Hatch',        {'Doors/hatches', 'Hatch'}, {alias = {'trapdoor', 'hatch cover'}}},
     -- Constructions (sorted alphabetically by label -- easier to find a known name)
     {'Bridge',       {'Constructions', 'Bridge'}},
     {'Dirt road',    {'Constructions', 'Dirt road'}},
@@ -158,12 +159,12 @@ local ENTRIES = {
     {'Paved road',   {'Constructions', 'Paved road'}},
     {'Ramp',         {'Constructions', 'Ramp'}},
     {'Reinf. wall',  {'Constructions', 'Reinforced Wall'}},
-    {'Stairs',       {'Constructions', 'Stairs'}},
+    {'Stairs',       {'Constructions', 'Stairs'}, {alias = 'staircase'}},
     {'Support',      {'Constructions', 'Support'}},
     {'Track',        {'Constructions', 'Track'}},
     {'Track stop',   {'Constructions', 'Track stop'}},
     {'Vert bars',    {'Constructions', 'Vertical bars'}},
-    {'Wall',         {'Constructions', 'Wall'}},
+    {'Wall',         {'Constructions', 'Wall'}, {alias = {'pillar', 'column'}}},
     {'Wall grate',   {'Constructions', 'Wall grate'}},
     -- Machines / fluids
     {'Lever',        {'Machines/fluids', 'Lever'}},
@@ -172,14 +173,14 @@ local ENTRIES = {
     {'Screw pump',   {'Machines/fluids', 'Screw pump'}},
     {'Water wheel',  {'Machines/fluids', 'Water wheel'}},
     {'Windmill',     {'Machines/fluids', 'Windmill'}},
-    {'Gear assembly',{'Machines/fluids', 'Gear assembly'}},
+    {'Gear assembly',{'Machines/fluids', 'Gear assembly'}, {alias = 'cog'}},
     {'Horiz axle',   {'Machines/fluids', 'Horizontal axle'}},
     {'Vert axle',    {'Machines/fluids', 'Vertical axle'}},
     {'Millstone',    {'Machines/fluids', 'Millstone'}},
     {'Rollers',      {'Machines/fluids', 'Rollers'}},
     -- Cages / restraints
     {'Cage',         {'Cages/restraints', 'Cage'}},
-    {'Restraint',    {'Cages/restraints', 'Rope/chain'}},
+    {'Restraint',    {'Cages/restraints', 'Rope/chain'}, {alias = {'rope', 'chain'}}},
     {'Animal trap',  {'Cages/restraints', 'Animal trap'}},
     -- Traps
     {'Pressure plt', {'Traps', 'Pressure plate'}},
@@ -188,9 +189,9 @@ local ENTRIES = {
     {'Weapon trap',  {'Traps', 'Weapon'}},
     {'Spike trap',   {'Traps', 'Upright weapon/spike'}},
     -- Military
-    {'Archery targ', {'Military', 'Archery target'}},
+    {'Archery targ', {'Military', 'Archery target'}, {alias = {'archery range', 'target'}}},
     {'Weapon rack',  {'Military', 'Weapon rack'}},
-    {'Armor stand',  {'Military', 'Armor stand'}},
+    {'Armor stand',  {'Military', 'Armor stand'}, {alias = 'armour stand'}},
     {'Ballista',     {'Military', 'Ballista'}},
     {'Catapult',     {'Military', 'Catapult'}},
     {'Bolt thrower', {'Military', 'Bolt thrower'}},
@@ -336,23 +337,34 @@ local function fuzzy(needle, hay)
     return false
 end
 
--- an entry matches if the search fuzzy-matches its shown label, any of its build-menu path
--- segments, or an explicit search alias (e[3].alias, a string or list) -- so the Mason entry
--- (path {"Workshops","Stoneworker"}) is found by "mason"/"stoneworker", and "pedestal" finds
--- the Display case. DF's own name for a thing, plus any synonym, counts as a search term.
-local function entry_matches(e, needle)
-    if fuzzy(needle, e[1]) then return true end
-    for _, seg in ipairs(e[2]) do
-        if fuzzy(needle, seg) then return true end
-    end
+-- how well the search matches an entry -- its shown label, any build-menu path segment, or an
+-- explicit search alias (e[3].alias, a string or list; DF's own name for a thing plus any synonym
+-- counts). Returns a RANK (lower = better) or nil for no match:
+--   0 = exact ("door" == Door -- an exact name always wins outright)
+--   1 = prefix ("cof" -> Coffin/Coffer...)
+--   2 = substring ("pump" -> Screw pump)
+--   3 = fuzzy subsequence ("trddpt" -> Trade Depot)
+local function entry_rank(e, needle)
+    needle = needle:lower()
+    local terms = {e[1]}
+    for _, seg in ipairs(e[2]) do terms[#terms + 1] = seg end
     local alias = e[3] and e[3].alias
     if alias then
         if type(alias) == 'string' then alias = {alias} end
-        for _, a in ipairs(alias) do
-            if fuzzy(needle, a) then return true end
-        end
+        for _, a in ipairs(alias) do terms[#terms + 1] = a end
     end
-    return false
+    local best
+    for _, t in ipairs(terms) do
+        t = t:lower()
+        local r
+        if t == needle then r = 0
+        elseif t:sub(1, #needle) == needle then r = 1
+        elseif t:find(needle, 1, true) then r = 2
+        elseif fuzzy(needle, t) then r = 3 end
+        if r and (not best or r < best) then best = r end
+        if best == 0 then break end
+    end
+    return best
 end
 
 -- ---- overlay -----------------------------------------------------------------
@@ -381,24 +393,30 @@ function DigBuilding:init()
     self.search = ''
 end
 
--- entries whose label fuzzy-matches the current search. Returns a set (by ENTRIES index) plus a
--- list of matching indices (for counting + "one match -> Enter selects it"). Empty search = no match.
+-- entries matching the current search. Returns a set (by ENTRIES index), a list of matching
+-- indices, and the BEST match's index -- lowest rank wins (exact beats prefix beats substring
+-- beats fuzzy), ties go to the first alphabetically. Enter always selects the best match.
+-- Empty search = no match.
 function DigBuilding:compute_matches()
-    local set, list = {}, {}
+    local set, list, best, best_rank = {}, {}, nil, nil
     if self.search ~= '' then
         for i = 1, #ENTRIES do
-            if entry_matches(ENTRIES[i], self.search) then set[i] = true; list[#list + 1] = i end
+            local r = entry_rank(ENTRIES[i], self.search)
+            if r then
+                set[i] = true; list[#list + 1] = i
+                if not best_rank or r < best_rank then best, best_rank = i, r end
+            end
         end
     end
-    return set, list
+    return set, list, best
 end
 
--- scroll so the first match is on screen, so you can see what you're narrowing toward
+-- scroll so the BEST match is on screen, so you can see what Enter will pick
 function DigBuilding:scroll_to_match()
     if self.search == '' then return end
-    local _, list = self:compute_matches()
-    if #list == 0 then return end
-    local line = math.floor((list[1] - 1) / self.cols)
+    local _, _, best = self:compute_matches()
+    if not best then return end
+    local line = math.floor((best - 1) / self.cols)
     if line < self.scroll then self.scroll = line
     elseif line >= self.scroll + self:list_rows() then self.scroll = line - self:list_rows() + 1 end
     self.scroll = math.max(0, math.min(self.scroll, self:max_scroll()))
@@ -417,7 +435,10 @@ end
 function DigBuilding:overlay_onupdate()
     self.search = self.search or ''
     self.visible = dig_active()
-    if not self.visible then self.search = '' end          -- reset the filter when the picker closes
+    if not self.visible then                               -- reset when the picker closes:
+        self.search = ''                                   -- clear the filter
+        self.unfocused = false                             -- and refocus for next open
+    end
     -- Size the panel to EXACTLY fit the list, and adapt to the screen. Start at 2 columns; if the
     -- list is taller than the space between the top/bottom margins, add columns until it fits (up to
     -- what the screen width allows). If it still can't fit, cap the height and let it scroll.
@@ -486,34 +507,40 @@ function DigBuilding:onRenderBody(dc)
         dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
     end
     -- fuzzy-search box on the top border, right after " Build " (auto-focused -- just type). Shows
-    -- the typed text + a cursor + the live match count; green = exactly one match (Enter selects it).
-    local mset, mlist = self:compute_matches()
+    -- the typed text + a cursor + the live match count; green while Enter has a pick.
+    local mset, mlist, mbest = self:compute_matches()
     local fx1, fx2 = 9, (ms > 0) and (w - 11) or (w - 2)
     if fx2 >= fx1 then
         local fw = fx2 - fx1 + 1
-        if self.search == '' then
+        if self.unfocused then
+            -- unfocused (after < or >): keys go to DF; click the box to type again. The
+            -- filter text (if any) stays visible but greyed, cursorless.
+            local txt = self.search == '' and 'click to filter'
+                or (self.search .. (' (%d)'):format(#mlist))
+            dc:seek(fx1, 0):pen(COLOR_DARKGREY):string(txt:sub(1, fw))
+        elseif self.search == '' then
             dc:seek(fx1, 0):pen(COLOR_DARKGREY):string(('type to filter'):sub(1, fw))
         else
             local n = #mlist
             local cnt = (' (%d)'):format(n)
             local body = self.search .. '_'
             if #body + #cnt > fw then body = body:sub(1, math.max(0, fw - #cnt)) end
-            local pen = (n == 1) and COLOR_GREEN or (n == 0 and COLOR_LIGHTRED or COLOR_YELLOW)
+            local pen = mbest and COLOR_GREEN or COLOR_LIGHTRED
             dc:seek(fx1, 0):pen(pen):string((body .. cnt):sub(1, fw))
         end
     end
-    local single = #mlist == 1
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
         local line = self.scroll + r
         for c = 0, cols - 1 do
             local idx = line * cols + c + 1
             local e = ENTRIES[idx]
             if e then
-                -- empty search: all white. Otherwise matches are bright (green if it's the sole
-                -- match, so you see what Enter picks), non-matches dimmed.
+                -- empty search: all white. Otherwise the BEST match (what Enter picks) is bright
+                -- green, other matches light green, non-matches dimmed.
                 local pen
                 if self.search == '' then pen = COLOR_WHITE
-                elseif mset[idx] then pen = single and COLOR_GREEN or COLOR_LIGHTGREEN
+                elseif idx == mbest then pen = COLOR_GREEN
+                elseif mset[idx] then pen = COLOR_LIGHTGREEN
                 else pen = COLOR_DARKGREY end
                 dc:seek(1 + c * COL_W, r + 1):pen(pen):string(e[1]:sub(1, COL_W - 1))
             end
@@ -535,25 +562,34 @@ function DigBuilding:onInput(keys)
     if not self.visible or self.covered then return false end
     self.search = self.search or ''
 
-    -- keyboard: the border search box is auto-focused whenever the picker is showing. Backspace edits,
-    -- Enter picks the sole match. Space is deliberately NOT captured (it stays DF's pause; fuzzy
-    -- subsequence matching means you never need to type the spaces in "Trade Depot" anyway).
-    if keys._STRING == 0 then                                     -- backspace
-        self.search = self.search:sub(1, -2); self:scroll_to_match(); return true
-    elseif keys._STRING and keys._STRING >= 33 then               -- a printable, non-space char
-        self.search = self.search .. string.char(keys._STRING); self:scroll_to_match(); return true
+    -- '<' / '>' are DF's z-level keys: NEVER typed into the search. They also UNFOCUS the
+    -- search box, so plain keys (wasd panning, hotkeys) pass to DF again -- refocus by
+    -- clicking the search box or reopening the picker.
+    if keys._STRING == 60 or keys._STRING == 62 then
+        self.unfocused = true
+        return false                                              -- DF still gets the z change
     end
-    if keys.SELECT then                                           -- Enter: select if exactly one match
-        local _, mlist = self:compute_matches()
-        if #mlist == 1 then
-            local e = ENTRIES[mlist[1]]
-            self.search = ''
-            navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore)
-            return true
+    if not self.unfocused then
+        -- keyboard: the border search box is auto-focused whenever the picker is showing. Backspace
+        -- edits, Enter picks the sole match. Space is deliberately NOT captured (it stays DF's pause;
+        -- fuzzy subsequence matching means you never need to type the spaces in "Trade Depot" anyway).
+        if keys._STRING == 0 then                                 -- backspace
+            self.search = self.search:sub(1, -2); self:scroll_to_match(); return true
+        elseif keys._STRING and keys._STRING >= 33 then           -- a printable, non-space char
+            self.search = self.search .. string.char(keys._STRING); self:scroll_to_match(); return true
         end
-        return false                                             -- 0 or many matches: leave Enter to DF
+        if keys.SELECT then                                       -- Enter: select the BEST match
+            local _, _, best = self:compute_matches()
+            if best then
+                local e = ENTRIES[best]
+                self.search = ''
+                navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore)
+                return true
+            end
+            return false                                         -- no match: leave Enter to DF
+        end
+        if keys.LEAVESCREEN and self.search ~= '' then self.search = ''; return true end   -- Esc clears filter
     end
-    if keys.LEAVESCREEN and self.search ~= '' then self.search = ''; return true end   -- Esc clears filter
 
     -- from here on it's mouse handling: yield when the cursor is over a DF hover element / another
     -- overlay -- never steal their input
@@ -577,7 +613,8 @@ function DigBuilding:onInput(keys)
         local w = self.frame.w
         if y == 0 then                        -- scroll controls on the title/top border
             if x >= w - 10 and x <= w - 6 then self.scroll = math.max(0, self.scroll - 1)
-            elseif x >= w - 5 and x <= w - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
+            elseif x >= w - 5 and x <= w - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1)
+            elseif x >= 9 then self.unfocused = false end   -- click the search box: refocus it
             return true
         end
         local e = self:entry_at(x, y)

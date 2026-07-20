@@ -342,7 +342,45 @@ function convert_dig_box(a, b)
             did = true
         end
     end
-    for _, p in ipairs(trees) do set_dig(p, DV.Default); log('  CHOP tree @' .. fmt(p)); did = true end
+    -- CHOP: mark whole TREES (by trunk, via the designations API -- tile marks on one big
+    -- tree would miscount it several times), capped by the elven lumber budget from
+    -- auto-elf-chop: new marks stop when total designations reach the remaining allowance.
+    -- budget nil = no cap (no elf agreement, or already AT the limit -- past that point
+    -- designating more is plainly deliberate and is not blocked).
+    if #trees > 0 then
+        local budget
+        local okr, aec = pcall(reqscript, 'auto-elf-chop')
+        if okr and aec and aec.manual_chop_budget then
+            local okb, b = pcall(aec.manual_chop_budget)
+            if okb then budget = b end
+        end
+        local marked, skipped = 0, 0
+        for _, pl in ipairs(df.global.world.plants.all) do
+            if pl.tree_info
+                and pl.pos.x >= x1 and pl.pos.x <= x2
+                and pl.pos.y >= y1 and pl.pos.y <= y2
+                and pl.pos.z >= z1 and pl.pos.z <= z2 then
+                local okm, ismarked = pcall(dfhack.designations.isPlantMarked, pl)
+                if okm and not ismarked then
+                    if budget and marked >= budget then
+                        skipped = skipped + 1
+                    else
+                        local okc, can = pcall(dfhack.designations.canMarkPlant, pl)
+                        if okc and can and pcall(dfhack.designations.markPlant, pl) then
+                            marked = marked + 1
+                            log(('  CHOP tree @%d,%d,%d'):format(pl.pos.x, pl.pos.y, pl.pos.z))
+                        end
+                    end
+                end
+            end
+        end
+        if skipped > 0 then
+            dfhack.gui.showAnnouncement(
+                ('Marked %d tree%s; %d left standing -- the elven lumber limit allows no more.')
+                    :format(marked, marked == 1 and '' or 's', skipped), COLOR_YELLOW, true)
+        end
+        did = did or marked > 0 or skipped > 0
+    end
     -- (room smoothing removed -- the implementation was wrong; nothing is designated for smoothing)
     return did
 end

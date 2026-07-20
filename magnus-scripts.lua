@@ -29,6 +29,8 @@ Activates the "always-on" helpers in this pack:
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (1x1 Tomb zone on each coffin, 1x1 Pasture zone on each nest box)
     * auto-elf-chop             (enables the autochop gate that respects the elven tree limit)
+    * caravan-unstick           (weekly watchdog: clears stuck caravans, which silently
+                                 block ALL future caravans and, for the home civ, migrants)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
@@ -134,6 +136,7 @@ if ({...})[1] == 'disable' then
     try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
     try('disable auto-elf-chop', function() dfhack.run_command('disable', 'auto-elf-chop') end)
     try('disable tarrasque', function() dfhack.run_command('disable', 'tarrasque') end)
+    try('disable caravan-unstick', function() dfhack.run_command('disable', 'caravan-unstick') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
@@ -146,8 +149,9 @@ if ({...})[1] == 'disable' then
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = false end
         end
         -- trader-notification suppressed DFHack's stock "traders_ready" alert; restore it.
-        -- agitated-animals-notification hid the stock "agitated_count" line; restore that too.
-        for _, nm in ipairs({'traders_ready', 'agitated_count'}) do
+        -- agitated-animals-notification hid the stock "agitated_count" + "hostile_count"
+        -- lines and `lovely` hid "warn_nuisance"; restore those too.
+        for _, nm in ipairs({'traders_ready', 'agitated_count', 'hostile_count', 'warn_nuisance'}) do
             if n.config and n.config.data and n.config.data[nm] then n.config.data[nm].enabled = true end
         end
         if n.config and n.config.write then n.config:write() end
@@ -184,6 +188,7 @@ try('labor-groups (ordered craft work details, once/fort)', function() dfhack.ru
 try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
 try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'auto-tomb') end)
 try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'auto-elf-chop') end)
+try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'caravan-unstick') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
@@ -209,6 +214,15 @@ if lovely then
     -- selecting a statue jumps straight to the statue item's sheet (its full description)
     try('statue-redirect (auto-open statue details)',
         function() dfhack.run_command('enable', 'statue-redirect') end)
+
+    -- hide the stock "N thieving or mischievous creature(s)" notify line (kea/rhesus
+    -- noise). The other stock lines this pack replaces (agitated_count, hostile_count)
+    -- are hidden by agitated-animals-notification, which plain magnus-scripts loads.
+    try('hide "thieving or mischievous" notification', function()
+        local n = reqscript('internal/notify/notifications')
+        n.config.data.warn_nuisance = n.config.data.warn_nuisance or {version = 1}
+        n.config.data.warn_nuisance.enabled = false
+    end)
 
     -- dead forgotten beasts / titans / bronze colossi roll 1/100 each winter solstice to
     -- revive and later RETURN as a real attack (the megabeast pool never runs dry)

@@ -47,16 +47,25 @@ local function trader_message()
     if not dfhack.world.isFortressMode() then return end
     local ready = ready_caravans()
     if #ready == 0 then return end
-    -- countdown: time_remaining ticks down while they're at the depot. With several caravans
-    -- present, report the SOONEST to leave (the smallest remaining) -- that's the deadline that
-    -- matters if you want to trade with everyone before someone packs up.
-    local min_ticks
+    -- countdown: time_remaining ticks down while each caravan is at the depot. With several
+    -- caravans present, list EVERY group's remaining days, soonest first -- e.g.
+    -- "Traders are ready to trade for 9, 12, and 18 days" -- so you can see both the
+    -- pressing deadline and how long the others will linger.
+    local days = {}
     for _, c in ipairs(ready) do
-        if not min_ticks or c.time_remaining < min_ticks then min_ticks = c.time_remaining end
+        days[#days + 1] = math.max(1, math.ceil(c.time_remaining / TICKS_PER_DAY))
     end
-    local days = math.max(1, math.ceil(min_ticks / TICKS_PER_DAY))
-    local who = #ready == 1 and 'Trader is' or 'Traders are'
-    return ('%s ready to trade for %d day%s'):format(who, days, days == 1 and '' or 's')
+    table.sort(days)
+    if #ready == 1 then
+        return ('Trader is ready to trade for %d day%s'):format(days[1], days[1] == 1 and '' or 's')
+    end
+    local list
+    if #days == 2 then
+        list = ('%d and %d'):format(days[1], days[2])
+    else
+        list = table.concat(days, ', ', 1, #days - 1) .. ', and ' .. days[#days]
+    end
+    return ('Traders are ready to trade for %s days'):format(list)
 end
 
 -- ---------------------------------------------------------------------------

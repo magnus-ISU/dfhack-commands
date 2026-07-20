@@ -44,10 +44,18 @@ WHAT REVIVAL DOES:
     even destroys any duplicate army we made). The service then converts DF's army into a hidden
     lurker in a random discovered local cavern layer and shelves the unit out of play again.
     Titans/colossi keep their lair-site whereabouts (death leaves it intact) -- no army needed.
-  * Beast with NO unit anywhere (died off-map in worldgen, unit culled): revived abstractly --
-    alive in legends and eligible for world-level events, but with nothing for a local Megabeast
-    event to materialize it cannot re-attack this fort (no working unit-creation primitive).
-  * Beast whose unit belongs to a different, unloaded site: skipped until that site is loaded.
+  * Forgotten beast with NO loaded unit (died in worldgen / culled / body at another site):
+    a REAL body is CREATED for it (dfhack.units.create builds a complete creature -- soul,
+    body, mind). The created unit never has to work "in play": it stays offloaded until DF's
+    own delivery activates it. The world treats created beasts as fully real -- left to
+    wander, one traveled the world, fought and died a real death. NO leave-dance for these:
+    a created unit that walks off the map is DESTROYED outright (emigration frees the unit;
+    nemesis save_file_id=-1 means no saved copy, and the nemesis .unit pointer dangles into
+    reused memory). Instead the body stays offloaded and a wait-mode staging entry lets DF's
+    world-sim adopt the live megabeast histfig on its own (it mints a travel army within
+    months); the heartbeat then converts that army into the hidden cavern lurker.
+  * Titan/colossus with no unit anywhere: abstract revival only (alive in legends; surface
+    delivery from a created body is unproven).
 
 State (enabled, last roll year, log) persists at WORLD level, so it follows the world across
 forts and into adventure mode. Reviving works anywhere; the army rebuild needs a loaded fort map
@@ -116,8 +124,8 @@ local function save_state() dfhack.persistent.saveWorldData(GLOBAL_KEY, state) e
 --   alive / waiting (alive with a hidden army or lair, not in play) / dead breakdowns
 local function survey()
     local cls = race_classes()
-    local out = {fb = {alive = 0, awaiting = 0, dead = 0, dead_loaded = {}, dead_nounit = {}, dead_elsewhere = 0},
-                 mega = {alive = 0, awaiting = 0, dead = 0, dead_loaded = {}, dead_nounit = {}, dead_elsewhere = 0}}
+    local out = {fb = {alive = 0, awaiting = 0, dead = 0, dead_loaded = {}, dead_nounit = {}, dead_elsewhere = {}},
+                 mega = {alive = 0, awaiting = 0, dead = 0, dead_loaded = {}, dead_nounit = {}, dead_elsewhere = {}}}
     for _, hf in ipairs(df.global.world.history.figures) do
         local c = cls[hf.race]
         if c then
@@ -129,7 +137,7 @@ local function survey()
                     if u and u.flags2.killed and not u.flags3.scuttle then
                         s.dead_loaded[#s.dead_loaded + 1] = hf.id
                     else
-                        s.dead_elsewhere = s.dead_elsewhere + 1
+                        s.dead_elsewhere[#s.dead_elsewhere + 1] = hf.id
                     end
                 else
                     s.dead_nounit[#s.dead_nounit + 1] = hf.id
@@ -187,6 +195,34 @@ local function set_beast_flags(hf, nem)
     hf.flags.never_cull = true
 end
 
+-- create a REAL unit for a beast that has none (died in worldgen / culled / body at an
+-- unloaded site). dfhack.units.create builds a complete creature (soul, body, mind); it
+-- never has to work "in play" -- it stays offloaded until DF's own army delivery
+-- activates it. Proven live: a created beast walked the world, fought, and died a real
+-- death when left to wander -- the world treats it as fully real.
+local function create_beast_unit(hf)
+    local ok, u = pcall(dfhack.units.create, hf.race, hf.caste >= 0 and hf.caste or 0)
+    if not ok or not u then return nil end
+    u.hist_figure_id = hf.id
+    local dst, src = u.name, hf.name
+    dst.first_name = src.first_name
+    dst.nickname = src.nickname
+    for i = 0, 6 do
+        dst.words[i] = src.words[i]
+        dst.parts_of_speech[i] = src.parts_of_speech[i]
+    end
+    dst.language = src.language
+    dst.type = src.type
+    dst.has_name = src.has_name
+    u.birth_year = hf.born_year
+    u.civ_id = -1
+    u.population_id = -1
+    u.enemy.normal_race, u.enemy.normal_caste = u.race, u.caste
+    u.enemy.were_race, u.enemy.were_caste = u.race, u.caste
+    hf.unit_id = u.id
+    return u
+end
+
 -- worldgen-style nemesis record; id == index invariant
 local function ensure_nemesis(hf)
     local nem = hf.nemesis_id >= 0 and df.nemesis_record.find(hf.nemesis_id)
@@ -208,6 +244,14 @@ local function ensure_nemesis(hf)
         nem.pool_id = nem.id
         nems:insert('#', nem)
         hf.nemesis_id = nem.id
+    end
+    -- a beast revived with a CREATED body may carry an old nemesis pointing at its far-away
+    -- corpse unit: re-point it at the new body (the old saved unit is simply orphaned)
+    if nem.unit_id ~= hf.unit_id then
+        nem.unit_id = hf.unit_id
+        nem.unit = hf.unit_id >= 0 and df.unit.find(hf.unit_id) or nil
+        nem.save_file_id = -1
+        nem.member_idx = 0
     end
     set_beast_flags(hf, nem)
     return nem
@@ -266,8 +310,12 @@ end
 -- stage 1: put the revived unit at a map edge, invisible, asking to leave. DF notices within
 -- a few ticks and mints a real army for its nemesis (taking over hf whereabouts).
 local function stage_departure(hf, u)
-    local pos = find_edge_tile(u.pos.z, 12) or find_edge_tile(u.pos.z, 60)
+    -- created units start at (-30000,...): center the edge search on the view z and seed
+    -- the position before teleporting (teleport cannot move a unit with no valid tile)
+    local zc = u.pos.z >= 0 and u.pos.z or df.global.window_z
+    local pos = find_edge_tile(zc, 12) or find_edge_tile(zc, 60)
     if not pos then return false end
+    if u.pos.x < 0 then u.pos.x, u.pos.y, u.pos.z = pos.x, pos.y, pos.z end
     dfhack.units.teleport(u, pos)
     u.flags1.move_state = true
     u.flags1.inactive = false
@@ -285,7 +333,9 @@ local function stage_departure(hf, u)
 end
 
 -- stage 2 (once DF has minted the army): convert it into the hidden cavern lurker the
--- Megabeast(layer) event selects from, and shelve the unit back out of play.
+-- Megabeast(layer) event selects from, and shelve the unit back out of play. The unit may
+-- already have LEFT the map by now (created beasts walk off as wild animals and DF pulls
+-- them out of the unit list into the nemesis) -- the conversion works without it.
 local function finish_departure(hf, u, layer)
     local a = hf.info.whereabouts.army_id >= 0 and df.army.find(hf.info.whereabouts.army_id)
     if not a then return false end
@@ -293,11 +343,13 @@ local function finish_departure(hf, u, layer)
     a.controller_id = -1
     a.hidden_sr_ind = -1
     a.hidden_fl_ind = layer or -1             -- the cavern layer it lurks in
-    u.flags1.inactive = true                  -- offloaded: alive but NOT in play
-    u.flags1.hidden_in_ambush = false
-    u.flags1.forest = false
-    u.flags2.visitor = false
-    u.animal.leave_countdown = 0
+    if u then
+        u.flags1.inactive = true              -- offloaded: alive but NOT in play
+        u.flags1.hidden_in_ambush = false
+        u.flags1.forest = false
+        u.flags2.visitor = false
+        u.animal.leave_countdown = 0
+    end
     hf.info.whereabouts.state = 3
     return true
 end
@@ -318,7 +370,7 @@ local function process_staging()
         local st = staging[i]
         local hf = df.historical_figure.find(st.hf)
         local u = hf and hf.unit_id >= 0 and df.unit.find(hf.unit_id)
-        if not hf or not u or hf.died_year >= 0 then
+        if not hf or hf.died_year >= 0 then
             table.remove(staging, i)                        -- died mid-staging / gone: drop
             dirty = true
         elseif hf.info.whereabouts.army_id >= 0
@@ -330,7 +382,10 @@ local function process_staging()
                 dirty = true
             end
         elseif df.global.cur_year * 403200 + df.global.cur_year_tick > st.deadline then
-            stage_departure(hf, u)                          -- DF didn't react: re-stage
+            -- DF didn't react: re-stage. NEVER for wait-mode (created-body) entries -- a
+            -- created unit that walks off the map is DESTROYED outright; they just wait
+            -- for the world-sim to mint the beast's army on its own.
+            if u and not st.wait then stage_departure(hf, u) end
             st.deadline = df.global.cur_year * 403200 + df.global.cur_year_tick + 7 * 1200
             dirty = true
         end
@@ -354,10 +409,10 @@ local function revive_beast(hfid)
     local name = hf_name(hf)
     local u = hf.unit_id >= 0 and df.unit.find(hf.unit_id) or nil
 
-    if hf.unit_id >= 0 and not u then
+    if hf.unit_id >= 0 and not u and cls == 'mega' then
         return false, name .. ': its remains lie at an unloaded site'
     end
-    if u and (df.global.cur_year - hf.died_year) < MIN_DEAD_YEARS then
+    if (df.global.cur_year - hf.died_year) < MIN_DEAD_YEARS then
         return false, name .. ': dead less than a year -- too soon to stir'
     end
 
@@ -392,9 +447,40 @@ local function revive_beast(hfid)
             hf.info.whereabouts.body_state_id = -1
         end
         entry.awaiting = true
+    elseif cls == 'fb' and dfhack.isMapLoaded() then
+        -- NO loaded unit (died in worldgen, culled, or its body lies at another site):
+        -- CREATE a real body for the beast. The world accepts created beasts as fully real
+        -- (they travel, fight and can re-die). CRITICAL: the created unit must NEVER walk
+        -- off the map -- emigration DESTROYS the unit object outright (no new id, and with
+        -- nemesis save_file_id=-1 there is no saved copy either; the nemesis .unit pointer
+        -- then DANGLES into reused memory -- it claimed a newborn lamb when this was
+        -- learned). So no leave-dance: the body stays offloaded in units.all and the
+        -- staging entry WAITS for DF's world-sim, which adopts live megabeast histfigs on
+        -- its own (proven: it minted a travel army within months); the heartbeat then
+        -- converts that army into the hidden cavern lurker.
+        u = create_beast_unit(hf)
+        if not u then return false, name .. ': unit creation failed' end
+        hf.died_year = -1
+        hf.died_seconds = -1
+        hf.flags.ghost = false
+        add_revival_event(hfid)
+        ensure_nemesis(hf)
+        u.flags1.inactive = true                    -- offloaded until DF delivers it
+        local layer = pick_local_layer()
+        if layer then
+            table.insert(state.staging, {hf = hf.id, army_before = hf.info.whereabouts.army_id,
+                layer = layer, wait = true,
+                deadline = (df.global.cur_year + 100) * 403200})   -- wait-mode: never re-staged
+            save_state()
+            entry.army = layer
+        else
+            entry.note = 'no cavern layer here -- alive but not re-attackable yet'
+        end
+        entry.awaiting = true
+        entry.created = true
     else
-        -- no unit anywhere: abstract revival (alive in legends; nothing for a local event
-        -- to materialize, so it cannot re-attack this fort)
+        -- titan/colossus with no unit anywhere: abstract revival (alive in legends;
+        -- nothing for a local event to materialize, so it cannot re-attack this fort)
         hf.died_year = -1
         hf.died_seconds = -1
         hf.flags.ghost = false
@@ -421,6 +507,8 @@ local function solstice_roll(verbose)
         for _, hfid in ipairs(s[c].dead_loaded) do candidates[#candidates + 1] = hfid end
         for _, hfid in ipairs(s[c].dead_nounit) do candidates[#candidates + 1] = hfid end
     end
+    -- FBs whose bodies lie at other sites get CREATED bodies -- they roll too
+    for _, hfid in ipairs(s.fb.dead_elsewhere) do candidates[#candidates + 1] = hfid end
     local revived = 0
     for _, hfid in ipairs(candidates) do
         if math.random(REVIVE_CHANCE) == 1 then
@@ -539,6 +627,7 @@ elseif cmd == 'revive' then
         for _, hfid in ipairs(s[c].dead_loaded) do candidates[#candidates + 1] = hfid end
         for _, hfid in ipairs(s[c].dead_nounit) do candidates[#candidates + 1] = hfid end
     end
+    for _, hfid in ipairs(s.fb.dead_elsewhere) do candidates[#candidates + 1] = hfid end
     local done = 0
     while done < n and #candidates > 0 do
         local i = math.random(#candidates)
@@ -554,8 +643,13 @@ else
     print(('tarrasque: %s'):format(enabled and 'ENABLED (1/100 revival roll each 1 Obsidian)' or 'disabled'))
     for _, c in ipairs({{'fb', 'forgotten beasts'}, {'mega', 'titans/colossi'}}) do
         local t = s[c[1]]
-        print(('  %-17s %d alive (%d awaiting return), %d dead (%d revivable here, %d unreachable in history, %d at other sites)')
-            :format(c[2] .. ':', t.alive, t.awaiting, t.dead, #t.dead_loaded, #t.dead_nounit, t.dead_elsewhere))
+        if c[1] == 'fb' then
+            print(('  %-17s %d alive (%d awaiting return), %d dead (%d revivable here, %d creatable from history, %d creatable from other sites)')
+                :format(c[2] .. ':', t.alive, t.awaiting, t.dead, #t.dead_loaded, #t.dead_nounit, #t.dead_elsewhere))
+        else
+            print(('  %-17s %d alive (%d awaiting return), %d dead (%d revivable here, %d unreachable in history, %d at other sites)')
+                :format(c[2] .. ':', t.alive, t.awaiting, t.dead, #t.dead_loaded, #t.dead_nounit, #t.dead_elsewhere))
+        end
     end
     print(('  last solstice roll: %s'):format(state.last_roll_year >= 0 and ('year ' .. state.last_roll_year) or 'never'))
     local shown = 0
@@ -570,3 +664,4 @@ else
     if not enabled then print('  `enable tarrasque` to start; `tarrasque revive` to force a revival.') end
     print('  to hurry a re-attack: `force-more forgotten-beast` (native event, DF picks the beast)')
 end
+

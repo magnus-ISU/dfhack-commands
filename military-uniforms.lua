@@ -2362,8 +2362,12 @@ local function register_gear_notify()
         end
         entry.desc = spec.desc
         entry.dwarf_fn = spec.fn
-        if n.config and n.config.data and not n.config.data[spec.name] then
-            n.config.data[spec.name] = {enabled = true, version = 1}
+        -- registered but OFF by default (both plain and lovely magnus-scripts load this):
+        -- the missing-uniform lines are noise; re-enable via gui/notify for a session
+        -- when wanted (registration turns them back off on the next load)
+        if n.config and n.config.data then
+            n.config.data[spec.name] = n.config.data[spec.name] or {version = 1}
+            n.config.data[spec.name].enabled = false
         end
     end
 end

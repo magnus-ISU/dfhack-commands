@@ -82,28 +82,33 @@ local SUBTYPED = {
 }
 
 -- processing / gathering jobs (no makeable "item"; the job IS the order). Each may
--- carry several natural-language aliases. Material is optional (e.g. cut gems FROM
--- glass) and never forced.
+-- carry several natural-language aliases. Material handling mirrors DF's own work-order
+-- DETAILS screen: jobs whose orders have no material row there (gathering, butchering,
+-- milking/shearing, melting, rendering, charcoal/ash/lye/potash, ...) are flagged
+-- `nomat` -- a material descriptor makes the parse REJECT that interpretation ("raw
+-- green glass collect sand" must not become a collect-sand order). Jobs that DO carry
+-- a legal material detail keep it optional: weave (silk/yarn/adamantine), mint (metal),
+-- cut/encrust gems (specific stone/gem/glass), mill / process plants (specific plant).
 local SPECIAL = {
-    {job = 'CollectSand',     names = {'collect sand', 'gather sand', 'sand'}},
+    {job = 'CollectSand', nomat = true,     names = {'collect sand', 'gather sand', 'sand'}},
     -- webs become SILK THREAD the moment they're picked up, so a repeating collect-webs
     -- order can "keep N in stock" by counting silk thread (item_type THREAD, silk material).
-    {job = 'CollectWebs',     names = {'collect webs', 'collect web', 'gather webs', 'collect silk', 'gather silk'},
+    {job = 'CollectWebs', nomat = true,     names = {'collect webs', 'collect web', 'gather webs', 'collect silk', 'gather silk'},
                               product = {item_type = 'THREAD', flags2 = {'silk'}}},
-    {job = 'CollectClay',     names = {'collect clay', 'gather clay'}},
-    {job = 'CollectHiveProducts', names = {'collect hive products', 'collect honey', 'harvest hive', 'gather hive'}},
-    {job = 'ButcherAnimal',   names = {'butcher animal', 'butcher an animal', 'butcher'}},
+    {job = 'CollectClay', nomat = true,     names = {'collect clay', 'gather clay'}},
+    {job = 'CollectHiveProducts', nomat = true, names = {'collect hive products', 'collect honey', 'harvest hive', 'gather hive'}},
+    {job = 'ButcherAnimal', nomat = true,   names = {'butcher animal', 'butcher an animal', 'butcher'}},
     {job = 'WeaveCloth',      names = {'weave cloth', 'weave', 'make cloth'}},
-    {job = 'MakeCharcoal',    names = {'make charcoal', 'burn charcoal', 'charcoal'}},
-    {job = 'MakeAsh',         names = {'make ash', 'burn ash'}},
-    {job = 'MakeLye',         names = {'make lye', 'lye'}},
-    {job = 'MakePotashFromLye', names = {'make potash from lye', 'potash from lye'}},
-    {job = 'MakePotashFromAsh', names = {'make potash from ash', 'make potash', 'potash'}},
-    {job = 'ExtractMetalStrands', names = {'extract metal strands', 'extract strands', 'process adamantine'}},
+    {job = 'MakeCharcoal', nomat = true,    names = {'make charcoal', 'burn charcoal', 'charcoal'}},
+    {job = 'MakeAsh', nomat = true,         names = {'make ash', 'burn ash'}},
+    {job = 'MakeLye', nomat = true,         names = {'make lye', 'lye'}},
+    {job = 'MakePotashFromLye', nomat = true, names = {'make potash from lye', 'potash from lye'}},
+    {job = 'MakePotashFromAsh', nomat = true, names = {'make potash from ash', 'make potash', 'potash'}},
+    {job = 'ExtractMetalStrands', nomat = true, names = {'extract metal strands', 'extract strands', 'process adamantine'}},
     {job = 'MintCoins',       names = {'mint coins', 'make coins', 'mint'}},
-    {job = 'MilkCreature',    names = {'milk creature', 'milk animal', 'milk'}},
-    {job = 'ShearCreature',   names = {'shear creature', 'shear animal', 'shear'}},
-    {job = 'MeltMetalObject', names = {'melt metal object', 'melt object', 'melt item', 'melt'}},
+    {job = 'MilkCreature', nomat = true,    names = {'milk creature', 'milk animal', 'milk'}},
+    {job = 'ShearCreature', nomat = true,   names = {'shear creature', 'shear animal', 'shear'}},
+    {job = 'MeltMetalObject', nomat = true, names = {'melt metal object', 'melt object', 'melt item', 'melt'}},
     {job = 'CutGems',         names = {'cut gems', 'cut gem', 'cut glass'}},
     {job = 'EncrustWithGems', names = {'encrust with gems', 'encrust gems'}},
     {job = 'MillPlants',      names = {'mill plants', 'mill plant', 'mill'}},
@@ -111,13 +116,13 @@ local SPECIAL = {
     {job = 'ProcessPlantsBag',names = {'process plant to bag', 'process to bag'}},
     {job = 'ProcessPlantsVial',names = {'process plant to vial', 'extract to vial'}},
     {job = 'ProcessPlantsBarrel', names = {'process plant to barrel', 'extract to barrel'}},
-    {job = 'RenderFat',       names = {'render fat', 'make tallow', 'render'}},
-    {job = 'MakeCheese',      names = {'make cheese', 'cheese'}},
-    {job = 'PrepareRawFish',  names = {'prepare raw fish', 'prepare fish', 'clean fish'}},
+    {job = 'RenderFat', nomat = true,       names = {'render fat', 'make tallow', 'render'}},
+    {job = 'MakeCheese', nomat = true,      names = {'make cheese', 'cheese'}},
+    {job = 'PrepareRawFish', nomat = true,  names = {'prepare raw fish', 'prepare fish', 'clean fish'}},
     {job = 'ExtractFromPlants',      names = {'extract from plants', 'extract plants'}},
-    {job = 'ExtractFromRawFish',     names = {'extract from raw fish', 'extract fish'}},
-    {job = 'ExtractFromLandAnimal',  names = {'extract from land animal', 'extract animal'}},
-    {job = 'CatchLiveFish',   names = {'catch live fish', 'catch fish'}},
+    {job = 'ExtractFromRawFish', nomat = true,     names = {'extract from raw fish', 'extract fish'}},
+    {job = 'ExtractFromLandAnimal', nomat = true,  names = {'extract from land animal', 'extract animal'}},
+    {job = 'CatchLiveFish', nomat = true,   names = {'catch live fish', 'catch fish'}},
 }
 
 local vocab  -- built once: list of entries
@@ -157,6 +162,7 @@ local function build_vocab()
             for _, nm in ipairs(sp.names) do
                 local e = add_job(v, nm, sp.job, nil, -1, false)
                 if e and sp.product then e.product = sp.product end   -- countable output for repeats
+                if e and sp.nomat then e.nomat = true end             -- order carries no material detail
             end
         end
     end
@@ -658,6 +664,11 @@ local function build_plan(item, mattoks)
         if #mattoks > 0 then return nil end
         return {item = item, mat = {kind = 'none'}}
     end
+    if item.nomat and #mattoks > 0 then
+        -- this job's work order carries no material detail in DF (collect sand, butcher,
+        -- melt, ...): a material descriptor means this interpretation is wrong
+        return nil, ('"%s" takes no material'):format(item.name)
+    end
     -- no material words -> skip the (allocating) resolver entirely; this is the common case
     local m = (#mattoks == 0) and {kind = 'none'} or resolve_material(mattoks, item, nil)
     if not m then return nil end
@@ -865,7 +876,12 @@ function create_order(input)
     -- amount_total counts JOBS, not finished items. Some jobs yield several per run (stone/metal
     -- blocks 4, glass blocks 1, flasks + goblets/mugs 3), so divide the requested item count by the
     -- yield and round up: "197 blocks" -> 50 jobs (200 blocks), not 197 jobs (788 blocks).
-    local jobs = math.ceil(plan.amount / order_yield(o))
+    -- REPEATING orders top up in batches of at most 10 ITEMS: the stock condition still targets
+    -- the full requested amount, but each (daily) trigger only queues ~10 -- "r200 blocks" keeps
+    -- the stock hovering at 200-209, instead of queueing 200 more and oscillating 200-399.
+    local batch = plan.amount
+    if plan.repeating and batch > 10 then batch = 10 end
+    local jobs = math.ceil(batch / order_yield(o))
     o.amount_total, o.amount_left = jobs, jobs
     if plan.repeating then
         -- Repeating = "keep `amount` of the OUTPUT item in stock". Checked DAILY, but a stock

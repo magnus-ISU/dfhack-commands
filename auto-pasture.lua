@@ -538,11 +538,12 @@ end
 CageGrazeOverlay = defclass(CageGrazeOverlay, overlay.OverlayWidget)
 CageGrazeOverlay.ATTRS{
     desc = 'On a caged tame/trained animal: [Graze]/[Scavenge] to pasture it, [Butcher] to slaughter.',
-    default_pos = {x = -48, y = 10},   -- directly BELOW statue-redirect's Remove button (y=9, h=1)
+    default_pos = {x = -48, y = 9},    -- rows 9-10; statue-redirect's Remove moved to y=11 so the
+                                       -- two overlays never overlap on a built cage's sheet
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
     frame = {w = 12, h = 2},           -- widest label: '[Scavenge] <check>' = 12 cols
-    version = 4,   -- v3 = [Butcher] row + no banner brackets; v4 = frame fixes + moved below Remove
+    version = 5,   -- v4 = frame fixes + below Remove; v5 = moved one row back up
     overlay_onupdate_max_freq_seconds = 0,
 }
 
