@@ -5,7 +5,10 @@ RIGHT-CLICK on the exposed map (dwarfmode/Default) -> enter mining (Dig) mode. R
 map_pos_if_clear() so a click on a panel/notification/other overlay is NOT hijacked.
 
 SHAPED DIG BOXES are reclassified on completion:
-  * 1x1xN single column                 -> STAIRCASE (carve stairs in rock, construct in air).
+  * 1x1xN single column                 -> STAIRCASE (carve stairs in rock, construct in air;
+                                           the floor at the bottom of an air gap gets BOTH a
+                                           carved down stair -- piercing the floor -- and a
+                                           constructed up/down staircase).
   * selection through OPEN-AIR tiles     -> constructed WALLS/FLOORS, bottom-up (wall if the tile
                                             below is a wall -- natural or a placed wall -- else floor).
   * selection of ONLY constructions/ramps (air allowed) -> designate them for REMOVAL.
@@ -270,6 +273,15 @@ local function make_staircase(x, y, z1, z2)
             -- a floor at the bottom still needs a constructed up stair to climb out of.
             set_dig(pos, DV.DownStair)
             log(('  stair CARVE floor dig=DownStair @%s'):format(fmt(pos)))
+            -- if this floor sits at the BOTTOM OF AN AIR GAP (open space above it), the
+            -- up-connection can't be carved -- there's nothing above to carve into -- so it
+            -- ALSO needs a constructed up/down staircase here: the dig pierces the floor so
+            -- the construction's down side connects into the stone below, and its up side
+            -- meets the constructed staircase hanging in the air above.
+            if z < z2 and is_empty({x = x, y = y, z = z + 1}) then
+                construct_real(pos, CT.UpDownStair)
+                log(('  stair CONSTRUCT up/down (air-gap bottom) @%s'):format(fmt(pos)))
+            end
         elseif is_tree(pos) then
             set_dig(pos, DV.Default); log('  stair CHOP tree @' .. fmt(pos))
         elseif is_buildable_open(pos) then
