@@ -2570,6 +2570,18 @@ if args[1] == 'orders' then
     return
 end
 if args[1] == 'altsched' then
+    -- `altsched once` (used by magnus-scripts lovely): only set up if the routines don't
+    -- exist yet, so hand-edited schedules on an already-initialized fort survive every
+    -- session. Bare `altsched` = force re-apply (e.g. after adding squads).
+    if args[2] == 'once' then
+        local routines = df.global.plotinfo.alerts.routines
+        for i = 0, #routines - 1 do
+            if routines[i].name == 'even month' then
+                print('military-uniforms: alt schedules already set up (skipped -- run `military-uniforms altsched` to re-apply).')
+                return
+            end
+        end
+    end
     local n, eidx, oidx = setup_alt_schedules()
     print(('military-uniforms: "even month" (idx %d) + "odd month" (idx %d) schedules ready on %d fort squads.'):format(eidx, oidx, n))
     print('  even month = train even months / Ready odd;  odd month = train odd months / Ready even.')

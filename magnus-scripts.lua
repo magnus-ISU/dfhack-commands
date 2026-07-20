@@ -20,6 +20,9 @@ Activates the "always-on" helpers in this pack:
     * auto-mandate              (enables the background work-order service)
     * military-uniforms         (creates the steel uniform templates + registers
                                  the Equip-screen auto-gear overlay/work-orders)
+    * military-uniforms altsched once  (creates the "even month"/"odd month" training
+                                 routines on every squad -- once per fort; skipped
+                                 if they already exist so schedule edits survive)
     * dwarf-rts                 (registers the RTS-style squad-screen overlay)
     * inside-burrow             (arms the auto-seeded "inside+" burrow watcher)
     * labor-groups once         (builds the ordered crafting Work Details -- once per
@@ -178,6 +181,10 @@ try('agitated-animals-notification', function() dfhack.run_script('agitated-anim
 try('planner-orders', function() dfhack.run_script('planner-orders') end)
 try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
 try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
+-- once per fort: creates the "even month"/"odd month" training routines (train that month,
+-- Ready the rest) on every squad; skipped if they already exist so schedule edits survive.
+try('military-uniforms altsched (even/odd month training routines, once/fort)',
+    function() dfhack.run_command('military-uniforms', 'altsched', 'once') end)
 try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
 -- embark-nobles intentionally NOT run here: it's unfinished and appears to interfere
 -- with position assignments. Run `embark-nobles` by hand if you want it.
