@@ -1,0 +1,8 @@
+tile_page_ha_playable
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_SHAPING_TREE_PAGE]
+	[FILE:images/shaping_tree.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:160:160]

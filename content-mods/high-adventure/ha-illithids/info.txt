@@ -1,0 +1,8 @@
+[ID:HA_illithids]
+[NUMERIC_VERSION:24]
+[DISPLAYED_VERSION:0.24]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (psionics and body forked from Illithids by Myphicbowser; language by DPh Kraken)]
+[NAME:HA - Illithids]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Adds the illithids: ageless, sexless psionic brain-eaters in isolated dark fortresses, hostile to all and trading with none, unable to wear armor but robed and terrible. Castes: illithids (psionic mind blasts, legendary paralytic bite), ur-illithids (iron-hard skin, flight, no hunger), the vast fragile Elder Brain (ten grasping tentacles, the colony's god), and human thralls who breed so the colony may grow. Their Neural Bath devours the brains of sentients (with a chance of ascension to ur-illithid), reclaims dead illithids' memories, extracts precious ur-brains, implants tadpoles in prisoners' skulls, ascends dead ur-illithids into Elder Brains with adamantine thread, and lets the Elder Brain resonate with the colony. Ten psionic levels scale with scholarly mastery. See CHANGES.md.]

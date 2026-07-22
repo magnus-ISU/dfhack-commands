@@ -1,0 +1,13 @@
+graphics_ha_drider
+
+[OBJECT:GRAPHICS]
+
+3x2 (96x64) drider - the engine's creature-sprite canvas is 3 wide x 2 tall;
+dragon-grammar rows, deer-man caste container. Large portraits intentionally
+fall through to the drow portrait file.
+
+[CREATURE_CASTE_GRAPHICS:HA_DROW:DRIDER]
+    [DEFAULT:HA_DRIDER64:LARGE_IMAGE:0:0:2:1:AS_IS]
+    [ANIMATED:HA_DRIDER64:LARGE_IMAGE:0:0:2:1:AS_IS]
+      [LIST_ICON:HA_DRIDER32:0:0]
+      [CORPSE:HA_DRIDER_DEAD:0:0:AS_IS]

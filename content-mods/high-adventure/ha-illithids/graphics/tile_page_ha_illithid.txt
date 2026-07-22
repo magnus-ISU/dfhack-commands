@@ -1,0 +1,38 @@
+tile_page_ha_illithid
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_ILLITHID_BODY]
+	[FILE:images/illithid_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:416]
+
+[TILE_PAGE:HA_ILLITHID_CLOTHING]
+	[FILE:images/illithid_clothes.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:576:736]
+
+[TILE_PAGE:HA_ILLITHID_ARMOR]
+	[FILE:images/illithid_armor.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:416:800]
+
+[TILE_PAGE:HA_ILLITHID_WIELDABLES]
+	[FILE:images/illithid_wieldables.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:960:864]
+
+[TILE_PAGE:HA_ILLITHID_BODY_SPECIAL]
+	[FILE:images/illithid_body_special.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:416]
+
+[TILE_PAGE:HA_ILLITHID_STATUE]
+	[FILE:images/illithid_statue.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_ILLITHID_CORPSE]
+	[FILE:images/illithid_corpse.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]

@@ -1,0 +1,101 @@
+tile_page_imported
+
+[OBJECT:TILE_PAGE]
+
+From CGE Redux - https://steamcommunity.com/sharedfiles/filedetails/?id=3265552481
+From Creature Graphics Extended
+[TILE_PAGE:HA_SUCCUBUS_HAIR_STRAIGHT_BACK]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_straight_back.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_STRAIGHT_FRONT]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_straight_front.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_CURLY_BACK]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_curly_back.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_CURLY_FRONT]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_curly_front.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_BEARD]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_beard.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:448]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_MOUSTACHE]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_moustache.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:448]
+
+[TILE_PAGE:HA_SUCCUBUS_HAIR_SIDEBURNS]
+	[FILE:succubus_dungeon/jacko_imported/succubus_hair_sideburns.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:448]
+
+[TILE_PAGE:HA_SUCCUBUS_CLOTHING_BODY]
+	[FILE:succubus_dungeon/jacko_imported/succubus_clothing_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:608:1696]
+
+[TILE_PAGE:HA_SUCCUBUS_CLOTHING_HEAD]
+	[FILE:succubus_dungeon/jacko_imported/succubus_clothing_head.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:608:544]
+
+[TILE_PAGE:HA_SUCCUBUS_ARMOR_BODY]
+	[FILE:succubus_dungeon/jacko_imported/succubus_armor_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:384:1728]
+
+[TILE_PAGE:HA_SUCCUBUS_CGE_ARMOR_BODY]
+	[FILE:succubus_dungeon/cge_imported/succubus_armor_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:768]
+
+[TILE_PAGE:HA_SUCCUBUS_ARMOR_HEAD]
+	[FILE:succubus_dungeon/jacko_imported/succubus_armor_head.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:384:544]
+
+[TILE_PAGE:HA_SUCCUBUS_WIELDABLES_RIGHT]
+	[FILE:succubus_dungeon/jacko_imported/succubus_wieldables_right.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:992:832]
+	
+[TILE_PAGE:HA_SUCCUBUS_WIELDABLES_LEFT]
+	[FILE:succubus_dungeon/jacko_imported/succubus_wieldables_left.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:992:832]
+
+From Vanilla
+[TILE_PAGE:HA_SUCCUBUS_CHILD_HAIR_STRAIGHT]
+	[FILE:succubus_dungeon/vanilla_imported/succubus_child_hair_straight.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_CHILD_HAIR_CURLY]
+	[FILE:succubus_dungeon/vanilla_imported/succubus_child_hair_curly.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:608]
+
+[TILE_PAGE:HA_SUCCUBUS_CHILD_CLOTHING]
+	[FILE:succubus_dungeon/vanilla_imported/succubus_child_clothes.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:576:736]
+
+[TILE_PAGE:HA_SUCCUBUS_CHILD_ARMOR]
+	[FILE:succubus_dungeon/vanilla_imported/succubus_child_armor.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:416:800]
+
+[TILE_PAGE:HA_SUCCUBUS_CHILD_WIELDABLES]
+	[FILE:succubus_dungeon/vanilla_imported/succubus_child_wieldables.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:960:864]

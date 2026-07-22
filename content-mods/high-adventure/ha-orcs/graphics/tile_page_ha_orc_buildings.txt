@@ -1,0 +1,8 @@
+tile_page_ha_orc_buildings
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_BREEDING_PIT_PAGE]
+	[FILE:images/breeding_pit.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:640:160]

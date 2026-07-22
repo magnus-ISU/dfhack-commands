@@ -1,0 +1,30 @@
+tile_page_ha_drow
+
+[OBJECT:TILE_PAGE]
+
+
+[TILE_PAGE:HA_DROW_BODY]
+	[FILE:images/dark_elf_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:224]
+
+[TILE_PAGE:HA_DROW_HAIR]
+	[FILE:images/dark_elf_hair.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:608]
+
+[TILE_PAGE:HA_DROW_WEARABLES]
+	[FILE:images/dark_elf_wearables.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:128:864]
+
+[TILE_PAGE:HA_DROW_BODY_SPECIAL]
+	[FILE:images/dark_elf_body_special.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:672]
+
+
+[TILE_PAGE:HA_DROW_STATUES]
+	[FILE:images/dark_elf_layered_statues.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM:1:2]

@@ -1,0 +1,34 @@
+interaction_ha_summon_test
+
+[OBJECT:INTERACTION]
+
+Permanent-summon test: modeled on the succubus SPIT_SOUL interactions but with
+IE_TIME_RANGE deliberately omitted (vanilla shrine blessings omit it and their
+summoned pets are permanent).
+
+[INTERACTION:HA_TEST_SUMMON_DOG]
+	[I_SOURCE:CREATURE_ACTION]
+	[I_TARGET:A:LOCATION]
+		[IT_LOCATION:CONTEXT_LOCATION]
+	[I_TARGET:B:LOCATION]
+		[IT_LOCATION:RANDOM_NEARBY_LOCATION:A:2]
+	[I_EFFECT:SUMMON_UNIT]
+		[IE_TARGET:B]
+		[IE_IMMEDIATE]
+		[CREATURE:DOG:DEFAULT]
+		[IE_MAKE_PET_IF_POSSIBLE]
+
+The sapient case, which is what the breeding pit / ceremorphosis actually needs.
+Note the vanilla blessing generator forbids CAN_LEARN summons - citizenship of a
+summoned sapient is exactly what this probes.
+
+[INTERACTION:HA_TEST_SUMMON_DWARF]
+	[I_SOURCE:CREATURE_ACTION]
+	[I_TARGET:A:LOCATION]
+		[IT_LOCATION:CONTEXT_LOCATION]
+	[I_TARGET:B:LOCATION]
+		[IT_LOCATION:RANDOM_NEARBY_LOCATION:A:2]
+	[I_EFFECT:SUMMON_UNIT]
+		[IE_TARGET:B]
+		[IE_IMMEDIATE]
+		[CREATURE:DWARF:DEFAULT]

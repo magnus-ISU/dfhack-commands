@@ -1,0 +1,19 @@
+creature_ha_playable
+
+[OBJECT:CREATURE]
+
+Adventure-mode outsider play for every playable race. Vanilla HUMAN already has
+OUTSIDER_CONTROLLABLE; these additions bring the rest in line. Purely additive
+SELECT edits - no vanilla tokens are removed or changed.
+
+[SELECT_CREATURE:DWARF]
+	[OUTSIDER_CONTROLLABLE]
+
+[SELECT_CREATURE:ELF]
+	[OUTSIDER_CONTROLLABLE]
+
+[SELECT_CREATURE:GOBLIN]
+	[OUTSIDER_CONTROLLABLE]
+
+[SELECT_CREATURE:KOBOLD]
+	[OUTSIDER_CONTROLLABLE]

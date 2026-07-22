@@ -1,0 +1,14 @@
+# Steam Workshop reference mods (downloaded via steamcmd, not our work).
+# Re-download with: steamcmd +login anonymous +workshop_download_item 975370 <id> +quit
+all-races-playable/
+all-races-playable-redo/
+cute-kobold-caverns/
+dark-elves-redux/
+fantastic-fantasy-fortress/
+illithids/
+kobold-caverns-skulking-filth/
+nauts-procedural-dragons/
+succubus-dungeon/
+topples-orcs/
+vanilla-drow-expanded/
+*Highfantasy*.zip

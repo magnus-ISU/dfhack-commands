@@ -1,0 +1,8 @@
+[ID:HA_playable_civs]
+[NUMERIC_VERSION:3]
+[DISPLAYED_VERSION:0.3]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (fork of All Races Playable Redo by Lord Nich; original by Arkbrik/Lovechild)]
+[NAME:HA - Existing Civilizations Playable]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Standalone fork of All Races Playable Redo: play dwarves, humans, elves, goblins, or kobolds in fortress mode, and play any of them as adventure-mode outsiders. Goblins additionally get bronze-working and a single autumn caravan season (High Adventure evil trade bloc). See CHANGES.md for the full diff from the source mod.]

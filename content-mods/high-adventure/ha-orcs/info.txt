@@ -1,0 +1,8 @@
+[ID:HA_orcs]
+[NUMERIC_VERSION:21]
+[DISPLAYED_VERSION:0.21]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (creature and art forked from Topples' Orcs by Topples; entity forked from vanilla humans)]
+[NAME:HA - Orcs]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Adds warlike orcs: bigger than humans, hostile to every civilization including the evil bloc, living in camp-scale human-style hamlets and conquered settlements, working only pure metals - no alloys, no steel, iron above all. One in five orcs is a champion: a hulking skull-cruncher who feels no pain but flies into frequent rages. Ruled by a primitive warband hierarchy of bosses, war bosses, taskmasters, enforcers, and a great warlord who must be a champion. They never trade and never fear death. Fully playable in fortress mode and adventure mode. See CHANGES.md.]

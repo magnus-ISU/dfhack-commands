@@ -1,0 +1,13 @@
+tile_page_ha_drow_corpse
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_DROW_BODY_CORPSE]
+	[FILE:images/dark_elf_body_corpse.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:288]
+
+[TILE_PAGE:HA_DROW_HAIR_CORPSE]
+	[FILE:images/dark_elf_hair_corpse.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:512]

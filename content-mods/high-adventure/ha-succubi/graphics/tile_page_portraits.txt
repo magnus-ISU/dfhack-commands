@@ -1,0 +1,163 @@
+tile_page_portraits
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_BODY]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_body.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:1536:1152]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_HAIR]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_hair.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:576:1536]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_EYES]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_eyes.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_HORNS]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_horns.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:768:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_CAP]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_cap.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_COAT]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_coat.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:960]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_VEST]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_vest.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:960]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_SHIRT]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_shirt.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:960]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_TOGA]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_toga.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:960]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_MAIL_SHIRT]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_chainmail.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:960]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_LEATHER]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_leather.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_BREASTPLATE]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_breastplate.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_CLOAK]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_cloak.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:480]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_CAPE]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_cape.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:384]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_VEIL_HEAD]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_headveil.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_HOOD]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_hood.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_VEIL_FACE]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_veil.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:192]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_HELM]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_helmet.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_TURBAN]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_turban.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_SCARF_HEAD]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_headscarf.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_MASK]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_mask.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:480]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_UNDER]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_under.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:96:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_BUSTIER]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_bustier.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:192]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CLOTHING_CORSET]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_clothing_corset.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:672:192]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_BODY]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_body.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:864:576]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_EYES]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_eyes.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_HAIR]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_hair.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:288:1536]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_HORNS]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_horns.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:288]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_CLOTHING]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_clothing.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:384:576]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_CHILD_CLOTHING_BUSTIER]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_child_clothing_bustier.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:384:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_BABY]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_baby.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:96]
+
+[TILE_PAGE:PORTRAIT_HA_SUCCUBUS_BABY_EYES]
+	[FILE:succubus_dungeon/portraits/succubus_portrait_baby_eyes.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:96]

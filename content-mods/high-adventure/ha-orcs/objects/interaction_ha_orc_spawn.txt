@@ -1,0 +1,18 @@
+interaction_ha_orc_spawn
+
+[OBJECT:INTERACTION]
+
+Breeding pit summon: only the smaller SNAGA caste, never champions. Permanent
+(no IE_TIME_RANGE - vanilla blessing precedent); the ha-orcs DFHack watcher
+adopts the newborn into the fort.
+
+[INTERACTION:HA_SPAWN_ORCLING]
+	[I_SOURCE:CREATURE_ACTION]
+	[I_TARGET:A:LOCATION]
+		[IT_LOCATION:CONTEXT_LOCATION]
+	[I_TARGET:B:LOCATION]
+		[IT_LOCATION:RANDOM_NEARBY_LOCATION:A:2]
+	[I_EFFECT:SUMMON_UNIT]
+		[IE_TARGET:B]
+		[IE_IMMEDIATE]
+		[CREATURE:HA_ORC:SNAGA]

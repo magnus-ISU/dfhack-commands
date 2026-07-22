@@ -1,0 +1,21 @@
+creature_ha_summon_test
+
+[OBJECT:CREATURE]
+
+Test-only vanilla edit (this mod is never shipped): dwarves cast the summons on
+greeting, so an ordinary embark produces summons within a few hundred ticks of
+social contact. Dog summons are frequent, dwarf summons rarer.
+
+[SELECT_CREATURE:DWARF]
+	[CAN_DO_INTERACTION:HA_TEST_SUMMON_DOG]
+		[CDI:ADV_NAME:Summon test dog]
+		[CDI:VERB:conjure a test dog:conjures a test dog:NA]
+		[CDI:USAGE_HINT:GREETING]
+		[CDI:TARGET:A:SELF_ONLY]
+		[CDI:WAIT_PERIOD:400]
+	[CAN_DO_INTERACTION:HA_TEST_SUMMON_DWARF]
+		[CDI:ADV_NAME:Summon test dwarf]
+		[CDI:VERB:conjure a test dwarf:conjures a test dwarf:NA]
+		[CDI:USAGE_HINT:GREETING]
+		[CDI:TARGET:A:SELF_ONLY]
+		[CDI:WAIT_PERIOD:1200]

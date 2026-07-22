@@ -1,0 +1,8 @@
+[ID:HA_dark_dwarves]
+[NUMERIC_VERSION:4]
+[DISPLAYED_VERSION:0.4]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure]
+[NAME:HA - Dark Dwarves]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Adds dark dwarves: carnivorous cannibal dwarves bent wholly on evil, with ironclad in-group loyalty - they never tantrum and never have bad thoughts. They live in mountain fortresses and deep mountain halls (never hillocks), snatch children, sap fortress walls with great picks, favor gods of death, and trade only with the evil bloc, arriving in winter. Fully playable in fortress mode and as adventure-mode outsiders. Fork of the vanilla dwarf raws; see CHANGES.md.]
