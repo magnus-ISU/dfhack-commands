@@ -1,6 +1,6 @@
 [ID:HA_orcs]
-[NUMERIC_VERSION:21]
-[DISPLAYED_VERSION:0.21]
+[NUMERIC_VERSION:22]
+[DISPLAYED_VERSION:0.22]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
 [AUTHOR:High Adventure (creature and art forked from Topples' Orcs by Topples; entity forked from vanilla humans)]

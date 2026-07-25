@@ -13,6 +13,9 @@ graphics_creatures_illithid_layered
 
 		[LAYER_GROUP]
 		[LAYER:SHADOW:HA_ILLITHID_BODY:4:0]
+			[CONDITION_CASTE:FEMALE]
+			[CONDITION_CASTE:MALE]
+			[CONDITION_CASTE:AGENDER]
 
 	cape
 

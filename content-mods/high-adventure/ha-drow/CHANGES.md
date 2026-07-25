@@ -246,3 +246,6 @@ copied verbatim from **vanilla giant cave spider**. All IDs `HA_*`; nothing vani
 - (Drider art note: the earlier layer fix was verified correct in the installed
   files; the "hair only" sighting came from a session started before the fix was
   installed — graphics index at game launch, restart required.)
+
+## v0.35
+- Banditry 20 -> 40 (LOCAL already present).

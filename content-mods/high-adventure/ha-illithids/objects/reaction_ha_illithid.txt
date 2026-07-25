@@ -2,34 +2,39 @@ reaction_ha_illithid
 
 [OBJECT:REACTION]
 
+[REACTION:HA_IMPLANT_TADPOLE]
+	[NAME:a. Implant a tadpole into a prisoner]
+	[BUILDING:HA_NEURAL_BATH:CUSTOM_T]
+	[SKILL:EXTRACT_STRAND]
+
+[REACTION:HA_DEVOUR_PRISONER]
+	[NAME:b. Devour the brain of a caged prisoner]
+	[BUILDING:HA_NEURAL_BATH:CUSTOM_P]
+	[SKILL:EXTRACT_STRAND]
+
 [REACTION:HA_DEVOUR_BRAIN]
-	[NAME:devour the brain of a sentient creature]
+	[NAME:c. Devour the brain of a dead sentient]
 	[BUILDING:HA_NEURAL_BATH:CUSTOM_D]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:HA_RECLAIM_MEMORIES]
-	[NAME:reclaim a dead illithid's memories]
+	[NAME:d. Reclaim a dead illithid's memories]
 	[BUILDING:HA_NEURAL_BATH:CUSTOM_R]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:HA_EXTRACT_UR_BRAIN]
-	[NAME:extract the precious brain of an ur-illithid]
+	[NAME:e. Extract the precious brain of a ulitharid]
 	[BUILDING:HA_NEURAL_BATH:CUSTOM_E]
 	[SKILL:EXTRACT_STRAND]
 
-[REACTION:HA_IMPLANT_TADPOLE]
-	[NAME:implant tadpole into prisoner]
-	[BUILDING:HA_NEURAL_BATH:CUSTOM_T]
-	[SKILL:EXTRACT_STRAND]
-
 [REACTION:HA_ASCEND]
-	[NAME:ascend a dead ur-illithid]
+	[NAME:f. Ascend a dead ulitharid's brain]
 	[BUILDING:HA_NEURAL_BATH:CUSTOM_A]
-	[REAGENT:brain:1:MEAT:NONE:CREATURE_MAT:HA_ILLITHID:UR_BRAIN]
+	[REAGENT:brain:1:TOOL:ITEM_TOOL_HA_UR_BRAIN:NONE:NONE]
 	[REAGENT:adam:15000:THREAD:NONE:INORGANIC:ADAMANTINE]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:HA_RESONATE]
-	[NAME:resonate with the colony]
+	[NAME:g. Resonate with the colony]
 	[BUILDING:HA_NEURAL_BATH:CUSTOM_SHIFT_R]
 	[SKILL:LOGIC]

@@ -62,3 +62,6 @@ is untouched and both civs coexist.
 ## Known gaps
 - "Allies only with drow and goblins, rarely" is emergent from the shared snatcher bloc +
   ethics proximity — verify in worldgen legends.
+
+## v0.5
+- Banditry 20 -> 40 (LOCAL already present).

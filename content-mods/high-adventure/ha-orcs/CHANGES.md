@@ -144,3 +144,6 @@ translation `HA_BLACK_SPEECH`, all interactions `HA_*`-prefixed, graphics pages
 - Sieges: orcs keep the pick as a digger tool but no great picks and no
   `SIEGE_SKILLED_MINERS` → picks in sieges rare/weak, per spec.
 - Worldgen survival while hostile to everyone — watch civ counts in legends.
+
+## v0.22
+- Banditry 10 -> 50 (+LOCAL). Also removed a duplicate `[BANDITRY:10]` lower in the entity that was silently overriding the intended value (last-wins), so orcs were effectively at 10 before.

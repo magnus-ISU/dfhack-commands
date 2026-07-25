@@ -1,0 +1,8 @@
+[ID:HA_increased_banditry]
+[NUMERIC_VERSION:1]
+[DISPLAYED_VERSION:0.1]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure]
+[NAME:High Adventure - Increased Banditry]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Raises the rate at which the two vanilla base civilizations throw off bandit groups - Humans to 30, Elves to 20 (confined to their own lands) - via SELECT_ENTITY so the change stays separate from the playable-civs component and can be toggled on its own at worldgen. Does not touch any of the suite's own civilizations (their banditry is set in their own mods). Raws only; affects worldgen. See CHANGES.md.]

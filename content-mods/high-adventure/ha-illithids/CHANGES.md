@@ -1,5 +1,183 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.39 — corpse hauling to the bath (dump-zone pipeline)
+- Reagent-less bath jobs (devour/reclaim/extract) consumed the nearest corpse without anyone
+  hauling it. Now, for a bath's queued corpse jobs, the mod keeps a small supply of matching
+  corpses hauled to the workshop: it creates a 1x1 garbage-dump Civzone beside the bath (once,
+  cached per bath), flags matching corpses for dumping so haulers carry them there, and
+  un-forbids the delivered (dumped) corpses so the reaction can consume them. Over-haul is
+  capped (stops once ~3 corpses wait at the bath; flags at most 3/tick).
+- MECHANISM IS ISOLATED for easy refactor: ensure_haul_target / request_haul / reclaim_hauled
+  are the only haul-mechanism functions; the pipeline (which corpse, when) is separate. If DF
+  won't haul to a script-made dump zone, swap those three (e.g. a posted DumpItem/BringItemToShop
+  job) without touching the pipeline.
+- CAVEAT: UNVERIFIED. DF suppresses ALL civilian hauling during a siege/alert, so this only
+  works on a calm fort -- confirm there that dump-flagged corpses actually get carried to the
+  bath's dump zone. Zone creation itself is confirmed working (Civzone subtype Dump registers
+  in ZONE_DUMP). Takes effect on the next fort/save load (tick re-registration).
+
+## v0.38 — elder brain grayscale-flash fixed at the source
+- The real cause: the creature-level `[CREATURE_GRAPHICS:HA_ILLITHID]` `SHADOW` layer was the
+  ONE unconditioned layer, so it leaked onto the ELDER_BRAIN caste; on the animated frame the
+  elder fell back to that creature-level art (grayscale, since the brain-body can't render the
+  illithid body page). The drow scopes its shadow with CONDITION_CASTE (so driders never flash)
+  -- the illithid didn't. Fixed by scoping the illithid SHADOW layer to FEMALE/MALE/AGENDER, so
+  no creature-level layer applies to the elder and its caste graphics render steadily. (All the
+  earlier DEFAULT-vs-ANIMATED toggling in the caste block was treating a symptom.) Graphics
+  re-index at launch, so this needs a DF restart, not just a reload.
+
+## v0.37 — staffing tick fix, unassign, thrall ghosts
+- **The periodic tick was never being (re)scheduled** after hot-reloads -- the fast tick that
+  runs staff_baths wasn't registered, so nothing assigned/cancelled bath jobs. Fixes:
+  self-enable always runs on load; do_enable cancels before scheduling (scheduleEvery does not
+  replace a key); staff_baths runs on the fast (20-tick) tick for prompt assign/cancel. NOTE:
+  DFHack script reload does NOT re-run do_enable -- these take effect on the next fort/save
+  load, not a live hot-reload.
+- **Unassign after work**: a bath with no jobs clears its worker profile; a cancelled job
+  also releases its worker (removeWorker) and drops the pinned profile.
+- **Feasibility checked FIRST** (before worker/legality), so an infeasible job is cancelled
+  even after a worker already claimed it.
+- **Thralls never linger as ghosts**: the tick clears flags3.ghostly from thrall castes.
+  Illithids still ghost normally unless devoured/reclaimed at the pool or memorialized.
+
+## v0.36 — bath staffing: unassign when idle, cancel infeasible jobs, quiet resonate
+- **Unassign after the job**: once a bath has no HA_ jobs left, staff_baths clears the
+  worker profile it set (only ever a mod-set one, never the player's), so the workshop
+  isn't left restricted to one dwarf while idle.
+- **Cancel infeasible jobs**: a queued job whose material isn't on hand is cancelled --
+  devour (no sentient corpse), reclaim (no illithid corpse), extract (no ulitharid corpse),
+  implant/devour-prisoner (no caged prisoner), ascend (no preserved brain tool + 15000
+  adamantine thread). Resonate needs no material. Feasibility is checked BEFORE the
+  worker/legality logic, so an infeasible job is cancelled even after a worker has already
+  claimed it (everyone now has the strand labor, so jobs get grabbed within a tick or two).
+- **Resonate no longer announces** (it's a frequent repeat job; the message spammed the
+  log). Its effects are unchanged.
+- Verified live: a queued resonate job correctly staffed the elder brain (its only legal
+  caste); fort stable.
+
+## v0.35 — bath staffing by workshop profile (labor left alone)
+- The script no longer manages anyone's strand-extraction labor beyond keeping it ON for
+  every illithid citizen (keep_strand_enabled) so all castes can physically staff the bath.
+  No more stripping, no more temporary grant/revoke.
+- **staff_baths()** steers each queued bath job to a legal, preference-ranked worker via the
+  workshop's permitted-workers profile:
+  - Legality: resonate = elder brains only; implant = anyone (incl. thralls); devour /
+    reclaim / extract / ascend = any non-thrall.
+  - Preference: illithid > ulitharid > elder brain > thrall (idle candidates win ties).
+  - If the player pre-assigned the workshop, it's left alone.
+  - A job an illegal worker grabbed is cancelled after reassigning the shop; a job with no
+    legal candidate (e.g. resonate with no elder, or an all-thrall fort) is cancelled.
+- NOTE: shipped but NOT yet verified live — the test world crashed (see below) before a
+  reload could exercise it.
+
+## v0.34 — graceful neural-bath staffing (no more labor stripping)
+- **Stopped auto-removing the strand-extraction labor from ulitharids** (and from
+  ulitharid-caste founders, which read as "illithids in the starting 7"). The old
+  labor_policy stripped EXTRACT_STRAND from ulitharids and promote_to_ur did the same on
+  promotion -- both removed.
+- **Graceful bath staffing (manage_bath_labor)**: when a neural bath has a queued job and
+  no eligible illithid has the strand labor, the mod enables EXTRACT_STRAND on ONE random
+  appropriate worker (non-thrall, non-elder citizen), and hands the labor back once no bath
+  job remains (only from workers it assigned -- never the player's own labor choices). So
+  bath jobs always get staffed without the player micromanaging labors, and elites aren't
+  permanently doing menial work. Elder brains remain out of the labor pool; resonate is
+  unchanged.
+
+## v0.33 — reclaim cap, awakening display, innate shields, crash revert
+- **Reclaim rewards only the 10 lowest-level illithids** (sorted by psi level, then scholar
+  skill), instead of the whole colony.
+- **Psionic-awakening announcement**: shows only the HIGHEST level newly reached (a IV->VI
+  jump prints just "VI", not V and VI), with capital roman numerals.
+- **Innate base shields for worldgen/adventure**: each caste's base-level best shield is now
+  innate in the raws -- illithid = psychic barrier (I), ulitharid = psychic shield (II),
+  elder brain = psychic aegis (III) -- so they defend even when the fort script isn't
+  running. The script (apply_shield) now only grants/manages shields STRICTLY ABOVE that
+  innate base, so it never duplicates the base tier and still keeps a single best higher
+  shield. (Attacks were already innate per caste.)
+- **Brain tool uses the vanilla body-part brain sprite** (graphics_ha_brain.txt ->
+  TOOL_GRAPHICS on the global BODYPARTS page, 0:13; no art shipped).
+- **CRASH FIX / revert**: the v0.32 cage-emptying (uncage_unit erasing cage<->unit
+  general_refs on devour/implant) crashed DF's UI renderer a few ticks later -- manual cage
+  ref surgery is unsafe on this build (DFHack releases caged units via pit jobs, never ref
+  edits). Reverted: devoured/implanted prisoners no longer scrub the cage, so the emptied
+  cage keeps its former-occupant name (cosmetic) but the game stays stable.
+
+## v0.31 — ascends-spam fix, workshop order, brain name prefix
+- **No more "ascends: psionic awakening" spam on load**: apply_levels tracks a per-unit
+  applied level (psi_applied) and stays silent on first sight (fort load, migrant
+  arrival, fresh spawn) — natural ulitharids (base 4) and elder brains (base 6) no
+  longer announce their base levels. Only genuine in-session gains (skill growth, pit
+  ascension) announce.
+- **Workshop task order forced via "a."–"g." name prefixes**: DF sorts a custom
+  workshop's task list ALPHABETICALLY by display name (not raw/entity order), so the
+  reactions are prefixed a.–g. to land in the intended order (implant, devour-prisoner,
+  devour-sentient, reclaim, extract, ascend, resonate).
+- **Brain reads "preserved ulitharid brain"** (no "illithid"/"iron" prefix): added
+  [PREFIX:NONE] to the UR_BRAIN material so the creature-name prefix is suppressed.
+
+## v0.30 — ulitharid rename, bath polish, prisoner/ascend/syndrome fixes
+- **find_syndrome fixed for this DFHack build**: world.raws.syndromes doesn't exist
+  here, so the old lookup errored on every call — silently breaking ALL syndrome
+  application (psi ascension AND caste transforms). Now iterates df.syndrome.find(id).
+- **"ur-illithid" renamed to "ulitharid" everywhere it shows** (caste name, reaction
+  names, item, announcements, description). Internal IDs (ULITHARID, UR_BRAIN,
+  promote_to_ur) unchanged. Transform syndrome "become ur-illithid" -> "become ulitharid".
+- **Workshop task order sorted**: implant, devour-prisoner, devour-sentient, reclaim,
+  extract, ascend, resonate (reordered PERMITTED_REACTION in the entity, which drives
+  the in-workshop menu order). All reaction NAMEs recapitalized/clarified.
+- **Brain item reads "preserved ulitharid brain"** (no "iron" prefix): repurposed the
+  orphaned UR_BRAIN material (STONE_TEMPLATE, adj "preserved ulitharid") as the tool's
+  material and set the tool NAME to "brain". Extract now mints it from that material.
+- **Ascend consumes the brain item as its reagent**: the reaction reagent (preserved
+  ulitharid brain tool + adamantine thread) is hauled and consumed natively. on_ascend
+  still prefers to REVIVE an actual dead ulitharid and transform it into an Elder Brain
+  (preserving that specific creature + histfig); it only mints a fresh Elder Brain when
+  no dead ulitharid exists.
+- **Caged-prisoner detection fixed**: caged units are often dropped from units.active,
+  so find_prisoner now scans CAGE items for their contained unit (with an active-list
+  fallback). This is why implant / devour-prisoner couldn't find caged sentients.
+
+## v0.28 — Neural Bath fixes (reclaim XP / ascend art / brain item)
+- **add_xp leveling fixed**: the new-skill branch no longer skips the level-up loop,
+  and every XP grant now re-runs apply_levels(u). Reclaiming a lost illithid (+1000 xp)
+  now actually raises the skill rating and can trigger a psi level-up, matching how
+  naturally-earned XP behaves.
+- **Ascend/promotion now changes body & art, not just descriptions**: set_caste applies
+  a permanent CE_BODY_TRANSFORMATION (new HA_TF_CARRIER syndromes "become ur-illithid" /
+  "become elder brain") *before* rewriting u.caste, so DF registers a real caste
+  transition and rebuilds the body/graphics instead of skipping it as a no-op. Identity
+  caches (u.caste, enemy.normal_race/caste, were_race/caste, soul.race/caste, histfig
+  race/caste) are then set so the change sticks (no revert) and the nobles/labor screens
+  update. This mirrors the succubus-corruption transform pattern.
+- **Ur-illithid brain is now a real, non-rotting, inedible item**: extract produces
+  ITEM_TOOL_HA_UR_BRAIN (a tool — tools never rot and can't be eaten) instead of a MEAT
+  brain. Removed [EDIBLE_RAW] from the UR_BRAIN creature material for good measure.
+- **Ascend now costs an ur-illithid brain, not illithid meat**: HA_ASCEND reagent changed
+  to TOOL:ITEM_TOOL_HA_UR_BRAIN (+ adamantine thread). The brain is a genuine reaction
+  reagent, so DF hauls it into the workshop and consumes it natively — no script-side
+  item deletion for the ascend step.
+
+## v0.26b
+- Elder brain grayscale flash fixed properly: added ANIMATED (same LARGE_IMAGE as
+  DEFAULT). With DEFAULT only, DF alternates to the creature-level mb art for the
+  animated frame, which the brain-body cannot render -> placeholder flicker. The
+  v0.20 removal of ANIMATED was the wrong fix; both frames now hold the elder.
+
+## v0.26
+- **New job: devour a sentient prisoner** - devours a caged brain-bearing sentient
+  directly (kill + gore, meat/fat, +1000 scholar xp, 20% ur-ascension), thralls barred.
+- **Thralls excluded from reclaim & resonate XP** (they still get resonate happiness).
+- Confirmed (post-snapshot-fix): devour rejects non-sentient corpses (CAN_LEARN
+  check), thralls cannot devour, resonate is elder-only. The earlier no-XP symptom
+  was the whole script not loading - installed_mods snapshot had been wiped; the
+  script/dispatcher (onJobCompleted + worker tracking) is the orc-proven path.
+
+## v0.25
+- Restored the Neural Bath graphics wiring (graphics_ha_illithid_buildings.txt +
+  tile_page) - the .txt files were collateral of an earlier graphics-folder wipe
+  while the neural_bath.png image survived, so the bath had lost its custom art.
+  Rebuilt in the proven orc-pit format (4-stage, 1-based rows).
+
 ## v0.24 — ur head remap on the correct page
 - v0.23 remapped BODY_SPECIAL faces, but those are undead-state layers; LIVING
   illithid faces (FACE_F1-M4) live on the main BODY page. Now remapping FACE layers
@@ -267,3 +445,6 @@ Upgrades are permanent syndromes applied by the watcher (fort + adventure).
 - Devour-corpse butchery products use GET_MATERIAL_FROM_REAGENT (muscle/fat) —
   verify yields in play. Implant head-burst degrades gracefully to messy death.
 - mb portrait/statue art not carried (referenced dead castes); polish pass later.
+
+## v0.29
+- Banditry 10 -> 40, added `[LOCAL_BANDITRY]` (single-token change atop the v0.28 caste/art work; nothing else altered).

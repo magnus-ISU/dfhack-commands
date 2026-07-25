@@ -1,0 +1,17 @@
+entity_ha_increased_banditry
+
+[OBJECT:ENTITY]
+
+Raises bandit-group generation for the two vanilla base civilizations, kept out of
+the playable-civs component so it can be toggled independently. SELECT_ENTITY
+appends these tokens to the existing vanilla entities; the later BANDITRY value
+overrides the vanilla one at worldgen.
+
+	Humans: vanilla BANDITRY:10 -> 30 (no LOCAL_BANDITRY, matching vanilla scope)
+[SELECT_ENTITY:PLAINS]
+	[BANDITRY:30]
+
+	Elves: vanilla has no banditry -> 20, confined to their own territory
+[SELECT_ENTITY:FOREST]
+	[BANDITRY:20]
+	[LOCAL_BANDITRY]

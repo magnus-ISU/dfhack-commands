@@ -75,3 +75,6 @@ with the original.
   `TOLERATES_SITE:CITY` so conquered foreign sites are not occupied. Survival outlook
   is good — the measured civs were *winning* their wars (occupied elf retreats), and
   demon combat strength is individual, not site-count-based. Verify next worldgen.
+
+## v0.15
+- Banditry 30 -> 40, added `[LOCAL_BANDITRY]`.

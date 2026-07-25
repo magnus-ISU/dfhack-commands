@@ -2,7 +2,7 @@ graphics_ha_ur
 
 [OBJECT:GRAPHICS]
 
-Ur-illithid: full varied illithid art, FACE layers remapped to the six-tentacle
+Ulitharid: full varied illithid art, FACE layers remapped to the six-tentacle
 ur head columns (4 & 6) on both body pages.
 
 [CREATURE_CASTE_GRAPHICS:HA_ILLITHID:ULITHARID]
