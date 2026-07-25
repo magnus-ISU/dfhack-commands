@@ -1,24 +1,28 @@
--- Adds a "needs a tomb" notification to DFHack's gui/notify panel.
---@ module = false
+-- Adds a "needs a tomb" notification + a dead-dwarf family/info browser.
+--@module = true
 --[[
-Registers a custom notification (name: "needs_tomb") into the same notification
-list used by "moody dwarf is gathering items" and "N groups of citizens are
-stranded" (DFHack's gui/notify overlay).
-
-It alerts when fortress dwarves have died and are not at rest -- their corpse is
-loose (not interred in a coffin), OR they are walking as a GHOST (even if some
-remains are interred, or the body is gone) -- and have not been memorialized (a
-built memorial slab lays a ghost to rest just as burial does):
+Registers a custom notification (name: "needs_tomb") into DFHack's gui/notify
+overlay: it alerts when fortress dwarves have died and are not at rest -- a loose
+corpse (not interred), OR walking as a GHOST -- and have not been memorialized:
     * exactly one  -> "Urist McMiner needs a tomb!"
     * more than one -> "2 dwarves need tombs!"
 
-Clicking the notification opens a list of the dwarves and what killed them.
-    * Clicking a name zooms the map to that dwarf's corpse.
-    * A button engraves a memorial slab (manager work order) for each of them.
+Clicking the notification opens the DEAD BROWSER, a two-pane window:
+    * LEFT: your dead, in two sections -- "Needs a tomb" then "Entombed"
+      (dwarves already at rest in a coffin).
+    * RIGHT: the selected dwarf's information -- profession, when/how they died,
+      notable skills, kills, and their RELATIVES (parents, spouse, children,
+      siblings, lovers). Click a relative to follow the family tree to them
+      (living or dead); Back returns.
+    * A "Go to corpse" button zooms the map to the selected dwarf's remains.
+    * "Engrave memorial slabs for all needing" queues a memorial slab (manager
+      work order) for everyone in the needs-a-tomb section.
 
-Run once per DFHack session to register. To make it permanent, add the line
-    needs-tomb-notification
-to your dfhack-config/init/dfhack.init (or onMapLoad.init).
+The same browser is reachable from the vanilla Units screen's Dead/Missing tab
+via a "Family & info" button (overlay `needs-tomb-notification.deceased`).
+
+Run once per DFHack session to register (or add `needs-tomb-notification` to
+dfhack-config/init/dfhack.init). Enable the overlay with `overlay rescan` once.
 ]]
 
 local NAME = 'needs_tomb'
@@ -26,68 +30,46 @@ local NAME = 'needs_tomb'
 local dlg = require('gui.dialogs')
 local gui = require('gui')
 local widgets = require('gui.widgets')
+local overlay = require('plugins.overlay')
 
 -- ---------------------------------------------------------------------------
 -- detection
 -- ---------------------------------------------------------------------------
 
 local function unit_display_name(u)
-    -- just the personal name, e.g. "Vucar Domastolis"
     return dfhack.translation.translateName(dfhack.units.getVisibleName(u))
 end
 
--- Cache the scan so the ~1/second notification refresh doesn't re-walk every corpse and unit
--- each time. Two guards, together: (1) a FRAME-counter check -- if no game tick has advanced
--- since our last call (the game is PAUSED, or this is a second call in one frame) nothing can
--- have changed, so reuse for free; (2) a wall-clock TTL -- while UNPAUSED the frame advances
--- every tick, so the frame check alone would thrash; the TTL then throttles to one scan per
--- minute. Deaths/burials/memorials change slowly, so up to a minute of staleness is fine.
+-- Cache the scan so the ~1/second notification refresh doesn't re-walk every corpse each time.
 local SCAN_TTL_MS = 60000
-local cache = {frame = nil, t = nil, list = {}}
+local cache = {frame = nil, t = nil, result = nil}
 
--- Only SAPIENT (intelligent, CAN_LEARN) creatures become ghosts -- tame animals never do, so they
--- are never counted even when they belong to the fort.
+-- Only SAPIENT (CAN_LEARN) creatures become ghosts / get tombs.
 local function is_sapient(u)
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
     return caste ~= nil and caste.flags.CAN_LEARN or false
 end
 
--- A dead unit whose loose corpse means it will haunt the fort as a ghost if not laid to rest. Only
--- the fort's OWN people come back to haunt it -- so the FINAL list (below) requires a loose corpse
--- to belong to the fort (isOwnCiv / isOwnGroup, which read stable data that survives death, unlike
--- the resident/merchant unit flags). A dead FOREIGN visitor, mercenary or defeated attacker does NOT
--- ghost your fort even if it has a historical figure (e.g. a passing human bard) -- those were the
--- over-zealous false positives. `ghost_risk` here is just the first, cheap cut that drops the
--- obviously-not-a-tomb cases before the membership test:
---   * INVADERS (dead attackers) and the undead / opposed-to-life -- isInvader/isOpposedToLife stay
---     reliable on the dead (verified: the fort's ~340 dead attackers all still test as invaders);
---   * wild / unaffiliated creatures -- a cavern troll or feral beast that died here has NO
---     civilization (civ_id < 0), whereas the fort's own dead carry the fort civ.
--- (A GHOST already walking is exempt from the membership test -- it is surfaced no matter whose it
--- was in life, so a rare visitor/merchant ghost is never missed.)
+-- First cheap cut: drop dead attackers / undead / wild creatures before the membership test.
 local function ghost_risk(u)
     return u.civ_id and u.civ_id >= 0
         and not dfhack.units.isInvader(u) and not dfhack.units.isOpposedToLife(u)
 end
 
+-- Full scan: walks corpses + ghosts once, then derives the two lists plus a
+-- unit-id -> corpse-position map (for jumping to a relative's remains).
+-- Returns (and caches) {needs_tomb=<list>, entombed=<list>, pos_by_unit=<map>}.
 local function scan()
     local fc = df.global.world.frame_counter or 0
     local now = dfhack.getTickCount()
-    if cache.list and (fc == cache.frame or (cache.t and now - cache.t < SCAN_TTL_MS)) then
-        cache.frame = fc     -- track the latest frame so a following pause reuses immediately
-        return cache.list
+    if cache.result and (fc == cache.frame or (cache.t and now - cache.t < SCAN_TTL_MS)) then
+        cache.frame = fc
+        return cache.result
     end
 
-    local fortrace = df.global.plotinfo.race_id
-    local fortciv  = df.global.plotinfo.civ_id
-
-    -- per dead unit: is any part interred (buried) / is any part loose (unburied)
+    -- per dead unit: interred part / loose part / positions / ghost
     local info, order = {}, {}
-    -- hf ids with a BUILT memorial slab: a memorial lays a ghost to rest just like a burial, so
-    -- a memorialized dwarf needs no tomb. The slab's `topic` is the memorialized hf; it must be
-    -- ENGRAVED as a Memorial and actually BUILT (in_building) -- an engraved slab still sitting in
-    -- a stockpile hasn't laid anyone to rest yet.
     local memorialized = {}
     local vec = df.global.world.items.other.IN_PLAY
     for i = 0, #vec - 1 do
@@ -105,44 +87,33 @@ local function scan()
         then
             local uid = it.unit_id
             local u = uid and uid >= 0 and df.unit.find(uid)
-            -- Anyone who can become a GHOST needs laying to rest: any dead sapient at the
-            -- fort that isn't a hostile invader (or the undead) -- our citizens & residents,
-            -- plus visitors and caravan merchants who died here (see ghost_risk). Require the
-            -- unit to be actually dead (a CORPSEPIECE can also be a limb lost by a LIVING unit).
             if u and dfhack.units.isDead(u) and is_sapient(u) and ghost_risk(u) then
                 local rec = info[uid]
                 if not rec then
-                    rec = {unit = u, buried = false, unburied = false, pos = nil,
+                    rec = {unit = u, buried = false, unburied = false, pos = nil, bpos = nil,
                            ghostly = u.flags3.ghostly}
                     info[uid] = rec
                     table.insert(order, uid)
                 end
+                local x, y, z = dfhack.items.getPosition(it)
                 if it.flags.in_building then
                     rec.buried = true                 -- in a coffin
+                    if not rec.bpos and x then rec.bpos = xyz2pos(x, y, z) end
                 else
                     rec.unburied = true
-                    if not rec.pos then
-                        local x, y, z = dfhack.items.getPosition(it)
-                        if x then rec.pos = xyz2pos(x, y, z) end
-                    end
+                    if not rec.pos and x then rec.pos = xyz2pos(x, y, z) end
                 end
             end
         end
     end
 
-    -- GHOSTS: any ghost wandering the fort is DEFINITIVELY not at rest and needs a slab/tomb --
-    -- even if some remains are interred (a partial burial still leaves the ghost), or the body is
-    -- gone entirely (no corpse item at all). Do NOT require fort-GROUP membership here: a ghost in
-    -- the (bounded) active-unit list is on THIS map haunting THIS fort no matter who it was in life
-    -- -- e.g. a dead merchant, or a resident/mercenary whose histfig never carried a fort-group link
-    -- (is_fort_member would wrongly drop them -- exactly the bug that let a caravan merchant's ghost
-    -- slip past the alert). Ghosts are always dead & sapient, so those two guards are all we need.
+    -- GHOSTS: any ghost on the map is not at rest, whatever the burial state.
     for _, u in ipairs(df.global.world.units.active) do
         if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) then
             local uid = u.id
             local rec = info[uid]
             if not rec then
-                rec = {unit = u, buried = false, unburied = false, pos = nil, ghostly = true}
+                rec = {unit = u, buried = false, unburied = false, pos = nil, bpos = nil, ghostly = true}
                 info[uid] = rec
                 table.insert(order, uid)
             else
@@ -155,41 +126,36 @@ local function scan()
         end
     end
 
-    -- a dwarf needs a tomb if their body is loose (a loose part, none interred) OR they are a
-    -- ghost (not at rest regardless of burial) -- and they have NOT been memorialized (a built
-    -- memorial slab lays their ghost to rest just as a burial would)
-    local list = {}
+    local pos_by_unit = {}
+    local needs_tomb, entombed = {}, {}
     for _, uid in ipairs(order) do
         local rec = info[uid]
         local hf = rec.unit.hist_figure_id
-        -- A loose CORPSE only comes back to haunt THIS fort if the dead unit BELONGS to the fort: its
-        -- own civilization (isOwnCiv) or its site group (isOwnGroup -- which also covers a foreign-civ
-        -- resident who joined). FOREIGN dead -- visitors, mercenaries passing through, defeated
-        -- attackers -- do NOT ghost your fort even when they have a historical figure (e.g. a visiting
-        -- human bard like "Ishas"), and were the over-zealous false positives. Both checks read stable
-        -- data, so they survive death (the resident/merchant unit FLAGS do not; civ_id does). A GHOST
-        -- already walking is ALWAYS surfaced no matter whose it was in life -- it is haunting this map
-        -- right now -- so a rare visitor/merchant ghost is never missed.
         local belongs = dfhack.units.isOwnCiv(rec.unit) or dfhack.units.isOwnGroup(rec.unit)
+        pos_by_unit[uid] = rec.pos or rec.bpos
+        local entry = {
+            unit_id = uid, hf = hf,
+            name = unit_display_name(rec.unit),
+            pos = rec.pos or rec.bpos,
+        }
         if (rec.ghostly or (rec.unburied and not rec.buried and belongs))
             and not memorialized[hf] then
-            table.insert(list, {
-                unit_id = uid,
-                hf = hf,
-                name = unit_display_name(rec.unit),
-                pos = rec.pos,
-            })
+            table.insert(needs_tomb, entry)
+        elseif belongs and rec.buried then
+            -- at rest in a coffin and not on the needs list = entombed
+            table.insert(entombed, entry)
         end
     end
+    table.sort(entombed, function(a, b) return a.name < b.name end)
 
     cache.frame = fc
     cache.t = now
-    cache.list = list
-    return list
+    cache.result = {needs_tomb = needs_tomb, entombed = entombed, pos_by_unit = pos_by_unit}
+    return cache.result
 end
 
 -- ---------------------------------------------------------------------------
--- cause of death (only computed when the dialog is opened, not every refresh)
+-- cause of death
 -- ---------------------------------------------------------------------------
 
 local DEATH_PHRASE = {
@@ -221,7 +187,6 @@ local function cause_phrase(death_cause)
     if cn then return (cn:lower():gsub('_', ' ')) end
 end
 
--- from a historical "figure died" event (best for named slayers, even long-gone)
 local function describe_death_event(ev)
     local name, raceidx
     if ev.slayer_hf and ev.slayer_hf >= 0 then
@@ -239,7 +204,6 @@ local function describe_death_event(ev)
     return cause_phrase(ev.death_cause) or 'cause of death unknown'
 end
 
--- from an incident record (fills in recent fort deaths lacking a history event)
 local function describe_incident(inc)
     local name, raceidx
     if inc.criminal and inc.criminal >= 0 then
@@ -257,13 +221,11 @@ local function describe_incident(inc)
     return cause_phrase(inc.death_cause) or 'cause of death unknown'
 end
 
--- some "figure died" / death-incident records carry a PLACEHOLDER death_type (MEMORIALIZE)
--- rather than a real cause -- e.g. a resident/mercenary whose death DF abstracted. Skip those so
--- we keep looking for a record with an actual cause and never print the raw "memorialize" token.
 local PLACEHOLDER_CAUSE = {}
 if df.death_type.MEMORIALIZE then PLACEHOLDER_CAUSE[df.death_type.MEMORIALIZE] = true end
 local function meaningful_cause(dc) return dc ~= nil and dc >= 0 and not PLACEHOLDER_CAUSE[dc] end
 
+-- batch: fill killed_by for a whole list in one pass (for the left-hand rows)
 local function attach_death_info(list)
     local by_hf, by_unit, remaining = {}, {}, 0
     for _, e in ipairs(list) do
@@ -272,7 +234,6 @@ local function attach_death_info(list)
         if e.hf and e.hf >= 0 then by_hf[e.hf] = e end
         remaining = remaining + 1
     end
-    -- 1) historical death events (reverse: first match per victim is latest)
     local events = df.global.world.history.events
     for i = #events - 1, 0, -1 do
         if remaining <= 0 then break end
@@ -285,7 +246,6 @@ local function attach_death_info(list)
             end
         end
     end
-    -- 2) incident log, keyed reliably by victim unit id
     if remaining > 0 then
         local incidents = df.global.world.incidents.all
         for i = #incidents - 1, 0, -1 do
@@ -305,8 +265,31 @@ local function attach_death_info(list)
     end
 end
 
+-- single figure (for a relative navigated to on demand)
+local function cause_for(hf, unit_id)
+    local events = df.global.world.history.events
+    for i = #events - 1, 0, -1 do
+        local ev = events[i]
+        if df.history_event_hist_figure_diedst:is_instance(ev)
+            and ev.victim_hf == hf and meaningful_cause(ev.death_cause) then
+            return describe_death_event(ev)
+        end
+    end
+    if unit_id and unit_id >= 0 then
+        local incs = df.global.world.incidents.all
+        for i = #incs - 1, 0, -1 do
+            local inc = incs[i]
+            if inc.type == df.incident_type.Death and inc.victim == unit_id
+                and meaningful_cause(inc.death_cause) then
+                return describe_incident(inc)
+            end
+        end
+    end
+    return nil
+end
+
 -- ---------------------------------------------------------------------------
--- memorial slab manager orders
+-- memorial slab manager orders (unchanged)
 -- ---------------------------------------------------------------------------
 
 local function has_pending_slab_order(hf)
@@ -320,9 +303,6 @@ local function has_pending_slab_order(hf)
     return false
 end
 
--- a memorial slab ALREADY engraved for this hf exists in the fort (ready to be placed/built) --
--- so there's no point engraving another; it just needs building. Matches any Memorial-engraved
--- slab whose topic is this hf (a built one means they're memorialized and off the list anyway).
 local function has_engraved_slab(hf)
     local vec = df.global.world.items.other.IN_PLAY
     for i = 0, #vec - 1 do
@@ -340,16 +320,16 @@ end
 
 local function create_slab_order(hf)
     local mo = df.global.world.manager_orders
-    local o = df.manager_order:new()      -- ownership passes to the vector on insert
+    local o = df.manager_order:new()
     o.id = mo.manager_order_next_id
     mo.manager_order_next_id = mo.manager_order_next_id + 1
     o.job_type = df.job_type.EngraveSlab
     o.amount_total = 1
     o.amount_left = 1
-    o.frequency = 0                       -- one-off (matches normal active orders)
+    o.frequency = 0
     o.status.validated = true
     o.status.active = true
-    o.specdata.hist_figure_id = hf        -- which dead dwarf this slab memorializes
+    o.specdata.hist_figure_id = hf
     mo.all:insert('#', o)
 end
 
@@ -359,7 +339,7 @@ local function count_blank_slabs()
     for i = 0, #vec - 1 do
         local it = vec[i]
         if it:getType() == df.item_type.SLAB
-            and it.engraving_type == df.slab_engraving_type.Slab    -- un-engraved
+            and it.engraving_type == df.slab_engraving_type.Slab
             and not (it.flags.garbage_collect or it.flags.removed)
         then
             n = n + 1
@@ -384,111 +364,340 @@ local function create_make_slab_order(amount)
     local o = df.manager_order:new()
     o.id = mo.manager_order_next_id
     mo.manager_order_next_id = o.id + 1
-    o.job_type = df.job_type.ConstructSlab     -- "make rock slab"
+    o.job_type = df.job_type.ConstructSlab
     o.amount_total = amount
     o.amount_left = amount
     o.frequency = 0
     o.status.validated = true
     o.status.active = true
-    -- material left unconstrained: the mason uses any available stone
     mo.all:insert('#', o)
 end
 
--- Queue an engrave order for EVERY listed dwarf who needs one, PLUS a "make rock slab" order for
--- however many extra blanks those engravings need. An EngraveSlab job simply waits for a blank
--- slab to exist, so we never cap engravings by the current blank count -- we queue them all and
--- make sure enough blanks get produced. Returns: engraved, made (extra blanks), skipped.
 local function enqueue_memorial_slabs(list)
-    -- only engrave for the dead who have neither an engraved slab ready nor an engrave order queued;
-    -- count the two "already handled" cases separately so we can report them separately.
     local need, have_slab, have_order = {}, 0, 0
     for _, e in ipairs(list) do
         if e.hf and e.hf >= 0 then
-            if has_engraved_slab(e.hf) then have_slab = have_slab + 1        -- a slab already engraved (needs placing)
-            elseif has_pending_slab_order(e.hf) then have_order = have_order + 1  -- an engrave order already queued
+            if has_engraved_slab(e.hf) then have_slab = have_slab + 1
+            elseif has_pending_slab_order(e.hf) then have_order = have_order + 1
             else table.insert(need, e) end
         end
-        -- an entry with no historical figure can't be memorialized by slab; it's simply not queued
     end
-
-    -- blanks available for the NEW engrave orders, measured BEFORE we add them: existing engrave
-    -- orders each consume a blank; already-queued make-slab orders each add one.
     local pending_engrave, pending_make = count_slab_orders()
     local free = count_blank_slabs() - pending_engrave + pending_make
-
-    -- always engrave for everyone who needs it
     for i = 1, #need do
         create_slab_order(need[i].hf)
     end
-
-    -- queue a "make rock slab" order for the shortfall so the extra blanks those engravings need
-    -- actually get produced (the engrave jobs just wait until a blank exists)
     local shortfall = #need - free
-    if shortfall > 0 then
-        create_make_slab_order(shortfall)
-    else
-        shortfall = 0
-    end
-
+    if shortfall > 0 then create_make_slab_order(shortfall) else shortfall = 0 end
     return #need, shortfall, have_slab, have_order
 end
 
 -- ---------------------------------------------------------------------------
--- the click dialog: list of names + cause, with a memorial-slab button
+-- figure info (profession / death / skills / kills / relatives)
 -- ---------------------------------------------------------------------------
 
-local MemorialScreen = defclass(nil, gui.ZScreen)
-MemorialScreen.ATTRS{
-    focus_path = 'needs-tomb/memorial',
-    list = DEFAULT_NIL,
+local LINK_LABEL = {
+    [df.histfig_hf_link_type.FATHER]          = 'Father',
+    [df.histfig_hf_link_type.MOTHER]          = 'Mother',
+    [df.histfig_hf_link_type.SPOUSE]          = 'Spouse',
+    [df.histfig_hf_link_type.DECEASED_SPOUSE] = 'Late spouse',
+    [df.histfig_hf_link_type.FORMER_SPOUSE]   = 'Former spouse',
+    [df.histfig_hf_link_type.LOVER]           = 'Lover',
+    [df.histfig_hf_link_type.CHILD]           = 'Child',
+}
+local REL_RANK = {Father=1, Mother=2, Spouse=3, ['Late spouse']=3, ['Former spouse']=4,
+                  Lover=5, Child=6, Sibling=7}
+
+-- build a figure descriptor from a historical figure id
+local function fig_from_hf(hf_id, pos_by_unit)
+    local hf = df.historical_figure.find(hf_id)
+    local name = hf and dfhack.translation.translateName(hf.name) or '(unknown)'
+    local uid, unit = -1, nil
+    if hf and hf.unit_id and hf.unit_id >= 0 then
+        unit = df.unit.find(hf.unit_id)
+        if unit then uid = unit.id end
+    end
+    local pos = pos_by_unit and pos_by_unit[uid]
+    if not pos and unit and not dfhack.units.isDead(unit) then
+        local x, y, z = dfhack.units.getPosition(unit)
+        if x then pos = xyz2pos(x, y, z) end
+    end
+    local dead = (hf and hf.died_year and hf.died_year >= 0) or (unit and dfhack.units.isDead(unit)) or false
+    return {hf = hf_id, unit_id = uid, name = name, pos = pos, dead = dead}
+end
+
+local function fig_from_unit(u, pos_by_unit)
+    return {
+        hf = u.hist_figure_id, unit_id = u.id,
+        name = unit_display_name(u),
+        pos = (pos_by_unit and pos_by_unit[u.id]) or (function()
+            local x, y, z = dfhack.units.getPosition(u); return x and xyz2pos(x, y, z) or nil end)(),
+        dead = dfhack.units.isDead(u),
+    }
+end
+
+-- parents/spouse/children/lovers from histfig links, siblings derived via parents
+local function build_relatives(fig, pos_by_unit)
+    local hf = fig.hf and fig.hf >= 0 and df.historical_figure.find(fig.hf)
+    if not hf then return {} end
+    local out, seen = {}, {}
+    local mother, father
+    for _, l in ipairs(hf.histfig_links) do
+        local ok, ty = pcall(function() return l:getType() end)
+        local label = ok and LINK_LABEL[ty]
+        local tgt = l.target_hf
+        if label and tgt and tgt >= 0 and not seen[label .. ':' .. tgt] then
+            seen[label .. ':' .. tgt] = true
+            if label == 'Mother' then mother = tgt elseif label == 'Father' then father = tgt end
+            out[#out + 1] = {label = label, fig = fig_from_hf(tgt, pos_by_unit)}
+        end
+    end
+    -- siblings: other children of either parent
+    for _, phf in ipairs({father, mother}) do
+        local p = phf and df.historical_figure.find(phf)
+        if p then
+            for _, l in ipairs(p.histfig_links) do
+                local ok, ty = pcall(function() return l:getType() end)
+                if ok and ty == df.histfig_hf_link_type.CHILD then
+                    local sib = l.target_hf
+                    if sib and sib >= 0 and sib ~= fig.hf and not seen['Sibling:' .. sib] then
+                        seen['Sibling:' .. sib] = true
+                        out[#out + 1] = {label = 'Sibling', fig = fig_from_hf(sib, pos_by_unit)}
+                    end
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        local ra, rb = REL_RANK[a.label] or 9, REL_RANK[b.label] or 9
+        if ra ~= rb then return ra < rb end
+        return a.fig.name < b.fig.name
+    end)
+    return out
+end
+
+local function top_skills(u, n)
+    if not (u and u.status and u.status.current_soul) then return {} end
+    local sk = u.status.current_soul.skills
+    local arr = {}
+    for i = 0, #sk - 1 do
+        local s = sk[i]
+        if s.rating and s.rating > 0 then arr[#arr + 1] = s end
+    end
+    table.sort(arr, function(a, b) return a.rating > b.rating end)
+    local out = {}
+    for i = 1, math.min(n, #arr) do
+        local a = df.job_skill.attrs[arr[i].id]
+        out[#out + 1] = ('%s %d'):format(a and a.caption or tostring(arr[i].id), arr[i].rating)
+    end
+    return out
+end
+
+-- returns {info_tokens = <Label text>, relatives = <List choices>}
+local function build_figure_info(fig, pos_by_unit)
+    local hf = fig.hf and fig.hf >= 0 and df.historical_figure.find(fig.hf)
+    local unit = fig.unit_id and fig.unit_id >= 0 and df.unit.find(fig.unit_id)
+    local T = {}
+    local function line(tokens) for _, t in ipairs(tokens) do T[#T + 1] = t end T[#T + 1] = NEWLINE end
+    local L = function(s) return {text = s, pen = COLOR_GRAY} end
+    local V = function(s) return {text = s, pen = COLOR_WHITE} end
+
+    line({{text = fig.name, pen = COLOR_YELLOW}})
+    if unit then
+        line({L('Profession: '), V(dfhack.units.getProfessionName(unit))})
+    end
+
+    local cur_year = df.global.cur_year
+    local born = hf and hf.born_year
+    local died = hf and hf.died_year
+    if fig.dead then
+        local when = (died and died >= 0) and ('year %d'):format(died) or 'unknown'
+        local age = (born and born >= 0 and died and died >= 0) and (' (age %d)'):format(died - born) or ''
+        line({L('Died: '), V(when .. age)})
+        local cause = cause_for(fig.hf, fig.unit_id) or (unit and 'cause of death unknown')
+        if cause then line({L('Cause: '), V(cause)}) end
+    else
+        local age = (born and born >= 0) and (' (age %d)'):format(cur_year - born) or ''
+        line({{text = 'Alive' .. age, pen = COLOR_GREEN}})
+    end
+
+    if unit then
+        local sk = top_skills(unit, 6)
+        if #sk > 0 then line({L('Skills: '), V(table.concat(sk, ', '))}) end
+        local ok, cd = pcall(reqscript, 'creature-description')
+        if ok and cd and cd.kill_summary then
+            local okk, ks = pcall(cd.kill_summary, unit)
+            if okk and ks and #ks > 0 then line({L('Kills: '), V(ks)}) end
+        end
+    end
+
+    T[#T + 1] = NEWLINE
+    local rels = build_relatives(fig, pos_by_unit)
+    local choices = {}
+    if #rels == 0 then
+        line({{text = 'No recorded relatives.', pen = COLOR_GRAY}})
+    else
+        for _, r in ipairs(rels) do
+            local dead = r.fig.dead
+            choices[#choices + 1] = {
+                text = {
+                    {text = ('%-12s '):format(r.label .. ':'), pen = COLOR_GRAY},
+                    {text = r.fig.name, pen = dead and COLOR_GRAY or COLOR_LIGHTGREEN},
+                    {text = dead and '  (deceased)' or '  (alive)', pen = COLOR_DARKGRAY},
+                },
+                fig = r.fig,
+            }
+        end
+    end
+    return {info_tokens = T, relatives = choices}
+end
+
+-- ---------------------------------------------------------------------------
+-- the dead browser
+-- ---------------------------------------------------------------------------
+
+local DeadScreen = defclass(DeadScreen, gui.ZScreen)
+DeadScreen.ATTRS{
+    focus_path = 'needs-tomb/dead',
+    needs_list = DEFAULT_NIL,
+    entombed_list = DEFAULT_NIL,
+    pos_by_unit = DEFAULT_NIL,
+    initial = DEFAULT_NIL,   -- optional figure to focus on open
 }
 
-function MemorialScreen:init()
-    local list = self.list or {}
+function DeadScreen:init()
+    self.history = {}
+    self.current = nil
+
     local choices = {}
-    for _, e in ipairs(list) do
-        table.insert(choices, {
-            text = ('%s  -  %s'):format(e.name, e.killed_by or '?'),
-            pos = e.pos,
-        })
+    local function header(txt)
+        choices[#choices + 1] = {text = {{text = txt, pen = COLOR_YELLOW}}, fig = nil, header = true}
+    end
+    local function none()
+        choices[#choices + 1] = {text = {{text = '  (none)', pen = COLOR_GRAY}}, fig = nil, header = true}
+    end
+    header(('Needs a tomb (%d)'):format(#self.needs_list))
+    if #self.needs_list == 0 then none() end
+    for _, e in ipairs(self.needs_list) do
+        choices[#choices + 1] = {text = ('%s - %s'):format(e.name, e.killed_by or '?'), fig = e}
+    end
+    header(('Entombed (%d)'):format(#self.entombed_list))
+    if #self.entombed_list == 0 then none() end
+    for _, e in ipairs(self.entombed_list) do
+        choices[#choices + 1] = {text = e.name, fig = e}
     end
 
     self:addviews{
         widgets.Window{
-            frame_title = 'Dead needing a tomb',
-            frame = {w = 66, h = 22},
+            frame_title = 'Fortress dead',
+            frame = {w = 84, h = 30},
             resizable = true,
-            resize_min = {w = 44, h = 10},
+            resize_min = {w = 60, h = 18},
             subviews = {
                 widgets.List{
-                    view_id = 'list',
-                    frame = {t = 0, l = 0, r = 0, b = 3},
+                    view_id = 'deadlist',
+                    frame = {t = 0, l = 0, w = 34, b = 4},
                     choices = choices,
-                    on_submit = function(_, choice)
-                        if choice and choice.pos then
-                            dfhack.gui.revealInDwarfmodeMap(choice.pos, true, true)
+                    on_select = function(_, choice)
+                        if self.subviews.info and choice and choice.fig then
+                            self:goto_figure(choice.fig, false)
                         end
                     end,
                 },
+                widgets.Panel{
+                    frame = {t = 0, l = 36, r = 0, b = 4},
+                    subviews = {
+                        widgets.Label{
+                            view_id = 'info',
+                            frame = {t = 0, l = 0, r = 0, h = 11},
+                            text = '',
+                        },
+                        widgets.Label{
+                            frame = {t = 12, l = 0},
+                            text = {{text = 'Relatives (click to follow):', pen = COLOR_GRAY}},
+                        },
+                        widgets.List{
+                            view_id = 'relatives',
+                            frame = {t = 13, l = 0, r = 0, b = 0},
+                            choices = {},
+                            on_submit = function(_, choice)
+                                if choice and choice.fig then self:goto_figure(choice.fig, true) end
+                            end,
+                        },
+                    },
+                },
                 widgets.Label{
-                    frame = {b = 2, l = 0},
-                    text = {{text = 'Click a name to zoom to the corpse.', pen = COLOR_GRAY}},
+                    frame = {b = 3, l = 0},
+                    text = {{text = 'Left: pick a dwarf.  Right: click a relative to follow the family.',
+                             pen = COLOR_GRAY}},
                 },
                 widgets.HotkeyLabel{
-                    view_id = 'slab_btn',
+                    frame = {b = 2, l = 0},
+                    key = 'CUSTOM_CTRL_G',
+                    auto_width = true,
+                    label = 'Go to corpse',
+                    on_activate = function() self:goto_corpse() end,
+                },
+                widgets.HotkeyLabel{
+                    frame = {b = 2, l = 22},
+                    key = 'CUSTOM_CTRL_B',
+                    auto_width = true,
+                    label = 'Back',
+                    on_activate = function() self:go_back() end,
+                },
+                widgets.HotkeyLabel{
                     frame = {b = 0, l = 0},
                     key = 'CUSTOM_CTRL_E',
                     auto_width = true,
-                    label = ('Engrave memorial slabs for all (%d)'):format(#choices),
+                    label = ('Engrave memorial slabs for all needing (%d)'):format(#self.needs_list),
                     on_activate = function() self:queue_slabs() end,
                 },
             },
         },
     }
+
+    local init = self.initial or self.needs_list[1] or self.entombed_list[1]
+    if init then self:goto_figure(init, false) end
 end
 
-function MemorialScreen:queue_slabs()
-    local engraved, made, have_slab, have_order = enqueue_memorial_slabs(self.list or {})
+function DeadScreen:refresh_current()
+    local built = build_figure_info(self.current, self.pos_by_unit)
+    self.subviews.info:setText(built.info_tokens)
+    self.subviews.relatives:setChoices(built.relatives)
+    self.subviews.relatives:setSelected(1)
+end
+
+function DeadScreen:goto_figure(fig, is_nav)
+    if not fig then return end
+    if is_nav and self.current then
+        table.insert(self.history, self.current)
+    elseif not is_nav then
+        self.history = {}          -- fresh context from the left list
+    end
+    self.current = fig
+    self:refresh_current()
+end
+
+function DeadScreen:go_back()
+    local prev = table.remove(self.history)
+    if prev then
+        self.current = prev
+        self:refresh_current()
+    end
+end
+
+function DeadScreen:goto_corpse()
+    if self.current and self.current.pos then
+        dfhack.gui.revealInDwarfmodeMap(self.current.pos, true, true)
+    else
+        dlg.showMessage('Go to corpse',
+            'No known remains on the map for ' .. (self.current and self.current.name or 'this figure') .. '.',
+            COLOR_GRAY)
+    end
+end
+
+function DeadScreen:queue_slabs()
+    local engraved, made, have_slab, have_order = enqueue_memorial_slabs(self.needs_list or {})
     local parts = {}
     if engraved > 0 then
         table.insert(parts, ('Queued %d memorial-slab engraving%s.'):format(
@@ -497,43 +706,52 @@ function MemorialScreen:queue_slabs()
     if made > 0 then
         table.insert(parts, ('Not enough blank slabs -- queued a "make rock slab" order for %d more.'):format(made))
     end
-    if have_slab > 0 then
-        table.insert(parts, ('%d already have a slab.'):format(have_slab))
-    end
-    if have_order > 0 then
-        table.insert(parts, ('%d already have an order.'):format(have_order))
-    end
-    if #parts == 0 then
-        table.insert(parts, 'Nothing to do.')
-    end
+    if have_slab > 0 then table.insert(parts, ('%d already have a slab.'):format(have_slab)) end
+    if have_order > 0 then table.insert(parts, ('%d already have an order.'):format(have_order)) end
+    if #parts == 0 then table.insert(parts, 'Nothing to do.') end
     dlg.showMessage('Memorial slabs', table.concat(parts, '\n'), COLOR_WHITE)
 end
 
-function MemorialScreen:onDismiss()
-    -- nothing persistent to clean up
+function DeadScreen:onDismiss() end
+
+-- open the browser; optional focus_unit selects that unit on open
+local function open_browser(focus_unit)
+    local r = scan()
+    if #r.needs_tomb == 0 and #r.entombed == 0 and not focus_unit then return false end
+    -- enrich copies with cause-of-death for the rows
+    local function enrich(src)
+        local out = {}
+        for _, e in ipairs(src) do
+            out[#out + 1] = {unit_id = e.unit_id, hf = e.hf, name = e.name, pos = e.pos}
+        end
+        attach_death_info(out)
+        return out
+    end
+    local needs = enrich(r.needs_tomb)
+    local entombed = enrich(r.entombed)
+    local initial
+    if focus_unit then
+        -- reuse the matching row if present, else build a fresh figure for it
+        for _, e in ipairs(needs) do if e.unit_id == focus_unit.id then initial = e break end end
+        if not initial then for _, e in ipairs(entombed) do if e.unit_id == focus_unit.id then initial = e break end end end
+        if not initial then initial = fig_from_unit(focus_unit, r.pos_by_unit) end
+    end
+    DeadScreen{needs_list = needs, entombed_list = entombed,
+               pos_by_unit = r.pos_by_unit, initial = initial}:show()
+    return true
 end
 
 local function show_dialog()
-    local list = scan()
-    if #list == 0 then return end
-    -- enrich a shallow copy so the cached scan list stays lean
-    local enriched = {}
-    for _, e in ipairs(list) do
-        enriched[#enriched + 1] = {
-            unit_id = e.unit_id, hf = e.hf, name = e.name, pos = e.pos,
-        }
-    end
-    attach_death_info(enriched)
-    MemorialScreen{list = enriched}:show()
+    open_browser(nil)
 end
 
 -- ---------------------------------------------------------------------------
--- notification message (runs frequently; keep it light)
+-- notification message
 -- ---------------------------------------------------------------------------
 
 local function needs_tomb_message()
     if not dfhack.world.isFortressMode() then return end
-    local list = scan()
+    local list = scan().needs_tomb
     local count = #list
     if count == 0 then return end
     if count == 1 then
@@ -543,7 +761,59 @@ local function needs_tomb_message()
 end
 
 -- ---------------------------------------------------------------------------
--- registration (idempotent; survives notify-module reloads via onStateChange)
+-- overlay: a button on the vanilla Dead/Missing units tab
+-- ---------------------------------------------------------------------------
+
+DeceasedButtonOverlay = defclass(DeceasedButtonOverlay, overlay.OverlayWidget)
+DeceasedButtonOverlay.ATTRS{
+    desc = 'Adds a "Family & info" button to the dead/missing units tab.',
+    default_pos = {x = 72, y = -7},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Info/CREATURES/DECEASED',
+    frame = {w = 18, h = 1},
+}
+
+-- selected unit from the Dead/Missing list (mirrors DFHack's deathcause_button)
+local function get_selected_dead_unit()
+    local creatures = df.global.game.main_interface.info.creatures
+    local list_widget = dfhack.gui.getWidget(creatures, 'Tabs', 'Dead/Missing')
+    if not list_widget then return nil end
+    local children = dfhack.gui.getWidgetChildren(list_widget)
+    local list_container = children[1]
+    if not list_container then return nil end
+    local grandchildren = dfhack.gui.getWidgetChildren(list_container)
+    local scrollable_list = grandchildren[2]
+    if not scrollable_list then return nil end
+    local rows = dfhack.gui.getWidgetChildren(scrollable_list)
+    local cursor_idx = list_widget.cursor_idx or 0
+    if cursor_idx >= 0 and cursor_idx < #rows then
+        local row = rows[cursor_idx + 1]
+        local ok, unit = pcall(function() return dfhack.gui.getWidget(row, 0).u end)
+        if ok and unit then return unit end
+    end
+    return nil
+end
+
+function DeceasedButtonOverlay:init()
+    self:addviews{
+        widgets.TextButton{
+            frame = {t = 0, l = 0},
+            label = 'Family & info',
+            key = 'CUSTOM_CTRL_F',
+            on_activate = function()
+                local unit = get_selected_dead_unit()
+                if not open_browser(unit) then
+                    dlg.showMessage('Fortress dead', 'No fortress dead to show yet.', COLOR_GRAY)
+                end
+            end,
+        },
+    }
+end
+
+OVERLAY_WIDGETS = {deceased = DeceasedButtonOverlay}
+
+-- ---------------------------------------------------------------------------
+-- registration
 -- ---------------------------------------------------------------------------
 
 local function register()
@@ -554,26 +824,25 @@ local function register()
         table.insert(n.NOTIFICATIONS_BY_IDX, entry)
         n.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
-    -- (re)assign callbacks every time so re-running the script picks up edits
     entry.desc = 'Notifies when a fortress dwarf has died but has no tomb (unburied corpse).'
     entry.dwarf_fn = needs_tomb_message
     entry.on_click = show_dialog
-    -- the overlay gates on config.data[name].enabled; make sure it exists so it
-    -- doesn't nil-index (and so the notification is on by default)
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
     end
 end
 
-register()
-
--- re-apply if the notify module is reloaded on a new world/map load
+-- keep the notification registered across world/map loads
 dfhack.onStateChange[NAME] = function(ev)
     if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then
         register()
     end
 end
 
-print('needs-tomb-notification: "needs_tomb" registered.')
-print('Click the notification for a list of the dead + a memorial-slab button.')
-print('Add `needs-tomb-notification` to dfhack.init to load it every session.')
+if not dfhack_flags.module then
+    register()
+    print('needs-tomb-notification: "needs_tomb" registered.')
+    print('Click the notification (or the Dead/Missing tab button) for the dead browser.')
+    print('Run `overlay rescan` once to enable the Dead/Missing "Family & info" button.')
+    print('Add `needs-tomb-notification` to dfhack.init to load it every session.')
+end
