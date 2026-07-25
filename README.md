@@ -44,7 +44,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `magnus-scripts` | one-shot | ✅ done | Enables all the always-on helpers at once |
 | `destroy-forbidden` | one-shot | ✅ done | Destroys loose forbidden items on the ground (skips inventory/buildings/artifacts) |
 | `clear-flows` | one-shot | ✅ done | Wipes airborne flow clouds (miasma/smoke/…) — miasma FPS fix. `clear-flows Miasma Smoke` to filter |
-| `needs-tomb-notification` | register | ✅ done | Notify-panel alert for dead dwarves with no tomb; click → list of dead + cause of death + memorial-slab button. The button **always queues an engraving for every one of them** (an EngraveSlab job just waits for a blank slab), **plus a "make rock slab" order for however many extra blanks those engravings need** |
+| `needs-tomb-notification` | register+overlay | ✅ done | Notify-panel alert for dead dwarves with no tomb; click opens the **dead browser** — a two-pane window: LEFT lists your dead in two sections, **Needs a tomb** then **Entombed** (dwarves at rest in a coffin); RIGHT shows the selected dwarf's **profession, when/how they died, notable skills, kills, and their RELATIVES** (parents/spouse/children/siblings/lovers — click a relative to follow the family tree to them, living or dead; **Back** returns). A **Go to corpse** button zooms to their remains. **Engrave memorial slabs for all needing** queues an engraving for every one in the needs-a-tomb section (an EngraveSlab job just waits for a blank slab) **plus a "make rock slab" order for however many extra blanks those engravings need**. The same browser is reachable from the vanilla Units screen's **Dead/Missing** tab via a `[Family & info]` button (overlay `needs-tomb-notification.deceased`). Relatives come from `histfig.histfig_links` (family types via `l:getType()` + `target_hf`; siblings derived through shared parents); cause of death from the `history_event_hist_figure_diedst` event / incident log; kills reuse `creature-description`'s `kill_summary` |
 | `mandate-notification` | register | ✅ done | Shows mandates the moment they exist (overrides built-in `mandates_expiring`) |
 | `raid-notification` | register | ✅ done | Notify-panel entry for squads out raiding (rough ETA / "back any minute now") + weekly auto-unstuck |
 | `auto-mandate` | enableable | ✅ done | Queues manager work orders for Make mandates using cheap renewable materials (incl. **minting coins** — a COIN mandate → a Strike Coins order in copper, or any metal bar / the mandated metal). Also **flags each mandate order's workshop jobs top priority** (`job.flags.do_now`, matched by `order_id`, ~1/s) — noble mandates have a deadline, and the forge is often saturated with other prioritized work (e.g. `military-uniforms`' gear jobs) that would otherwise starve the mandate |
@@ -80,7 +80,7 @@ aren't plain enables — turn those on in `gui/control-panel`.
 | `caravan-teleport` | one-shot | ✅ done | Rescues stranded traders: teleports every member of a caravan that is **AtDepot but stuck away from it** (off-map, a different z-level, or >3 tiles from the depot) onto the depot centre so it can unload and trade -- `dfhack.units.teleport` per unit. Gates on `caravan.trade_state == AtDepot` (leaves arriving/departing caravans alone) and skips the fort's own units. Run `caravan-teleport` by hand when merchants get stuck; pairs with `caravan unload` (reconnect disconnected pack animals) |
 | `plan-tile` | overlay | 🟡 needs in-game test | During buildingplan **placement**, **left-drag** a box on the map to lay a whole **grid** of the building at once, tiled by its **footprint** (1×1 furniture every tile, 3×3 workshop every 3, 5×5 depot every 5) so copies sit edge-to-edge. **Purely additive**: DFHack places the first building where you press; on release this fills the rest of the box with copies aligned to it (`constructBuilding` + `addPlannedBuilding`, same material filters), and overlapping/blocked cells silently self-skip. Only engages for **fixed-footprint** buildings with no native area drag (`cur_building_has_no_area()` — workshops/furniture/machines), so **walls/floors/farm plots/bridges keep DF's own build-more area UI with no conflict**; stays out when buildingplan is in "choose items by hand" mode. Green footprint preview while dragging. Overlay `plan-tile.tile` on `dwarfmode/Building/Placement`; loaded by magnus-scripts |
 | `planner-orders` | register | ✅ done | Notify-panel **"N planned items have no manager order"** for `buildingplan` items nothing produces. Click walks each missing item and offers the materials it can actually be made of (generics first, then your metals/stones; magma-safe tagged/filtered); picking one creates a **daily order gated to run only while you have 0** of that item. Also runs **standing-order checks** (brewing, charcoal, coke, smelting/pig-iron/steel, containers, cages, soap chain, melting, pig-tail/yarn thread+cloth) offering the missing repeating orders. **Adamantine:** once you have **raw adamantine** (the mined `RAW_ADAMANTINE` boulder — a *different* inorganic from processed `ADAMANTINE`), offers three keep-1-in-stock orders: **extract** raw → **thread** (`ExtractMetalStrands`, Craftsdwarf's Workshop — order on the raw material), **smelt** thread → **wafers** (`ADAMANTINE_WAFERS` reaction, Smelter), and **weave** thread → **cloth** (`WeaveCloth`, Loom) — the products all target processed adamantine, each gated to run only while its input is on hand |
-| `auto-elf-chop` | enableable+service | ✅ done | Gates the stock **`autochop`** plugin by the elves' yearly tree-cutting limit (`autochop` itself has no idea about it, so left alone it blows past the cap and sours relations). Does **not** modify autochop — sits on top and toggles it. **Reads the real per-year limit from the game** — the `TreeQuota` **`meeting_event`** on the **elven civ's** `historical_entity.meeting_events` (`quota_total` = the year's cap, `quota_remaining` = fells left), i.e. the "Lumber limits N/N, agreed in year Y" line on World > Civilizations. It gates directly on **`quota_remaining`**, so it tracks as you cut and resets itself whenever the elves renegotiate (the quota varies year to year — 5, 4, 7, 32…). While remaining > 0 it keeps autochop enabled; the moment remaining hits 0 it **disables autochop and undesignates all pending tree-chop jobs** (so even autochop's already-queued batch stops — this clears *every* chop designation on the map, i.e. assumes autochop is your only chop source). Self-correcting: re-checks `autochop.isEnabled()` each ~100 frames so a manual toggle can't defeat the gate. **Notify-panel line** while the allowance is used up: `Elven lumber limit reached (3/3) — tree cutting paused` (yellow; click → a dialog with the limit, why cutting is paused, and the limit's source) — clears when the agreement renews. `auto-elf-chop limit N` pins a fixed cap (manual mode) if you have no elf agreement. Enabled by magnus-scripts. `enable auto-elf-chop` / `auto-elf-chop` (status) / `auto-elf-chop auto` (read the agreement, default) / `auto-elf-chop limit <N>` / `auto-elf-chop reset` |
+| `auto-elf-chop` | enableable+service | ✅ done | Keeps your tree-cutting **under the elven yearly lumber limit** — and never lets the stock **`autochop`** plugin run (its uncapped batch designation was what kept breaking the limit). Instead it designates trees **itself**, always: it reads the real per-year cap from the game (the `TreeQuota` **`meeting_event`** on the **elven civ's** `historical_entity.meeting_events` — `quota_total`/`quota_remaining`, i.e. the "Lumber limits N/N" line on World > Civilizations) and holds the **total** chop designations (its own + hand-marked) at **remaining − 1** (the last permitted tree is reserved for moods/emergencies), so a parallel felling crew can't overshoot. It designates the trees **closest to a woodcutter first** (approximate distance, z-weighted) so nobody walks across the map while a nearer tree is free. **Requires a chop burrow** (the ones you flag in `gui/autochop`): with none it sits **dormant** and prompts you once. **No elf agreement at all** → no cap: it mirrors autochop's **own log target**, restocking toward its max (still burrow-scoped, still closest-first, never clear-cutting). **Scorched mode** (default on): once a year's agreement is *already* broken, the breach is per-year (not per tree), so it clear-cuts the chop burrows. Keeps stock autochop disabled, self-correcting each ~100 frames. Announces new agreements, over-limit breaches, and the no-burrow prompt. Enabled by magnus-scripts. `auto-elf-chop` (status) / `auto-elf-chop auto` (default) / `auto-elf-chop limit <N>` / `auto-elf-chop scorched on\|off` / `auto-elf-chop reset` |
 | `tarrasque` | enableable+service | ✅ done (v3, **fully native pipeline**, proven end-to-end on a virgin test world) | Keeps the world's **megabeasts** from going extinct: **forgotten beasts** (finite, one per underground region), **titans**, **bronze colossi**; dragons/rocs/hydras excluded (they breed). Each **winter solstice (1 Obsidian)**, every dead eligible beast rolls **1/100** to revive. Revival keeps the **death record** (killer + year stay in legends), adds a *revived* history event, requires fort-killed beasts to be **>1 year dead** (pacing cooldown), resurrects the unit (`full-heal -r`) and **offloads** it (alive, NOT in play); **remains in the fort are left alone** — trophies of the first kill stay even as the beast walks again. **tarrasque spawns NOTHING itself** — a revived FB is restored to the exact world-model of a natural waiting beast so **DF's own attack scheduler re-sends it**: the unit is staged invisibly at a map edge with the emigration **leave flags**, DF **mints its world army itself** within ticks (hand-built army objects are NEVER selected — eligibility lives in registration only DF's army creation performs; DF even garbage-collects hand-made duplicates), then the service converts that army into a **hidden cavern lurker** (`flags.hidden`, `hidden_fl_ind=<layer>`) and shelves the unit again. Waiting FB = hidden 1-member army + `whereabouts.state=3/army_id`; titans/colossi keep their lair-site whereabouts (no army). **The native FB attack = a `Megabeast` timed event with `layer_id` = a really-dug-open cavern layer** (hand-set Discovered flags don't count; `FeatureAttack` never spawns FBs — dead end). DF queues these itself each season (irritation/wealth-gated) — or `force-more` queues one on demand. Fresh nemesis records get the natural megabeast flags (`DO_NOT_CULL` etc.). FBs with NO loaded body (worldgen deaths, culled units, bodies at other forts) get a REAL body CREATED (`dfhack.units.create` builds a complete creature — soul/body/mind; it stays offloaded until DF's own delivery activates it, so it never needs to work “in play”; proven: a created beast left to wander traveled the world, fought and died a REAL death in legends). If the leave-dance doesn't mint its army (created beasts can walk off as mere wildlife), the persistent staging entry waits for DF's world-sim, which ADOPTS live megabeast histfigs on its own (minting a travel army that the service instantly converts to a hidden lurker). Titans/colossi without units still revive abstractly (surface delivery from a created body unproven). World-level persistence; revival works in adventure mode (army staging needs a loaded fort). `enable tarrasque` / `tarrasque` / `tarrasque roll` / `tarrasque revive [N]`. Enabled by `magnus-scripts lovely` |
 | `force-more` | one-shot | ✅ done (verified live) | Forces native attack events the stock `force` can't: **`force-more forgotten-beast [layer]`** queues the real v50 FB-attack event (a `Megabeast` timed event with `layer_id` = the cavern layer — `force Megabeast` can't send FBs because it never sets `layer_id`, so it only rolls surface beasts). Layer = an id from `force-more list` or a cavern ordinal 1–3; defaults to a random **discovered** cavern. DF does the selection (from waiting hidden-army beasts, incl. tarrasque-revived ones), placement, announcement, and AI. Also `force-more megabeast` (surface) and `force-more list` (local cavern layers + discovered state + irritation) |
 | `auto-tomb` | enableable+service | ✅ done | Drops a 1×1 activity zone onto furniture that needs one — a **Tomb** zone on every coffin (so it's instantly assignable) and a **Pen/Pasture** zone on every nest box (for egg-layers). Idempotent; leaves furniture that already has its zone alone. `enable auto-tomb` / `auto-tomb` |
@@ -564,6 +564,17 @@ caste description instead, which is what's accessible and is the useful part for
 beasts. (Attribute-traits like "incredibly quick to heal, susceptible to disease"
 could be reconstructed from `unit` attributes if wanted.)
 
+**🟡 TODO — also show worst wounds + mood-important preferences.** Beyond the
+description and the categorized Kills line, add two things for a selected unit:
+(1) the **worst wounds** — the most severe current injuries (missing/mangled body
+parts, arteries/nerves/motor+sensory damage, infection, pain), read from
+`unit.body.components`/`body_part_status` and `unit.health`/wounds, summarized
+worst-first; and (2) the **preferences that matter for strange moods** — the
+likes DF actually checks when a mood strikes (preferred material/stone/metal/gem,
+item type, "likes X for its Y") so you can pre-stock a moody dwarf's workshop —
+from `unit.status.current_soul.preferences` (same data `embark-prep`'s
+Preferences window reads). Keep it compact under the existing overlay.
+
 ### ✅ auto-pasture (DONE)
 
 Overlay `auto-pasture.pasture` on `dwarfmode/Zone/Some/Pen` with two
@@ -638,6 +649,60 @@ units out** of the unit list, so you only assign labors to civilians.
   `work_detail.assigned_units` IS accessible, so a one-shot or background service
   could keep military units out of work details (un-assign + clear those labors).
   Not the same as a visual filter, but achieves the intent. Awaiting a decision.
+
+### ✅ deceased-dwarf relatives & info browser — DONE (`needs-tomb-notification.lua`)
+See a **dead** dwarf's relatives and full information from inside the fort. Built
+into `needs-tomb-notification` as the **dead browser** (`DeadScreen`): a two-pane
+window — LEFT lists the fort's dead in a **Needs a tomb** section and an
+**Entombed** section; RIGHT shows the selected dwarf's profession, when/how they
+died, notable skills, kills, and **relatives** (parents/spouse/children/siblings/
+lovers), each clickable to follow the family tree (living or dead) with a Back
+button; a **Go to corpse** button zooms to their remains. Reached by clicking the
+needs-tomb notification, or from the vanilla Units **Dead/Missing** tab via the
+`[Family & info]` button (overlay `needs-tomb-notification.deceased`).
+- **Data (verified live):** relatives from `histfig.histfig_links` — each link's
+  family type via **`l:getType()`** (`df.histfig_hf_link_type`: MOTHER/FATHER/
+  SPOUSE/CHILD/LOVER/FORMER_SPOUSE/DECEASED_SPOUSE) + `l.target_hf`; **siblings are
+  derived** by walking each parent's own CHILD links (there is no SIBLING link
+  type). `histfig.died_year` (−1 = alive) is the living/dead test. Cause of death:
+  `history_event_hist_figure_diedst` (victim/slayer hf, cause) with an
+  `incidents.all` Death fallback. Kills reuse `creature-description`'s
+  `kill_summary(unit)`; skills from `unit.status.current_soul.skills`.
+- **Overlay note:** discovery is via `require('plugins.overlay').rescan()` (runs
+  automatically on world load); there is no `overlay rescan` **command** in this
+  build — the older README shorthand.
+
+### 🟡 dwarf-reequip — IN PROGRESS (doesn't work well)
+The re-equip logic (currently living in `military-uniforms.lua`) is **unreliable**:
+it sometimes **can't explain why a dwarf won't re-equip** a piece it's assigned,
+and sometimes **picks the wrong thing to forge** for them. The intent is a clear
+per-dwarf diagnosis — for each soldier, why each uniform slot is unmet (no item in
+stock / stalled pickup job / wrong-material incumbent / size mismatch / anatomy,
+per the stall-anatomy notes) and exactly what to queue. Needs: a reliable mapping
+from "slot unfilled" → root cause → the specific order, replacing the current
+best-effort heuristics. **Status: partially working, being reworked.**
+
+### dwarf-clicks-everywhere (requested)
+Make dwarves clickable **wherever their name/portrait appears** — noble/
+administrator assignment screens, the military **squad member** lists, etc. —
+opening that dwarf's **unit info** and offering to **start following** them
+(camera-follow). Today those screens show a dwarf but don't let you jump to their
+unit sheet or follow them.
+- **Approach:** per-screen overlays (like `dwarf-rts`'s member handling and the
+  `needs-tomb` Dead/Missing button) that resolve the hovered/selected row to its
+  `df.unit`, then `dfhack.gui.showUnitDetails` (or push the unit view) and set
+  camera-follow (`df.global.plotinfo.follow_unit`).
+- **Needs live inspection:** the focus strings + widget hierarchies for the
+  Nobles/Administrators screen and the Squads member list (use the
+  `dfhack.gui.getWidget` navigation pattern from `sort/deathcause_button`).
+
+### stockpile-info (requested)
+A script/overlay that surfaces a selected **stockpile's** useful information at a
+glance — what it currently holds (counts by type), its capacity/fill, links
+(give-to/take-from), and enabled categories — so you don't have to open the
+customize screen to see what a pile is actually storing.
+- **Needs live inspection:** stockpile building focus string; read
+  `building_stockpilest` (`settings`, `container_type`, `links`, contained items).
 
 ### ✅ auto-create labor groups (Work Details) — DONE (`labor-groups.lua`)
 `labor-groups` creates the crafting Work Details (stone carving, metal/weapon/
