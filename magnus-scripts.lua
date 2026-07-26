@@ -31,7 +31,9 @@ Activates the "always-on" helpers in this pack:
                                  by hand to force a re-apply.)
     * military-labor            (daily-syncs the "Military" work detail to your squads)
     * auto-tomb                 (1x1 Tomb zone on each coffin, 1x1 Pasture zone on each nest box)
-    * auto-elf-chop             (enables the autochop gate that respects the elven tree limit)
+    * auto-elf-chop             (manages tree-chopping under the elven limit -- keeps stock
+                                 autochop OFF and designates the closest trees itself; dormant
+                                 until you flag a chop burrow in gui/autochop)
     * caravan-unstick           (weekly watchdog: clears stuck caravans, which silently
                                  block ALL future caravans and, for the home civ, migrants)
     * item-description.expand   (overlay: expands a long item description to half-screen)
