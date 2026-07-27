@@ -138,15 +138,70 @@ function kill_summary(u)
     return ('%d kill%s: %s'):format(total, total == 1 and '' or 's', table.concat(parts, ', '))
 end
 
--- description + kills line for the selected creature, or nil
+-- ---- metal + weapon/armor preference (citizens) ----------------------------
+-- "Prefers steel and short swords". The preference `type` enum is inline (no
+-- df.preference_type export): LikeMaterial = 0, LikeItem = 4. A weapon/armor
+-- preference's item_type indexes one of the itemdef lists below; the metal
+-- preference is a LikeMaterial on an INORGANIC (mattype 0) whose material is a metal.
+
+local PREF_MATERIAL, PREF_ITEM = 0, 4
+
+-- item_type -> the itemdef list holding that gear's subtypes (weapons + armour pieces)
+local function gear_lists()
+    local r = df.global.world.raws.itemdefs
+    return {
+        [df.item_type.WEAPON] = r.weapons,
+        [df.item_type.ARMOR]  = r.armor,
+        [df.item_type.SHOES]  = r.shoes,
+        [df.item_type.SHIELD] = r.shields,
+        [df.item_type.HELM]   = r.helms,
+        [df.item_type.GLOVES] = r.gloves,
+        [df.item_type.PANTS]  = r.pants,
+    }
+end
+
+-- first preferred metal + first preferred weapon/armour piece, either nil
+local function prefs_line(u)
+    local soul = u.status and u.status.current_soul
+    if not soul then return end
+    local metal, gear, lists
+    for _, p in ipairs(soul.preferences) do
+        if not metal and p.type == PREF_MATERIAL and p.mattype == 0 then
+            local mi = dfhack.matinfo.decode(p.mattype, p.matindex)
+            if mi and mi.material and mi.material.flags.IS_METAL then
+                local nm = mi.material.state_name.Solid
+                metal = (nm and #nm > 0) and nm or mi:toString()
+            end
+        elseif not gear and p.type == PREF_ITEM then
+            lists = lists or gear_lists()
+            local lst = lists[p.item_type]
+            if lst and p.item_subtype >= 0 and p.item_subtype < #lst then
+                local d = lst[p.item_subtype]
+                if d then gear = (d.name_plural ~= '' and d.name_plural) or d.name end
+            end
+        end
+        if metal and gear then break end
+    end
+    if metal and gear then return ('Prefers %s and %s'):format(metal, gear)
+    elseif metal then return ('Prefers %s'):format(metal)
+    elseif gear then return ('Prefers %s'):format(gear) end
+end
+
+-- description [+ preferences for citizens] + kills line for the selected creature, or nil
 local function unit_info()
     local u = dfhack.gui.getSelectedUnit(true)
     if not u then return end
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
     if not (caste and caste.description and #caste.description > 0) then return end
+    local lines = {caste.description}
+    if dfhack.units.isCitizen(u) then
+        local ok, pref = pcall(prefs_line, u)
+        if ok and pref then lines[#lines + 1] = pref end
+    end
     local ok, kills = pcall(kill_summary, u)
-    return ('%s\n%s'):format(caste.description, ok and kills or 'Kills: ?')
+    lines[#lines + 1] = ok and kills or 'Kills: ?'
+    return table.concat(lines, '\n')
 end
 
 -- how many display rows the text needs after word-wrapping to `width`
