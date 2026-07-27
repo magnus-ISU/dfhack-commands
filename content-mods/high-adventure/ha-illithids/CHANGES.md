@@ -1,5 +1,12 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.40 — ulitharids and elder brains no longer fly
+- Removed [FLIER] from ULITHARID and ELDER_BRAIN. Flight forced expensive 3D pathfinding
+  (a real FPS drain, especially for the huge elder brain) and made their pathing erratic.
+  Both keep their walk gaits (elder brain: Ponderous Drift; ulitharid: humanoid body plan),
+  so they still move -- just grounded. Regular illithids never had FLIER. Raws, so it takes
+  effect in a newly generated world.
+
 ## v0.39 — corpse hauling to the bath (dump-zone pipeline)
 - Reagent-less bath jobs (devour/reclaim/extract) consumed the nearest corpse without anyone
   hauling it. Now, for a bath's queued corpse jobs, the mod keeps a small supply of matching
