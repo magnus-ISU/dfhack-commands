@@ -155,3 +155,32 @@ Fix (graphics-only, so it needs only a DF restart, no creature-raw change):
   _BABY`). Clothing tile pages stay on vanilla (dormant on naked gibberlings).
 - Palette files unchanged (already blue); no creature-raw edit needed - blueness no
   longer depends on which skin color a gibberling rolls.
+
+## v0.5 — chitin redesign toward the canonical Cacame gibberling
+
+Reworked the creature from the humanoid goblin fork toward the canonical gibberling
+body while keeping our blue theme, cannibalism, and skill-tiered castes:
+- **Intelligent but babbling:** added `CAN_LEARN` + `CAN_SPEAK` + `UTTERANCES`.
+- **New body:** chitin exoskeleton, `TAIL`, clawed toes (`4TOES_FQ_REG`/`4TOES_RQ_REG`
+  + `CLAW_TEMPLATE`), **no hands** (cannot wield), **ICHOR** blood. All tokens are
+  vanilla, so still self-contained. Replaced the humanoid body/tissues/hair/face.
+- **Attacks:** bite (MAIN, latch) + claw (MAIN, `GRASP_STRIKE`) + kick (`STANCE_STRIKE`);
+  dropped punch/scratch (no hands).
+- **Size:** adult ~50,000 cm³ (10,000 below dwarves/goblins at 60,000).
+- **Agility** set to the elf range (`450:950:1150:1250:1350:1550:2250`).
+- `MAXAGE:20:30`; matures at `CHILD:2`.
+- **No longer `[EVIL]`-restricted** — spawns in any region. Dropped `CREATURE_CLASS:MAMMAL`
+  (it's a chitin creature now).
+- Kept the blue **goblin sprite** (user's request): the graphics' skin-tissue colour
+  conditions were repointed from `SKIN` → `CHITIN` (the carapace is coloured with the
+  same blues), so the existing art renders on the new body. The sprite is still a
+  humanoid goblin — an art placeholder that no longer matches the anatomy; bespoke
+  gibberling art is a future task.
+- **On `EAT_SAPIENT` ethics:** skipped — ethics only apply to *entity* members, and
+  gibberlings have no entity (they're wildlife), so it would do nothing; their
+  cannibalism stays mechanical (`CARNIVORE` + `BONECARN`).
+
+**Verify in-game (not yet render/spawn-tested):** (1) that `CAN_LEARN` wildlife with
+no entity still spawns as roaming predators (if not, add `FEATURE_ATTACK_GROUP` or an
+entity); (2) that the sprite renders blue on the chitin body (the `CHITIN` graphics
+condition). Only affects newly-generated worlds (creature raws are baked per world).
