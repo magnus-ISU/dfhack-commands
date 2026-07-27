@@ -564,16 +564,17 @@ caste description instead, which is what's accessible and is the useful part for
 beasts. (Attribute-traits like "incredibly quick to heal, susceptible to disease"
 could be reconstructed from `unit` attributes if wanted.)
 
-**🟡 TODO — also show worst wounds + mood-important preferences.** Beyond the
-description and the categorized Kills line, add two things for a selected unit:
-(1) the **worst wounds** — the most severe current injuries (missing/mangled body
-parts, arteries/nerves/motor+sensory damage, infection, pain), read from
-`unit.body.components`/`body_part_status` and `unit.health`/wounds, summarized
-worst-first; and (2) the **preferences that matter for strange moods** — the
-likes DF actually checks when a mood strikes (preferred material/stone/metal/gem,
-item type, "likes X for its Y") so you can pre-stock a moody dwarf's workshop —
-from `unit.status.current_soul.preferences` (same data `embark-prep`'s
-Preferences window reads). Keep it compact under the existing overlay.
+**🟡 partly done — preferences shown; wounds still TODO.** For a selected
+**citizen** the overlay now shows a `Prefers <metal> and <weapon/armor>` line
+between the description and Kills (e.g. `Prefers silver and war hammers`): the
+first preferred **metal** (LikeMaterial pref, type 0, on an INORGANIC whose
+material `IS_METAL`, named via `dfhack.matinfo.decode`) and the first preferred
+**weapon or armour piece** (LikeItem pref, type 4, `item_type` → the matching
+`raws.itemdefs` list → `name_plural`). Still **TODO**: (1) the **worst wounds** —
+most severe current injuries (missing/mangled parts, artery/nerve/motor damage,
+infection, pain) from `unit.body.components`/`body_part_status` + `unit.health`,
+worst-first; and (2) the **other** mood-relevant likes (preferred stone/gem,
+"likes X for its Y") to fully cover strange-mood pre-stocking.
 
 ### ✅ auto-pasture (DONE)
 
