@@ -82,6 +82,7 @@ local function caste_index(name)
 end
 
 local function skill_id(name) return df.job_skill[name] end
+local function random_mental_skill() return skill_id(SCHOLAR_SKILLS[math.random(#SCHOLAR_SKILLS)]) end
 
 local function get_skill(u, sk)
     local soul = u.status.current_soul
@@ -304,6 +305,7 @@ local function mod_worker_valid(b, reaction)
 end
 
 local find_prisoner   -- forward declaration (defined in the handlers section below)
+local prisoner_ok     -- forward declaration (used by the cage-teleport helpers below)
 
 -- Is there an unrotten, unforbidden corpse matching pred lying about?
 local function corpse_exists(pred)
@@ -402,6 +404,37 @@ local function teleport_corpse_to_ring(b, pred)
         end
     end
 end
+
+-- The cage rites (implant tadpole / devour a caged prisoner) need a caged, brain-bearing prisoner
+-- beside the bath. Same idea as corpses, but the "item" is the CAGE holding a valid prisoner.
+local function cage_prisoner(cage)   -- the valid prisoner inside `cage`, or nil
+    for _, gref in ipairs(cage.general_refs) do
+        if df.general_ref_contains_unitst:is_instance(gref) then
+            local u = df.unit.find(gref.unit_id)
+            if prisoner_ok(u) then return u end
+        end
+    end
+end
+local function ring_has_cage(b)      -- already a cage with a valid prisoner in the bath's 3x3?
+    for _, cage in ipairs(df.global.world.items.other.CAGE) do
+        if not cage.flags.in_building and cage.pos.z == b.z
+            and math.abs(cage.pos.x - b.centerx) <= 1 and math.abs(cage.pos.y - b.centery) <= 1
+            and cage_prisoner(cage) then
+            return true
+        end
+    end
+    return false
+end
+local function teleport_cage_to_ring(b)   -- move one prisoner-bearing cage into a random ring tile
+    for _, cage in ipairs(df.global.world.items.other.CAGE) do
+        if not cage.flags.in_building and not cage.flags.in_job and cage_prisoner(cage) then
+            cage.flags.forbid = false
+            pcall(dfhack.items.moveToGround, cage, ring_pos(b))
+            cage.flags.in_building = false
+            return true
+        end
+    end
+end
 -- --------------------------------------------------------------------------------------------
 
 local function job_corpse_pred(reaction)   -- what corpse a job needs (nil = no corpse)
@@ -417,18 +450,26 @@ local function job_corpse_pred(reaction)   -- what corpse a job needs (nil = no 
     end
 end
 
--- For a bath's live corpse-jobs, keep one matching corpse teleported into the ring, replacing
--- whatever the reaction consumed. Only teleports when none is already beside the bath.
-local function maintain_ring_corpses(b, jobs)
-    local done = {}
+local CAGE_RITE = { HA_IMPLANT_TADPOLE = true, HA_DEVOUR_PRISONER = true }
+
+-- For a bath's live rites, keep their reagents teleported into the ring, replacing whatever was
+-- consumed: a matching corpse for devour/reclaim/extract, and a prisoner-bearing cage for the
+-- cage rites. Only teleports when the reagent isn't already beside the bath.
+local function maintain_ring_reagents(b, jobs)
+    local done_corpse, need_cage = {}, false
     for _, job in ipairs(jobs) do
         local rn = job.reaction_name
         local pred = job_corpse_pred(rn)
-        if pred and not done[rn] then
-            done[rn] = true
-            if not ring_has_corpse(b, pred) then teleport_corpse_to_ring(b, pred) end
+        if pred then
+            if not done_corpse[rn] then
+                done_corpse[rn] = true
+                if not ring_has_corpse(b, pred) then teleport_corpse_to_ring(b, pred) end
+            end
+        elseif CAGE_RITE[rn] then
+            need_cage = true
         end
     end
+    if need_cage and not ring_has_cage(b) then teleport_cage_to_ring(b) end
 end
 
 -- ---------- Bath job cancellation: clear, specific messages ----------
@@ -547,7 +588,7 @@ local function staff_baths()
                     local pw = b.profile.permitted_workers
                     if #pw ~= 1 or pw[0] ~= cand.id then set_profile(b, cand.id) end
                     -- (3) teleport the needed reagents beside the assigned worker
-                    maintain_ring_corpses(b, live)
+                    maintain_ring_reagents(b, live)
                 end
             end
         end
@@ -759,7 +800,11 @@ local function on_reclaim(unit)
         if a.lvl ~= b.lvl then return a.lvl < b.lvl end
         return a.rating < b.rating
     end)
-    for i = 1, math.min(10, #elig) do add_xp(elig[i].u, elig[i].sk, 1000) end
+    -- train a RANDOM mental skill (not each recipient's highest) for the 10 least-developed minds
+    for i = 1, math.min(10, #elig) do
+        local rnd = random_mental_skill()
+        if rnd then add_xp(elig[i].u, rnd, 1000) end
+    end
     if dead.flags3.ghostly then dead.flags3.ghostly = false end
     dfhack.gui.showAnnouncement(
         "The colony drinks the memories of its dead; nothing is lost, and no one is mourned.",
@@ -788,7 +833,7 @@ local function on_extract(unit)
     end
 end
 
-local function prisoner_ok(u)
+function prisoner_ok(u)
     if not u or u.flags1.inactive or u.flags2.killed or u.race == race_id() then return false end
     local cr = df.creature_raw.find(u.race)
     if not cr or not cr.caste[u.caste].flags.CAN_LEARN then return false end
@@ -798,20 +843,34 @@ local function prisoner_ok(u)
     return false
 end
 
-function find_prisoner()
-    -- Caged units are often dropped from units.active (stored inside the cage item),
-    -- so look through cage items first, then fall back to any still-active caged unit.
+-- Find a valid caged prisoner. With `near` (a worker pos) it returns the CLOSEST one -- so the
+-- rite consumes the cage we teleported into the bath ring rather than one across the map. Without
+-- `near` it returns the first valid (the cheap path used for feasibility checks).
+function find_prisoner(near)
+    local best, bestd
+    local function consider(u, pos)
+        if not prisoner_ok(u) then return end
+        if not near then best = best or u; return end
+        local d = math.abs(pos.x - near.x) + math.abs(pos.y - near.y) + 8 * math.abs(pos.z - near.z)
+        if not bestd or d < bestd then best, bestd = u, d end
+    end
+    -- Caged units are often dropped from units.active (stored inside the cage item), so look
+    -- through cage items first, then fall back to any still-active caged unit.
     for _, cage in ipairs(df.global.world.items.other.CAGE) do
         for _, gref in ipairs(cage.general_refs) do
             if df.general_ref_contains_unitst:is_instance(gref) then
-                local u = df.unit.find(gref.unit_id)
-                if prisoner_ok(u) then return u end
+                consider(df.unit.find(gref.unit_id), cage.pos)
+                if best and not near then return best end
             end
         end
     end
     for _, u in ipairs(df.global.world.units.active) do
-        if u.flags1.caged and prisoner_ok(u) then return u end
+        if u.flags1.caged then
+            consider(u, u.pos)
+            if best and not near then return best end
+        end
     end
+    return best
 end
 
 local function translation_index(name)
@@ -890,7 +949,7 @@ local function on_devour_prisoner(unit)
     if cn == "THRALL_M" or cn == "THRALL_F" then
         return warn("Thralls may not taste the feast of minds.")
     end
-    local prisoner = find_prisoner()
+    local prisoner = find_prisoner(unit.pos)
     if not prisoner then return false end   -- no caged prisoner -> cancel (message from on_bath_job)
     local pos = xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z)
     prisoner.flags1.caged = false
@@ -911,7 +970,7 @@ local function on_devour_prisoner(unit)
 end
 
 local function on_implant(unit)
-    local prisoner = find_prisoner()
+    local prisoner = find_prisoner(unit.pos)
     if not prisoner then return false end   -- no caged prisoner -> cancel (message from on_bath_job)
     local pos = xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z)
     prisoner.flags1.caged = false
@@ -999,10 +1058,13 @@ local function on_resonate(unit)
                 soul.personality.stress = math.min(soul.personality.stress, -50000)
             end
             local cn = caste_name(u)
-            if cn ~= "THRALL_M" and cn ~= "THRALL_F" and math.random() < 0.35 then
-                local name = SCHOLAR_SKILLS[math.random(#SCHOLAR_SKILLS)]
-                local sk = skill_id(name)
-                if sk then add_xp(u, sk, 150) end
+            if cn ~= "THRALL_M" and cn ~= "THRALL_F" then
+                -- each resonate trains ONE random mental skill (+10) and logician (+10), not the
+                -- whole scholarly array
+                local rnd = random_mental_skill()
+                if rnd then add_xp(u, rnd, 10) end
+                local logic = skill_id("LOGIC")
+                if logic then add_xp(u, logic, 10) end
             end
         end
     end

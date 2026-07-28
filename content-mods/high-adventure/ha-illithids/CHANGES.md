@@ -1,5 +1,17 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.45 — cage rites teleport their reagent too + resonate/reclaim skill tuning
+- The cage rites (implant a tadpole / devour a caged prisoner) now also move their reagent to the
+  bath: while the bath is staffed, a prisoner-bearing CAGE is teleported into the ring of 8 tiles
+  around the bath centre, same as the corpse rites. find_prisoner now takes the worker's position
+  and returns the CLOSEST valid caged prisoner, so the rite consumes the cage that was teleported
+  beside the bath rather than one across the map (and the ring cage doesn't pile up unused).
+- **Resonate** now trains, per non-thrall illithid, ONE random mental skill (+10 xp) and logician
+  (+10 xp) each time -- instead of the old repeated random-scholar bursts that cumulatively raised
+  the whole scholarly array. (Still calms the colony's stress.)
+- **Reclaim lost memories** now trains a RANDOM mental skill for each of the 10 least-developed
+  minds, rather than each recipient's highest skill.
+
 ## v0.44 — one worker per bath (fixes resonate) + teleport reagents (drops dump-zone hauling)
 - **Resonate no longer churns an illithid.** A bath holds a SINGLE worker profile, but a bath with
   many queued rites needs different castes (resonate = Elder Brain only; devour/etc. = non-thrall).
