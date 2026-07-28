@@ -194,21 +194,32 @@ local function track_breed_workers()
     end
 end
 
+local CHAMP_CASTES = {"SKINNER","MUSH_FACE","SOMBOLG","JOBBER","GRISHNAHRK","GORE_BAG","SAW_GOD","SKULL_CRUNCHER"}
+
+-- champion caste indices for a race; champions ARE memorialized, so their ghosts
+-- are left alone -- only the rank-and-file get dispelled.
+local function champion_caste_set(race)
+    local cr = df.creature_raw.find(race)
+    local names, set = {}, {}
+    for _, n in ipairs(CHAMP_CASTES) do names[n] = true end
+    if cr then for j = 0, #cr.caste - 1 do if names[cr.caste[j].caste_id] then set[j] = true end end end
+    return set
+end
+
 local function tick()
     track_breed_workers()
     local race = orc_race_id()
     if not race then return end
+    local champs = champion_caste_set(race)
     for _, u in ipairs(df.global.world.units.active) do
-        if u.race == race and u.flags3.ghostly then
-            -- orcs do not memorialize their dead
+        if u.race == race and u.flags3.ghostly and not champs[u.caste] then
+            -- rank-and-file orcs are not memorialized; champions are left to haunt
             u.flags3.ghostly = false
             u.flags1.inactive = true
             u.flags2.killed = true
         end
     end
 end
-
-local CHAMP_CASTES = {"SKINNER","MUSH_FACE","SOMBOLG","JOBBER","GRISHNAHRK","GORE_BAG","SAW_GOD","SKULL_CRUNCHER"}
 
 local function champion_indices(race)
     local cr = df.creature_raw.find(race)
