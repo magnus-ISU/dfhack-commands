@@ -12,6 +12,10 @@
 #     make install                              # auto-detect everything
 #     make install DFHACK_DIR=/path/to/DFHack   # if your DFHack lives elsewhere
 #     make install DFHACK_VERSION=53.15-r2      # pin the release asset explicitly
+#     make build                                # compile from the submodule SOURCE instead
+#                                               # (clones the DFHack source tree into build/ on
+#                                               # first run; use when the source has unreleased
+#                                               # fixes). Restart DF after installing.
 #
 # Re-run after every DFHack update (plugins are ABI-specific to a DFHack version).
 
@@ -37,12 +41,28 @@ DFRUN   := $(DFHACK_DIR)/dfhack-run
 PLUGDIR := $(DFHACK_DIR)/hack/plugins
 SO      := $(PLUGDIR)/$(PLUGIN).plug.so
 
+# --- source build (make build) ---
+# Everything lives under build/ (gitignored): the DFHack source tree, its cmake build dir, and a
+# locally-built XML::LibXSLT (DFHack's codegen needs it; built from CPAN when the system perl
+# lacks it, so no root is required).
+ROOT        := $(abspath .)
+BUILDDIR    := $(ROOT)/build
+DFHACK_SRC  := $(BUILDDIR)/dfhack
+CMAKE_BUILD := $(DFHACK_SRC)/build-rel
+PERL5_LOCAL := $(BUILDDIR)/perl5
+PLUGIN_SRC  := $(ROOT)/other-authors/df-smooth-movement
+# Git tag of the DFHack source to build against. Must match the installed DFHack (ABI).
+DFHACK_TAG  ?= 53.15-r2
+JOBS        ?= $(shell nproc)
+
 .DEFAULT_GOAL := help
-.PHONY: help install enable disable status uninstall
+.PHONY: help install build enable disable status uninstall
 
 help:
 	@echo "df-smooth-movement plugin — make targets:"
 	echo "  make install    download + checksum-verify the prebuilt plugin, install into DFHack"
+	echo "  make build      compile the plugin from the submodule source (clones the DFHack"
+	echo "                  source tree into build/ on first run) and install it. Restart DF after."
 	echo "  make enable     load + enable it now (Dwarf Fortress must be running)"
 	echo "  make disable    disable it now"
 	echo "  make status     show the plugin's status / installed binary"
@@ -126,6 +146,58 @@ install:
 	  echo "Start Dwarf Fortress to load it. 'magnus-scripts lovely' enables it automatically,"
 	  echo "or run 'make enable' while the game is running."
 	fi
+
+# Compile the plugin from the submodule source against a local DFHack source tree, then install.
+# The tree is cloned (shallow, tag $(DFHACK_TAG), with submodules) into build/dfhack on first run;
+# later runs reuse it. ABI rule: $(DFHACK_TAG) must match the installed DFHack version.
+build:
+	@if [ ! -f "$(PLUGIN_SRC)/CMakeLists.txt" ]; then
+	  echo "Initializing the plugin submodule..."
+	  git -C "$(ROOT)" submodule update --init other-authors/df-smooth-movement
+	fi
+	if [ ! -f "$(DFHACK_SRC)/CMakeLists.txt" ]; then
+	  echo "Cloning the DFHack $(DFHACK_TAG) source tree (one-time, ~200MB)..."
+	  git clone --depth 1 --branch "$(DFHACK_TAG)" --recurse-submodules --shallow-submodules -j8 \
+	    https://github.com/DFHack/dfhack "$(DFHACK_SRC)"
+	fi
+	# DFHack's codegen needs perl XML::LibXSLT; build it locally (no root) if the system lacks it.
+	export PERL5LIB="$(PERL5_LOCAL)/lib/perl5$${PERL5LIB:+:$$PERL5LIB}"
+	if ! perl -MXML::LibXSLT -e 1 2>/dev/null; then
+	  echo "Building perl XML::LibXSLT locally into build/perl5 (needs libxslt headers)..."
+	  mkdir -p "$(BUILDDIR)/perl5-src"
+	  cd "$(BUILDDIR)/perl5-src"
+	  [ -f libxslt.tar.gz ] || curl -fsSL -o libxslt.tar.gz \
+	    "https://cpan.metacpan.org/authors/id/S/SH/SHLOMIF/XML-LibXSLT-2.003000.tar.gz"
+	  tar xzf libxslt.tar.gz && cd XML-LibXSLT-*
+	  perl Makefile.PL INSTALL_BASE="$(PERL5_LOCAL)" >/dev/null && make -j4 >/dev/null && make install >/dev/null
+	  perl -MXML::LibXSLT -e 1 || { echo "local XML::LibXSLT build failed"; exit 1; }
+	fi
+	# Wire the plugin into the tree as an external plugin (symlink -> always builds current source).
+	mkdir -p "$(DFHACK_SRC)/plugins/external"
+	ln -sfn "$(PLUGIN_SRC)" "$(DFHACK_SRC)/plugins/external/df-smooth-movement"
+	grep -qs 'add_subdirectory(df-smooth-movement)' "$(DFHACK_SRC)/plugins/external/CMakeLists.txt" || \
+	  echo 'add_subdirectory(df-smooth-movement)' >> "$(DFHACK_SRC)/plugins/external/CMakeLists.txt"
+	if [ ! -f "$(CMAKE_BUILD)/CMakeCache.txt" ]; then
+	  # -Wno-error goes in the per-config flags: they land AFTER DFHack's hardcoded -Werror on the
+	  # compile line, neutralizing it (newer gcc releases add warnings the pinned tree predates).
+	  cmake -S "$(DFHACK_SRC)" -B "$(CMAKE_BUILD)" -G Ninja \
+	    -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DBUILD_TESTS=OFF \
+	    -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG -Wno-error" \
+	    -DCMAKE_C_FLAGS_RELEASE="-O2 -DNDEBUG -Wno-error"
+	fi
+	cmake --build "$(CMAKE_BUILD)" --target $(PLUGIN) -j"$(JOBS)"
+	built="$$(find "$(CMAKE_BUILD)" -name '$(PLUGIN).plug.so' | head -1)"
+	[ -n "$$built" ] || { echo "build produced no $(PLUGIN).plug.so"; exit 1; }
+	# Swap the binary in. If DF is running, unload the old plugin first so the file isn't in use;
+	# a RESTART of Dwarf Fortress is still the reliable way to pick up the new code.
+	if [ -x "$(DFRUN)" ] && "$(DFRUN)" lua 'print(1)' >/dev/null 2>&1; then
+	  "$(DFRUN)" disable $(PLUGIN) >/dev/null 2>&1 || true
+	  "$(DFRUN)" unload $(PLUGIN) >/dev/null 2>&1 || true
+	fi
+	cp -f "$$built" "$(SO)"
+	echo "Installed freshly-built plugin: $(SO)"
+	echo "RESTART Dwarf Fortress now (or: dfhack-run load $(PLUGIN) && dfhack-run enable $(PLUGIN)"
+	echo "for a hot reload, then verify with 'make status')."
 
 enable:
 	@"$(DFRUN)" load $(PLUGIN) >/dev/null 2>&1 || true
