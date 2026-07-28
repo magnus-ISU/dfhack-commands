@@ -11,8 +11,8 @@ Lays the Labor screen out as:
     3. the other defaults -- Hunters, Fisherdwarves, Plant gatherers, Haulers, Orderlies,
        Siege operators, plus anything else you added
     4. "Cook" and "Brewer" (farmer/plow icon) at the end of the list
-    5. an "Animal Trainer" detail (farmer/plow icon; "Only Selected Does This" + the animal-
-       training labor, so empty-labor-notification warns when you have no trainer assigned)
+    5. an "Animal Trainer" detail (farmer/plow icon; "Everybody Does This" + the animal-
+       training labor, so any idle dwarf can pick up queued animal-training jobs)
     6. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
        your squads by the separate `military-labor` script)
 
@@ -68,10 +68,10 @@ local END_GROUPS = {
 local MILITARY_NAME = 'Military'
 local MILITARY_ICON = 'SIEGE_OPERATORS'
 
--- an "Animal Trainer" detail: the animal-training labor, farmer/plow icon, "Only Selected Does
--- This" so the empty-labor-notification warning fires when nobody is assigned. Placed just
--- before Military. Created if missing; an existing one is kept (mode preserved), only its icon
--- and the training labor are (re)applied.
+-- an "Animal Trainer" detail: the animal-training labor, farmer/plow icon, "Everybody Does
+-- This" so any idle dwarf can pick up queued animal-training jobs. Placed just before Military.
+-- Created if missing; an existing one has its mode ENFORCED to EverybodyDoesThis (like the
+-- craft details), plus its icon and the training labor (re)applied.
 local TRAINER_NAME = 'Animal Trainer'
 local TRAINER_ICON = 'PLANTERS'
 local TRAINER_LABOR = 'ANIMALTRAIN'
@@ -220,10 +220,10 @@ local function plan()
     end
     if trainer_idx then                                         -- Animal Trainer: before Military
         rows[#rows + 1] = {idx = trainer_idx, name = TRAINER_NAME, icon_name = TRAINER_ICON,
-                           mode_name = df.work_detail_mode[wd[trainer_idx].flags.mode], status = 'kept', trainer = true}
+                           mode_name = 'EverybodyDoesThis', status = 'kept', trainer = true}
     else
         rows[#rows + 1] = {name = TRAINER_NAME, icon_name = TRAINER_ICON,
-                           mode_name = 'OnlySelectedDoesThis', status = 'NEW', trainer = true}
+                           mode_name = 'EverybodyDoesThis', status = 'NEW', trainer = true}
     end
     if mil_idx then
         rows[#rows + 1] = {idx = mil_idx, name = MILITARY_NAME, icon_name = MILITARY_ICON,
@@ -246,14 +246,16 @@ if not dry then
         if r.idx then
             h = wd[r.idx]
             h.icon = df.work_detail_icon_type[r.icon_name]
-            if not r.military and not r.trainer then h.flags.mode = df.work_detail_mode[r.mode_name] end
+            -- military mode is left to military-labor; every other detail (incl. the Animal
+            -- Trainer, now EverybodyDoesThis) has its planned mode enforced
+            if not r.military then h.flags.mode = df.work_detail_mode[r.mode_name] end
         else
             h = df.work_detail:new()
             h.name = r.name
             if r.military then
                 h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- members synced by military-labor
             elseif r.trainer then
-                h.flags.mode = df.work_detail_mode.OnlySelectedDoesThis   -- pick your trainer(s); warns if none
+                h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- any idle dwarf trains
                 h.allowed_labors[TRAINER_LABOR] = true
             else
                 h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- new craft
