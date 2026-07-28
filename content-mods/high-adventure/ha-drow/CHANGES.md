@@ -262,3 +262,6 @@ copied verbatim from **vanilla giant cave spider**. All IDs `HA_*`; nothing vani
 
 ## v0.35
 - Banditry 20 -> 40 (LOCAL already present).
+
+## v0.36
+- Graphics: removed the `ANIMATED` frame from the drider large sprite (it pointed at the same single frame, causing the grayscale flicker); static `DEFAULT` LARGE_IMAGE only, matching vanilla single-frame large creatures.

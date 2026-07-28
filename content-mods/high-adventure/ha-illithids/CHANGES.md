@@ -551,3 +551,6 @@ Upgrades are permanent syndromes applied by the watcher (fort + adventure).
 
 ## v0.29
 - Banditry 10 -> 40, added `[LOCAL_BANDITRY]` (single-token change atop the v0.28 caste/art work; nothing else altered).
+
+## v0.46
+- Graphics: removed the `ANIMATED` frame from the elder-brain large sprite (it pointed at the same single frame, causing the grayscale flicker); static `DEFAULT` LARGE_IMAGE only, matching vanilla single-frame large creatures.
