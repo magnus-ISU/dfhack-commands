@@ -1,5 +1,44 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.43 — proactive bath staffing + newborns are 0-year-old adults + staffing crash fixes
+- **CRITICAL: staffing no longer dies mid-game.** `ensure_haul_target` did `#findCivzonesAt(...)`,
+  but that DFHack call returns NIL (not an empty list) when no zone is on the tile, so `#nil` threw
+  on every staffing tick that had a bath job. repeat-util re-schedules a tick only if its callback
+  RETURNS, so the error silently killed staffing until a reload -- workers stopped being assigned
+  and the (useless) "brine stirs" message appeared. Coalesced to `or {}`. Also hardened
+  `caste_name` (a unit mid dummy-transform during a caste change can momentarily have an out-of-
+  range caste index) so ascensions/promotions can't crash the tick either.
+- **The staffing ticks are now wrapped in pcall** and log-and-continue, so no future error can kill
+  the service; and a job completion calls `ensure_ticks()`, which restarts staffing if it ever
+  stopped -- at most one rite is lost, then proper assignment resumes.
+- Replaced the unhelpful "brine stirs / tender slipped away" message with a quiet skip (it only
+  fired when staffing had stalled, which now self-heals).
+- **Tadpole-born illithids are now age 0 and adult.** Illithid castes carry no CHILD/BABY token
+  (no child phase), but `set_age_fresh_adult` was aging new units up by ~18 years. Newborns from
+  an implanted prisoner now read as 0 years old and fully grown.
+- **Bath jobs are staffed PROACTIVELY -- never by waiting for a job to finish.** Every fast tick,
+  for each queued bath job the mod chooses ONE specific valid worker (preference-ranked,
+  idle-preferred) and pins the workshop profile to exactly that unit, so only an eligible caste
+  can claim it (every illithid and thrall carries the strand labor, so without this a thrall could
+  grab "devour a dead sentient's brain," or a non-Elder "resonate"). Conditions are checked at
+  assignment time, not at completion.
+- **A job whose conditions fail is cancelled at staffing time, with a clear, specific reason** --
+  no material/target on hand, no eligible caste in the colony, or an ineligible worker having
+  grabbed it (in which case a valid worker is re-pinned). Example message: "Neural Bath: cancelling
+  the job to devour a dead sentient's brain -- no fresh sentient-outsider corpse is on hand."
+  Resonate cancels/reassigns whenever its worker is not a living Elder Brain.
+- Reactions take far longer to perform than the 20-tick staffing cadence, so an
+  ineligible/infeasible job is always cancelled before it can complete; the completion handler just
+  applies the effect (handlers keep a defensive per-caste no-op as a last resort).
+- **The assigned worker is handed back after EACH completion, including repeat jobs** -- the
+  workshop is re-pinned to a fresh valid worker (idle-preferred) for the next cycle rather than left
+  empty. Leaving it empty let an ineligible caste grab the repeat job in the window before the next
+  staffing pass -- most visibly an illithid snatching a **resonate** job that only the slow Elder
+  Brain may do, which then had to be unclaimed, looking like "assigns an illithid, then cancels."
+  Re-pinning a valid worker keeps the rotation with no such window (for resonate the Elder Brain is
+  the only valid pick, so it simply stays pinned). A worker the player pinned before the task began
+  is left untouched. (Script-only change; hot-reloads into the running fort.)
+
 ## v0.42 — worldgen fix (no illithids) + crash-free caste changes
 - **CRITICAL worldgen fix:** worlds generated no illithids at all. An orphaned, malformed
   "nullification" syndrome block left over from the pre-rename base mod (no `[SYNDROME]`

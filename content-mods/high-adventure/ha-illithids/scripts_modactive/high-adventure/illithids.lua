@@ -54,8 +54,12 @@ local function race_id()
 end
 
 local function caste_name(u)
+    -- Guard cr.caste[u.caste]: during the 1-tick dummy transform of a caste change (ascension /
+    -- promotion) a unit's race is briefly the dummy creature (one caste) while u.caste may still
+    -- hold a higher index, so the lookup can be nil. Never index a nil (it would crash the tick).
     local cr = df.creature_raw.find(u.race)
-    return cr and cr.caste[u.caste].caste_id or ""
+    local c = cr and cr.caste[u.caste]
+    return c and c.caste_id or ""
 end
 
 local REGULAR = { FEMALE=true, MALE=true, AGENDER=true }
@@ -380,7 +384,9 @@ local function ensure_haul_target(b)
         if tt then
             local sh = df.tiletype.attrs[tt].shape
             if sh and df.tiletype_shape.attrs[sh].walkable
-                and #dfhack.buildings.findCivzonesAt(xyz2pos(x, y, b.z)) == 0 then
+                -- findCivzonesAt returns NIL (not an empty list) when no zone is on the tile;
+                -- `#nil` would throw and kill the whole staffing tick, so coalesce to {}.
+                and #(dfhack.buildings.findCivzonesAt(xyz2pos(x, y, b.z)) or {}) == 0 then
                 local ok, z = pcall(function()
                     return dfhack.buildings.constructBuilding{ type = df.building_type.Civzone,
                         subtype = df.civzone_type.Dump, abstract = true,
@@ -454,9 +460,60 @@ local function haul_corpses_to_bath(b, ha)
     end
 end
 
--- For every queued bath job: cancel it if its material is missing; otherwise keep it staffed
--- by a legal, preference-ranked worker via the workshop profile. Respect a profile the player
--- set. Once a bath has no jobs left, hand back any worker WE assigned.
+-- ---------- Bath job cancellation: clear, specific messages ----------
+-- What each bath reaction DOES (for messages), what it NEEDS when infeasible, and who it needs.
+local JOB_ACTION = {
+    HA_IMPLANT_TADPOLE  = "implant a tadpole",
+    HA_DEVOUR_PRISONER  = "devour a caged prisoner's brain",
+    HA_DEVOUR_BRAIN     = "devour a dead sentient's brain",
+    HA_RECLAIM_MEMORIES = "reclaim a dead illithid's memories",
+    HA_EXTRACT_UR_BRAIN = "extract a ulitharid's brain",
+    HA_ASCEND           = "ascend a ulitharid's brain",
+    HA_RESONATE         = "resonate with the colony",
+}
+local JOB_NEED = {
+    HA_IMPLANT_TADPOLE  = "no caged, brain-bearing prisoner is on hand",
+    HA_DEVOUR_PRISONER  = "no caged, brain-bearing prisoner is on hand",
+    HA_DEVOUR_BRAIN     = "no fresh sentient-outsider corpse is on hand",
+    HA_RECLAIM_MEMORIES = "no fresh illithid corpse is on hand",
+    HA_EXTRACT_UR_BRAIN = "no fresh ulitharid corpse is on hand",
+    HA_ASCEND           = "the preserved ulitharid brain and adamantine thread are not both on hand",
+    HA_RESONATE         = "no Elder Brain dwells in the colony",
+}
+local JOB_WHO = { HA_RESONATE = "Elder Brain" }   -- default below: "non-thrall illithid"
+
+local function caste_word(cn)
+    if cn == "THRALL_M" or cn == "THRALL_F" then return "thrall"
+    elseif cn == "ULITHARID" then return "ulitharid"
+    elseif cn == "ELDER_BRAIN" then return "Elder Brain"
+    else return "illithid" end
+end
+local function announce(msg) if msg then dfhack.gui.showAnnouncement(msg, COLOR_YELLOW, true) end end
+local function act(rn) return JOB_ACTION[rn] or "a bath rite" end
+local function msg_infeasible(rn) return ("Neural Bath: cancelling the job to %s -- %s."):format(act(rn), JOB_NEED[rn] or "its requirement is missing") end
+local function msg_illegal(rn, cn) return ("Neural Bath: cancelling the job to %s -- a %s may not perform it."):format(act(rn), caste_word(cn)) end
+local function msg_nobody(rn) return ("Neural Bath: cancelling the job to %s -- no %s in the colony can perform it."):format(act(rn), JOB_WHO[rn] or "non-thrall illithid") end
+
+-- The worker ASSIGNED to a job (via the job's worker ref -- set the moment a unit claims it,
+-- before it starts walking), falling back to a unit actively running it.
+local function assigned_worker(job)
+    local wref = dfhack.job.getGeneralRef(job, df.general_ref_type.UNIT_WORKER)
+    if wref then local u = df.unit.find(wref.unit_id); if u then return u end end
+    return job_worker(job)
+end
+local function cancel_bath_job(job, msg)
+    pcall(dfhack.job.removeWorker, job, 0)
+    pcall(dfhack.job.removeJob, job)
+    announce(msg)
+end
+
+-- Staff the bath PROACTIVELY, every fast tick -- never wait for a job to finish. For each queued
+-- bath job we, at assignment time: (1) check its conditions -- if the material/target is missing
+-- or no eligible caste exists, cancel it now with a clear reason; (2) otherwise choose ONE
+-- specific valid worker (preference-ranked, idle-preferred) and pin the workshop's profile to
+-- exactly that unit, so only an eligible worker can ever claim it. If an ineligible worker
+-- somehow grabbed a job (every illithid and thrall carries the strand labor), cancel it and
+-- re-pin a valid worker. When a bath has no jobs left, hand its worker back.
 local function staff_baths()
     for _, b in ipairs(bath_buildings()) do
         local ha = {}
@@ -467,47 +524,44 @@ local function staff_baths()
             end
         end
         if #ha == 0 then
-            -- no bath work left: unassign the workshop (clear any worker we pinned to it)
             if #b.profile.permitted_workers > 0 then set_profile(b, nil) end
         else
             haul_corpses_to_bath(b, ha)   -- physically haul needed corpses to the bath
-            local to_remove = {}
+            local removed, pin = 0, nil
             for _, job in ipairs(ha) do
                 local rn = job.reaction_name
                 if not job_feasible(rn) then
-                    -- material missing: cancel even if a worker already grabbed it (everyone
-                    -- has the strand labor, so jobs get claimed before a no-worker tick)
-                    to_remove[#to_remove + 1] = job
+                    cancel_bath_job(job, msg_infeasible(rn))          -- condition fails -> cancel now
+                    removed = removed + 1
                 else
-                    local worker = job_worker(job)
-                    if worker then
-                        if not job_legal_caste(rn, caste_name(worker)) then
-                            local cand = pick_worker(rn)
-                            set_profile(b, cand and cand.id or nil)
-                            to_remove[#to_remove + 1] = job      -- illegal worker: reassign + cancel
-                        end
+                    local cand = pick_worker(rn)                      -- the specific valid worker
+                    if not cand then
+                        cancel_bath_job(job, msg_nobody(rn))          -- no eligible caste -> cancel now
+                        removed = removed + 1
                     else
-                        local pw = b.profile.permitted_workers
-                        if #pw > 0 and not bath_profile_mod[b.id] then
-                            -- player pre-assigned the workshop: leave it
-                        elseif not mod_worker_valid(b, rn) then
-                            local cand = pick_worker(rn)
-                            if cand then
-                                set_profile(b, cand.id)
-                            else
-                                set_profile(b, nil)              -- no legal candidate...
-                                to_remove[#to_remove + 1] = job  -- ...so cancel the job
-                            end
+                        local worker = assigned_worker(job)
+                        if worker and not job_legal_caste(rn, caste_name(worker)) then
+                            -- an ineligible worker grabbed it in the brief window after the last
+                            -- completion handed the bath back: unclaim them (silently -- this is a
+                            -- routine part of the assign/unassign cycle) and pin a valid worker,
+                            -- who takes over long before the reaction could ever finish.
+                            pcall(dfhack.job.removeWorker, job, 0)
+                            pin = cand.id
+                        elseif worker then
+                            pin = worker.id                           -- a valid worker already holds it
+                        else
+                            pin = cand.id                             -- assign the specific valid worker
                         end
                     end
                 end
             end
-            for _, job in ipairs(to_remove) do
-                pcall(dfhack.job.removeWorker, job, 0)   -- release the worker from the cancelled job
-                pcall(dfhack.job.removeJob, job)
+            -- pin the workshop to the chosen valid worker so only they can claim (clear if all cancelled)
+            if removed == #ha then
+                if #b.profile.permitted_workers > 0 then set_profile(b, nil) end
+            elseif pin then
+                local pw = b.profile.permitted_workers
+                if #pw ~= 1 or pw[0] ~= pin then set_profile(b, pin) end
             end
-            -- if everything got cancelled, drop the pinned worker now instead of next tick
-            if #to_remove == #ha and #b.profile.permitted_workers > 0 then set_profile(b, nil) end
         end
     end
 end
@@ -684,9 +738,7 @@ local function on_devour(unit)
         return v.race ~= unit.race and vcr
             and vcr.caste[v.caste].flags.CAN_LEARN
     end)
-    if not victim then
-        return warn("The bath demands the unrotten corpse of a sentient outsider; none lies near.")
-    end
+    if not victim then return false end   -- no valid corpse -> cancel (message from on_bath_job)
     local vcr = df.creature_raw.find(victim.race)
     local vid = vcr.creature_id
     make_items(unit, df.item_type.MEAT, -1, "CREATURE_MAT:"..vid..":MUSCLE", 5)
@@ -701,9 +753,7 @@ local function on_reclaim(unit)
         local dc = caste_name(v)
         return v.race == race_id() and dc ~= "THRALL_M" and dc ~= "THRALL_F"
     end)
-    if not dead then
-        return warn("Only the unrotten corpse of an illithid holds memories worth drinking; none lies near.")
-    end
+    if not dead then return false end   -- no valid corpse -> cancel (message from on_bath_job)
     local race = race_id()
     -- The reclaimed memories flow to the colony's least-developed minds: only the 10
     -- lowest-level (then lowest-skilled) non-thrall illithids gain experience.
@@ -732,9 +782,7 @@ local function on_extract(unit)
     local dead = take_corpse(unit, function(v)
         return v.race == race_id() and caste_name(v) == "ULITHARID"
     end)
-    if not dead then
-        return warn("Only the unrotten corpse of a ulitharid yields a brain precious enough to keep; none lies near.")
-    end
+    if not dead then return false end   -- no valid corpse -> cancel (message from on_bath_job)
     -- brain tool is made of the ulitharid's own preserved-brain material (reads
     -- "preserved ulitharid brain", no metal prefix)
     local mi = dfhack.matinfo.find("CREATURE_MAT:HA_ILLITHID:UR_BRAIN")
@@ -811,11 +859,10 @@ end
 
 
 local function set_age_fresh_adult(u)
-    -- newly spawned units get an arbitrary old birth year; make them just-matured
-    local cr = df.creature_raw.find(u.race)
-    local grow = cr.caste[u.caste].misc.child_age
-    if not grow or grow <= 0 then grow = 18 end
-    local new_birth = df.global.cur_year - grow
+    -- Illithid castes carry no CHILD/BABY token, so a unit born this instant is already an adult
+    -- (no child phase). Newly created units get an arbitrary birth year; normalize to age 0 so a
+    -- tadpole-born illithid reads as 0 years old and still fully grown.
+    local new_birth = df.global.cur_year
     local delta = new_birth - u.birth_year
     u.birth_year = new_birth
     u.birth_time = df.global.cur_year_tick
@@ -856,9 +903,7 @@ local function on_devour_prisoner(unit)
         return warn("Thralls may not taste the feast of minds.")
     end
     local prisoner = find_prisoner()
-    if not prisoner then
-        return warn("No caged, brain-bearing sentient awaits devouring; capture one first.")
-    end
+    if not prisoner then return false end   -- no caged prisoner -> cancel (message from on_bath_job)
     local pos = xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z)
     prisoner.flags1.caged = false
     dfhack.units.teleport(prisoner, pos)
@@ -879,9 +924,7 @@ end
 
 local function on_implant(unit)
     local prisoner = find_prisoner()
-    if not prisoner then
-        return warn("No caged, brain-bearing sentient awaits the tadpole; capture one first.")
-    end
+    if not prisoner then return false end   -- no caged prisoner -> cancel (message from on_bath_job)
     local pos = xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z)
     prisoner.flags1.caged = false
     dfhack.units.teleport(prisoner, pos)
@@ -943,9 +986,7 @@ local function on_ascend(unit)
 
     -- Fallback: no dead ulitharid to raise; coalesce a fresh Elder Brain.
     local u = dfhack.units.create(race, caste_index("ELDER_BRAIN"))
-    if not u then
-        return warn("The bath convulses, but no greater mind coalesces; the ascension fails.")
-    end
+    if not u then return false end   -- ascension failed to mint an Elder Brain -> cancel
     u.pos.x, u.pos.y, u.pos.z = pos.x, pos.y, pos.z
     u.flags1.inactive = false
     df.global.world.units.active:insert("#", u)
@@ -1004,17 +1045,42 @@ local function track_bath_workers()
     end
 end
 
+local ensure_ticks   -- forward decl (defined with do_enable); revives staffing if it ever stopped
+
 local function on_bath_job(job)
-    local h = HANDLERS[job.reaction_name]
+    if ensure_ticks then ensure_ticks() end   -- a completion restarts staffing if it had died
+    local rn = job.reaction_name
+    local h = HANDLERS[rn]
     if not h then return end
     local wref = dfhack.job.getGeneralRef(job, df.general_ref_type.UNIT_WORKER)
     local wid = wref and wref.unit_id or pending_workers[job.id]
     pending_workers[job.id] = nil
     local unit = wid and df.unit.find(wid)
     if not unit then
-        return warn("The bath's brine stirs, but its tender slipped away unseen.")
+        -- The rite finished but we cannot tell who performed it. This only happens when staffing
+        -- had stalled (now revived by ensure_ticks above) so pending_workers was never recorded.
+        -- Skip this one rite quietly -- the next staffing pass assigns proper workers again.
+        return
     end
+    -- Legality and feasibility are enforced PROACTIVELY by staff_baths (a bath reaction takes far
+    -- longer to perform than the 20-tick staffing cadence, so an ineligible/infeasible job is
+    -- cancelled before it can complete). Here we only apply the effect; the handlers keep a
+    -- defensive no-op guard for their own caste as a last resort.
     h(unit)
+    -- Hand the worker back after each completion -- including repeat jobs. A worker WE assigned
+    -- (tracked in bath_profile_mod) is released and the workshop RE-PINNED to a fresh valid worker
+    -- for the next cycle (idle-preferred). We must NOT leave the profile empty: a repeat job would
+    -- then be grabbable by an ineligible caste in the window before the next staffing pass -- most
+    -- visibly an illithid snatching a resonate job that only the (slow) Elder Brain may do, which
+    -- then has to be unclaimed, looking like "assigns an illithid, then cancels." Re-pinning a
+    -- valid worker keeps the rotation with no such window. If none is valid now, clear it and let
+    -- staff_baths cancel the job with a reason. A worker the player pinned before the task began
+    -- (bath_profile_mod unset) is left untouched.
+    local b = dfhack.job.getHolder(job)
+    if b and bath_profile_mod[b.id] then
+        local cand = pick_worker(job.reaction_name)
+        set_profile(b, cand and cand.id or nil)
+    end
 end
 
 local function do_enable()
@@ -1026,13 +1092,27 @@ local function do_enable()
     repeatUtil.cancel(GLOBAL_KEY.."Slow")
     eventful.enableEvent(eventful.eventType.JOB_COMPLETED, 0)
     eventful.onJobCompleted[GLOBAL_KEY] = on_bath_job
-    -- fast: staff the bath (assign a dedicated worker / cancel infeasible or illegal jobs)
+    -- fast: staff the bath (assign a dedicated worker / cancel infeasible or illegal jobs).
+    -- WRAPPED IN pcall: repeat-util re-schedules a tick only if its callback RETURNS, so any
+    -- unhandled error (e.g. a transient during an ascension/caste change, or an odd map tile)
+    -- would silently kill staffing until a reload. Catch and log instead -- a bad tick costs one
+    -- cycle, not the whole service.
     repeatUtil.scheduleEvery(GLOBAL_KEY, 20, "ticks", function()
-        track_bath_workers()
-        staff_baths()
+        local ok, err = pcall(function() track_bath_workers(); staff_baths() end)
+        if not ok then dfhack.printerr("ha-illithids: staffing tick error (continuing): "..tostring(err)) end
     end)
     -- slow: psi levels + keep the strand labor on for everyone
-    repeatUtil.scheduleEvery(GLOBAL_KEY.."Slow", 100, "ticks", tick)
+    repeatUtil.scheduleEvery(GLOBAL_KEY.."Slow", 100, "ticks", function()
+        local ok, err = pcall(tick)
+        if not ok then dfhack.printerr("ha-illithids: slow tick error (continuing): "..tostring(err)) end
+    end)
+end
+
+-- Self-heal: if staffing ever stopped (e.g. a pre-pcall error), a job completion brings it back.
+function ensure_ticks()
+    if dfhack.isMapLoaded() and race_id() and not repeatUtil.repeating[GLOBAL_KEY] then
+        do_enable()
+    end
 end
 
 local function do_disable()
