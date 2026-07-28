@@ -141,9 +141,10 @@ stock DFHack tools and a few extras.
 - **`adv/fight`** — Auto-fights: marks matching creatures and hunts them down, even while paused.
 - **`adv/im-sure`** — Instantly dismisses the "can't act for a while" interrupt when webbed or
   stunned.
-- **`keep-talking`** — Auto-reopens the conversation menu with the same person each time it
-  closes, so a conversation flows without re-clicking the NPC for every line. Toggle with
-  `enable`/`disable keep-talking` (disable to leave a conversation). Default off.
+- **`adv/keep-talking`** — Auto-reopens the conversation each time it closes (via the `k`/`A_TALK`
+  action → "Continue conversation"), so a conversation flows without re-initiating for every line.
+  Toggle with `enable`/`disable adv/keep-talking` or **Ctrl+K** in-game (turn it off to leave a
+  conversation). Default off.
 
 ### 🚧 Embark & experimental
 
