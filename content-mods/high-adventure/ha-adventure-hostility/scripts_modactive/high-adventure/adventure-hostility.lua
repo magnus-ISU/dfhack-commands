@@ -188,38 +188,42 @@ local function process()
             local targeted = false
             for _, races in ipairs(active) do if races[cid] then targeted = true break end end
             if targeted then
-                make_hostile(u, adv)
-                if u.flags3.adv_yield then
-                    local threshold = PACIFY_THRESHOLD[cid] or DEFAULT_PACIFY
-                    -- a skilled enough Pacifier gets to keep them surrendered
-                    if pacify < threshold then u.flags3.adv_yield = false end
-                end
+                -- guard per-unit so one odd unit can't abort the whole sweep
+                pcall(function()
+                    make_hostile(u, adv)
+                    if u.flags3.adv_yield then
+                        local threshold = PACIFY_THRESHOLD[cid] or DEFAULT_PACIFY
+                        -- a skilled enough Pacifier gets to keep them surrendered
+                        if pacify < threshold then u.flags3.adv_yield = false end
+                    end
+                end)
             end
         end
     end
 end
 
 -- ===========================================================================
--- overlay (drives process() each adventure turn; edge-triggered on movement)
+-- overlay (drives process() every adventure turn)
 -- ===========================================================================
-
-local last_key = nil
+-- overlay_onupdate keeps firing while the game is paused and self-heals after a
+-- map reload / fast travel, so it is the right driver for adventure mode. We run
+-- process() on a short real-time throttle -- NOT gated on the adventurer moving
+-- -- so that standing still in a fight, or arriving from fast travel, keeps
+-- nearby enemies re-engaged instead of letting them de-escalate into idle. The
+-- whole body is wrapped in pcall: a single bad frame (transient nil during a
+-- map reload, an odd unit, etc.) can never bubble an error up to the overlay
+-- manager, which is exactly what would leave the widget dead until a restart.
 
 HostilityOverlay = defclass(HostilityOverlay, overlay.OverlayWidget)
 HostilityOverlay.ATTRS{
     desc = 'Forces designated High Adventure civilizations hostile to the adventurer.',
     default_enabled = true,
     viewscreens = 'dungeonmode',
-    overlay_onupdate_max_freq_seconds = 0,
+    overlay_onupdate_max_freq_seconds = 5,
     frame = {w = 1, h = 1},
 }
 
 function HostilityOverlay:overlay_onupdate()
-    local ok, adv = pcall(dfhack.world.getAdventurer)
-    if not (ok and adv) then return end
-    local key = ('%d,%d,%d'):format(adv.pos.x, adv.pos.y, adv.pos.z)
-    if key == last_key then return end
-    last_key = key
     pcall(process)
 end
 
