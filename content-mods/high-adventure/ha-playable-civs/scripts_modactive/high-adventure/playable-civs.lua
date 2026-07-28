@@ -11,7 +11,9 @@ Support script for the High Adventure playable-civilizations mod:
 - **Shaping Tree pacing**: growing wood from seeds takes one month per tree;
   a legendary strand extractor halves that. Jobs finished too soon wither
   (products are consumed) with an announcement.
-- **Shaping Trees cannot be deconstructed**: removal jobs are cancelled.
+- **Elves can remove their own walls**: elves have no picks, so Remove-Construction
+  orders (mining designations) never complete; in an elf fort this finishes them,
+  reverting each designated constructed tile so walls/floors can be torn down.
 - **Goblins do not memorialize their dead**: goblin ghosts are dispelled.
 
 Usage
@@ -88,7 +90,55 @@ local function on_reaction(reaction, reaction_product, unit, input_items, input_
     next_ok[bid] = t + period
 end
 
+local function elf_fort()
+    local r = df.global.world.raws.creatures.all[df.global.plotinfo.race_id]
+    return r and tostring(r.creature_id) == "ELF"
+end
+
+-- Elves have no picks, so a "Remove Construction" order (which is a mining
+-- designation) can never be carried out -- it just sits forever. Finish those
+-- ourselves: revert each designated constructed tile to what it was before and
+-- drop the construction record, so an elf fort can tear down its own walls and
+-- floors with the normal Remove-Construction order, no DFHack command needed.
+local function complete_wall_removals()
+    if not elf_fort() then return end
+    -- The player's Remove-Construction order shows up as a RemoveConstruction
+    -- job that no pick-less elf can ever work. Snapshot those jobs (removeJob
+    -- mutates the list), then finish each: revert the tile and drop the record.
+    local jobs = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local j = link.item
+        if j and j.job_type == df.job_type.RemoveConstruction then jobs[#jobs + 1] = j end
+        link = link.next
+    end
+    if #jobs == 0 then return end
+    local cons = df.construction.get_vector()
+    local removed = false
+    for _, j in ipairs(jobs) do
+        local p = j.pos
+        for i = #cons - 1, 0, -1 do
+            local c = cons[i]
+            if c.pos.x == p.x and c.pos.y == p.y and c.pos.z == p.z then
+                local b = dfhack.maps.getTileBlock(c.pos)
+                if b then
+                    local lx, ly = p.x % 16, p.y % 16
+                    b.tiletype[lx][ly] = c.original_tile
+                    b.designation[lx][ly].dig = df.tile_dig_designation.No
+                    dfhack.maps.enableBlockUpdates(b, true, true)
+                    removed = true
+                end
+                cons:erase(i)
+                break
+            end
+        end
+        dfhack.job.removeJob(j)
+    end
+    if removed then pcall(function() df.global.world.reindex_pathfinding = true end) end
+end
+
 local function tick()
+    complete_wall_removals()
     -- dispel goblin ghosts
     local grace = goblin_race_id()
     if grace then
@@ -97,22 +147,6 @@ local function tick()
                 u.flags3.ghostly = false
                 u.flags1.inactive = true
                 u.flags2.killed = true
-            end
-        end
-    end
-    -- shaping trees cannot be unmade
-    local btype = shaping_tree_type()
-    if btype then
-        for _, bld in ipairs(df.global.world.buildings.all) do
-            if df.building_workshopst:is_instance(bld) and bld.custom_type == btype then
-                for i = #bld.jobs - 1, 0, -1 do
-                    local job = bld.jobs[i]
-                    if job.job_type == df.job_type.DestroyBuilding then
-                        dfhack.job.removeJob(job)
-                        dfhack.gui.showAnnouncement(
-                            "The shaping tree refuses to be unmade.", COLOR_GREEN, true)
-                    end
-                end
             end
         end
     end
