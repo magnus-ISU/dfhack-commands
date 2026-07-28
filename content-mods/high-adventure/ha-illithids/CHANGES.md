@@ -1,5 +1,20 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.44 — one worker per bath (fixes resonate) + teleport reagents (drops dump-zone hauling)
+- **Resonate no longer churns an illithid.** A bath holds a SINGLE worker profile, but a bath with
+  many queued rites needs different castes (resonate = Elder Brain only; devour/etc. = non-thrall).
+  The old per-job pin let the last job win, pinning an illithid who then grabbed the resonate job
+  and was endlessly unclaimed. Now the whole workshop is staffed by ONE worker legal for the most
+  restrictive rite present -- the legal-caste sets are nested (resonate ⊂ non-thrall ⊂ anyone), so
+  an Elder Brain staffs any bath containing a resonate job and can perform every other rite too.
+  (Put resonate in its own bath if you want illithids working the other rites in parallel.)
+- **Replaced the dump-zone corpse hauling with a teleport.** DF hauling to a script-made dump zone
+  was unreliable. Now, while a bath is staffed, each corpse-rite (devour/reclaim/extract) keeps one
+  matching corpse teleported into the ring of 8 tiles around the bath's centre (the middle 3x3
+  minus the centre) -- the reagent appears beside the assigned worker; take_corpse consumes the
+  nearest and the next pass teleports a replacement. Removed ensure_haul_target / request_haul /
+  reclaim_hauled / haul_corpses_to_bath (and the `#nil` crash they carried is gone with them).
+
 ## v0.43 — proactive bath staffing + newborns are 0-year-old adults + staffing crash fixes
 - **CRITICAL: staffing no longer dies mid-game.** `ensure_haul_target` did `#findCivzonesAt(...)`,
   but that DFHack call returns NIL (not an empty list) when no zone is on the tile, so `#nil` threw

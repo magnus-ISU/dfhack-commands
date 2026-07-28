@@ -362,55 +362,43 @@ local function job_feasible(reaction)
 end
 
 -- ============================================================================================
--- Corpse hauling to the bath. Reagent-less bath reactions (devour/reclaim/extract) consume the
--- nearest corpse; without this, nobody physically HAULS one to the workshop. The MECHANISM for
--- getting a corpse hauled to the bath is deliberately isolated in the three functions below so
--- it can be swapped wholesale if this approach doesn't pan out (DF suppresses civilian hauling
--- during sieges, so it is best observed on a calm fort). Current mechanism: a per-bath garbage
--- dump zone + flagging the corpse for dumping, so haulers carry it to the tile beside the bath.
--- If that proves unreliable, replace ONLY ensure_haul_target / request_haul / reclaim_hauled
--- (e.g. with a posted DumpItem/BringItemToShop job); the pipeline (which corpse, when) is separate.
-bath_haul_target = bath_haul_target or {}   -- bath building id -> mechanism handle (dump zone id)
+-- Getting a reagent to the bath. Reagent-less bath reactions (devour/reclaim/extract) consume a
+-- matching corpse, but nothing HAULS one to the workshop, and DF hauling to a script-made dump
+-- zone proved unreliable. Instead we TELEPORT one matching corpse into the ring of 8 tiles around
+-- the bath's centre (the middle 3x3 minus the centre) whenever the bath is staffed and none is
+-- already there -- the reagent simply appears beside the assigned worker. take_corpse then consumes
+-- the nearest, and the next staffing pass teleports a replacement.
+local RING8 = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}}
 
-local function ensure_haul_target(b)
-    local zid = bath_haul_target[b.id]
-    if zid then
-        local z = df.building.find(zid)
-        if z and df.building_civzonest:is_instance(z) then return z end
-    end
-    for _, d in ipairs({{-2,0},{2,0},{0,-2},{0,2},{-2,-2},{2,2},{-3,0},{3,0}}) do
-        local x, y = b.centerx + d[1], b.centery + d[2]
-        local tt = dfhack.maps.getTileType(x, y, b.z)
-        if tt then
-            local sh = df.tiletype.attrs[tt].shape
-            if sh and df.tiletype_shape.attrs[sh].walkable
-                -- findCivzonesAt returns NIL (not an empty list) when no zone is on the tile;
-                -- `#nil` would throw and kill the whole staffing tick, so coalesce to {}.
-                and #(dfhack.buildings.findCivzonesAt(xyz2pos(x, y, b.z)) or {}) == 0 then
-                local ok, z = pcall(function()
-                    return dfhack.buildings.constructBuilding{ type = df.building_type.Civzone,
-                        subtype = df.civzone_type.Dump, abstract = true,
-                        pos = {x = x, y = y, z = b.z}, width = 1, height = 1 }
-                end)
-                if ok and z then bath_haul_target[b.id] = z.id; return z end
-            end
+local function ring_pos(b)
+    local d = RING8[math.random(#RING8)]
+    return {x = b.centerx + d[1], y = b.centery + d[2], z = b.z}
+end
+
+-- already an unrotten matching corpse within the bath's 3x3? (so we don't teleport another)
+local function ring_has_corpse(b, pred)
+    for _, it in ipairs(df.global.world.items.other.ANY_CORPSE or {}) do
+        if df.item_corpsest:is_instance(it) and not it.flags.rotten and not it.flags.in_building
+            and it.pos.z == b.z and math.abs(it.pos.x - b.centerx) <= 1 and math.abs(it.pos.y - b.centery) <= 1 then
+            local u = it.unit_id and it.unit_id >= 0 and df.unit.find(it.unit_id)
+            if u and pred(u) then return true end
         end
     end
+    return false
 end
 
-local function request_haul(item)       -- cause `item` to be hauled to the bath's haul target
-    item.flags.dump = true
-end
-
-local function near_bath(it, b)
-    return it.pos.z == b.z and math.abs(it.pos.x - b.centerx) <= 2 and math.abs(it.pos.y - b.centery) <= 2
-end
-
-local function reclaim_hauled(b)        -- free corpses that ARRIVED at the bath so the reaction can use them
+-- teleport ONE matching corpse (from anywhere) into a random ring tile beside the bath
+local function teleport_corpse_to_ring(b, pred)
     for _, it in ipairs(df.global.world.items.other.ANY_CORPSE or {}) do
-        if df.item_corpsest:is_instance(it) and it.flags.forbid and not it.flags.rotten and near_bath(it, b) then
-            it.flags.forbid = false     -- dumped items arrive forbidden
-            it.flags.dump = false
+        if df.item_corpsest:is_instance(it) and not it.flags.rotten and not it.flags.in_building
+            and not it.flags.in_job then
+            local u = it.unit_id and it.unit_id >= 0 and df.unit.find(it.unit_id)
+            if u and pred(u) then
+                it.flags.forbid = false
+                pcall(dfhack.items.moveToGround, it, ring_pos(b))
+                it.flags.in_building = false
+                return true
+            end
         end
     end
 end
@@ -429,33 +417,16 @@ local function job_corpse_pred(reaction)   -- what corpse a job needs (nil = no 
     end
 end
 
--- Pipeline: for a bath's queued corpse jobs, keep a small supply of matching corpses hauled to it.
-local function haul_corpses_to_bath(b, ha)
-    reclaim_hauled(b)
-    local preds = {}
-    for _, job in ipairs(ha) do
-        local p = job_corpse_pred(job.reaction_name)
-        if p then preds[#preds + 1] = p end
-    end
-    if #preds == 0 then return end
-    -- don't over-haul: stop once a few corpses are already waiting at the bath
-    local near = 0
-    for _, it in ipairs(df.global.world.items.other.ANY_CORPSE or {}) do
-        if df.item_corpsest:is_instance(it) and not it.flags.rotten and near_bath(it, b) then near = near + 1 end
-    end
-    if near >= 3 then return end
-    if not ensure_haul_target(b) then return end
-    local flagged = 0
-    for _, it in ipairs(df.global.world.items.other.ANY_CORPSE or {}) do
-        if flagged >= 3 then break end
-        if df.item_corpsest:is_instance(it) and not it.flags.rotten and not it.flags.forbid
-            and not it.flags.in_job and it.flags.on_ground and not it.flags.dump and not near_bath(it, b) then
-            local u = it.unit_id and it.unit_id >= 0 and df.unit.find(it.unit_id)
-            if u then
-                for _, p in ipairs(preds) do
-                    if p(u) then request_haul(it); flagged = flagged + 1; break end
-                end
-            end
+-- For a bath's live corpse-jobs, keep one matching corpse teleported into the ring, replacing
+-- whatever the reaction consumed. Only teleports when none is already beside the bath.
+local function maintain_ring_corpses(b, jobs)
+    local done = {}
+    for _, job in ipairs(jobs) do
+        local rn = job.reaction_name
+        local pred = job_corpse_pred(rn)
+        if pred and not done[rn] then
+            done[rn] = true
+            if not ring_has_corpse(b, pred) then teleport_corpse_to_ring(b, pred) end
         end
     end
 end
@@ -507,6 +478,26 @@ local function cancel_bath_job(job, msg)
     announce(msg)
 end
 
+-- One worker staffs a whole workshop, so it must be legal for the MOST restrictive rite queued.
+-- The legal-caste sets are nested -- resonate (Elder Brain) is a subset of the non-thrall rites,
+-- which are a subset of implant (anyone) -- so a worker picked for the most restrictive rite can
+-- perform every other rite in the same bath. (A bath containing a resonate job is therefore
+-- staffed by an Elder Brain; put resonate in its own bath if you want parallel work.)
+local RESTRICT = {
+    HA_RESONATE = 3,
+    HA_DEVOUR_BRAIN = 2, HA_DEVOUR_PRISONER = 2, HA_RECLAIM_MEMORIES = 2,
+    HA_EXTRACT_UR_BRAIN = 2, HA_ASCEND = 2,
+    HA_IMPLANT_TADPOLE = 1,
+}
+local function pick_bath_worker(jobs)
+    local worst_rn, worst = nil, -1
+    for _, job in ipairs(jobs) do
+        local r = RESTRICT[job.reaction_name] or 0
+        if r > worst then worst, worst_rn = r, job.reaction_name end
+    end
+    return worst_rn and pick_worker(worst_rn) or nil
+end
+
 -- Staff the bath PROACTIVELY, every fast tick -- never wait for a job to finish. For each queued
 -- bath job we, at assignment time: (1) check its conditions -- if the material/target is missing
 -- or no eligible caste exists, cancel it now with a clear reason; (2) otherwise choose ONE
@@ -526,41 +517,38 @@ local function staff_baths()
         if #ha == 0 then
             if #b.profile.permitted_workers > 0 then set_profile(b, nil) end
         else
-            haul_corpses_to_bath(b, ha)   -- physically haul needed corpses to the bath
-            local removed, pin = 0, nil
+            -- (1) per-job conditions, checked NOW (not at completion): cancel with a clear reason
+            -- if the reagent/target is missing or no eligible caste exists. Survivors -> `live`.
+            local live = {}
             for _, job in ipairs(ha) do
                 local rn = job.reaction_name
                 if not job_feasible(rn) then
-                    cancel_bath_job(job, msg_infeasible(rn))          -- condition fails -> cancel now
-                    removed = removed + 1
+                    cancel_bath_job(job, msg_infeasible(rn))
+                elseif not pick_worker(rn) then
+                    cancel_bath_job(job, msg_nobody(rn))
                 else
-                    local cand = pick_worker(rn)                      -- the specific valid worker
-                    if not cand then
-                        cancel_bath_job(job, msg_nobody(rn))          -- no eligible caste -> cancel now
-                        removed = removed + 1
-                    else
-                        local worker = assigned_worker(job)
-                        if worker and not job_legal_caste(rn, caste_name(worker)) then
-                            -- an ineligible worker grabbed it in the brief window after the last
-                            -- completion handed the bath back: unclaim them (silently -- this is a
-                            -- routine part of the assign/unassign cycle) and pin a valid worker,
-                            -- who takes over long before the reaction could ever finish.
-                            pcall(dfhack.job.removeWorker, job, 0)
-                            pin = cand.id
-                        elseif worker then
-                            pin = worker.id                           -- a valid worker already holds it
-                        else
-                            pin = cand.id                             -- assign the specific valid worker
-                        end
-                    end
+                    live[#live + 1] = job
                 end
             end
-            -- pin the workshop to the chosen valid worker so only they can claim (clear if all cancelled)
-            if removed == #ha then
+            if #live == 0 then
                 if #b.profile.permitted_workers > 0 then set_profile(b, nil) end
-            elseif pin then
-                local pw = b.profile.permitted_workers
-                if #pw ~= 1 or pw[0] ~= pin then set_profile(b, pin) end
+            else
+                -- (2) ONE worker staffs the workshop: legal for the most restrictive live rite (an
+                -- Elder Brain if a resonate job is present -- it can do every rite). Unclaim any
+                -- ineligible worker that grabbed a job in the meantime, then pin the chosen worker.
+                local cand = pick_bath_worker(live)
+                if cand then
+                    for _, job in ipairs(live) do
+                        local w = assigned_worker(job)
+                        if w and not job_legal_caste(job.reaction_name, caste_name(w)) then
+                            pcall(dfhack.job.removeWorker, job, 0)
+                        end
+                    end
+                    local pw = b.profile.permitted_workers
+                    if #pw ~= 1 or pw[0] ~= cand.id then set_profile(b, cand.id) end
+                    -- (3) teleport the needed reagents beside the assigned worker
+                    maintain_ring_corpses(b, live)
+                end
             end
         end
     end
@@ -1078,7 +1066,17 @@ local function on_bath_job(job)
     -- (bath_profile_mod unset) is left untouched.
     local b = dfhack.job.getHolder(job)
     if b and bath_profile_mod[b.id] then
-        local cand = pick_worker(job.reaction_name)
+        -- re-pin for the WHOLE bath (most restrictive rite), not just the completed job, so a
+        -- resonate-containing bath stays pinned to the Elder Brain rather than flipping to an
+        -- illithid after a devour/extract completes.
+        local jobs = {}
+        for _, j in ipairs(b.jobs) do
+            local rn = j.reaction_name
+            if j.job_type == df.job_type.CustomReaction and rn and rn:sub(1, 3) == "HA_" then
+                jobs[#jobs + 1] = j
+            end
+        end
+        local cand = pick_bath_worker(jobs)
         set_profile(b, cand and cand.id or nil)
     end
 end
