@@ -44,7 +44,10 @@ Activates the "always-on" helpers in this pack:
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
-full description), and enable a batch of stock DFHack tools:
+full description), load smooth-movement (3rd-party render-only plugin that
+interpolates creature sprites between tiles -- source is the
+other-authors/df-smooth-movement submodule, binary in DFHack's hack/plugins),
+and enable a batch of stock DFHack tools:
     enable: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
             `name+` burrows), hide-tutorials, prioritize, seedwatch, suspendmanager,
             timestream
@@ -255,6 +258,17 @@ if lovely then
     -- revive and later RETURN as a real attack (the megabeast pool never runs dry)
     try('tarrasque (solstice megabeast revival)',
         function() dfhack.run_command('enable', 'tarrasque') end)
+
+    -- render-only smooth interpolation of matching creature sprites between adjacent
+    -- tiles (3rd-party C++ plugin by notliad; source vendored as the
+    -- other-authors/df-smooth-movement submodule, prebuilt binary installed in DFHack's
+    -- hack/plugins/). It auto-loads at DFHack startup when the .plug.so is present; `load`
+    -- here is a harmless fallback for a mid-session install, then enable turns it on. If the
+    -- binary isn't installed this just fails gracefully (SDL 2D renderer only).
+    try('smooth-movement (render-only smooth creature movement)', function()
+        pcall(dfhack.run_command, 'load', 'smooth-movement')
+        dfhack.run_command('enable', 'smooth-movement')
+    end)
 
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
     local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
