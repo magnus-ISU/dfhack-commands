@@ -4,7 +4,8 @@
 Companion to dig-shapes. While NORMAL MINING MODE is active (the Dig tool selected,
 main_designation_selected == DIG_DIG) on dwarfmode/Default, a picker window docks on the LEFT
 listing every buildable thing -- workshops, furnaces, constructions, doors/hatches, machines,
-traps, cages/restraints, military buildings, trade depot, and all furniture.
+traps, cages/restraints, military buildings, trade depot, and all furniture. Plus a "Stockpile"
+entry that drops the Dig tool and opens DF's stockpile placement screen (not a build-menu item).
 
 Clicking an entry drives DF's OWN build menu straight to that building's native placement action:
 it drops the Dig tool, opens the build menu (the D_BUILDING toolbar key), then clicks through the
@@ -88,6 +89,11 @@ local TOP_MARGIN, BOT_MARGIN = MAX_TOP, 6  -- TOP_MARGIN = initial/default; reco
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
 local COL_W = 16                          -- each column's cell width (inside the border)
+-- The picker ducks out of the way when the cursor is over it -- but it should clear out slightly
+-- BEFORE the cursor reaches it from the map on the right, so extend the hide zone this many tiles
+-- past the right edge. So the cursor triggers the hide 2 tiles closer to the right edge (out on the
+-- map) than the edge itself, and never collides with the panel as you designate next to it.
+local MOUSE_MARGIN_R = 2
 
 -- Every buildable thing, in display order: {disp, path}. `path` is the sequence of on-screen
 -- button labels to click (category -> [subcategory] -> building), matched EXACTLY against the
@@ -199,6 +205,10 @@ local ENTRIES = {
     {'Bolt thrower', {'Military', 'Bolt thrower'}},
     -- direct (no submenu)
     {'Trade depot',  {'Trade depot'}},
+    -- NOT a Build-menu building: DF's own stockpile placement tool (its own toolbar mode). Selecting
+    -- it drops the Dig tool and opens the stockpile screen instead of driving the build menu -- see
+    -- open_stockpile / activate below.
+    {'Stockpile',    {'Stockpile'}, {stockpile = true, alias = {'storage', 'stockpiles'}}},
 }
 
 -- one fully alphabetical list (by shown label) so anything is easy to find by name
@@ -322,6 +332,25 @@ local function navigate(path, noplan, buildmore)
     end
     dfhack.timeout(d + 4, 'frames', settle)
     dfhack.timeout(d + 9, 'frames', settle)
+end
+
+-- The "Stockpile" entry isn't in the Build menu -- it's DF's separate stockpile placement tool. So
+-- instead of navigate()'s build-menu driving, drop the Dig tool (back to dwarfmode/Default) and feed
+-- DF's own D_STOCKPILES toolbar key, which opens the stockpile screen (dwarfmode/Stockpile). Deferred
+-- a frame so the key isn't fed mid-input, exactly as navigate defers D_BUILDING.
+local function open_stockpile()
+    mi().main_designation_selected = df.main_designation_type.NONE   -- drop the Dig tool -> Default
+    dfhack.timeout(1, 'frames', function() gui.simulateInput(scr(), 'D_STOCKPILES') end)
+end
+
+-- run the action for a picked entry: the stockpile tool for the special flag, else the build menu
+local function activate(e)
+    local opt = e[3]
+    if opt and opt.stockpile then
+        open_stockpile()
+    else
+        navigate(e[2], opt and opt.noplan, opt and opt.buildmore)
+    end
 end
 
 -- fuzzy subsequence match: every char of `needle` appears in `hay` IN ORDER (case-insensitive).
@@ -501,10 +530,22 @@ function DigBuilding:covered_by_native()
     return false
 end
 
--- draw the picker as a bordered, opaque panel -- unless a native panel overlaps it (then hide it)
+-- Is the cursor over the panel, or within MOUSE_MARGIN_R tiles to the RIGHT of its right edge?
+-- The right side is where the map is, so extending the zone rightward makes the panel step aside a
+-- couple tiles before the cursor arrives -- letting you designate the map right next to (and under)
+-- it without the panel flickering in and out at the boundary.
+function DigBuilding:mouse_in_hide_zone()
+    local fr = self.frame_rect
+    if not fr then return false end
+    local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+    return mx >= fr.x1 and mx <= fr.x2 + MOUSE_MARGIN_R and my >= fr.y1 and my <= fr.y2
+end
+
+-- draw the picker as a bordered, opaque panel -- unless a native panel overlaps it, or the cursor
+-- is over/just-right-of it (both hide it and let clicks through to the map)
 function DigBuilding:onRenderBody(dc)
     if not self.visible then return end
-    self.covered = self:covered_by_native()
+    self.covered = self:covered_by_native() or self:mouse_in_hide_zone()
     if self.covered then return end   -- a native panel overlaps us: get out of its way entirely
     local w, h, cols = self.frame.w, self.frame.h, self.cols
     local BG = {fg = COLOR_GREY, bg = COLOR_BLACK}
@@ -599,7 +640,7 @@ function DigBuilding:onInput(keys)
             if best then
                 local e = ENTRIES[best]
                 self.search = ''
-                navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore)
+                activate(e)
                 return true
             end
             return false                                         -- no match: leave Enter to DF
@@ -634,7 +675,7 @@ function DigBuilding:onInput(keys)
             return true
         end
         local e = self:entry_at(x, y)
-        if e then self.search = ''; navigate(e[2], e[3] and e[3].noplan, e[3] and e[3].buildmore) end
+        if e then self.search = ''; activate(e) end
         return true                           -- consume any click within the window
     end
     return false
