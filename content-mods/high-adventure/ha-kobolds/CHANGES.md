@@ -91,6 +91,16 @@
 - Kept per request: the 5 new pets (wooly spider, cave rat + giant cave rat, tame helmet snake + tame
   monitor lizard), the small kobold weapons, and all crafting/cleaning reactions.
 
+## v0.10 -- fix civ worldgen placement
+- **HA_KOBOLD_CAVES now reliably generates civilizations.** CKC's inherited
+  START_BIOME was restricted to tropical/temperate wetlands + tropical rivers, so
+  in worlds short on those biomes the kobold civ founded ZERO sites (a test world
+  generated 0 HA kobold civs while vanilla broad-placement kobolds made 19).
+  Added [START_BIOME:MOUNTAIN] + [START_BIOME:NOT_FREEZING] to match vanilla kobold
+  breadth; the tropical/wetland START_BIOMEs and BIOME_SUPPORT weights are kept so
+  they still lean toward swampy caves. (Pairs with ha-playable-civs no longer making
+  vanilla SKULKING kobolds playable -- HA_KOBOLD_CAVES is the intended kobold civ.)
+
 ## TODO (next)
 - (DONE) Ancient Dragon caste in HA_KOBOLD (~0.2% POP_RATIO, asexual, dragon body/fire/flight/iron-skin,
   tail attack, dragon-size@100 / giant-elephant@1000, legendary combat, phys 2000-3000) + the

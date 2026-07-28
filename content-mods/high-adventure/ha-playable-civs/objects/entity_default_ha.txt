@@ -1237,5 +1237,6 @@ Dwarves get no changes.
 	[GENERATE_MUSICAL_FORMS]
 	[GENERATE_DANCE_FORMS]
 
-[SELECT_ENTITY:SKULKING]
-	[SITE_CONTROLLABLE]		Will this work? Note: Kinda. Needs UTTERANCES removed from Kobolds for best play...
+Vanilla kobolds (SKULKING) are intentionally NOT made playable: the HA_kobolds
+mod supplies the proper playable kobold civ (HA_KOBOLD_CAVES) with dragon rulers.
+Making SKULKING controllable produced broken "livestock" citizens, so it is cut.

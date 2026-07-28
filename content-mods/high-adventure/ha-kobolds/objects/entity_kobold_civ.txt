@@ -281,6 +281,12 @@ TODO:
 	[START_BIOME:ANY_TROPICAL_RIVER]
 	[START_BIOME:ANY_TROPICAL_WETLAND]
 	[START_BIOME:ANY_TEMPERATE_WETLAND]
+	HA fix: broaden starting placement so the civ reliably generates (CKC's
+	wetland-only START_BIOME left worlds with few such biomes kobold-less).
+	MOUNTAIN + NOT_FREEZING match vanilla kobold breadth; the tropical/wetland
+	START_BIOMEs above and BIOME_SUPPORT weights below keep their swamp-cave lean.
+	[START_BIOME:MOUNTAIN]
+	[START_BIOME:NOT_FREEZING]
 	[SETTLEMENT_BIOME:ANY_WETLAND]
 	[SETTLEMENT_BIOME:ANY_RIVER]
 	[BIOME_SUPPORT:ANY_RIVER:6]

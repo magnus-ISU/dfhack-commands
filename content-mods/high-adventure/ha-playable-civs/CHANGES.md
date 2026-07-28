@@ -1,5 +1,12 @@
 # ha-playable-civs — fork changelog
 
+## v0.6 — vanilla kobolds no longer playable
+- Removed `[SELECT_ENTITY:SKULKING][SITE_CONTROLLABLE]`. Making vanilla kobolds
+  (entity SKULKING) fort-playable produced broken forts where the kobolds appeared
+  as **livestock** rather than citizens. The **ha-kobolds** mod now supplies the
+  proper playable kobold civilization (HA_KOBOLD_CAVES, with Ancient Dragon rulers),
+  so vanilla kobolds are intentionally left un-playable to avoid the two colliding.
+
 ## v0.5
 - Shaping Tree pacing hook fixed (same onReactionComplete bug as the breeding pit
   - it never fired). Now uses `eventful.registerReaction`; early harvests cancel
