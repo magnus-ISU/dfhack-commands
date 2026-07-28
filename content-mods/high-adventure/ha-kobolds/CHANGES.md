@@ -101,6 +101,19 @@
   they still lean toward swampy caves. (Pairs with ha-playable-civs no longer making
   vanilla SKULKING kobolds playable -- HA_KOBOLD_CAVES is the intended kobold civ.)
 
+## v0.11 -- THE actual worldgen fix: kobolds found caves, not mountain halls
+- v0.10's biome broadening was a red herring. Inspecting a freshly-genned world
+  live (DFHack) proved HA_KOBOLD_CAVES *does* load and now has 28 start biomes
+  (broader than vanilla kobolds' 25) yet still generated ZERO civs, while vanilla
+  SKULKING kobolds made 9. The only remaining difference: `DEFAULT_SITE_TYPE`.
+- **Root cause:** CKC's inherited `[DEFAULT_SITE_TYPE:CAVE_DETAILED]` resolves to
+  world site type **MountainHalls** (the dwarf fortress type, enum 3) -- so kobolds
+  tried to found mountain halls, which need mountain biomes and lose that niche to
+  actual dwarves (who themselves only placed 4 civs). Result: no kobold civs.
+- **Fix:** `[DEFAULT_SITE_TYPE:CAVE]` (enum 2, "Cave") -- the canonical kobold site
+  type that vanilla SKULKING uses and that generates reliably across biomes. Pop cap
+  is unchanged (MAX_SITE_POP_NUMBER:120). Kept the broadened START_BIOMEs from v0.10.
+
 ## TODO (next)
 - (DONE) Ancient Dragon caste in HA_KOBOLD (~0.2% POP_RATIO, asexual, dragon body/fire/flight/iron-skin,
   tail attack, dragon-size@100 / giant-elephant@1000, legendary combat, phys 2000-3000) + the

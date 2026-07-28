@@ -269,7 +269,12 @@ TODO:
 
 	Added broad tolerance for moving into other sites. Kobolds aren't picky.
 
-	[DEFAULT_SITE_TYPE:CAVE_DETAILED]
+	HA fix: DEFAULT_SITE_TYPE was CAVE_DETAILED (= world site type MountainHalls),
+	so kobolds tried to found dwarf-style mountain halls -- they need mountain
+	biomes and lose the niche to actual dwarves, producing ZERO kobold civs in
+	worldgen (verified: 0 civs while broad START_BIOMEs were fine). CAVE is the
+	canonical kobold site type (vanilla SKULKING uses it and generates reliably).
+	[DEFAULT_SITE_TYPE:CAVE]
 	[LIKES_SITE:CAVE]
 	[LIKES_SITE:CAVE_DETAILED]
 	[TOLERATES_SITE:CAVE]
