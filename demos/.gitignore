@@ -1,5 +1,7 @@
 # Demo videos live here but are ignored for now.
 # (They can be committed later — or embedded via GitHub attachment URLs instead.)
-# Ignore everything in this directory except this .gitignore itself.
+# Ignore everything in this directory (source recordings, mp4s, etc.) except this
+# .gitignore and any GIFs, which are committed for use as looping README demos.
 *
 !.gitignore
+!*.gif
