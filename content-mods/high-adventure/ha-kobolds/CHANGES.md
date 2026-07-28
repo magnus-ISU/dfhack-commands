@@ -69,6 +69,12 @@
   sleep), NOEMOTION (they keep their greedy/proud temperament), and no Tier-2 immunities
   (webs / paralysis / drowning remain viable ways to bring a dragon down).
 
+## v0.8 -- dragonscale is heat-inert
+- Dragonscale material is now fully heat-inert (SPEC_HEAT:NONE plus MELTING/BOILING/IGNITE/HEATDAM/
+  COLDDAM points all NONE): dragonscale armour is immune to dragonfire and magma and has no specific
+  heat. Removed the megabeast's blanket SPEC_HEAT:30000 (from the vanilla-dragon fireproof block) so
+  it can't override the scale's heat-inertness.
+
 ## TODO (next)
 - (DONE) Ancient Dragon caste in HA_KOBOLD (~0.2% POP_RATIO, asexual, dragon body/fire/flight/iron-skin,
   tail attack, dragon-size@100 / giant-elephant@1000, legendary combat, phys 2000-3000) + the

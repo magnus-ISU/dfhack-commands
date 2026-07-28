@@ -122,6 +122,13 @@ Based on the vanilla dragon.
 		[ITEMS_ARMOR]
 		[ITEMS_SCALED]
 		[ITEMS_SOFT]
+		heat-inert: immune to dragonfire and magma, no specific heat (for dragonscale armour)
+		[SPEC_HEAT:NONE]
+		[MELTING_POINT:NONE]
+		[BOILING_POINT:NONE]
+		[IGNITE_POINT:NONE]
+		[HEATDAM_POINT:NONE]
+		[COLDDAM_POINT:NONE]
 	[SELECT_MATERIAL:ALL]
 	size: a full-grown dragon (~5,000,000) at age 100, a giant elephant (~10,000,000) at 1000
 	[BODY_SIZE:0:0:500000]
@@ -191,7 +198,6 @@ Based on the vanilla dragon.
 		[IGNITE_POINT:NONE]
 		[IF_EXISTS_SET_MELTING_POINT:55000]
 		[IF_EXISTS_SET_BOILING_POINT:57000]
-		[SPEC_HEAT:30000]
 	[SELECT_MATERIAL:BLOOD]
 	 [PLUS_MATERIAL:PUS]
 		[MELTING_POINT:10000]

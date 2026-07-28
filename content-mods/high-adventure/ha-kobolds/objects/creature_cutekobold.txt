@@ -421,6 +421,13 @@ creature_cutekobold
 			[ITEMS_ARMOR]
 			[ITEMS_SCALED]
 			[ITEMS_SOFT]
+			heat-inert: immune to dragonfire and magma, no specific heat (for dragonscale armour)
+			[SPEC_HEAT:NONE]
+			[MELTING_POINT:NONE]
+			[BOILING_POINT:NONE]
+			[IGNITE_POINT:NONE]
+			[HEATDAM_POINT:NONE]
+			[COLDDAM_POINT:NONE]
 		[SELECT_MATERIAL:ALL]
 		procedural scale colours (must match the dragon graphics layers so no state ever falls back to grayscale)
 		[SET_TL_GROUP:BY_CATEGORY:ALL:SCALE]
