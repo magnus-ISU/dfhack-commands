@@ -510,7 +510,11 @@ local function build_figure_info(fig, pos_by_unit)
     local cur_year = df.global.cur_year
     local born = hf and hf.born_year
     local died = hf and hf.died_year
-    if fig.dead then
+    -- Determine death from the LIVE records, not fig.dead: the browser's left-list entries come from
+    -- the scan, which carries no `dead` field, so trusting fig.dead rendered every dead dwarf as
+    -- "Alive". A recorded death year (died_year >= 0) or a loaded dead unit each mean dead.
+    local dead = (hf and hf.died_year and hf.died_year >= 0) or (unit and dfhack.units.isDead(unit)) or false
+    if dead then
         local when = (died and died >= 0) and ('year %d'):format(died) or 'unknown'
         local age = (born and born >= 0 and died and died >= 0) and (' (age %d)'):format(died - born) or ''
         line({L('Died: '), V(when .. age)})
