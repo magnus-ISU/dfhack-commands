@@ -1,0 +1,5 @@
+# Demo videos live here but are ignored for now.
+# (They can be committed later — or embedded via GitHub attachment URLs instead.)
+# Ignore everything in this directory except this .gitignore itself.
+*
+!.gitignore
