@@ -431,7 +431,7 @@ creature_illithid
 			[SYNDROME]
 				[SYN_NAME:illithid toxic strike]
 				[SYN_AFFECTED_CLASS:GENERAL_POISON]
-				[SYN_IMMUNE_CREATURE:ILLITHID:ALL]
+				[SYN_IMMUNE_CREATURE:HA_ILLITHID:ALL]
 				[SYN_INJECTED]
 				[CE_DIZZINESS:SEV:100:PROB:100:SIZE_DILUTES:START:20:PEAK:200:END:600]
 
@@ -447,20 +447,10 @@ creature_illithid
 			[SYNDROME]
 				[SYN_NAME:ulitharid toxic strike]
 				[SYN_AFFECTED_CLASS:GENERAL_POISON]
-				[SYN_IMMUNE_CREATURE:ILLITHID:ALL]
+				[SYN_IMMUNE_CREATURE:HA_ILLITHID:ALL]
 				[SYN_INJECTED]
 				[CE_PARALYSIS:SEV:100:PROB:100:SIZE_DILUTES:START:20:PEAK:600:END:1200]
 				[CE_NECROSIS:SEV:100:PROB:100:SIZE_DILUTES:START:20:PEAK:600:END:1200]
-
-
-			[SYN_NAME:nullification]
-			[SYN_IMMUNE_CREATURE:HA_ILLITHID:AGENDER]
-			[SYN_IMMUNE_CREATURE:ILLITHID:ULITHARID]
-			[SYN_AFFECTED_CREATURE:ILLITHID:MALE]
-			[SYN_AFFECTED_CREATURE:ILLITHID:FEMALE]
-			[SYN_CONTACT]
-			[CE_BODY_TRANSFORMATION:START:0]
-			[CE:CREATURE:HA_ILLITHID:AGENDER]
 
 [CASTE:ELDER_BRAIN]
 		[CREATURE_CLASS:HA_TRUE_ILLITHID]
@@ -585,3 +575,29 @@ creature_illithid
 		[SET_TL_GROUP:BY_CATEGORY:ALL:SKIN]
 			[TL_COLOR_MODIFIER:BROWN:1:BURNT_UMBER:1:CINNAMON:1:COPPER:1:DARK_BROWN:1:DARK_PEACH:1:DARK_TAN:1:ECRU:1:PALE_BROWN:1:PALE_CHESTNUT:1:PALE_PINK:1:PEACH:1:PINK:1:RAW_UMBER:1:SEPIA:1:TAN:1:TAUPE_PALE:1:TAUPE_SANDY:1]
 				[TLCM_NOUN:skin:SINGULAR]
+
+Dummy creature used only as a 1-tick body-transformation waypoint for caste changes
+(illithid -> ulitharid -> elder brain). The neural-bath script sets a unit's identity
+caches to the target caste, then applies the HA_ILLITHID_TF syndrome which turns the unit
+into this flux for a single tick; when it reverts, DF rebuilds the unit's body, appearance
+vectors and graphics from the caches, landing cleanly on the target caste. This is the
+succubus-mod pattern: transforming the caste directly (setting unit.caste) leaves the
+appearance vectors sized for the old caste and CRASHES the game when the description is
+opened. Never invoked in worldgen; exists purely as a transform target.
+[CREATURE:HA_ILLITHID_DUMMY]
+	[DESCRIPTION:A flicker of raw psionic flux, gone in an instant.]
+	[NAME:psionic flux:psionic fluxes:psionic flux]
+	[CASTE_NAME:psionic flux:psionic fluxes:psionic flux]
+	[CREATURE_TILE:'*'][COLOR:5:0:1]
+	[NOT_BUTCHERABLE][ARENA_RESTRICTED][DOES_NOT_EXIST]
+	[NO_EAT][NO_DRINK][NO_SLEEP]
+	[NOEMOTION][NOT_LIVING][NOPAIN][NOBREATHE][NOFEAR][NOTHOUGHT]
+	[PREFSTRING:impermanence]
+	[BODY:BASIC_1PARTBODY]
+	[TISSUE:FLUX]
+		[TISSUE_NAME:flux:flux]
+		[TISSUE_MATERIAL:INORGANIC:HA_PSI_FORCE]
+		[STRUCTURAL][FUNCTIONAL][RELATIVE_THICKNESS:1][TISSUE_SHAPE:LAYER][CONNECTS]
+	[TISSUE_LAYER:BY_CATEGORY:ALL:FLUX]
+	[IMMOBILE]
+	[BODY_SIZE:0:0:5000]

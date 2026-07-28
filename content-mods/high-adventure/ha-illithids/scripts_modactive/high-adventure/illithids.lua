@@ -512,9 +512,60 @@ local function staff_baths()
     end
 end
 
+-- Illithids may FORGE armor (for thralls / trade) but never WEAR it. This strips the actual
+-- armor pieces (armorlevel > 0) out of any illithid squad member's OWN uniform -- categories
+-- body/head/pants/gloves/shoes -- while leaving weapons, shields, clothing (armorlevel 0), and
+-- thralls untouched. Runs on the slow tick; idempotent (nothing to strip once done).
+local ARMOR_DEFS
+local function spec_is_armor(sp)
+    ARMOR_DEFS = ARMOR_DEFS or {
+        [df.item_type.ARMOR] = df.global.world.raws.itemdefs.armor,
+        [df.item_type.HELM] = df.global.world.raws.itemdefs.helms,
+        [df.item_type.PANTS] = df.global.world.raws.itemdefs.pants,
+        [df.item_type.GLOVES] = df.global.world.raws.itemdefs.gloves,
+        [df.item_type.SHOES] = df.global.world.raws.itemdefs.shoes,
+    }
+    local lst = ARMOR_DEFS[sp.item_type]
+    if lst and sp.item_subtype >= 0 and sp.item_subtype < #lst then
+        local d = lst[sp.item_subtype]
+        return d and d.armorlevel and d.armorlevel > 0
+    end
+    return false
+end
+
+local function strip_illithid_armor()
+    local race = race_id()
+    local ent = df.global.plotinfo.main.fortress_entity
+    if not ent then return end
+    for _, sid in ipairs(ent.squads) do
+        local sq = df.squad.find(sid)
+        if sq then
+            for pi = 0, #sq.positions - 1 do
+                local pos = sq.positions[pi]
+                if pos.occupant and pos.occupant >= 0 then
+                    local hf = df.historical_figure.find(pos.occupant)
+                    local u = hf and df.unit.find(hf.unit_id)
+                    if u and u.race == race then
+                        local cn = caste_name(u)
+                        if cn ~= "THRALL_M" and cn ~= "THRALL_F" then
+                            for _, cat in ipairs({0, 1, 2, 3, 4}) do   -- body/head/pants/gloves/shoes
+                                local specs = pos.equipment.uniform[cat]
+                                for si = #specs - 1, 0, -1 do
+                                    if spec_is_armor(specs[si]) then specs:erase(si) end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function tick()
     local race = race_id()
     if not race then return end
+    strip_illithid_armor()
     for _, u in ipairs(df.global.world.units.active) do
         if u.race == race then
             -- Thralls are mindless human stock; they never linger as ghosts. (Illithids may
@@ -578,17 +629,18 @@ local function make_items(worker, itype, subtype, matstr, count)
     return made
 end
 
-local function set_caste(u, ci, syn_name)
+-- Brief dummy body-transformation (raws: HA_ILLITHID_TF -> HA_ILLITHID_DUMMY, END:1).
+local TF_SYNDROME = "HA_ILLITHID_TF"
+
+local function set_caste(u, ci)
     local race = u.race
-    -- Rebuild the body/graphics FIRST, while u.caste is still the old caste, so DF
-    -- registers a real caste transition and doesn't skip the transform as a no-op.
-    -- The permanent CE_BODY_TRANSFORMATION supplies the new body & art; the identity
-    -- caches below make the change stick (no revert) and update nobles/labor screens.
-    if syn_name then
-        local syn = find_syndrome(syn_name)
-        if syn then syndromeUtil.infectWithSyndrome(u, syn, syndromeUtil.ResetPolicy.DoNothing) end
-    end
-    u.caste = ci
+    -- Succubus-proven caste change. Write the target caste into the identity CACHES only,
+    -- then apply a one-tick dummy transformation. When it reverts next tick, DF rebuilds
+    -- the unit's body, appearance vectors and graphics FROM these caches, landing cleanly
+    -- on the target caste. We deliberately do NOT set u.caste/u.race here: doing so leaves
+    -- the appearance vectors sized for the old caste, so opening the unit's description
+    -- reads past their end and CRASHES the game (and the art comes out wrong). The dummy
+    -- revert is what regenerates those vectors to match the new caste.
     u.enemy.normal_race = race
     u.enemy.normal_caste = ci
     u.enemy.were_race = race
@@ -603,12 +655,20 @@ local function set_caste(u, ci, syn_name)
         local hf = df.historical_figure.find(u.hist_figure_id)
         if hf then hf.race = race; hf.caste = ci end
     end
+    local syn = find_syndrome(TF_SYNDROME)
+    if syn then
+        syndromeUtil.infectWithSyndrome(u, syn, syndromeUtil.ResetPolicy.DoNothing)
+    else
+        -- Fallback for worlds generated before the dummy syndrome existed: set the caste
+        -- directly. May render the description imperfectly, but never leaves a stuck curse.
+        u.caste = ci
+    end
 end
 
 local function promote_to_ur(u)
     local ci = caste_index("ULITHARID")
     if not ci then return end
-    set_caste(u, ci, "become ulitharid")
+    set_caste(u, ci)
     dfhack.gui.showAnnouncement(
         ("%s has devoured a worthy mind and swelled into a ULITHARID!")
             :format(dfhack.units.getReadableName(u)), COLOR_MAGENTA, true)
@@ -868,9 +928,9 @@ local function on_ascend(unit)
         pcall(dfhack.run_script, "full-heal", "-r", "--unit", tostring(uid))
         local u = df.unit.find(uid)
         if u and not u.flags2.killed then
-            set_caste(u, caste_index("ELDER_BRAIN"), "become elder brain")
-            local si = u.body.size_info
-            si.size_cur = 10000000; si.size_base = 10000000
+            set_caste(u, caste_index("ELDER_BRAIN"))
+            -- No manual resize: the dummy-revert rebuilds the body from the ELDER_BRAIN
+            -- caste, which already defines BODY_SIZE 10000000 at adulthood.
             dfhack.units.teleport(u, pos)
             dfhack.units.makeown(u)
             managed[u.id] = nil

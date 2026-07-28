@@ -1,5 +1,35 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.42 — worldgen fix (no illithids) + crash-free caste changes
+- **CRITICAL worldgen fix:** worlds generated no illithids at all. An orphaned, malformed
+  "nullification" syndrome block left over from the pre-rename base mod (no `[SYNDROME]`
+  opener, bare `ILLITHID:MALE/FEMALE/ULITHARID` creature tokens) produced *"Error(s)
+  finalizing the creature HA_ILLITHID"*, which excluded the illithid civ from worldgen.
+  Removed the dead block and fixed the two `SYN_IMMUNE_CREATURE:ILLITHID:ALL` toxin lines
+  to `HA_ILLITHID:ALL`. Illithids spawn again. (Raws -> regenerate the world.)
+- **Crash fix (converted ulitharids):** clicking the description of an illithid promoted to
+  ulitharid crashed the game, and its art was wrong. Cause: `set_caste` set `u.caste`
+  directly *and* applied a permanent `CE_BODY_TRANSFORMATION`. ULITHARID has EXTRA_FACE_TENTACLES
+  (extra body parts -> extra appearance modifiers), so with `u.caste` pointing at ULITHARID but
+  the appearance vectors still sized for the regular illithid caste, the description viewscreen
+  read past the end of those vectors and crashed; the leftover permanent curse gave wrong art.
+- Rewrote the caste change to the succubus-proven pattern: write the target caste into the
+  identity *caches* only (enemy/soul/histfig race+caste), then apply a one-tick dummy transform
+  (`HA_ILLITHID_TF` -> new `HA_ILLITHID_DUMMY`, `START:0:END:1`). When it reverts, DF rebuilds
+  the body, appearance vectors and graphics from the caches, landing cleanly on the target caste
+  -- no crash, correct art. Replaces the old permanent `become ulitharid` / `become elder brain`
+  syndromes. Elder-brain ascension no longer needs a manual resize (the revert rebuilds it at the
+  caste's BODY_SIZE 10000000). (Raws -> takes effect in a newly generated world.)
+
+## v0.41 — illithids forge armor but never wear it
+- Entity now permits forging protective armor (breastplate, mail shirt, leather, metal helm,
+  gauntlets, greaves, high boots) -- so thralls can be armored and armor can be traded.
+- New script step strip_illithid_armor() (slow tick): removes actual armor pieces
+  (armorlevel > 0) from any illithid squad member's OWN uniform -- body/head/pants/gloves/shoes
+  -- while keeping weapons, shields, clothing (armorlevel 0), and leaving thralls fully armored.
+  So an illithid soldier fights robed and armed but never armored, no matter what uniform you
+  assign. (Entity change is raws -> new world; the strip script re-registers on fort load.)
+
 ## v0.40 — ulitharids and elder brains no longer fly
 - Removed [FLIER] from ULITHARID and ELDER_BRAIN. Flight forced expensive 3D pathfinding
   (a real FPS drain, especially for the huge elder brain) and made their pathing erratic.

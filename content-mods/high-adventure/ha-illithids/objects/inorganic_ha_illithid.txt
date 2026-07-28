@@ -218,13 +218,14 @@ inorganic_ha_illithid
 	[USE_MATERIAL_TEMPLATE:STONE_TEMPLATE]
 	[STATE_NAME_ADJ:ALL_SOLID:transformation][STATE_NAME_ADJ:LIQUID:transformation][STATE_NAME_ADJ:GAS:transformation]
 	[SPECIAL]
+	Single dummy-revert transform used for every caste change (illithid -> ulitharid ->
+	elder brain). The script writes the target caste into the unit's identity caches, then
+	applies this syndrome to turn the unit into HA_ILLITHID_DUMMY for one tick; on revert DF
+	rebuilds the body/appearance/graphics from the caches and lands on the target caste with
+	no leftover curse and no appearance-vector mismatch (which previously crashed the game
+	when a converted ulitharid's description was opened). This is the succubus-mod pattern.
 	[SYNDROME]
-		[SYN_NAME:become ulitharid]
+		[SYN_NAME:HA_ILLITHID_TF]
 		[SYN_AFFECTED_CREATURE:HA_ILLITHID:ALL]
-		[CE_BODY_TRANSFORMATION:PROB:100:START:0]
-			[CE:CREATURE:HA_ILLITHID:ULITHARID]
-	[SYNDROME]
-		[SYN_NAME:become elder brain]
-		[SYN_AFFECTED_CREATURE:HA_ILLITHID:ALL]
-		[CE_BODY_TRANSFORMATION:PROB:100:START:0]
-			[CE:CREATURE:HA_ILLITHID:ELDER_BRAIN]
+		[CE_BODY_TRANSFORMATION:START:0:END:1]
+			[CE:CREATURE:HA_ILLITHID_DUMMY:DEFAULT]
