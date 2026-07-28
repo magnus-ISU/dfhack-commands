@@ -655,7 +655,12 @@ local function tick()
             -- ghost normally unless devoured/reclaimed at the pool or memorialized.)
             if u.flags3.ghostly then
                 local cn = caste_name(u)
-                if cn == "THRALL_M" or cn == "THRALL_F" then u.flags3.ghostly = false end
+                if cn == "THRALL_M" or cn == "THRALL_F" then
+                    -- thralls are mindless stock: fully dispel, like goblin/orc dead
+                    u.flags3.ghostly = false
+                    u.flags1.inactive = true
+                    u.flags2.killed = true
+                end
             end
             if not u.flags1.inactive and not u.flags2.killed then
                 if dfhack.units.isCitizen(u) or dfhack.world.isAdventureMode() then
