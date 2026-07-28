@@ -141,10 +141,11 @@ stock DFHack tools and a few extras.
 - **`adv/fight`** — Auto-fights: marks matching creatures and hunts them down, even while paused.
 - **`adv/im-sure`** — Instantly dismisses the "can't act for a while" interrupt when webbed or
   stunned.
-- **`adv/keep-talking`** — Auto-reopens the conversation each time it closes (via the `k`/`A_TALK`
-  action → "Continue conversation"), so a conversation flows without re-initiating for every line.
-  Toggle with `enable`/`disable adv/keep-talking` or **Ctrl+K** in-game (turn it off to leave a
-  conversation). Default off.
+- **`adv/keep-talking`** — After you pick a conversation topic, auto-reopens the conversation (via
+  the `k`/`A_TALK` action → "Continue conversation") so it flows without re-initiating for every
+  line. Closing with **Escape** does not reopen — that's how you leave. Toggle with
+  `enable`/`disable adv/keep-talking` or **Ctrl+K** in-game. Default off. (Enabled automatically in
+  adventure mode by `magnus-scripts`.)
 
 ### 🚧 Embark & experimental
 

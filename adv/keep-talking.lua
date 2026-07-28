@@ -4,9 +4,9 @@
 --[[
 In adventure mode a conversation drops back to the map every time you pick a topic -- to ask
 the next thing you press `k` (talk) and choose "Continue conversation with ...". With
-keep-talking ENABLED, that's done for you: the instant the conversation menu closes it is
-reopened, so you keep asking questions in one flowing exchange instead of re-initiating every
-line.
+keep-talking ENABLED, that's done for you: after you pick a topic the conversation is reopened
+automatically, so you keep asking questions in one flowing exchange instead of re-initiating
+every line. Closing the menu with ESCAPE does NOT reopen it -- that's how you leave: press Esc.
 
     enable keep-talking       auto-reopen conversations (this session)
     disable keep-talking      stop
@@ -81,6 +81,18 @@ local function in_select_menu()
 end
 local function on_map() return focus_is('dungeonmode/Default') end
 
+-- Signals that tell a topic SELECTION apart from an Escape when the menu closes: picking a topic
+-- takes a game action, so the "last took input" stamp advances AND a turn processes (player_control
+-- _state leaves TAKING_INPUT); backing out with Escape does neither.
+local function input_stamp()
+    local av = df.global.adventure
+    return ('%d:%d:%d'):format(av.last_took_input_year, av.last_took_input_season_count,
+        av.last_took_input_precise_phase)
+end
+local function processing_turn()
+    return df.global.adventure.player_control_state ~= df.adventure_game_loop_type.TAKING_INPUT
+end
+
 -- ---- overlay ----------------------------------------------------------------
 
 KeepTalking = defclass(KeepTalking, overlay.OverlayWidget)
@@ -102,7 +114,17 @@ function KeepTalking:reset() self.was_open = false; self.job = nil end
 -- menu but there is no Continue entry it backs out with Escape so the player isn't stranded there.
 function KeepTalking:drive()
     local job = self.job
-    if job.stage == 'talk' then
+    if job.stage == 'detect' then
+        -- decide why the menu closed: a topic SELECTION (advanced the input stamp / a turn is running)
+        -- vs an Escape (neither). Only a selection reopens.
+        if processing_turn() or input_stamp() ~= self.conv_stamp then
+            job.stage, job.settle, job.tries, job.attempts = 'talk', 0, 0, 0   -- selected -> reopen
+        else
+            job.frames = (job.frames or 0) + 1
+            if job.frames > 8 then self.job = nil end                          -- Escape -> do NOT reopen
+        end
+        return
+    elseif job.stage == 'talk' then
         -- A_TALK is ignored while the game is still processing the last exchange (the NPC's reply):
         -- wait for the plain map AND the input-ready state, then let it settle a few frames. The very
         -- first A_TALK right after a processing turn still gets eaten even at input-ready, so we also
@@ -141,15 +163,16 @@ end
 function KeepTalking:overlay_onupdate()
     if not enabled then self:reset(); return end
     if not dfhack.world.isAdventureMode() then return end
-    if in_conversation() then                            -- actually talking: remember it, no reopen pending
-        self.was_open = true
+    if in_conversation() then                            -- actually talking: remember it (+ the input
+        self.was_open = true                             -- stamp, so a later close can tell select vs Escape)
+        self.conv_stamp = input_stamp()
         self.job = nil
         return
     end
     if self.job then self:drive(); return end            -- a reopen is in flight (incl. the select menu)
-    if self.was_open and on_map() then                    -- conversation just closed -> queue a reopen
+    if self.was_open and on_map() then                    -- conversation just closed -> decide, then reopen
         self.was_open = false
-        self.job = {stage = 'talk', tries = 0}
+        self.job = {stage = 'detect', frames = 0}
         self:drive()
     end
 end

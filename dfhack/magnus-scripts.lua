@@ -94,8 +94,26 @@ Usage
 ]====]
 
 if not dfhack.world.isFortressMode() then
-    -- soft return (not qerror): this script auto-runs from onMapLoad.init, which
-    -- also fires on non-fort maps -- we just do nothing there instead of erroring.
+    -- ADVENTURE mode: enable the adventure-mode helpers here. onMapLoad.init runs this script on
+    -- every map load (forts AND adventurers), so once the pack is armed these re-enable on each
+    -- adventure load -- i.e. they persist / stay on across sessions, same as the fort helpers.
+    if dfhack.world.isAdventureMode() then
+        local function atry(label, fn)
+            local ok, err = pcall(fn)
+            print(('  [%s] %s'):format(ok and 'ok' or 'FAIL', label))
+            if not ok then print('       ' .. tostring(err)) end
+        end
+        if ({...})[1] == 'disable' then
+            atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
+            atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
+        else
+            atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
+                function() dfhack.run_command('enable', 'adv/keep-talking') end)
+            atry('adv/im-sure (auto-dismiss the "can\'t act for a while" prompt)',
+                function() dfhack.run_script('adv/im-sure') end)
+        end
+    end
+    -- soft return (not qerror): onMapLoad.init also fires on other non-fort maps; do nothing there.
     return
 end
 
