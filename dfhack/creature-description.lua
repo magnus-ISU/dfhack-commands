@@ -220,6 +220,13 @@ local function wrapped_lines(text, width)
     return n
 end
 
+-- The box's RIGHT edge is kept this many columns in from the screen's right border, so it lands
+-- just left of the native creature window (at the 'u' in "powerful" on the reference bunny, where
+-- W=150 -> right edge col 51) and never overlaps it. Width is recomputed from the live screen width
+-- each frame, so the right edge tracks the border 1:1 -- screen one wider => box one wider, and so on.
+local RIGHT_MARGIN = 98
+local MIN_W = 20            -- floor so the box never collapses on a very narrow screen
+
 CreatureDescOverlay = defclass(CreatureDescOverlay, overlay.OverlayWidget)
 CreatureDescOverlay.ATTRS{
     desc = "Shows the selected creature's description in the bottom-left.",
@@ -257,9 +264,13 @@ function CreatureDescOverlay:overlay_onupdate()
         self.subviews.desc.text_to_wrap = text
         changed = true
     end
+    local sw, sh = dfhack.screen.getWindowSize()
+    -- width tracks the screen so the RIGHT edge stays RIGHT_MARGIN cols in from the border (just
+    -- left of the native creature window); the left edge (frame.l) stays put
+    local w = math.max(MIN_W, sw - RIGHT_MARGIN - (self.frame.l or 0))
+    if self.frame.w ~= w then self.frame.w = w; changed = true end
     -- grow the box to fit the wrapped text (incl. the Kills line), so nothing is
     -- cut off; cap so it stays on screen
-    local _, sh = dfhack.screen.getWindowSize()
     local h = math.max(4, math.min(wrapped_lines(text, self.frame.w - 2) + 2, sh - 6))
     if self.frame.h ~= h then self.frame.h = h; changed = true end
     if changed then self:updateLayout() end
