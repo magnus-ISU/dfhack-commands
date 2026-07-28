@@ -264,7 +264,8 @@ if lovely then
     -- other-authors/df-smooth-movement submodule, prebuilt binary installed in DFHack's
     -- hack/plugins/). It auto-loads at DFHack startup when the .plug.so is present; `load`
     -- here is a harmless fallback for a mid-session install, then enable turns it on. If the
-    -- binary isn't installed this just fails gracefully (SDL 2D renderer only).
+    -- binary isn't installed this just fails gracefully -- run `make install` to fetch it
+    -- (SDL 2D renderer only).
     try('smooth-movement (render-only smooth creature movement)', function()
         pcall(dfhack.run_command, 'load', 'smooth-movement')
         dfhack.run_command('enable', 'smooth-movement')
