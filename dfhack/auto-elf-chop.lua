@@ -33,10 +33,12 @@ kept breaking the limit; it stays disabled and THIS script designates trees itse
     reserved for manual felling (moods, emergencies). Designations are only ever ADDED, never
     removed -- hand-marked trees are yours. Since total designations can never exceed
     remaining-1, a parallel felling crew cannot overshoot the allowance.
-  * NO AGREEMENT AT ALL (the elves have never negotiated one with this fort): there is no elf
-    cap, so instead of running stock autochop we mirror autochop's OWN log target -- topping
-    up designations (still burrow-scoped, still closest-first) to keep your log count near
-    autochop's max. Nothing is clear-cut.
+  * NO ELF CAP IN FORCE -- either NO AGREEMENT AT ALL (the elves have never negotiated one),
+    OR the year's agreement is ALREADY BROKEN (remaining < 0): there is no cap left to respect,
+    so instead of running stock autochop we mirror autochop's OWN log target -- topping up
+    designations (still burrow-scoped, still closest-first) to keep your log count near
+    autochop's max. Nothing is clear-cut. (Once broken, restricting further this year gains
+    nothing -- the elves punish per breach-year, not per tree -- so we just maintain wood.)
     (Between two known agreements -- the yearly gap while the diplomat renegotiates -- new
     designation is paused instead: the incoming agreement counts the year's fells
     retroactively, so gap-cutting can break it before it's even signed. Verified live.)
@@ -51,9 +53,6 @@ Usage:
     auto-elf-chop               show status: quota, remaining, designations, mode
     auto-elf-chop auto          read the limit from the elven lumber agreement (the default)
     auto-elf-chop limit <N>     pin the annual tree-cutting limit to a fixed N (overrides auto)
-    auto-elf-chop scorched on|off  once a year's agreement is ALREADY broken, clear-cut the
-                                chop burrows (evidence says elves punish per breach-year --
-                                hostility_level steps per incident -- not per tree). Default ON
     auto-elf-chop reset         (manual mode only) reset this year's cut count to 0 right now
 
 While enabled, don't toggle the stock autochop by hand -- this script owns its on/off state.
@@ -73,9 +72,6 @@ local function load_state()
     if not state then
         state = dfhack.persistent.getSiteData(GLOBAL_KEY,
             {enabled = false, mode = 'auto', limit = 5, year_baseline = -1, last_year = -1})
-        -- scorched defaults ON (the elves punish per breach-YEAR, not per tree -- once a
-        -- year's agreement is broken, clear-cutting costs nothing more)
-        if state.scorched == nil then state.scorched = true end
     end
     return state
 end
@@ -139,21 +135,30 @@ end
 -- trees ourselves, inside the burrows the player flagged for chopping in autochop's own
 -- config (gui/autochop) -- the existing chop-area setup keeps working unchanged.
 
--- burrows flagged chop=true in autochop's config (readable while the plugin is disabled)
+-- burrows flagged chop=true in autochop's config (readable while the plugin is disabled).
+-- We read the per-burrow config directly (autochop_getBurrowConfig) rather than the whole
+-- getTreeCountsAndBurrowConfigs summary, which re-surveys every tree -- this stays cheap
+-- enough to call each cycle so a newly-flagged burrow is picked up right away.
 local function chop_burrow_list()
     local burrows = {}
-    local ok, data = pcall(function()
-        return require('plugins.autochop').getTreeCountsAndBurrowConfigs()
-    end)
-    if ok and data and data.burrow_configs then
-        for _, bc in ipairs(data.burrow_configs) do
-            if bc.chop then
-                local b = df.burrow.find(bc.id)
-                if b then burrows[#burrows + 1] = b end
-            end
+    local ok, ac = pcall(require, 'plugins.autochop')
+    if not ok or not ac or not ac.autochop_getBurrowConfig then return burrows end
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+        local okc, cfg = pcall(ac.autochop_getBurrowConfig, b.id)
+        if okc and cfg and (cfg.chop == true or cfg.chop == 1) then
+            burrows[#burrows + 1] = b
         end
     end
     return burrows
+end
+
+-- a signature of the current chop-burrow set (sorted ids), so the survey gate below
+-- re-fires the instant a burrow is flagged/unflagged rather than waiting for the next day
+local function burrow_sig(burrows)
+    local ids = {}
+    for _, b in ipairs(burrows) do ids[#ids + 1] = b.id end
+    table.sort(ids)
+    return table.concat(ids, ',')
 end
 
 -- woodcutters: fort units with the Wood Cutting labor (few; scanned once per pass so we
@@ -371,25 +376,32 @@ function do_check()
                 :format(g.limit, g.limit == 1 and '' or 's', auto_n), COLOR_LIGHTGREEN, true)
     end
 
-    -- The designation target (a total cap under a limit; a top-up count when unlimited). The
-    -- tree survey is the heavy part, so it runs only when the target changes and at most once
-    -- per game day otherwise. SCORCHED mode: once the year's agreement is already broken, the
-    -- breach is per-YEAR (hostility_level steps per incident, not per tree), so we may
-    -- clear-cut. UNLIMITED: no elf cap -- mirror autochop's own log target.
-    local scorched_clearcut = false
+    -- The designation target (the TOTAL trees to have designated). The tree survey is the heavy
+    -- part, so it runs only when the target changes and at most once per game day otherwise.
+    -- RESTOCK mode -- mirror autochop's own log target (chop toward the gui/autochop max) -- is
+    -- used whenever there's no elf cap in force: either no agreement at all (unlimited), OR the
+    -- year's agreement is ALREADY broken (remaining < 0). Once broken, restricting further this
+    -- year gains nothing (the elves punish per breach-year, not per tree), so we just keep the
+    -- log stock topped up like normal instead of either stopping or clear-cutting. Within an
+    -- intact limit, the cap is remaining-1 (the last permitted tree is reserved for manual use).
+    local restock = g.unlimited or g.remaining < 0
     local target                                      -- the TOTAL trees to have designated
-    if g.unlimited then
-        target = log_target_total()                   -- restock toward autochop's log target
+    if restock then
+        target = log_target_total()
     else
         target = math.max(0, g.remaining - 1)
-        if g.remaining < 0 and state.scorched then target = math.huge; scorched_clearcut = true end
     end
+    -- The chop-burrow set is part of the gate key: without it, flagging a burrow mid-day
+    -- wouldn't change the target, so the once-a-day survey wouldn't re-fire and the newly
+    -- flagged burrow would sit ignored until the next game day. (chop_burrow_list is cheap.)
+    local burrows = chop_burrow_list()
+    local sig = burrow_sig(burrows)
     local day = df.global.cur_year * 336 + df.global.cur_year_tick // 1200
-    if not (last_pass and last_pass.day == day and last_pass.target == target) then
-        last_pass = {day = day, target = target}
+    if not (last_pass and last_pass.day == day and last_pass.target == target
+            and last_pass.sig == sig) then
+        last_pass = {day = day, target = target, sig = sig}
         if target ~= 0 then
             -- a chop burrow (gui/autochop) is required; without one we sit dormant and prompt
-            local burrows = chop_burrow_list()
             if #burrows == 0 then
                 if not warned_noburrow then
                     warned_noburrow = true
@@ -400,30 +412,19 @@ function do_check()
             else
                 warned_noburrow = false
                 local designated, candidates = tree_survey(burrows)
-                -- top designations up to the target total (both modes); scorched clear-cuts
-                local need = scorched_clearcut and #candidates or (target - designated)
-                if scorched_clearcut and need > 0 and state.scorched_year ~= df.global.cur_year then
-                    state.scorched_year = df.global.cur_year
-                    save_state()
-                    dfhack.gui.showAnnouncement(
-                        'The lumber agreement is already broken this year -- clear-cutting the chop burrows (scorched mode).',
-                        COLOR_LIGHTRED, true)
-                end
+                local need = target - designated       -- top designations up to the target total
                 if need > 0 then
                     local n = designate_trees(candidates, need)
                     if n > 0 then
-                        if scorched_clearcut then
-                            print(('auto-elf-chop: designated %d tree%s (scorched mode -- the year is already broken)')
-                                :format(n, n == 1 and '' or 's'))
-                        elseif g.unlimited then
-                            print(('auto-elf-chop: designated %d tree%s (no elf limit -- maintaining log stock)')
+                        if restock then
+                            print(('auto-elf-chop: designated %d tree%s (maintaining log stock)')
                                 :format(n, n == 1 and '' or 's'))
                         else
                             print(('auto-elf-chop: designated %d tree%s (%d in flight of %d permitted; 1 reserved for manual felling)')
                                 :format(n, n == 1 and '' or 's', designated + n, g.limit))
                         end
                     end
-                    if not g.unlimited and n < need and #candidates <= n then
+                    if not restock and n < need and #candidates <= n then
                         print(('auto-elf-chop: the chop burrow%s ran out of trees (%d more permitted)')
                             :format(#burrows == 1 and '' or 's', need - n))
                     end
@@ -433,9 +434,9 @@ function do_check()
     end
 
     -- OVER the limit: trees felled past the agreement (remaining < 0) anger the elves.
-    -- Announce ONCE per breach -- in scorched mode the overshoot grows with every felled
-    -- tree, so growth must NOT re-announce. Rearmed only when a renewed agreement /
-    -- recount puts the count back under the limit. (Never in unlimited mode.)
+    -- Announce ONCE per breach -- once broken we keep restocking toward the wood target, so
+    -- the overshoot grows with every felled tree and growth must NOT re-announce. Rearmed only
+    -- when a renewed agreement / recount puts the count back under the limit. (Not unlimited.)
     local over = (not g.unlimited and g.remaining < 0) and -g.remaining or 0
     if over > 0 then
         if (state.over_announced or 0) == 0 then
@@ -556,15 +557,6 @@ elseif cmd == 'auto' then
         (ag and (' (%d/%d remaining, agreed in year %d)'):format(ag.remaining, ag.total, ag.year)
              or ' (none found yet -- will fall back to the pinned limit until the elves agree one)'))
     if enabled then pcall(do_check) end
-elseif cmd == 'scorched' then
-    local v = args[2]
-    if v ~= 'on' and v ~= 'off' then qerror('usage: auto-elf-chop scorched on|off') end
-    state.scorched = (v == 'on')
-    save_state()
-    print('auto-elf-chop: scorched mode ' .. (state.scorched
-        and 'ON -- once a year\'s agreement is already broken, the chop burrows are clear-cut (the breach is per-year)'
-        or 'OFF -- an already-broken year designates nothing further automatically'))
-    if enabled then pcall(do_check) end
 elseif cmd == 'reset' then
     state.year_baseline = df.global.plotinfo.trees_removed
     state.last_year = df.global.cur_year
@@ -579,12 +571,14 @@ else
     local burrows = chop_burrow_list()
     if g.unlimited then
         print('  no elven lumber agreement -- no cap; maintaining log stock to autochop\'s own target')
+    elseif g.remaining < 0 then
+        print(('  limit    : %d trees/year  (source: %s)'):format(g.limit, g.source))
+        print(('  remaining: %d  -- ALREADY BROKEN this year; now maintaining log stock to autochop\'s target')
+            :format(g.remaining))
     else
         print(('  limit    : %d trees/year  (source: %s)'):format(g.limit, g.source))
         print(('  remaining: %d  (designations held at remaining-1; the last tree is manual-only)')
             :format(g.remaining))
-        print(('  scorched mode: %s (`auto-elf-chop scorched on|off` -- clear-cut once a year is already broken)')
-            :format(state.scorched and 'ON' or 'off'))
     end
     local designated = tree_survey(burrows)
     if #burrows == 0 then
