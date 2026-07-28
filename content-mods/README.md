@@ -259,7 +259,7 @@ Facts established from the raws:
 * `makeown` working is a good sign — the historical defect of summons is
   ownership/citizenship, which `makeown` repairs.
 
-**TEST RESULTS (2026-07-20, live fort, mod `ha-summon-test`): the pipeline works.**
+**TEST RESULTS (2026-07-20, live fort): the pipeline works.**
 * Summoned **dogs** (6): no histfig, but `tame=true` and **assigned to the fort civ** —
   `IE_MAKE_PET_IF_POSSIBLE` yields real pets with no despawn timer.
 * Summoned **dwarf** (sapient probe): spawned adult, but `citizen=false, civ=-1, hf=-1` —
