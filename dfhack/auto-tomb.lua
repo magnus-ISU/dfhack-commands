@@ -14,9 +14,15 @@ immediately assignable with no manual zone-painting:
 Furniture that already has the matching zone is left alone (idempotent), and other zones on the
 tile are untouched.
 
+It also cleans up after itself: zones it placed (tracked per fort; a pre-existing 1x1 zone found
+sitting on matching furniture is adopted into tracking) are REMOVED again when their coffin /
+nest box goes away -- deconstructed, or a planned one canceled -- but only while the zone is
+still 1x1. A zone you've grown beyond 1x1 is considered yours and is left alone (and untracked).
+Zones it didn't create are never removed.
+
     enable auto-tomb     start watching (persists with the fort)
     disable auto-tomb    stop
-    auto-tomb            zone any coffins / nest boxes missing one right now, and report
+    auto-tomb            one pass right now: add missing zones, retire stale ones, report
 
 Add `enable auto-tomb` to magnus-scripts / dfhack.init to run it every session.
 ]]
@@ -34,15 +40,15 @@ local AUTO_ZONE = {
     [df.building_type.NestBox] = df.civzone_type.Pen,   -- Pen == Pen/Pasture
 }
 
--- is the tile already under a civzone of `ztype`?
-local function has_zone(pos, ztype)
+-- the civzone of `ztype` already on the tile, or nil
+local function get_zone(pos, ztype)
     local zones = dfhack.buildings.findCivzonesAt(pos)
     if zones then
         for _, z in ipairs(zones) do
-            if z.type == ztype then return true end
+            if z.type == ztype then return z end
         end
     end
-    return false
+    return nil
 end
 
 -- create a 1x1 civzone of `subtype` at pos (a civzone needs an extents bitmap; ours is one tile)
@@ -65,19 +71,6 @@ local function make_zone(pos, subtype)
     return bld
 end
 
--- drop the matching zone on every coffin / nest box that lacks one; returns how many were added
-local function scan()
-    local made = 0
-    for _, b in ipairs(df.global.world.buildings.all) do
-        local ztype = AUTO_ZONE[b:getType()]
-        if ztype then
-            local pos = {x = b.centerx, y = b.centery, z = b.z}
-            if not has_zone(pos, ztype) and make_zone(pos, ztype) then made = made + 1 end
-        end
-    end
-    return made
-end
-
 -- ---- enable state (persisted per fort) --------------------------------------
 
 state = state or nil
@@ -90,6 +83,57 @@ local function load_state()
 end
 local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) end
 function isEnabled() return load_state().enabled end
+
+-- ---- the scan (needs the state above for zone tracking) ----------------------
+
+-- One pass over the fort's buildings: drop the matching zone on every coffin / nest box that
+-- lacks one, track the zones we place, and retire tracked zones whose furniture is gone.
+-- Returns (zones added, zones removed).
+local function scan()
+    load_state()
+    state.zones = state.zones or {}     -- ids of zones we created/adopted (string keys for JSON)
+    local made, removed, changed = 0, 0, false
+    for _, b in ipairs(df.global.world.buildings.all) do
+        local ztype = AUTO_ZONE[b:getType()]
+        if ztype then
+            local pos = {x = b.centerx, y = b.centery, z = b.z}
+            local z = get_zone(pos, ztype)
+            if not z then
+                z = make_zone(pos, ztype)
+                if z then made = made + 1 end
+            end
+            -- track what we just placed -- and adopt a pre-existing 1x1 zone -- so it can be
+            -- retired later if its furniture goes away
+            if z and z.x1 == z.x2 and z.y1 == z.y2 and not state.zones[tostring(z.id)] then
+                state.zones[tostring(z.id)] = true
+                changed = true
+            end
+        end
+    end
+    -- retire: a tracked zone that is STILL 1x1 but whose coffin / nest box is gone
+    -- (deconstructed, or a planned one canceled). A zone the player grew beyond 1x1 is
+    -- theirs now: left in place and dropped from tracking. (Clearing keys during pairs()
+    -- is legal in Lua; we never add keys in this loop.)
+    for id_str in pairs(state.zones) do
+        local z = df.building.find(tonumber(id_str))
+        local keep = false
+        if z and z:getType() == df.building_type.Civzone and z.x1 == z.x2 and z.y1 == z.y2 then
+            local furn = dfhack.buildings.findAtTile(xyz2pos(z.x1, z.y1, z.z))
+            if furn and AUTO_ZONE[furn:getType()] == z.type then
+                keep = true
+            else
+                dfhack.buildings.deconstruct(z)   -- abstract building: removed instantly
+                removed = removed + 1
+            end
+        end
+        if not keep then
+            state.zones[id_str] = nil
+            changed = true
+        end
+    end
+    if changed then save_state() end
+    return made, removed
+end
 
 -- ---- heartbeat (every SCAN_FRAMES; survives reloads via dfhack.internal) -----
 local function hb_gen(set)
@@ -149,5 +193,6 @@ if dfhack_flags and dfhack_flags.enable ~= nil then
 end
 
 if not dfhack.world.isFortressMode() then qerror('auto-tomb only works in fortress mode') end
-local n = scan()
-print(('auto-tomb: placed %d new zone%s on coffins / nest boxes missing one.'):format(n, n == 1 and '' or 's'))
+local made, removed = scan()
+print(('auto-tomb: placed %d new zone%s on coffins / nest boxes missing one, removed %d stale zone%s.')
+    :format(made, made == 1 and '' or 's', removed, removed == 1 and '' or 's'))
