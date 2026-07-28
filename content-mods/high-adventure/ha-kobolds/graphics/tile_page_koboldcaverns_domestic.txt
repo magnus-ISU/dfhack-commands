@@ -1,0 +1,18 @@
+tile_page_koboldcaverns_domestic
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_CREATURES_KOBOLD_CIV_DOMESTIC]
+	[FILE:images/koboldcaverns/koboldcaverns_domestic.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:224]
+
+[TILE_PAGE:HA_SADDLEBAGS_KOBOLD_CIV]
+	[FILE:images/koboldcaverns/koboldcaverns_domestic_saddlebags.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:128:128]
+
+[TILE_PAGE:HA_STATUES_KOBOLD_CIV]
+	[FILE:images/koboldcaverns/koboldcaverns_statues.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:256]

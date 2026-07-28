@@ -1,0 +1,27 @@
+item_extra_objects
+
+[OBJECT:ITEM]
+
+Some less dwarf-centric toy variety.
+
+[ITEM_TOY:HA_ITEM_TOY_DOLL]
+	[NAME:doll:dolls]
+
+[ITEM_TOY:HA_ITEM_TOY_BALL]
+	[NAME:ball:balls]
+
+[ITEM_TOY:HA_ITEM_TOY_HOOP]
+	[NAME:hoop:hoops]
+	[HARD_MAT]
+
+[ITEM_TOY:HA_ITEM_TOY_WAGON]
+	[NAME:toy wagon:toy wagons]
+	[HARD_MAT]
+
+[ITEM_TOY:HA_ITEM_TOY_KNIFE]
+	[NAME:toy knife:toy knives]
+	[HARD_MAT]
+
+[ITEM_TOY:HA_ITEM_TOY_BOW]
+	[NAME:toy bow:toy bows]
+	[HARD_MAT]

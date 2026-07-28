@@ -1,0 +1,8 @@
+[ID:HA_kobolds]
+[NUMERIC_VERSION:7]
+[DISPLAYED_VERSION:0.7]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (kobolds forked from Cute Kobold Caverns by Ottfried & GadgetPatch/DeltaFire; ITEM_THIEF from Kobold Caverns - Skulking Filth by GadgetPatch; dragon bodies after Naut's Procedural Dragons)]
+[NAME:HA - Kobolds]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. A self-contained fork of Cute Kobold Caverns with Skulking Filth's item-thief hard mode baked in. Kobold civilizations are occasionally ruled by an Ancient Dragon -- a rare draconic caste whose eldest becomes the civ's Dread Wyrm king. Ancient Dragons also lair the world as fearsome megabeasts. See CHANGES.md.]
