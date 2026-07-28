@@ -103,23 +103,37 @@ function KeepTalking:reset() self.was_open = false; self.job = nil end
 function KeepTalking:drive()
     local job = self.job
     if job.stage == 'talk' then
-        if not on_map() then                             -- wait for the plain map, then give up
-            job.tries = job.tries + 1
-            if job.tries > 12 then self.job = nil end
+        -- A_TALK is ignored while the game is still processing the last exchange (the NPC's reply):
+        -- wait for the plain map AND the input-ready state, then let it settle a few frames. The very
+        -- first A_TALK right after a processing turn still gets eaten even at input-ready, so we also
+        -- re-feed (see the 'select' retry) if the menu doesn't come up.
+        local ready = on_map()
+            and df.global.adventure.player_control_state == df.adventure_game_loop_type.TAKING_INPUT
+        if not ready then
+            job.wait = (job.wait or 0) + 1
+            if job.wait > 400 then self.job = nil end     -- something's wrong: bail (no input spam)
             return
         end
+        job.settle = (job.settle or 0) + 1
+        if job.settle < 4 then return end                 -- let the frame settle before feeding
         feed('A_TALK')
         job.stage, job.tries = 'select', 0
     elseif job.stage == 'select' then
-        if in_conversation() then self.job = nil; return end            -- resumed: done
+        if in_conversation() then self.job = nil; return end             -- resumed: done
         if in_select_menu() then
-            if click_text(CONTINUE) then self.job = nil; return end      -- clicked Continue: done
-            -- menu up but the label isn't rendered yet -> retry a few frames, then back out
-            job.tries = job.tries + 1
-            if job.tries > 5 then feed('LEAVESCREEN'); self.job = nil end
+            if click_text(CONTINUE) then self.job = nil; return end       -- clicked Continue: done
+            job.tries = job.tries + 1                                     -- menu up, label not rendered
+            if job.tries > 8 then feed('LEAVESCREEN'); self.job = nil end -- no ongoing convo: back out
         else
-            job.tries = job.tries + 1                     -- select menu hasn't come up yet
-            if job.tries > 12 then self.job = nil end
+            job.tries = job.tries + 1                     -- select menu hasn't come up: re-feed A_TALK
+            if job.tries > 8 then
+                job.attempts = (job.attempts or 0) + 1
+                if job.attempts < 5 then
+                    job.stage, job.settle, job.tries = 'talk', 0, 0
+                else
+                    self.job = nil                        -- gave up after retries
+                end
+            end
         end
     end
 end
