@@ -24,6 +24,8 @@ stock DFHack tools and a few extras.
 - **`stockpile-place`** — Drag to create a stockpile, expand a selected one, or erase tiles
   from any pile.
 
+https://github.com/user-attachments/assets/90ace1bf-8e89-4047-b105-8d2de0b64d45
+
 ### 🔔 Notifications & alerts
 
 - **`needs-tomb-notification`** — Alerts when a dwarf dies with no tomb; click for a death
