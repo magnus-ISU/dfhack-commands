@@ -5,6 +5,16 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.2 -- kobold civ + dragon overlords
+- The kobold civ is now a hostile faction: `HA_KOBOLD` (which includes its dragon
+  overlords, the `ANCIENT_DRAGON` caste of the same creature) is hostile to any
+  adventurer who is not a kobold.
+- Special pacify thresholds for kobolds: a plain kobold's surrender sticks at Pacify
+  1, but rises to 12 while one of their ancient-dragon overlords is on screen; a
+  dragon overlord itself always needs Pacify 12.
+- The standalone `HA_ANCIENT_DRAGON` MEGABEAST (a different creature) is deliberately
+  left out -- only the civ kobolds and their overlords are affected.
+
 ## v0.1
 - Adventure-mode overlay that forces designated civs hostile to the adventurer by
   injecting nearby members into a Conflict activity opposing the player (creating

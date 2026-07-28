@@ -14,6 +14,13 @@ adventurer is a skilled enough Pacifier (Pacify skill >= the target race's
 threshold), in which case a surrender is respected. Optionally sets [NOFEAR] on a
 faction's castes (session-only) so they never break.
 
+KOBOLDS are a special case (see pacify_threshold): the kobold civ AND its dragon
+overlords (the HA_KOBOLD ANCIENT_DRAGON caste, the same creature) are hostile to any
+non-kobold. A plain kobold's surrender sticks at Pacify 1, but rises to 12 while one
+of their ancient-dragon overlords is on screen; a dragon overlord itself always needs
+Pacify 12. The standalone HA_ANCIENT_DRAGON MEGABEAST is a different creature and is
+untouched by this.
+
 Ships in the HA_adventure_hostility mod; auto-discovered as an overlay on world
 load. Add a faction by editing RULES / PACIFY_THRESHOLD -- the engine is identical
 for all of them, and races absent from the loaded world are ignored.
@@ -57,6 +64,13 @@ local RULES = {
     -- good civilizations: hostile to EVIL adventurers only (and they CAN yield/flee)
     {name = 'good_civs', races = {'DWARF', 'HUMAN', 'ELF'}, nofear = false,
      friendly = function(adv) return not EVIL[adv] end},
+    -- kobold civ: hostile to any adventurer who is NOT a kobold. Their dragon overlords are the
+    -- HA_KOBOLD ANCIENT_DRAGON caste -- the SAME creature -- so this one rule covers kobolds AND
+    -- their dragons. The standalone HA_ANCIENT_DRAGON MEGABEAST is a different creature and is left
+    -- out entirely. Pacify thresholds are special-cased (see pacify_threshold): a plain kobold yields
+    -- at Pacify 1, but 12 while a dragon overlord is on screen; a dragon overlord always needs 12.
+    {name = 'kobolds', races = {'HA_KOBOLD'}, nofear = false,
+     friendly = function(adv) return adv == 'HA_KOBOLD' end},
 }
 
 local RANGE = 20   -- manhattan distance (z weighted x4) at which a unit is engaged
@@ -79,6 +93,37 @@ end
 local function dist(u, adv)
     return math.abs(u.pos.x - adv.pos.x) + math.abs(u.pos.y - adv.pos.y)
         + math.abs(u.pos.z - adv.pos.z) * 4
+end
+
+-- a kobold-civ dragon OVERLORD: the HA_KOBOLD ANCIENT_DRAGON caste (NOT the HA_ANCIENT_DRAGON
+-- MEGABEAST, which is a separate creature). Only ever called on HA_KOBOLD units.
+local function is_dragon_caste(u)
+    local cr = df.global.world.raws.creatures.all[u.race]
+    local caste = cr and cr.caste[u.caste]
+    return caste ~= nil and tostring(caste.caste_id) == 'ANCIENT_DRAGON'
+end
+
+-- is a unit inside the current on-screen viewport? (same map-tile-size math the click tools use:
+-- S = viewport_zoom_factor/4 px per tile; visible tiles = screen pixels / S)
+local function on_screen(u)
+    if u.pos.z ~= df.global.window_z then return false end
+    local gps = df.global.gps
+    local S = math.max(1, gps.viewport_zoom_factor // 4)
+    local vw = math.max(4, (gps.dimx * gps.tile_pixel_x) // S)
+    local vh = math.max(4, (gps.dimy * gps.tile_pixel_y) // S)
+    return u.pos.x >= df.global.window_x and u.pos.x < df.global.window_x + vw
+        and u.pos.y >= df.global.window_y and u.pos.y < df.global.window_y + vh
+end
+
+-- Pacify skill a yielded unit's slayer needs for the surrender to STICK. Kobolds are special-cased:
+-- a dragon overlord always needs 12; a plain kobold needs 1, but 12 while a dragon overlord is on
+-- screen (emboldened by their overlord). Every other race uses the flat PACIFY_THRESHOLD table.
+local function pacify_threshold(u, cid, dragon_on_screen)
+    if cid == 'HA_KOBOLD' then
+        if is_dragon_caste(u) then return 12 end
+        return dragon_on_screen and 12 or 1
+    end
+    return PACIFY_THRESHOLD[cid] or DEFAULT_PACIFY
 end
 
 local function adv_conflict(adv)
@@ -174,13 +219,29 @@ local function process()
     local pacify = dfhack.units.getNominalSkill(adv, df.job_skill.PACIFY, true) or 0
 
     local active = {}
+    local kobolds_active = false
     for _, rule in ipairs(RULES) do
         if not rule.friendly(adv_race) then
-            active[#active + 1] = race_set(rule.races)
-            if rule.nofear then set_nofear(race_set(rule.races)) end
+            local rs = race_set(rule.races)
+            active[#active + 1] = rs
+            if rs['HA_KOBOLD'] then kobolds_active = true end
+            if rule.nofear then set_nofear(rs) end
         end
     end
     if #active == 0 then return end
+
+    -- kobolds are harder to pacify while one of their ANCIENT_DRAGON overlords is on screen: note it
+    -- up front (a pre-pass, since a plain kobold may be visited before the dragon in the sweep below).
+    local dragon_on_screen = false
+    if kobolds_active then
+        for _, u in ipairs(df.global.world.units.active) do
+            if u.id ~= adv.id and dfhack.units.isAlive(u)
+                and creature_id(u.race) == 'HA_KOBOLD' and is_dragon_caste(u) and on_screen(u) then
+                dragon_on_screen = true
+                break
+            end
+        end
+    end
 
     for _, u in ipairs(df.global.world.units.active) do
         if u.id ~= adv.id and dfhack.units.isAlive(u) and dist(u, adv) <= RANGE then
@@ -192,7 +253,7 @@ local function process()
                 pcall(function()
                     make_hostile(u, adv)
                     if u.flags3.adv_yield then
-                        local threshold = PACIFY_THRESHOLD[cid] or DEFAULT_PACIFY
+                        local threshold = pacify_threshold(u, cid, dragon_on_screen)
                         -- a skilled enough Pacifier gets to keep them surrendered
                         if pacify < threshold then u.flags3.adv_yield = false end
                     end
