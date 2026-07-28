@@ -75,6 +75,22 @@
   heat. Removed the megabeast's blanket SPEC_HEAT:30000 (from the vanilla-dragon fireproof block) so
   it can't override the scale's heat-inertness.
 
+## v0.9 -- item cleanup (vanilla-first)
+- **Removed the 6 CKC custom toys** (doll, ball, hoop, wagon, toy knife, toy bow) -- their item defs,
+  graphics, tile-page entry, image, and entity permits. Kobolds keep the vanilla toys and now also
+  make **miniature hammers** ([TOY:ITEM_TOY_HAMMER]) alongside puzzleboxes and boats.
+- **Removed the 3 oversized weapons** (war pick, saber, longstaff): they needed a size-20k-60k wielder
+  (an adult kobold is ~20k) and the entity never granted them -- dead CKC leftovers. Deleted defs +
+  graphics. The 9 remaining weapons are all kobold-sized (small axe/pick/hammer/mace/sword/knife,
+  dagger, staff, sling).
+- **Kobolds no longer manufacture full shields, only bucklers.** Dropped the forge shield token
+  ([SHIELD:ITEM_SHIELD_SHIELD], kept [SHIELD:ITEM_SHIELD_BUCKLER]) AND un-permitted the two bone/shell
+  full-shield crafting reactions (HA_MAKE_BONE_SHIELD, HA_MAKE_SHELL_SHIELD), keeping the buckler
+  reactions. They can still use a full shield if they loot one -- these tokens only control what the
+  civ knows how to make/issue.
+- Kept per request: the 5 new pets (wooly spider, cave rat + giant cave rat, tame helmet snake + tame
+  monitor lizard), the small kobold weapons, and all crafting/cleaning reactions.
+
 ## TODO (next)
 - (DONE) Ancient Dragon caste in HA_KOBOLD (~0.2% POP_RATIO, asexual, dragon body/fire/flight/iron-skin,
   tail attack, dragon-size@100 / giant-elephant@1000, legendary combat, phys 2000-3000) + the

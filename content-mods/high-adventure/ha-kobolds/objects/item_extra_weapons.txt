@@ -2,23 +2,6 @@ item_extra_weapons
 
 [OBJECT:ITEM]
 
-OVERSIZED WEAPONS:
-Huge tools and weapons, primarily for use by humans, or 2-handed by some dwarves.
-
-[ITEM_WEAPON:HA_ITEM_WEAPON_LARGE_PICK]
-[NAME:war pick:war picks]
-[SIZE:1000]
-[SKILL:MINING]
-[TWO_HANDED:67500]
-[MINIMUM_SIZE:60000]
-[MATERIAL_SIZE:4]
-[ATTACK:EDGE:100:6000:strike:strikes:NO_SUB:2000]
-	[ATTACK_PREPARE_AND_RECOVER:3:3]
-
-
-
-----------------------------------------------------------------
-
 SMALL WEAPONS:
 Small tools and weapons, wieldable by kobolds and animal folk
 
@@ -119,21 +102,6 @@ Can be wielded by any sentient creature larger than a fairy.
 [ATTACK:BLUNT:20:1000:strike:strikes:pommel:1000]
 	[ATTACK_PREPARE_AND_RECOVER:2:2]
 
-[ITEM_WEAPON:HA_ITEM_WEAPON_LARGE_KNIFE]
-[NAME:saber:sabers]
-[SIZE:300]
-[SKILL:DAGGER]
-[TWO_HANDED:32500]
-[MINIMUM_SIZE:20000]
-[MATERIAL_SIZE:2]
-[ATTACK:EDGE:20:4000:stab:stabs:NO_SUB:1000]
-	[ATTACK_PREPARE_AND_RECOVER:2:2]
-[ATTACK:EDGE:6000:4000:slash:slashes:NO_SUB:1250]
-	[ATTACK_PREPARE_AND_RECOVER:2:2]
-[ATTACK:BLUNT:20:1000:strike:strikes:pommel:1000]
-	[ATTACK_PREPARE_AND_RECOVER:2:2]
-
-
 
 ----------------------------------------------------------------
 
@@ -151,19 +119,6 @@ Staves, which are a new mace class focused on blunt jabs and high-velocity bashe
 	[ATTACK_PREPARE_AND_RECOVER:3:3]
 [ATTACK:BLUNT:50:1000:jab:jabs:NO_SUB:1000]
 	[ATTACK_PREPARE_AND_RECOVER:3:3]
-
-[ITEM_WEAPON:HA_ITEM_WEAPON_LARGE_STAFF]
-[NAME:longstaff:longstaves]
-[SIZE:800]
-[SKILL:MACE]
-[TWO_HANDED:72500]
-[MINIMUM_SIZE:60000]
-[MATERIAL_SIZE:3]
-[ATTACK:BLUNT:10000:6000:bash:bashes:NO_SUB:2000]
-	[ATTACK_PREPARE_AND_RECOVER:3:3]
-[ATTACK:BLUNT:50:1000:jab:jabs:NO_SUB:1000]
-	[ATTACK_PREPARE_AND_RECOVER:3:3]
-
 
 
 ----------------------------------------------------------------
