@@ -11,6 +11,8 @@ Support script for the High Adventure playable-civilizations mod:
 - **Shaping Tree pacing**: growing wood from seeds takes one month per tree;
   a legendary strand extractor halves that. Jobs finished too soon wither
   (products are consumed) with an announcement.
+- **Shaping Trees need open sky**: a tree placed without an "outside" (open to
+  sky) work tile is cancelled while still under construction.
 - **Elves can remove their own walls**: elves have no picks, so Remove-Construction
   orders (mining designations) never complete; in an elf fort this finishes them,
   reverting each designated constructed tile so walls/floors can be torn down.
@@ -137,8 +139,27 @@ local function complete_wall_removals()
     if removed then pcall(function() df.global.world.reindex_pathfinding = true end) end
 end
 
+-- shaping trees must be built under open sky (to catch starlight / grow wood);
+-- cancel a roofed or underground one while it is still under construction
+local function enforce_sky_access()
+    local btype = shaping_tree_type()
+    if not btype then return end
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+           and bld.construction_stage < bld:getMaxBuildStage() then
+            local b = dfhack.maps.getTileBlock(bld.centerx, bld.centery, bld.z)
+            if b and not b.designation[bld.centerx % 16][bld.centery % 16].outside then
+                dfhack.buildings.deconstruct(bld)
+                dfhack.gui.showAnnouncement(
+                    "A shaping tree must be built under open sky.", COLOR_YELLOW, true)
+            end
+        end
+    end
+end
+
 local function tick()
     complete_wall_removals()
+    pcall(enforce_sky_access)
     -- dispel goblin ghosts
     local grace = goblin_race_id()
     if grace then
