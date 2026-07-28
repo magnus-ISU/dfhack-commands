@@ -1,0 +1,8 @@
+[ID:HA_high_elves]
+[NUMERIC_VERSION:1]
+[DISPLAYED_VERSION:0.1]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (creature forked from vanilla elves; entity forked from vanilla elves + dwarven artifice)]
+[NAME:HA - High Elves]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Adds high elves: elf-stock artisans with all the metal artifice of the dwarves but no fey moods. They mine and forge (picks and metalwork) yet still refuse to cut trees, growing what wood they need at the Shaping Tree. Their signature material is TWINKLING METAL, a fixed divine metal they coax from the sky ("catch starlight") and weave into near-armor twinkling fabric or forge into bars. They live in a handful of human-style castles (low total population, few but populous sites), keep peaceful elven ethics (but are not cannibals and prize craftsmanship), and do not trade. Worldgen cannot equip divine metal, so DFHack re-gears their invaders/visitors/adventurers in full twinkling metal. See README.md and CHANGES.md.]

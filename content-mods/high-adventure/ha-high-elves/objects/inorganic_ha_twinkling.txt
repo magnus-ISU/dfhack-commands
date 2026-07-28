@@ -1,0 +1,63 @@
+inorganic_ha_twinkling
+
+[OBJECT:INORGANIC]
+
+Twinkling metal -- High Adventure's fixed "divine metal" for the high elves.
+
+Material PROPERTIES are cloned from vanilla's generated divine metal
+(vanilla_procedural/scripts/generators/divine.lua, materials.divine.metal.default)
+-- crucially [MELTING_POINT:NONE] and [BOILING_POINT:NONE], which is what makes
+divine metal truly dragonfire-safe (it cannot melt at any temperature; adamantine
+melts at 25000 and is NOT dragonfire-safe). Same strength/density/edge as divine
+metal, so twinkling gear is light, effective, and indestructible by fire.
+
+We then add adamantine's THREAD-metal flags ([ITEMS_SOFT], [WAFERS],
+[STOCKPILE_THREAD_METAL]) so it can also be woven into cloth and processed into
+bars/wafers -- vanilla divine metal is metal-only; we want a divine metal that is
+ALSO a fabric, so twinkling cloaks are near-armour AND fireproof.
+
+Name/colour = the STARS-sphere divine metal actually named "twinkling metal" in
+divine.lua. It is grown at the Shaping Tree ("catch starlight"), never mined, so
+no [DEEP_SPECIAL].
+
+[INORGANIC:HA_TWINKLING_METAL]
+	[USE_MATERIAL_TEMPLATE:METAL_TEMPLATE]
+	[STATE_COLOR:ALL_SOLID:WHITE]
+	[STATE_NAME:ALL_SOLID:twinkling metal]
+	[STATE_NAME_ADJ:ALL_SOLID:twinkling metal]
+	[DISPLAY_COLOR:7:0:1]
+	[BUILD_COLOR:7:0:1]
+	[MATERIAL_VALUE:200]
+	[SPEC_HEAT:7500]
+	[MELTING_POINT:NONE]
+	[BOILING_POINT:NONE]
+	[ITEMS_WEAPON][ITEMS_WEAPON_RANGED][ITEMS_AMMO][ITEMS_DIGGER][ITEMS_ARMOR][ITEMS_ANVIL]
+	[ITEMS_HARD]
+	[ITEMS_METAL]
+	[ITEMS_BARRED]
+	[ITEMS_SCALED]
+	[ITEMS_SOFT]
+	[WAFERS]
+	[SOLID_DENSITY:1000]
+	[LIQUID_DENSITY:1000]
+	[MOLAR_MASS:20000]
+	[IMPACT_YIELD:1000000]
+	[IMPACT_FRACTURE:2000000]
+	[IMPACT_STRAIN_AT_YIELD:0]
+	[COMPRESSIVE_YIELD:1000000]
+	[COMPRESSIVE_FRACTURE:2000000]
+	[COMPRESSIVE_STRAIN_AT_YIELD:0]
+	[TENSILE_YIELD:1000000]
+	[TENSILE_FRACTURE:2000000]
+	[TENSILE_STRAIN_AT_YIELD:0]
+	[TORSION_YIELD:1000000]
+	[TORSION_FRACTURE:2000000]
+	[TORSION_STRAIN_AT_YIELD:0]
+	[SHEAR_YIELD:1000000]
+	[SHEAR_FRACTURE:2000000]
+	[SHEAR_STRAIN_AT_YIELD:0]
+	[BENDING_YIELD:1000000]
+	[BENDING_FRACTURE:2000000]
+	[BENDING_STRAIN_AT_YIELD:0]
+	[MAX_EDGE:12000]
+	[STOCKPILE_THREAD_METAL]
