@@ -19,8 +19,9 @@ group on/off, so you can compose a pile (binnables + food, food + drink, etc.):
                        "Extract (animal)" category trimmed to just milk & honey
                        (the rest is procedural venom/poison/extract clutter).
     * all drink     -- Drink (plant) + Drink (animal).
-    * quality       -- a tri-state that overwrites the quality options in Armor,
+    * quality       -- a cycle that overwrites the quality options in Armor,
                        Finished goods, Furniture and Weapons/trap comps:
+                         (set)      -- clear every quality designator (none checked)
                          all        -- every quality
                          masterwork -- only masterwork
                          inferior   -- everything except masterwork
@@ -84,6 +85,7 @@ local QUALITY = {                         -- indices 0..6, 1-based here
     all      = {true, true, true, true, true, true,  true},
     master   = {false, false, false, false, false, true,  true},    -- masterwork + artifact
     inferior = {true, true, true, true, true, false, false},        -- everything below masterwork
+    none     = {false, false, false, false, false, false, false},   -- clear every quality designator
 }
 local function set_quality(sp, mode, cats)
     local set = QUALITY[mode]; if not set then return end
@@ -96,6 +98,30 @@ local function set_quality(sp, mode, cats)
             end
         end
     end
+end
+
+-- category preset -> its group-enabled flag / settings field (the same name serves both). A pile's
+-- `settings.flags.<field>` bit is the master "this category is on" marker -- it is what NAMES the pile
+-- and decides membership. import_settings with mode='disable' clears a category's item types but does
+-- NOT clear this bit, so a "disabled" sheet category strands a phantom "Sheet Stockpile" with no items.
+-- Every enable/disable therefore drives the flag itself.
+local PRESET_FIELD = {
+    cat_ammo = 'ammo', cat_armor = 'armor', cat_bars_blocks = 'bars_blocks', cat_cloth = 'cloth',
+    cat_coins = 'coins', cat_finished_goods = 'finished_goods', cat_gems = 'gems',
+    cat_leather = 'leather', cat_sheets = 'sheet', cat_weapons = 'weapons', cat_animals = 'animals',
+    cat_corpses = 'corpses', cat_furniture = 'furniture', cat_refuse = 'refuse', cat_stone = 'stone',
+    cat_wood = 'wood', cat_food = 'food',
+}
+-- set a category's group-enabled flag by its settings-field name (no-op if the field has no flag bit)
+local function set_cat_flag(sp, field, on)
+    local flags = sp.settings.flags
+    if field and flags[field] ~= nil then flags[field] = on end
+end
+-- enable/disable a whole category via its library preset, then force its group flag to match so the
+-- category (and the pile name) fully reflects the change -- import_settings won't clear it on disable.
+local function set_cat(sp, preset, on)
+    stockpiles.import_settings('library/' .. preset, {id = sp.id, mode = on and 'enable' or 'disable'})
+    set_cat_flag(sp, PRESET_FIELD[preset], on)
 end
 
 -- ---- meltables (non-masterwork, non-adamantine METAL items) ----------------
@@ -157,12 +183,12 @@ local function apply_meltables()
     local sp = get_sp(); if not sp then return end
     local on, c = melt_config(sp)
     if on then
-        for _, cat in ipairs(MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        for _, cat in ipairs(MELTABLE) do set_cat(sp, cat, false) end
         set_melt(sp, false, c)
         print('binnable-stockpile: meltables OFF')
     else
-        for _, cat in ipairs(MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'enable'}) end
-        for _, cat in ipairs(NON_MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        for _, cat in ipairs(MELTABLE) do set_cat(sp, cat, true) end
+        for _, cat in ipairs(NON_MELTABLE) do set_cat(sp, cat, false) end
         set_metal_only(sp)
         set_quality(sp, 'inferior', {'weapons', 'armor', 'ammo', 'finished_goods'})
         -- ammo stays fully configured (metal mats + below-masterwork quality) but accepts NO ammo:
@@ -196,11 +222,11 @@ local function apply_binnables()
         if not cat_any_on(sp.settings[CAT_FIELD[cat]]) then all_on = false; break end
     end
     if all_on then
-        for _, cat in ipairs(BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        for _, cat in ipairs(BINNABLE) do set_cat(sp, cat, false) end
         print('binnable-stockpile: binnables OFF')
     else
-        for _, cat in ipairs(BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'enable'}) end
-        for _, cat in ipairs(NON_BINNABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        for _, cat in ipairs(BINNABLE) do set_cat(sp, cat, true) end
+        for _, cat in ipairs(NON_BINNABLE) do set_cat(sp, cat, false) end
         set_quality(sp, 'all', {'armor', 'finished_goods', 'weapons'})
         print('binnable-stockpile: set to all binnables')
     end
@@ -320,7 +346,10 @@ function BinnableButton:init()
                 {label = 'masterwork', value = 'master'},
                 {label = 'inferior', value = 'inferior'},
             },
-            on_change = function(new) if new ~= 'none' then apply_quality(new) end end,
+            -- every option (including wrapping back to '(set)') applies: '(set)' clears all quality
+            -- designators via QUALITY.none. The first on_change only fires when the user cycles, not
+            -- on load, so opening the screen never wipes an existing quality filter.
+            on_change = function(new) apply_quality(new) end,
         },
     }
 end
@@ -435,11 +464,30 @@ local function over_buttons(mx, my)
     return (r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2) and true or false
 end
 
+-- Does the click at (mx,my) land on an "All" or "None" toggle-ALL button (any column, any row)?
+-- Those are native "enable/clear everything" buttons, NEVER a re-click on a category, so they must
+-- not drive our toggle -- otherwise clicking "None" (which empties the category) is read as a
+-- re-click on the still-selected category and flips it right back ON. Layout-independent: we test the
+-- glyphs under the cursor, so it holds no matter where DF places the buttons or how all_y is detected.
+local function on_all_none(mx, my)
+    local function ch(x) local ok, c = pcall(dfhack.screen.readTile, x, my); return (ok and c and c.ch) or 0 end
+    for x = mx - 3, mx do
+        if x >= 0 then
+            if ch(x) == 65 and ch(x + 1) == 108 and ch(x + 2) == 108 and mx <= x + 2 then return true end   -- "All"
+            if ch(x) == 78 and ch(x + 1) == 111 and ch(x + 2) == 110 and ch(x + 3) == 101 and mx <= x + 3 then
+                return true   -- "None"
+            end
+        end
+    end
+    return false
+end
+
 function CategoryToggle:onInput(keys)
     if keys._MOUSE_L then
         local cs = df.global.game.main_interface.custom_stockpile
         local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
         if over_buttons(mx, my) then return false end   -- a click on our buttons, not a category re-click
+        if on_all_none(mx, my) then return false end    -- a native All/None button, never a re-click
         local cols, all_y = all_columns()
         -- Only act on clicks in the list area (below the "All/None" header row). This deliberately
         -- ignores clicks ON the header -- including the phantom click DF replays at the position we
@@ -496,9 +544,12 @@ function CategoryToggle:overlay_onupdate()
     local name = sp and main_cat_name(cs)
     if name and sp.settings[name] then
         -- flip the whole category on/off via DFHack's own preset (item types + materials + quality
-        -- together; populates the enable vectors so even a never-touched category still toggles)
-        local mode = any_on(sp.settings[name]) and 'disable' or 'enable'
-        stockpiles.import_settings(cat_preset(name), {id = sp.id, mode = mode})
+        -- together; populates the enable vectors so even a never-touched category still toggles).
+        -- "Currently on" reads the group flag too, not just item types, so a flag-only phantom still
+        -- flips cleanly; and we drive the flag ourselves since import_settings won't clear it on disable.
+        local on = not ((sp.settings.flags[name] == true) or any_on(sp.settings[name]))
+        stockpiles.import_settings(cat_preset(name), {id = sp.id, mode = on and 'enable' or 'disable'})
+        set_cat_flag(sp, name, on)
     end
 end
 
