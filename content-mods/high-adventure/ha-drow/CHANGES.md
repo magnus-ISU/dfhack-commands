@@ -1,5 +1,18 @@
 # ha-drow — fork changelog
 
+## v0.35
+- **Fixed driders flashing grayscale.** The drider has its own dedicated
+  `CREATURE_CASTE_GRAPHICS:HA_DROW:DRIDER` (a LARGE_IMAGE sprite), but the parent
+  `CREATURE_GRAPHICS:HA_DROW` in graphics_ha_drow.txt was *also* conditioning all
+  370 of its body layers on `[CONDITION_CASTE:DRIDER]`, so driders were drawn by
+  both at once and flickered between the layered drow body and the large image.
+  Removed every `[CONDITION_CASTE:DRIDER]` from the parent layered graphics (the
+  layers now cover FEMALE/MALE only), so driders render solely from their own
+  large image. Same class of bug as the illithid Elder Brain grayscale flash.
+  (The corpse, statue, and portrait files had no conflict -- the portrait file
+  keeps its DRIDER conditions, an intentional fall-through.) Graphics change ->
+  reload graphics / new world to see it.
+
 ## v0.34
 - **Driders never sleep** (NO_SLEEP added beside NOSTUN - ends the drowse loop).
 - **Boots and pants impossible, stance unbreakable**: no external part carries
