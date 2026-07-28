@@ -5,6 +5,13 @@ On the stockpile category-edit screen (focus dwarfmode/Stockpile/Some/Customize)
 this adds controls in the bottom-left corner. Each button TOGGLES only its own
 group on/off, so you can compose a pile (binnables + food, food + drink, etc.):
 
+    * all meltables -- a melt-feeder pile: Weapons, Armor and Finished goods
+                       restricted to METAL materials EXCEPT adamantine, at
+                       below-masterwork quality (no coins, bars/blocks or cages).
+                       Ammo is configured the same way but accepts NO item types
+                       (its metal bolts/arrows are kept, not melted). Also flips on
+                       DFHack's native automelt (logistics) for the pile, so items
+                       routed here are auto-designated for melting.
     * all binnables -- the container categories, WITHOUT food/drink: Ammo, Armor,
                        Bars/Blocks, Cloth, Coins, Finished goods, Gems, Leather,
                        Sheets, Weapons.
@@ -29,6 +36,7 @@ Reposition with `gui/overlay`.
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local stockpiles = require('plugins.stockpiles')
+local logistics = require('plugins.logistics')
 
 -- ---- shared helpers -------------------------------------------------------
 local function set_elem(v, i, on)
@@ -87,6 +95,81 @@ local function set_quality(sp, mode, cats)
                 if v and #v >= 7 then for i = 0, 6 do set_elem(v, i, set[i + 1]) end end
             end
         end
+    end
+end
+
+-- ---- meltables (non-masterwork, non-adamantine METAL items) ----------------
+-- "all meltables" OVERWRITES the pile into a melt-feeder: it enables only the meltable metal
+-- categories (Weapons, Armor, Ammo, Finished goods -- deliberately NOT bars/blocks, coins, or cages),
+-- restricts their materials to metals EXCEPT adamantine, drops quality to below-masterwork, and turns
+-- on DFHack's native automelt (the `logistics` per-stockpile melt flag) so anything routed here gets
+-- auto-designated for melting. Toggling off disables those categories and automelt. Food is left alone.
+local MELTABLE = {'cat_weapons', 'cat_armor', 'cat_ammo', 'cat_finished_goods'}
+local NON_MELTABLE = {'cat_bars_blocks', 'cat_cloth', 'cat_coins', 'cat_gems', 'cat_leather',
+    'cat_sheets', 'cat_animals', 'cat_corpses', 'cat_furniture', 'cat_refuse', 'cat_stone', 'cat_wood'}
+-- meltable category preset name -> its sp.settings field
+local MELT_FIELD = {cat_weapons = 'weapons', cat_armor = 'armor', cat_ammo = 'ammo',
+    cat_finished_goods = 'finished_goods'}
+
+-- A category's `mats` bool vector is indexed parallel to raws.inorganics.all; `other_mats` holds the
+-- non-inorganic materials. mask[df_idx]=true for every metal inorganic EXCEPT adamantine.
+local function metal_mask()
+    local mask = {}
+    local all = df.global.world.raws.inorganics.all   -- indexed 0-based, parallel to a category's `mats`
+    for i = 0, #all - 1 do
+        local ino = all[i]
+        if ino.material.flags.IS_METAL and ino.id ~= 'ADAMANTINE' then mask[i] = true end
+    end
+    return mask
+end
+
+-- restrict every meltable category to metal-only-minus-adamantine (the categories must already be
+-- enabled -- import_settings populates `mats`/`other_mats` -- before this filters them down).
+local function set_metal_only(sp)
+    local mask = metal_mask()
+    for _, field in pairs(MELT_FIELD) do
+        local s = sp.settings[field]
+        if s then
+            for i = 0, #s.mats - 1 do set_elem(s.mats, i, mask[i] == true) end
+            set_vec(s.other_mats, false)
+        end
+    end
+end
+
+-- DFHack's per-stockpile automelt state (the native "melt" flag). Returns is_on, config.
+local function melt_config(sp)
+    local cfgs = logistics.logistics_getStockpileConfigs(sp.stockpile_number)
+    local c = cfgs and cfgs[1]
+    return (c and c.melt == 1) or false, c
+end
+-- flip automelt on/off, preserving the pile's other logistics features. melt_masterworks stays off
+-- (the quality filter already keeps masterworks out; belt-and-suspenders so none ever get melted).
+local function set_melt(sp, on, c)
+    logistics.logistics_setStockpileConfig(sp.stockpile_number, on and true or false,
+        (c and c.trade == 1) or false, (c and c.dump == 1) or false, (c and c.train == 1) or false,
+        (c and c.forbid) or 0, false)
+end
+
+-- Toggle: automelt already on for this pile -> turn the meltable categories + automelt OFF; else
+-- OVERWRITE into a meltables pile (meltable metal categories on, everything else off, metal-only mats,
+-- below-masterwork quality, automelt on). Automelt state is the "meltables mode" indicator.
+local function apply_meltables()
+    local sp = get_sp(); if not sp then return end
+    local on, c = melt_config(sp)
+    if on then
+        for _, cat in ipairs(MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        set_melt(sp, false, c)
+        print('binnable-stockpile: meltables OFF')
+    else
+        for _, cat in ipairs(MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'enable'}) end
+        for _, cat in ipairs(NON_MELTABLE) do stockpiles.import_settings('library/' .. cat, {id = sp.id, mode = 'disable'}) end
+        set_metal_only(sp)
+        set_quality(sp, 'inferior', {'weapons', 'armor', 'ammo', 'finished_goods'})
+        -- ammo stays fully configured (metal mats + below-masterwork quality) but accepts NO ammo:
+        -- zero its item-type list so bolts/arrows/etc. never land here (metal bolts are too handy to melt).
+        set_vec(sp.settings.ammo.type, false)
+        set_melt(sp, true, c)
+        print('binnable-stockpile: set to all meltables (metal, no adamantine, below masterwork; automelt on)')
     end
 end
 
@@ -202,30 +285,34 @@ end
 
 BinnableButton = defclass(BinnableButton, overlay.OverlayWidget)
 BinnableButton.ATTRS{
-    desc = 'Stockpile screen: toggle binnables / food / drink groups, and a quality tri-state.',
+    desc = 'Stockpile screen: toggle meltables / binnables / food / drink groups, and a quality tri-state.',
     default_pos = {x = 8, y = -5},   -- bottom-left area, clear of the native buttons
     default_enabled = true,
     viewscreens = 'dwarfmode/Stockpile/Some/Customize',
-    frame = {w = 26, h = 4},
-    version = 5,   -- bumped so the new size/position takes effect
+    frame = {w = 26, h = 5},
+    version = 7,   -- bumped so the new size/position takes effect (added meltables row, nudged down)
 }
 
 function BinnableButton:init()
     self:addviews{
         widgets.TextButton{
-            view_id = 'binnables', frame = {t = 0, l = 0, w = 26, h = 1},
+            view_id = 'meltables', frame = {t = 0, l = 0, w = 26, h = 1},
+            label = 'all meltables', key = 'CUSTOM_CTRL_M', on_activate = apply_meltables,
+        },
+        widgets.TextButton{
+            view_id = 'binnables', frame = {t = 1, l = 0, w = 26, h = 1},
             label = 'all binnables', key = 'CUSTOM_CTRL_B', on_activate = apply_binnables,
         },
         widgets.TextButton{
-            view_id = 'food', frame = {t = 1, l = 0, w = 26, h = 1},
+            view_id = 'food', frame = {t = 2, l = 0, w = 26, h = 1},
             label = 'all food', key = 'CUSTOM_CTRL_F', on_activate = apply_food,
         },
         widgets.TextButton{
-            view_id = 'drink', frame = {t = 2, l = 0, w = 26, h = 1},
+            view_id = 'drink', frame = {t = 3, l = 0, w = 26, h = 1},
             label = 'all drink', key = 'CUSTOM_CTRL_D', on_activate = apply_drink,
         },
         widgets.CycleHotkeyLabel{
-            view_id = 'quality', frame = {t = 3, l = 0, w = 26, h = 1},
+            view_id = 'quality', frame = {t = 4, l = 0, w = 26, h = 1},
             label = 'quality', key = 'CUSTOM_CTRL_Q',
             options = {
                 {label = '(set)', value = 'none'},
