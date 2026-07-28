@@ -5,6 +5,17 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.3 -- militant good (high elves + dwarves); kobolds are evil
+- Kobolds (`HA_KOBOLD`) are now part of the EVIL set, so the good factions treat a
+  kobold adventurer as an enemy. The evil set is now orc, kobold, goblin, succubus,
+  dark dwarf, drow and mind flayer.
+- New "militant good" faction: high elves (`HA_HIGH_ELF`) and dwarves (`DWARF`) are
+  hostile to any EVIL adventurer -- same target set as the plain good civs -- but
+  they NEVER break (NOFEAR) and NEVER yield (unreachable Pacify threshold), unlike
+  the weaker good civs.
+- `DWARF` moved from the yielding "good civs" group into "militant good"; the good
+  civs are now just `HUMAN` and `ELF`.
+
 ## v0.2 -- kobold civ + dragon overlords
 - The kobold civ is now a hostile faction: `HA_KOBOLD` (which includes its dragon
   overlords, the `ANCIENT_DRAGON` caste of the same creature) is hostile to any

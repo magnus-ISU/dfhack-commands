@@ -14,6 +14,11 @@ adventurer is a skilled enough Pacifier (Pacify skill >= the target race's
 threshold), in which case a surrender is respected. Optionally sets [NOFEAR] on a
 faction's castes (session-only) so they never break.
 
+GOOD races split into two: the weaker "good civs" (HUMAN, ELF) attack any EVIL
+adventurer but can surrender/flee, while "militant good" (HA_HIGH_ELF, DWARF) attack
+the same EVIL set yet NEVER break (NOFEAR) and NEVER yield (NO_YIELD threshold). The
+EVIL target set is orc, kobold, goblin, succubus, dark dwarf, drow and mind flayer.
+
 KOBOLDS are a special case (see pacify_threshold): the kobold civ AND its dragon
 overlords (the HA_KOBOLD ANCIENT_DRAGON caste, the same creature) are hostile to any
 non-kobold. A plain kobold's surrender sticks at Pacify 1, but rises to 12 while one
@@ -35,11 +40,13 @@ local utils = require('utils')
 
 -- the evil bloc trades/allies with each other (README trade table)
 local BLOC = {HA_DROW=true, HA_DARK_DWARF=true, HA_SUCCUBUS=true, GOBLIN=true}
--- races treated as "evil" for the good-civ rule
+-- races treated as "evil" -- the target set for the good-civ and militant-good rules
 local EVIL = {HA_ORC=true, HA_ILLITHID=true, HA_DROW=true, HA_DARK_DWARF=true,
-              HA_SUCCUBUS=true, GOBLIN=true}
+              HA_SUCCUBUS=true, GOBLIN=true, HA_KOBOLD=true}
 
--- Pacify skill a yielded unit's slayer needs for the surrender to STICK, per race.
+-- Pacify skill a yielded unit's slayer needs for the surrender to STICK, per race. Unreachable
+-- values (NO_YIELD) mark races that fight to the death and never surrender.
+local NO_YIELD = 999
 local PACIFY_THRESHOLD = {
     GOBLIN        = 1,
     HA_ORC        = 3,
@@ -47,6 +54,9 @@ local PACIFY_THRESHOLD = {
     HA_SUCCUBUS   = 6,
     HA_DARK_DWARF = 6,   -- not user-specified; matches the other CAVE_DETAILED evil civs
     HA_ILLITHID   = 12,
+    -- militant good (high elves + dwarves) never yield, unlike the weaker HUMAN/ELF good civs
+    HA_HIGH_ELF   = NO_YIELD,
+    DWARF         = NO_YIELD,
 }
 local DEFAULT_PACIFY = 3
 
@@ -62,7 +72,12 @@ local RULES = {
     {name = 'evil_bloc', races = {'HA_DROW', 'HA_DARK_DWARF', 'HA_SUCCUBUS', 'GOBLIN'}, nofear = true,
      friendly = function(adv) return BLOC[adv] == true end},
     -- good civilizations: hostile to EVIL adventurers only (and they CAN yield/flee)
-    {name = 'good_civs', races = {'DWARF', 'HUMAN', 'ELF'}, nofear = false,
+    {name = 'good_civs', races = {'HUMAN', 'ELF'}, nofear = false,
+     friendly = function(adv) return not EVIL[adv] end},
+    -- militant good (high elves + dwarves): same target set as the good civs -- hostile to any EVIL
+    -- adventurer -- but they NEVER break (NOFEAR) and NEVER yield (NO_YIELD threshold), unlike the
+    -- weaker HUMAN/ELF good civs who can surrender.
+    {name = 'militant_good', races = {'HA_HIGH_ELF', 'DWARF'}, nofear = true,
      friendly = function(adv) return not EVIL[adv] end},
     -- kobold civ: hostile to any adventurer who is NOT a kobold. Their dragon overlords are the
     -- HA_KOBOLD ANCIENT_DRAGON caste -- the SAME creature -- so this one rule covers kobolds AND
