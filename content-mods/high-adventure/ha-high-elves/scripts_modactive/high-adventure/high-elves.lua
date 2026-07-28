@@ -6,40 +6,39 @@ high-adventure/high-elves
 
 Tags: fort | adventure | gameplay
 
-Worldgen cannot equip a civ in a divine metal (metals come from geology; twinkling
-metal is reaction-made), so high elves never spawn wearing it. This re-gears them
-after the fact.
+Support script for the self-contained high-elf civilization. Three jobs:
 
-HOW IT WORKS (redesigned): it does NOT alter the material of existing items (that
-can make impossible item/material combos -- a cloth-only type turned metal, etc.).
-Instead, for each item a target already has EQUIPPED (wielded or worn) whose
-type+subtype is on the ALLOWLIST below, it GENERATES a fresh twinkling-metal item
-of that same type/subtype AT THE OLD ITEM'S QUALITY (lower qualities preserved),
-swaps it into the same slot, and removes the old one. MASTERWORK and ARTIFACT
-items are left untouched -- never re-geared (so no masterwork is destroyed). Empty
-slots are never filled; equipped items not on the allowlist are left alone.
+- **Shaping Tree pacing**: growing wood at HA_HE_SHAPING_TREE takes one month per
+  tree (halved by a legendary strand extractor); wood grown before the tree
+  regrows withers, with an announcement. (Catch-starlight is NOT paced -- it is
+  gated by its plant/silk thread cost.)
+- **Shaping Trees need open sky**: a tree placed without an "outside" (open to
+  sky) work tile is cancelled while still under construction -- they catch
+  starlight, so they cannot be built under a roof or underground.
+- **Twinkling gear**: worldgen cannot equip a divine metal (metals come from
+  geology), so high elves never spawn in twinkling metal. This re-gears them.
+  It does NOT alter item materials (that can make impossible item/material combos);
+  instead, for each item a target already has EQUIPPED whose type+subtype is on the
+  ALLOWLIST, it GENERATES a fresh twinkling item of that type/subtype at the old
+  item's quality (lower qualities preserved), swaps it in, and removes the old one.
+  MASTERWORK and ARTIFACT items are left untouched; empty slots are never filled.
+  Targets fort-mode invaders/visitors (never citizens) and adventure-mode NPCs
+  (never historical figures -- so not the adventurer, retired citizens, or named
+  high elves).
 
-WHO it targets:
-  - fort mode: high-elf INVADERS/VISITORS (never your own citizens).
-  - adventure mode: high-elf units that are NOT historical figures -- so it never
-    touches the adventurer if they are a histfig, retired fortress citizens, or any
-    named/legendary high elf; only anonymous NPCs.
-
-The drow "always steel" script is the same module with RACE_ID='HA_DROW',
-MAT_ID='INORGANIC:STEEL', and a steel allowlist -- factor to a shared helper when
-that ships.
-
-UNTESTED until a high-elf world exists; the createItem/moveToInventory path is the
-load-bearing part to verify live.
+UNTESTED until a high-elf world exists.
 
 Usage: enable high-adventure/high-elves
 ]====]
 
 local repeatUtil = require('repeat-util')
+local eventful = require('plugins.eventful')
 
 local GLOBAL_KEY = 'haHighElves'
 local RACE_ID    = 'HA_HIGH_ELF'
 local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'
+local MONTH      = 33600
+local GROW_REACTIONS = { HA_HE_GROW_WOOD = true, HA_HE_GROW_FEATHER = true }
 
 -- Only these item types/subtypes are ever generated (prevents impossible items).
 -- Edit freely -- this is the whole point of the allowlist.
@@ -61,8 +60,11 @@ local EQUIPPED = {[df.inv_item_role_type.Weapon]=true, [df.inv_item_role_type.Wo
 
 enabled = enabled or false
 done = done or {}
+next_ok = next_ok or {}       -- shaping-tree building id -> earliest tick for next harvest
 
 function isEnabled() return enabled end
+
+-- ---------------------------------------------------------------- gear ----
 
 local function target_mat()
     local mi = dfhack.matinfo.find(MAT_ID)
@@ -83,7 +85,6 @@ local function should_regear(u, race)
     return not dfhack.units.isCitizen(u)        -- fort: invaders/visitors, never our citizens
 end
 
--- allowlisted, currently-equipped items -> {type, subtype, role, body_part}
 local function equipped_targets(u)
     local out = {}
     for _, inv in ipairs(u.inventory) do
@@ -109,14 +110,81 @@ local function regear(u, mtype, mindex)
         local created = dfhack.items.createItem(u, t.itype, t.isub, mtype, mindex)
         local newit = created and created[1]
         if newit then
-            newit:setQuality(t.quality)         -- preserve masterwork / crafted quality
+            newit:setQuality(t.quality)
             dfhack.items.remove(t.old)
             dfhack.items.moveToInventory(newit, u, t.mode, t.bp)
         end
     end
 end
 
+-- ------------------------------------------------------- shaping tree ----
+
+local function now()
+    return dfhack.world.ReadCurrentTick() + dfhack.world.ReadCurrentYear() * 403200
+end
+
+local function shaping_tree_type()
+    for i, b in ipairs(df.global.world.raws.buildings.all) do
+        if b.code == "HA_HE_SHAPING_TREE" then return b.id end
+    end
+end
+
+local function worker_is_legendary(unit)
+    local soul = unit.status.current_soul
+    if not soul then return false end
+    for _, s in ipairs(soul.skills) do
+        if s.id == df.job_skill.EXTRACT_STRAND then return s.rating >= 15 end
+    end
+    return false
+end
+
+local function job_building(unit)
+    local job = unit.job.current_job
+    if not job then return nil end
+    for _, ref in ipairs(job.general_refs) do
+        if df.general_ref_building_holderst:is_instance(ref) then return ref.building_id end
+    end
+    return nil
+end
+
+-- pace grow-wood: one month per tree, wither if worked too soon
+local function on_grow(reaction, rp, unit, ii, ir, oi, call_native)
+    if not reaction or not GROW_REACTIONS[reaction.code] or not unit then return end
+    local bid = job_building(unit) or -1
+    local t = now()
+    if next_ok[bid] and t < next_ok[bid] then
+        if call_native then call_native.value = false end
+        dfhack.gui.showAnnouncement(
+            "The shaping tree has not yet regrown; the young wood withers away.",
+            COLOR_YELLOW, true)
+        return
+    end
+    next_ok[bid] = t + (worker_is_legendary(unit) and (MONTH // 2) or MONTH)
+end
+
+-- shaping trees must be built under open sky; cancel a roofed/underground one
+-- while it is still under construction
+local function enforce_sky_access(btype)
+    if not btype then return end
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+           and bld.construction_stage < bld:getMaxBuildStage() then
+            local b = dfhack.maps.getTileBlock(bld.centerx, bld.centery, bld.z)
+            if b and not b.designation[bld.centerx % 16][bld.centery % 16].outside then
+                dfhack.buildings.deconstruct(bld)
+                dfhack.gui.showAnnouncement(
+                    "A shaping tree must be built under open sky.", COLOR_YELLOW, true)
+            end
+        end
+    end
+end
+
+-- ------------------------------------------------------------- engine ----
+
 local function tick()
+    if dfhack.world.isFortressMode() then
+        pcall(enforce_sky_access, shaping_tree_type())
+    end
     local race = target_race(); if not race then return end
     local mtype, mindex = target_mat(); if not mtype then return end
     for _, u in ipairs(df.global.world.units.active) do
@@ -129,11 +197,15 @@ end
 
 local function do_enable()
     enabled = true
+    eventful.registerReaction("HA_HE_GROW_WOOD", on_grow)
+    eventful.registerReaction("HA_HE_GROW_FEATHER", on_grow)
     repeatUtil.scheduleEvery(GLOBAL_KEY, 100, 'ticks', tick)
 end
 
 local function do_disable()
     enabled = false
+    eventful.registerReaction("HA_HE_GROW_WOOD", nil)
+    eventful.registerReaction("HA_HE_GROW_FEATHER", nil)
     repeatUtil.cancel(GLOBAL_KEY)
 end
 
