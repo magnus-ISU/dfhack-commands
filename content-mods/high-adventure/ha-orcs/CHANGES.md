@@ -147,3 +147,8 @@ translation `HA_BLACK_SPEECH`, all interactions `HA_*`-prefixed, graphics pages
 
 ## v0.22
 - Banditry 10 -> 50 (+LOCAL). Also removed a duplicate `[BANDITRY:10]` lower in the entity that was silently overriding the intended value (last-wins), so orcs were effectively at 10 before.
+
+## v0.23
+- Added `[NOFEAR]` to the base raws so orcs never flee or yield. Pairs with the
+  `adventure-hostility` DFHack script (loner rule: hostile to any non-orc
+  adventurer, pacifiable only at Pacify skill >= 3).

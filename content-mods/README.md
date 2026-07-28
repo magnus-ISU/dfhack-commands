@@ -221,6 +221,19 @@ Standalone fork of Succubus Dungeon (`HA_` IDs) with minimal documented changes:
   the old SELECT-can't-remove problem disappears).
 * Everything else (corruption system, summons, secrets, magmawell, language) carries over.
 
+### 10. Revenge (`HA_Revenge`) — planned
+A cross-cutting **behavior** mod, companion to the `adventure-hostility` DFHack
+script (already built for the always-hostile evil civs). Where `adventure-hostility`
+makes designated civs attack the adventurer **on sight**, `HA_Revenge` covers the
+**provoked** case: if the adventurer **attacks an allied/neutral civilization**, its
+members turn hostile **and communicate that hostility to nearby members of their
+race**, so one assault escalates into the whole group turning on you. It reuses the
+same proven engine — put the unit in a **Conflict activity opposing the adventurer**
+(create one if none exists) and gate yielding on the adventurer's **Pacify skill**
+vs a per-race threshold — differing only in the **trigger** (attack + race-proximity
+spread, not unconditional on-sight) and in **NOT** applying `[NOFEAR]`, so a
+revenge mob can still flee or yield.
+
 ## Workshops (custom 5x5 buildings)
 
 * **Shaping Tree** (elves and high elves; NOT drow): grow wooden items from seeds.

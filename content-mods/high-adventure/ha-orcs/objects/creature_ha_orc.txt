@@ -12,6 +12,7 @@ creature_ha_orc
 	
 	[INTELLIGENT]
 	[TRANCES]
+	[NOFEAR]
 	[CANOPENDOORS]
 	[EQUIPS]
 	[DIURNAL]
