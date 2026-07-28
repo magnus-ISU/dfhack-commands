@@ -384,6 +384,22 @@ local function cat_preset(name)
     return name == 'sheet' and 'library/cat_sheets' or ('library/cat_' .. name)
 end
 
+-- Heal "phantom" categories: a group flag left ON while the category holds NOTHING (no item types,
+-- materials or quality). DF's own "None" button clears a category's contents but leaves its group
+-- flag set, and that flag is what NAMES the pile -- so an emptied pile is misnamed after a leftover
+-- category ("Sheet Stockpile" containing nothing). Clearing the flag of any truly-empty category
+-- makes the name reflect reality. Safe: a category with ANY filter still set reads as on (any_on),
+-- so a configured-but-item-less category is untouched; only fully-empty ones are cleared.
+local CAT_FIELDS = {'ammo', 'armor', 'bars_blocks', 'cloth', 'coins', 'finished_goods', 'gems',
+    'leather', 'sheet', 'weapons', 'animals', 'corpses', 'furniture', 'refuse', 'stone', 'wood', 'food'}
+local function heal_phantom_flags(settings)
+    for _, f in ipairs(CAT_FIELDS) do
+        if settings.flags[f] == true and settings[f] ~= nil and not any_on(settings[f]) then
+            settings.flags[f] = false
+        end
+    end
+end
+
 -- x-positions of the "All" column headers, and the row they sit on. Scans the top rows and keeps the
 -- row with the MOST "All" markers -- normal categories have 3 columns, but Wood/Stone/Corpses have no
 -- middle column and show only 2, so we require >=2 (not 3) or those would be skipped. Resolution-
@@ -520,6 +536,11 @@ function CategoryToggle:onInput(keys)
 end
 
 function CategoryToggle:overlay_onupdate()
+    -- Keep the pile name honest every frame: clear any group flag stranded on a now-empty category
+    -- (DF's native "None" clears a category's contents but leaves its flag set, so the pile keeps a
+    -- phantom name like "Sheet Stockpile" with nothing in it). cs.sp is the live working settings.
+    local hcs = df.global.game.main_interface.custom_stockpile
+    if hcs.open and hcs.sp then heal_phantom_flags(hcs.sp) end
     -- After a redirect DF leaves gps.mouse parked on the header (it only refreshes the cursor on real
     -- OS movement), so the user's next stationary click would land on "All/None" and do nothing. Put
     -- the cursor back on the row they actually clicked so consecutive clicks keep toggling.
@@ -540,16 +561,19 @@ function CategoryToggle:overlay_onupdate()
     -- toggle only when the SAME category is still selected after the click (i.e. a re-click, not a
     -- switch to a new category) -- so first click selects, next click flips the whole category
     if cs.cur_main_mode ~= p.cm then return end
-    local sp = dfhack.gui.getSelectedStockpile(true)
+    -- get_sp() is address-matched to cs.sp so it is the RELIABLE handle here (getSelectedStockpile is
+    -- flaky on this screen and can hand back a detached copy, which is why a flag write via it silently
+    -- vanished). cs.sp IS this building's live settings, so read/write item + flag state through it.
+    local sp = get_sp()
     local name = sp and main_cat_name(cs)
-    if name and sp.settings[name] then
-        -- flip the whole category on/off via DFHack's own preset (item types + materials + quality
-        -- together; populates the enable vectors so even a never-touched category still toggles).
-        -- "Currently on" reads the group flag too, not just item types, so a flag-only phantom still
-        -- flips cleanly; and we drive the flag ourselves since import_settings won't clear it on disable.
-        local on = not ((sp.settings.flags[name] == true) or any_on(sp.settings[name]))
+    if name and cs.sp[name] then
+        -- Direction is judged by ITEM state, not the group flag: import_settings leaves a category's
+        -- flag set even after it clears the items, so a flag-only phantom must still read as OFF and
+        -- enable (judging by the flag would see it "on" and only ever try to disable -> stuck). We then
+        -- drive the flag ourselves so a disabled category doesn't strand a phantom "Sheet Stockpile".
+        local on = not any_on(cs.sp[name])
         stockpiles.import_settings(cat_preset(name), {id = sp.id, mode = on and 'enable' or 'disable'})
-        set_cat_flag(sp, name, on)
+        if cs.sp.flags[name] ~= nil then cs.sp.flags[name] = on end
     end
 end
 
