@@ -28,7 +28,16 @@ Registered automatically as overlay `dig-building.picker`. Reposition with `gui/
 local overlay = require('plugins.overlay')
 local gui = require('gui')
 
+local sr = df.global.selection_rect
+
 local function mi() return df.global.game.main_interface end
+-- a dig-box drag is IN PROGRESS: the first corner has been placed (selection_rect.start_z >= 0,
+-- else it sits at a large negative sentinel) and the Dig tool is still selected. This is the ONLY
+-- time the picker should duck away from the cursor -- so you can drag the box up to (and under) the
+-- panel. When no drag is active, hovering the panel must NOT hide it, so its options stay clickable.
+local function drag_in_progress()
+    return mi().main_designation_selected == df.main_designation_type.DIG_DIG and sr.start_z >= 0
+end
 local function scr() return dfhack.gui.getDFViewscreen(true) end
 
 -- does overlay `w` match the current focus? (only yield to overlays actually drawn on this screen)
@@ -534,7 +543,10 @@ end
 -- The right side is where the map is, so extending the zone rightward makes the panel step aside a
 -- couple tiles before the cursor arrives -- letting you designate the map right next to (and under)
 -- it without the panel flickering in and out at the boundary.
+-- ONLY hides while a dig-box drag is actually in progress (drag_in_progress): otherwise moving the
+-- cursor onto the panel to click an option would make it vanish out from under the click.
 function DigBuilding:mouse_in_hide_zone()
+    if not drag_in_progress() then return false end
     local fr = self.frame_rect
     if not fr then return false end
     local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
