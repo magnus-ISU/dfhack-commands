@@ -269,6 +269,9 @@ if lovely then
     try('smooth-movement (render-only smooth creature movement)', function()
         pcall(dfhack.run_command, 'load', 'smooth-movement')
         dfhack.run_command('enable', 'smooth-movement')
+        -- the free camera (scroll glide + pixel-perfect drag pan + sub-tile rest) is opt-in
+        -- per session in the plugin; opt in here. Harmless no-op on builds without it.
+        pcall(dfhack.run_command, 'smooth-movement', 'camera', 'on')
     end)
 
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
