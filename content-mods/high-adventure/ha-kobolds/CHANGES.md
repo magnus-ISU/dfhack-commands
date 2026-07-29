@@ -1,5 +1,20 @@
 # ha-kobolds — build notes
 
+## v0.16a -- the ancient dragon caste grows its legs back
+- **Kobold ancient dragons rendered as a legless winged serpent.** The dragon composite
+  in `graphics_creatures_cutekobold_layered.txt` had only five of the thirteen layer
+  groups the sprite needs: body, head, tail and the two wings. All four legs and all
+  four feet (front/back x left/right) were simply absent, even though the comment above
+  it claimed a "full 4-leg dragon composite" -- the art on the HA_ANCIENT_DRAGONS page
+  was always there, nothing pointed at it.
+- Copied the eight missing leg/foot layer groups over from the standalone
+  `HA_ANCIENT_DRAGON` megabeast graphics, into all three of the caste's layer sets
+  (BABY, CHILD, DEFAULT), keeping Naut's draw order: right-side legs and feet UNDER the
+  body, left-side legs and feet OVER it. Every added layer is `CONDITION_CASTE:
+  ANCIENT_DRAGON` gated, so none of it can render on a plain kobold -- 585 dragon layers
+  now, all caste-gated, 15 colour variants per region so no state falls back to grayscale.
+- Graphics change: applies on save reload, no new world needed.
+
 ## v0.16 -- the Dread Wyrm executes
 - Added `[RESPONSIBILITY:EXECUTIONS]` to the **Dread Wyrm**. The civ had no executioner of
   any kind; an ancient dragon overlord answers to nobody and kills whoever it likes.

@@ -23,8 +23,16 @@ KOBOLDS are a special case (see pacify_threshold): the kobold civ AND its dragon
 overlords (the HA_KOBOLD ANCIENT_DRAGON caste, the same creature) are hostile to any
 non-kobold. A plain kobold's surrender sticks at Pacify 1, but rises to 12 while one
 of their ancient-dragon overlords is on screen; a dragon overlord itself always needs
-Pacify 12. The standalone HA_ANCIENT_DRAGON MEGABEAST is a different creature and is
-untouched by this.
+Pacify 12.
+
+DRAGON CHALLENGE: two ancient dragons meeting is read as a challenge. When the
+ADVENTURER is an ancient dragon -- either the HA_KOBOLD ANCIENT_DRAGON caste or the
+standalone HA_ANCIENT_DRAGON megabeast -- every other ancient dragon turns on them,
+and so do the kobolds standing with that rival dragon, even though the kobold civ
+would otherwise greet a dragon as an overlord. Kobolds nowhere near a rival dragon
+still treat a dragon adventurer as one of their own. A challenger that has already
+yielded is left alone if the adventurer's Pacify is 12 or better: that surrender
+stands and the challenge is not reopened.
 
 Ships in the HA_adventure_hostility mod; auto-discovered as an overlay on world
 load. Add a faction by editing RULES / PACIFY_THRESHOLD -- the engine is identical
@@ -90,6 +98,12 @@ local RULES = {
 
 local RANGE = 20   -- manhattan distance (z weighted x4) at which a unit is engaged
 
+-- Dragon challenge (see the header): how close a kobold has to stand to a rival ancient
+-- dragon to take its side against a dragon adventurer, and the Pacify that calls the
+-- whole challenge off once a challenger has yielded.
+local DRAGON_CHALLENGE_RANGE = 20
+local DRAGON_PACIFY = 12
+
 -- ===========================================================================
 -- helpers
 -- ===========================================================================
@@ -116,6 +130,15 @@ local function is_dragon_caste(u)
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
     return caste ~= nil and tostring(caste.caste_id) == 'ANCIENT_DRAGON'
+end
+
+-- an ancient dragon of EITHER kind: the kobold civ's ANCIENT_DRAGON caste or the
+-- standalone HA_ANCIENT_DRAGON megabeast. Used only by the dragon-challenge rule,
+-- which does not care which of the two a dragon is.
+local function is_ancient_dragon(u, cid)
+    cid = cid or creature_id(u.race)
+    if cid == 'HA_ANCIENT_DRAGON' then return true end
+    return cid == 'HA_KOBOLD' and is_dragon_caste(u)
 end
 
 -- is a unit inside the current on-screen viewport? (same map-tile-size math the click tools use:
@@ -243,12 +266,27 @@ local function process()
             if rule.nofear then set_nofear(rs) end
         end
     end
-    if #active == 0 then return end
+    -- A dragon adventurer is challenged by every other ancient dragon, so collect the rivals up
+    -- front: their kobold retinue is decided by proximity to THEM, not to the adventurer, and a
+    -- retainer may be swept before its dragon. This is the one rule that can fire with no faction
+    -- rule active at all (the kobold civ greets a dragon as an overlord), so it is gathered before
+    -- the early-out below.
+    local adv_is_dragon = is_ancient_dragon(adv, adv_race)
+    local rival_dragons = {}
+    if adv_is_dragon then
+        for _, u in ipairs(df.global.world.units.active) do
+            if u.id ~= adv.id and dfhack.units.isAlive(u) and is_ancient_dragon(u) then
+                rival_dragons[#rival_dragons + 1] = u
+            end
+        end
+    end
+
+    if #active == 0 and #rival_dragons == 0 then return end
 
     -- kobolds are harder to pacify while one of their ANCIENT_DRAGON overlords is on screen: note it
     -- up front (a pre-pass, since a plain kobold may be visited before the dragon in the sweep below).
     local dragon_on_screen = false
-    if kobolds_active then
+    if kobolds_active or adv_is_dragon then
         for _, u in ipairs(df.global.world.units.active) do
             if u.id ~= adv.id and dfhack.units.isAlive(u)
                 and creature_id(u.race) == 'HA_KOBOLD' and is_dragon_caste(u) and on_screen(u) then
@@ -263,9 +301,28 @@ local function process()
             local cid = creature_id(u.race)
             local targeted = false
             for _, races in ipairs(active) do if races[cid] then targeted = true break end end
-            if targeted then
+
+            -- dragon challenge: a rival ancient dragon, or a kobold standing with one
+            local challenge = false
+            if adv_is_dragon and not targeted then
+                if is_ancient_dragon(u, cid) then
+                    challenge = true
+                elseif cid == 'HA_KOBOLD' then
+                    for _, d in ipairs(rival_dragons) do
+                        if d.id ~= u.id and dist(u, d) <= DRAGON_CHALLENGE_RANGE then
+                            challenge = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            if targeted or challenge then
                 -- guard per-unit so one odd unit can't abort the whole sweep
                 pcall(function()
+                    -- a challenger who has already yielded to a Pacify 12 adventurer is left in
+                    -- peace: that surrender stands rather than reopening the challenge each turn
+                    if challenge and u.flags3.adv_yield and pacify >= DRAGON_PACIFY then return end
                     make_hostile(u, adv)
                     if u.flags3.adv_yield then
                         local threshold = pacify_threshold(u, cid, dragon_on_screen)
