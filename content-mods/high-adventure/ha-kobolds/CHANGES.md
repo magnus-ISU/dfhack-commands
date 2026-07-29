@@ -1,5 +1,37 @@
 # ha-kobolds — build notes
 
+## v0.17 -- ten ancient dragon castes
+- **The single ancient dragon becomes 10 castes**, applied identically to the standalone
+  `HA_ANCIENT_DRAGON` megabeast and to the draconic caste-set inside `HA_KOBOLD`:
+  head count 1/2/3 at 80/10/10, spiked vs clubbed tail 50/50, and 2/4/6 horns split
+  evenly across the single-headed castes. Multi-headed frames carry a fixed four horns
+  per head, which is how upstream bundles them, so they have no horn axis.
+- `POP_RATIO` sums to 300. The two kobold castes were rescaled from 500 to **74850** each
+  so the draconic share stays exactly **0.2%**. Worldgen megabeast counts are per creature,
+  not per caste, so this adds no extra megabeasts.
+- **New `objects/body_ha_dragon.txt`**, ported from Naut's `body_new.txt`. Plan names carry
+  an `HA_` prefix so they cannot collide with the upstream mod; the body part TOKENS are
+  deliberately unchanged (`HD`, `NK`, `TRHORN`, ...) because the graphics layers match on
+  tokens. Includes the `HA_DRAGON` frame -- a real `CATEGORY:NECK` neck and `CATEGORY:HEAD`
+  head, replacing vanilla `QUADRUPED_NECK` whose neck was `CATEGORY:SPINE`.
+- `HA_2HEAD_HORN` has no upstream equivalent (Naut ships only 4- and 6-horn sets) and is
+  written here as the top pair alone. The 6-horn set was re-tokened so its top pair keeps
+  the `TRHORN`/`TLHORN` names the sprites gate on.
+- **Dragonfire now needs the organ**: every caste gets `HA_FIRE_SACK` and the breath moved
+  from `BP_REQUIRED:BY_CATEGORY:MOUTH` to `FIRE_ORGAN`, so destroying the sack ends the
+  fire without killing the dragon. Not copied from upstream, whose own gating asks for
+  `BY_TOKEN:BIG_FIRE_SACK` -- that is the plan name, not the part token, so it can never
+  match. Vapor/ice/venom sacks were skipped: upstream defines them but attaches them to no
+  caste and references them in no interaction.
+- **Graphics**: all 594 dragon layers were re-gated from the deleted `ANCIENT_DRAGON` caste
+  onto the ten new ones. Horns are now gated on the real body parts (`TRHORN`/`TLHORN`,
+  with `TRHORN1`/`TLHORN1` as an alternate layer for the multi-headed frames), so a severed
+  horn disappears. Second and third heads draw from `HD2`/`HD3` presence with their own horn
+  pairs.
+- Version bumped to 17 rather than patched into 16 in place: the `ANCIENT_DRAGON` caste no
+  longer exists, so an existing save holding dragons of that caste must keep loading 16.
+- **Needs a new world.**
+
 ## v0.16b -- the ancient dragon gets its face back
 - **The head rendered as a featureless blob.** The base head sprite (Naut's `HEAD1`,
   page region 12:10:14:11) is only a snout-and-jaw silhouette -- it carries no face at
