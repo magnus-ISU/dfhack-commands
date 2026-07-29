@@ -269,12 +269,18 @@ TODO:
 
 	Added broad tolerance for moving into other sites. Kobolds aren't picky.
 
-	HA fix: DEFAULT_SITE_TYPE was CAVE_DETAILED (= world site type MountainHalls),
-	so kobolds tried to found dwarf-style mountain halls -- they need mountain
-	biomes and lose the niche to actual dwarves, producing ZERO kobold civs in
-	worldgen (verified: 0 civs while broad START_BIOMEs were fine). CAVE is the
-	canonical kobold site type (vanilla SKULKING uses it and generates reliably).
-	[DEFAULT_SITE_TYPE:CAVE]
+	HA fix history: CAVE_DETAILED (v<=0.10, = MountainHalls) needed mountain
+	starts and lost the niche to dwarves -> 0 civs. CAVE (v0.11) ALSO placed 0
+	civs: Cave sites are pregenerated terrain features that only SKULKING civs
+	move into -- a non-SKULKING civ must FOUND its default site at worldgen, and
+	Cave is not foundable (verified live: HA_KOBOLD_CAVES 0 civs vs vanilla
+	SKULKING 3 in the same world, with near-identical baked start biomes).
+	v0.12: DARK_FORTRESS ("pits") -- foundable by any civ regardless of biome
+	(verified in the same world: HA_ILLITHID_CIV founded 3 DarkFortress civs)
+	and it fits the warren/pit-boss flavor. CAVE stays liked/tolerated so
+	kobolds still move into caves after worldgen.
+	[DEFAULT_SITE_TYPE:DARK_FORTRESS]
+	[LIKES_SITE:DARK_FORTRESS]
 	[LIKES_SITE:CAVE]
 	[LIKES_SITE:CAVE_DETAILED]
 	[TOLERATES_SITE:CAVE]

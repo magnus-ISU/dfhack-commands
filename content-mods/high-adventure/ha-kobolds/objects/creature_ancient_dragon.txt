@@ -2,13 +2,13 @@ creature_ancient_dragon
 
 [OBJECT:CREATURE]
 
-The wild Ancient Dragon: a solitary [MEGABEAST] (DIFFICULTY:18), NOT part of any kobold civ and NOT
-[POWER]. Same design as the HA_KOBOLD ANCIENT_DRAGON caste -- asexual, four legs + two wings + a
+The wild Ancient Dragon: a solitary MEGABEAST (DIFFICULTY:18), NOT part of any kobold civ and NOT
+a POWER. Same design as the HA_KOBOLD ANCIENT_DRAGON caste -- asexual, four legs + two wings + a
 tail (with a tail-slam), iron-hard scales, dragonfire, flight, legendary combat, phys 2000-3000,
 size of a full-grown dragon at 100 and a giant elephant at 1000, immortal like an elf (no MAXAGE).
 Based on the vanilla dragon.
 [CREATURE:HA_ANCIENT_DRAGON]
-	[DESCRIPTION:A colossal reptile of terrible majesty, sheathed in iron-hard scales, breathing searing dragonfire and taking wing on vast leathery pinions. It hoards wealth in a deep lair and can live for well over a thousand years.]
+	[DESCRIPTION:A huge winged creature full of dread majesty, it soars the skies with iron-hard scales immune to any fire.]
 	[NAME:ancient dragon:ancient dragons:draconic]
 	[CASTE_NAME:ancient dragon:ancient dragons:draconic]
 	[CREATURE_TILE:'D'][COLOR:4:0:1]
@@ -184,7 +184,7 @@ Based on the vanilla dragon.
 	[APPLY_CREATURE_VARIATION:STANDARD_CRAWLING_GAITS:2990:2257:1525:731:4300:6100]
 	[SWIMS_INNATE]
 	[HOMEOTHERM:10040]
-	asexual: no [MALE]/[FEMALE], no egg-laying -- worldgen places solitary adults
+	asexual: no MALE/FEMALE token, no egg-laying -- worldgen places solitary adults
 	[SET_TL_GROUP:BY_CATEGORY:ALL:SCALE]
 		[TL_COLOR_MODIFIER:RED:1:CRIMSON:1:SCARLET:1:BLACK:1:CHARCOAL:1:GRAY:1:ASH_GRAY:1:DARK_GREEN:1:EMERALD:1:CERULEAN:1:SKY_BLUE:1:GOLD:1:PURPLE:1:CHESTNUT:1:RUSSET:1]
 			[TLCM_NOUN:scales:PLURAL]

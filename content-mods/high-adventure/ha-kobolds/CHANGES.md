@@ -1,5 +1,28 @@
 # ha-kobolds — build notes
 
+## v0.14 -- dragon legs + new description
+- The layered Ancient Dragon sprite was missing all four legs: the HA adaptation of Naut's sheet
+  carried body/tail/wings/head layer groups but dropped Naut's leg+foot groups entirely. Added all
+  8 groups (front/back x left/right leg + foot, adult regions from Naut's atlas) x 15 colours,
+  sandwiched in Naut's draw order (right-side under the body, left-side over it). No CONDITION_BP:
+  the legs ALWAYS render regardless of body-part state.
+- New description for both the megabeast and the civ caste: "A huge winged creature full of dread
+  majesty, it soars the skies with iron-hard scales immune to any fire."
+- Graphics reach the active save via the installed_mods snapshot (restart DF); the description is
+  baked raws -- new worlds only (live-patched in the running session via DFHack).
+
+## v0.13 -- THE sterile-civ fix: bracketed tokens in comments
+- Root cause of "0 kobold civs" across v0.10-v0.12 site-type experiments was NOT the site type:
+  a design comment above the Ancient Dragon caste contained literal `[MALE]/[FEMALE]` -- DF's raw
+  parser reads tokens anywhere, and coming right after `[SELECT_CASTE:ALL]` it stamped MALE then
+  FEMALE onto every caste. Last token wins, so the MALE caste parsed as female (verified live:
+  HA_KOBOLD castes FEMALE=0/MALE=0 vs vanilla KOBOLD MALE=1). A civ with no males is sterile, and
+  sterile civs die out/never place in worldgen. De-bracketed the comment.
+- Same bug class in creature_ancient_dragon.txt: header `[MEGABEAST]`/`[POWER]` (orphan tokens) and
+  a mid-creature `[MALE]/[FEMALE]` comment that made the "asexual" megabeast female. De-bracketed.
+- The v0.12 DARK_FORTRESS default site is kept -- it parsed and loaded correctly all along.
+- Needs a fresh world.
+
 ## v0.1 — fork scaffold
 - Self-contained fork of **Cute Kobold Caverns** (workshop 3477662286): every CKC-defined id
   prefixed `HA_` (creature `HA_KOBOLD` <- CUTEKOBOLD; entity `HA_KOBOLD_CAVES` <- KOBOLD_CAVES;
@@ -113,6 +136,26 @@
 - **Fix:** `[DEFAULT_SITE_TYPE:CAVE]` (enum 2, "Cave") -- the canonical kobold site
   type that vanilla SKULKING uses and that generates reliably across biomes. Pop cap
   is unchanged (MAX_SITE_POP_NUMBER:120). Kept the broadened START_BIOMEs from v0.10.
+
+## v0.12 -- worldgen fix, round three: kobolds found pits (DARK_FORTRESS)
+- v0.11's `[DEFAULT_SITE_TYPE:CAVE]` ALSO generated zero civs (verified live in
+  region2, genned with v11: HA_KOBOLD_CAVES 0 civs / 0 entity populations while
+  vanilla SKULKING kobolds placed 3 civs with near-identical baked start biomes
+  and the same baked default_site_type enum). **Root cause:** Cave sites are
+  pregenerated terrain features that only `SKULKING` civs move into; a
+  non-SKULKING civ must *found* its default site at worldgen, and Cave is not
+  foundable. Every foundable-site civ in the same world placed fine (CITY: orcs 7,
+  high elves 7; DARK_FORTRESS: illithids 3, goblins 3; CAVE_DETAILED+mountain:
+  drow/dark dwarves/succubi 1 each).
+- **Fix:** `[DEFAULT_SITE_TYPE:DARK_FORTRESS]` + `[LIKES_SITE:DARK_FORTRESS]` --
+  kobold *pits* (the PIT_BOSS flavor writes itself), foundable in any biome and
+  empirically reliable for a custom non-goblin civ (HA_ILLITHID_CIV precedent).
+  CAVE / CAVE_DETAILED stay liked/tolerated so kobolds still migrate into caves
+  after worldgen. Mountain-halls and skulking-cave routes are documented as dead
+  ends in the entity file.
+- Needs a fresh world to test, like all raw changes. Verify with:
+  `dfhack-run lua` counting Civilization entities whose `entity_raw.code ==
+  "HA_KOBOLD_CAVES"` (expect >0, sites of type DarkFortress).
 
 ## TODO (next)
 - (DONE) Ancient Dragon caste in HA_KOBOLD (~0.2% POP_RATIO, asexual, dragon body/fire/flight/iron-skin,

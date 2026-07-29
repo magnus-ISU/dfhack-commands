@@ -348,7 +348,8 @@ creature_cutekobold
 				[APP_MOD_NOUN:claws:PLURAL]
 				[APP_MOD_DESC_RANGE:60:80:90:110:130:150]
 	Ancient Dragon caste (~0.2% of the civ; kobold castes are POP_RATIO 500 each). Asexual (no
-	[MALE]/[FEMALE]). Overrides the humanoid kobold body/size/maxage with a four-legged, two-winged,
+	MALE/FEMALE token -- NEVER write those bracketed in comments: the parser reads tokens anywhere,
+	and after SELECT_CASTE:ALL they neutered the whole civ). Overrides the humanoid kobold body/size/maxage with a four-legged, two-winged,
 	iron-scaled, fire-breathing dragon. Its CREATURE_CLASS gates the civ's Dread Wyrm throne. This is
 	the CIV caste -- the wild megabeast version is the separate creature HA_ANCIENT_DRAGON.
 	[CASTE:ANCIENT_DRAGON]
@@ -378,7 +379,7 @@ creature_cutekobold
 		[NO_PHYS_ATT_RUST]
 		[TRANCES]
 		[EXTRAVISION]
-		[DESCRIPTION:A vast dragon of terrible majesty, its hide sheathed in iron-hard scales. It breathes a searing dragonfire and takes wing on leathery pinions. The eldest of its kind rules the kobolds as their Dread Wyrm.]
+		[DESCRIPTION:A huge winged creature full of dread majesty, it soars the skies with iron-hard scales immune to any fire.]
 		[PREFSTRING:terrible majesty]
 		[PREFSTRING:iron-hard scales]
 		four legs, two wings, a head and a tail (vanilla dragon body + wings)
