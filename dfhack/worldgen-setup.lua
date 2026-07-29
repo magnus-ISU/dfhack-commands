@@ -18,16 +18,18 @@ Two mechanisms, chosen per step:
 * **Synthetic clicks, where that works.** The title menu responds to a fed `_MOUSE_L`
   once `gps.mouse_x/y` is parked on the label, so `open` is automatic.
 
-Known boundary: **Create world has to be clicked by a human.** The world-creation screen
-ignores synthetic input entirely -- a fed `_MOUSE_L` does not even move a slider, no
-interface key reaches the button (DF defines none for worldgen), and holding
-`enabler.mouse_lbut` across frames does nothing. xdotool is no help either: on Wayland it
-can move the pointer (DF polls the cursor position, so `gps.mouse_x/y` does follow) but
-button and key events never arrive -- `click`, `mousedown`/`mouseup` and `key` were all
-tested, via XTEST and `--window`. `/dev/uinput` is root-only and ydotool is absent.
+One gotcha, and it is the whole story: **DF's first-run "Welcome to Dwarf Fortress" panel
+is modal and swallows every input**, including fed ones. While it is up, nothing works --
+not a fed `_MOUSE_L` on any button, not `SELECT`/`LEAVESCREEN`/`CLOSE_MEGA_ANNOUNCEMENT`,
+and not xdotool clicks or keys on its own Okay button. Nothing programmatic dismisses it
+either: there is no dialog flag on the viewscreen, `text_box.text` is empty, and no
+`tutorial`/`hint` field exists on `init`, `d_init`, `game`, `plotinfo`, `gview` or
+`enabler`. Dismiss it by hand once.
 
-So `generate` parks the pointer on the button and asks. Everything the button acts on --
-the mod list and the sliders -- is already set from data.
+With it gone, a fed `_MOUSE_L` on the Create-world button works fine, so `generate` is
+fully automatic. (xdotool remains useless here regardless: it moves DF's pointer, because
+DF polls the cursor position, but no button or key event ever reaches the process --
+`click`, `mousedown`/`mouseup` and `key` all tested via XTEST and `--window`.)
 
 Usage::
 
@@ -38,8 +40,8 @@ Usage::
     worldgen-setup unselect <id>     drop one mod from the load order
     worldgen-setup params            civilizations and sites to max
     worldgen-setup params all        every slider to max (slow: Large world, 500 years)
-    worldgen-setup generate          try the button, and report if it needs a human
-    worldgen-setup all               open + mods + params, then hand over
+    worldgen-setup generate          press Create world
+    worldgen-setup all               open + mods + params + generate
     worldgen-setup verify            after generation, list the mods the world loaded
 
 Each step re-checks the screen and is safe to re-run, so a partial run can be resumed.
@@ -244,11 +246,24 @@ end
 
 -- -------------------------------------------------------------- generate ----
 
--- The Create-world button is a widget fed by real SDL mouse events, so this can only
--- try; it reports honestly rather than claiming a generation that never started.
+-- Returns true if DF's modal welcome panel is up. While it is, every input is swallowed,
+-- so there is no point clicking anything.
+local function welcome_modal()
+    for _, row in pairs(grid_rows()) do
+        if row:find('Welcome to Dwarf Fortress', 1, true) then return true end
+    end
+    return false
+end
+
 function generate()
     local vs = region_screen()
     if not vs then qerror('not on the world-creation screen (focus: ' .. focus() .. ')') end
+    if welcome_modal() then
+        print('DF\'s modal "Welcome to Dwarf Fortress" panel is up and swallows all input,')
+        print('including fed clicks. Nothing dismisses it programmatically -- press its Okay')
+        print('button by hand, then re-run `worldgen-setup generate`.')
+        return false
+    end
     if not click_text('Create world') then
         qerror('could not find the "Create world" button on screen')
     end
@@ -256,8 +271,8 @@ function generate()
         print('generation started')
         return true
     end
-    print('the Create world button does not take synthetic input (see the notes at the top).')
-    print('the DF cursor is parked on it -- click once, then run `worldgen-setup verify`.')
+    print('the click did not take and the welcome panel is not up -- unexpected; still on '
+        .. focus())
     return false
 end
 
@@ -285,11 +300,7 @@ function all(mode)
     if not region_screen() and not open() then return false end
     mods(mode)
     params(mode)
-    status()
-    print('')
-    print('ready -- click "Create world" (bottom right) to generate,')
-    print('then run `worldgen-setup verify`.')
-    return true
+    return generate()
 end
 
 local ACTIONS = {status = status, open = open, mods = mods, params = params,
