@@ -57,3 +57,9 @@ renamed so fork and original can coexist.
     shaping tree refuses to be unmade.");
   - **goblin ghosts are dispelled** — goblins are used to sending out fodder and do
     not memorialize their dead (orcs get the same in ha-orcs).
+
+## 0.5 -- vanilla-elf embark food & drink
+- Playable FOREST (vanilla elf) civs had empty crop/seed/booze resource lists (plants=0 seeds=0
+  booze=0 live), so elf embarks offered no food or drink. Added [OUTDOOR_FARMING]
+  [OUTDOOR_GARDENS] + PLANTER/COOK/MILLER jobs + PROCESS_PLANT_TO_BAG / MILL_SEEDS_NUTS_TO_PASTE
+  (BREWER + brew reactions were already present). Needs a fresh world.

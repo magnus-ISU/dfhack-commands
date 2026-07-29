@@ -1,6 +1,6 @@
 [ID:HA_playable_civs]
-[NUMERIC_VERSION:4]
-[DISPLAYED_VERSION:0.4]
+[NUMERIC_VERSION:5]
+[DISPLAYED_VERSION:0.5]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
 [AUTHOR:High Adventure (fork of All Races Playable Redo by Lord Nich; original by Arkbrik/Lovechild)]
