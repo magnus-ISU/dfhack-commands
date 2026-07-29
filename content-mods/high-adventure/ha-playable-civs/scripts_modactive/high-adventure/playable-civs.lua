@@ -14,6 +14,10 @@ Support script for the High Adventure playable-civilizations mod:
   (legendary+5). Jobs finished too soon wither (products consumed) with an announcement.
 - **Shaping Trees need open sky**: a tree placed without an "outside" (open to
   sky) work tile is cancelled while still under construction.
+- **Shaping Trees wrap a living tree**: the tile directly above the workshop must be a
+  tree trunk, or the tree is cancelled while still under construction. DF gives a 5x5
+  workshop a 5 x 6 art grid whose row 0 is that tile, and the art leaves row 0 blank,
+  so the living tree stands in the mouth of the fern ring.
 - **Elves can remove their own walls**: elves have no picks, so Remove-Construction
   orders (mining designations) never complete; in an elf fort this finishes them,
   reverting each designated constructed tile so walls/floors can be torn down.
@@ -106,7 +110,7 @@ local function on_reaction(reaction, reaction_product, unit, input_items, input_
     if next_ok[bid] and t < next_ok[bid] then
         if call_native then call_native.value = false end
         dfhack.gui.showAnnouncement(
-            "The shaping tree is not yet ready to grow into new forms; it only yields new logs once a moon.",
+            "The shaping tree is not ready to grow into new forms; it only can once a month.",
             COLOR_YELLOW, true)
         return
     end
@@ -168,13 +172,13 @@ local function enforce_sky_access()
     local btype = shaping_tree_type()
     if not btype then return end
     for _, bld in ipairs(df.global.world.buildings.all) do
-        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype
            and bld.construction_stage < bld:getMaxBuildStage() then
             local b = dfhack.maps.getTileBlock(bld.centerx, bld.centery, bld.z)
             if b and not b.designation[bld.centerx % 16][bld.centery % 16].outside then
                 dfhack.buildings.deconstruct(bld)
                 dfhack.gui.showAnnouncement(
-                    "A shaping tree must be built under open sky.", COLOR_YELLOW, true)
+                    "A shaping tree must be built under the open sky.", COLOR_YELLOW, true)
             end
         end
     end
@@ -187,7 +191,7 @@ local function init_new_trees()
     if not btype then return end
     local t = now()
     for _, bld in ipairs(df.global.world.buildings.all) do
-        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype
            and not cooldown_init[bld.id]
            and bld.construction_stage >= bld:getMaxBuildStage() then
             cooldown_init[bld.id] = true
@@ -196,10 +200,50 @@ local function init_new_trees()
     end
 end
 
+-- --------------------------------------------------- shaping tree site ----
+-- a shaping tree is grown AROUND a living tree: DF draws a 5x5 workshop's art on a
+-- 5 x (5+1) grid whose row 0 is the tile directly above the footprint. The art
+-- (graphics/images/shaping_tree.png) leaves that row transparent so the real tree
+-- shows through it -- and that tile has to BE a real tree.
+
+local function trunk_pos(bld) return {x = bld.centerx, y = bld.y1 - 1, z = bld.z} end
+
+-- any part of a living tree counts: a trunk pillar is material TREE but shape
+-- WALL, not TRUNK_BRANCH
+local function is_trunk(pos)
+    local tt = dfhack.maps.getTileType(pos.x, pos.y, pos.z)
+    if not tt then return false end
+    return df.tiletype.attrs[tt].material == df.tiletype_material.TREE
+end
+
+-- NOTE: custom_type only exists on workshops/furnaces, so the is_instance test
+-- must come FIRST -- reading it off a farm plot is a hard error
+local function each_shaping_tree(btype, fn)
+    if not btype then return end
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype then
+            fn(bld)
+        end
+    end
+end
+
+local function enforce_trunk(btype)
+    each_shaping_tree(btype, function(bld)
+        if bld.construction_stage < bld:getMaxBuildStage()
+           and not is_trunk(trunk_pos(bld)) then
+            dfhack.buildings.deconstruct(bld)
+            dfhack.gui.showAnnouncement(
+                'A shaping tree must be built around a living tree: put the trunk ' ..
+                'just above the workshop.', COLOR_YELLOW, true)
+        end
+    end)
+end
+
 local function tick()
     complete_wall_removals()
     pcall(enforce_sky_access)
     pcall(init_new_trees)
+    pcall(enforce_trunk, shaping_tree_type())
     -- dispel goblin ghosts
     local grace = goblin_race_id()
     if grace then

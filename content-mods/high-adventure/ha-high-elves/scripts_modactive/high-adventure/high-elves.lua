@@ -12,12 +12,20 @@ Support script for the self-contained high-elf civilization. Three jobs:
   tree; a freshly built tree starts on a full month cooldown; wood grown before the
   tree regrows withers, with an announcement. A skilled strand extractor grows MORE
   wood -- the one native log plus one bonus log per skill level, up to 21 total
-  (legendary+5). (Catch-starlight is NOT paced -- gated by its thread cost -- but its
-  twinkling strand is minted here, not as a native reaction PRODUCT, so the fuel-less
-  Shaping Tree escapes DF's hardcoded metal-item fuel requirement.)
+  (legendary+5). Catch-starlight is chancy: 5% success per point of the worker's strand
+  extractor rating, so an unskilled elf always fails and a legendary+5 one always
+  succeeds. A failure still spends both threads but does NOT rest the tree -- it can be
+  tried again immediately; only a caught strand puts the tree on the same one-month
+  cooldown that growing wood uses. Its twinkling strand is minted here, not as a native
+  reaction PRODUCT, so the fuel-less Shaping Tree escapes DF's hardcoded metal-item fuel
+  requirement.
 - **Shaping Trees need open sky**: a tree placed without an "outside" (open to
   sky) work tile is cancelled while still under construction -- they catch
   starlight, so they cannot be built under a roof or underground.
+- **Shaping Trees wrap a living tree**: the tile directly above the workshop must be a
+  tree trunk, or the tree is cancelled while still under construction. DF gives a 5x5
+  workshop a 5 x 6 art grid whose row 0 is that tile, and the art leaves row 0 blank,
+  so the living tree stands in the mouth of the fern ring.
 - **Twinkling gear**: worldgen cannot equip a divine metal (metals come from
   geology), so high elves never spawn in twinkling metal. This re-gears them.
   It does NOT alter item materials (that can make impossible item/material combos);
@@ -41,6 +49,9 @@ local GLOBAL_KEY = 'haHighElves'
 local RACE_ID    = 'HA_HIGH_ELF'
 local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'
 local MONTH      = 33600
+-- catch starlight is a gamble: this much success chance per point of the worker's
+-- strand extractor rating (so rating 20, legendary+5, is a sure thing)
+local STARLIGHT_CHANCE_PER_LEVEL = 0.05
 local GROW_REACTIONS = { HA_HE_GROW_WOOD = true, HA_HE_GROW_FEATHER = true }
 -- material each grow reaction yields, so we can mint skill-scaled bonus logs
 local GROW_MAT = {
@@ -181,7 +192,7 @@ local function on_grow(reaction, rp, unit, ii, ir, oi, call_native)
     if next_ok[bid] and t < next_ok[bid] then
         if call_native then call_native.value = false end
         dfhack.gui.showAnnouncement(
-            "The shaping tree is not yet ready to grow into new forms; it only yields new logs once a moon.",
+            "The shaping tree is not ready to grow into new forms; it only can once a month.",
             COLOR_YELLOW, true)
         return
     end
@@ -192,8 +203,32 @@ end
 -- catch starlight: the reaction has NO native product (a metal [PRODUCT] would force
 -- DF's hardcoded metal-item fuel requirement onto this fuel-less workshop). Instead we
 -- mint the dimension-15000 twinkling THREAD here after the reagents are consumed.
+-- Catching starlight is chancy: STARLIGHT_CHANCE_PER_LEVEL per point of the worker's
+-- strand extractor rating. A failure still burns the two threads -- the reagents are
+-- consumed by the job itself, and all we withhold is the strand -- but it does NOT put
+-- the tree on cooldown, so a failed catch can be tried again at once. Only a caught
+-- strand rests the tree, and it shares the one month cooldown with growing wood.
 local function on_catch_starlight(reaction, rp, unit, ii, ir, oi, call_native)
     if not reaction or reaction.code ~= 'HA_CATCH_STARLIGHT' or not unit then return end
+    local bid = job_building(unit) or -1
+    local t = now()
+    if next_ok[bid] and t < next_ok[bid] then
+        if call_native then call_native.value = false end
+        dfhack.gui.showAnnouncement(
+            "The shaping tree has spent its light; its boughs will not catch more for a moon.",
+            COLOR_YELLOW, true)
+        return
+    end
+    local rating = extract_strand_rating(unit)
+    if math.random() >= rating * STARLIGHT_CHANCE_PER_LEVEL then
+        dfhack.gui.showAnnouncement(
+            dfhack.units.getReadableName(unit) ..
+            ' lacked the skill to extract the strands of starlight. They can try again with a ' ..
+            math.floor(rating * STARLIGHT_CHANCE_PER_LEVEL * 100) .. '% chance.',
+            COLOR_YELLOW, true)
+        return
+    end
+    next_ok[bid] = t + MONTH
     local mi = dfhack.matinfo.find(MAT_ID)
     if not mi then return end
     local created = dfhack.items.createItem(unit, df.item_type.THREAD, -1, mi.type, mi.index)
@@ -209,13 +244,13 @@ end
 local function enforce_sky_access(btype)
     if not btype then return end
     for _, bld in ipairs(df.global.world.buildings.all) do
-        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype
            and bld.construction_stage < bld:getMaxBuildStage() then
             local b = dfhack.maps.getTileBlock(bld.centerx, bld.centery, bld.z)
             if b and not b.designation[bld.centerx % 16][bld.centery % 16].outside then
                 dfhack.buildings.deconstruct(bld)
                 dfhack.gui.showAnnouncement(
-                    "A shaping tree must be built under open sky.", COLOR_YELLOW, true)
+                    "A shaping tree must be built under the open sky.", COLOR_YELLOW, true)
             end
         end
     end
@@ -227,13 +262,52 @@ local function init_new_trees(btype)
     if not btype then return end
     local t = now()
     for _, bld in ipairs(df.global.world.buildings.all) do
-        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype
            and not cooldown_init[bld.id]
            and bld.construction_stage >= bld:getMaxBuildStage() then
             cooldown_init[bld.id] = true
             next_ok[bld.id] = t + MONTH
         end
     end
+end
+
+-- --------------------------------------------------- shaping tree site ----
+-- a shaping tree is grown AROUND a living tree: DF draws a 5x5 workshop's art on a
+-- 5 x (5+1) grid whose row 0 is the tile directly above the footprint. The art
+-- (graphics/images/shaping_tree.png) leaves that row transparent so the real tree
+-- shows through it -- and that tile has to BE a real tree.
+
+local function trunk_pos(bld) return {x = bld.centerx, y = bld.y1 - 1, z = bld.z} end
+
+-- any part of a living tree counts: a trunk pillar is material TREE but shape
+-- WALL, not TRUNK_BRANCH
+local function is_trunk(pos)
+    local tt = dfhack.maps.getTileType(pos.x, pos.y, pos.z)
+    if not tt then return false end
+    return df.tiletype.attrs[tt].material == df.tiletype_material.TREE
+end
+
+-- NOTE: custom_type only exists on workshops/furnaces, so the is_instance test
+-- must come FIRST -- reading it off a farm plot is a hard error
+local function each_shaping_tree(btype, fn)
+    if not btype then return end
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if df.building_workshopst:is_instance(bld) and bld.custom_type == btype then
+            fn(bld)
+        end
+    end
+end
+
+local function enforce_trunk(btype)
+    each_shaping_tree(btype, function(bld)
+        if bld.construction_stage < bld:getMaxBuildStage()
+           and not is_trunk(trunk_pos(bld)) then
+            dfhack.buildings.deconstruct(bld)
+            dfhack.gui.showAnnouncement(
+                'A shaping tree must be built around a living tree: put the trunk ' ..
+                'just above the workshop.', COLOR_YELLOW, true)
+        end
+    end)
 end
 
 -- ------------------------------------------------------------- engine ----
@@ -243,6 +317,7 @@ local function tick()
         local btype = shaping_tree_type()
         pcall(enforce_sky_access, btype)
         pcall(init_new_trees, btype)
+        pcall(enforce_trunk, btype)
     end
     local race = target_race(); if not race then return end
     local mtype, mindex = target_mat(); if not mtype then return end

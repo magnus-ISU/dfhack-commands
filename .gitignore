@@ -1,2 +1,6 @@
 # Local build workspace (make build): DFHack source tree + compile artifacts. Never committed.
 /build/
+
+# Python bytecode from the art generators under content-mods/art/
+__pycache__/
+*.pyc

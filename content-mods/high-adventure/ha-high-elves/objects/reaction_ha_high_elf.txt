@@ -35,11 +35,16 @@ strand (THREAD of HA_TWINKLING_METAL). Weave at a loom into twinkling cloth ->
 clothes (vanilla adamantine path -- VERIFY the loom accepts a custom thread-metal
 in-game), or forge into a bar below. Strand dimension 15000 = 1 bar / 1 cloth.
 
-NOTE: the twinkling strand is NOT a native [PRODUCT] here. DF hardcodes a fuel
+NOTE: the twinkling strand is NOT a native PRODUCT here. DF hardcodes a fuel
 requirement onto any reaction that outputs a *metal* item (twinkling metal is a
 METAL_TEMPLATE inorganic), even at a fuel-less custom workshop. To keep starlight-
 catching fuel-free, this reaction only consumes its reagents; the high-elves.lua
 script hooks HA_CATCH_STARLIGHT and mints the dimension-15000 twinkling THREAD itself.
+
+NEVER write a raw token in square brackets anywhere in these comments: DF's parser
+scans for an opening bracket on every line, comment or not, and applies what it finds
+to the reaction that is currently open. A stray bracketed FUEL token in the prose
+below this block is exactly what put a fuel cost on catch starlight.
 
 [REACTION:HA_CATCH_STARLIGHT]
 	[NAME:catch starlight]
@@ -50,10 +55,10 @@ script hooks HA_CATCH_STARLIGHT and mints the dimension-15000 twinkling THREAD i
 	[REAGENT:silk thread:1:THREAD:NO_SUBTYPE:NONE:NONE]
 		[ANY_SILK_MATERIAL]
 		[UNROTTEN]
-	[SKILL:CLOTHESMAKING]
+	[SKILL:EXTRACT_STRAND]
 
 FORGE TWINKLING BAR: 1 strand + 1 silver bar + fuel -> 1 twinkling metal bar.
-[FUEL] = free at a magma smelter, costs coke at a normal one.
+Its fuel token is free at a magma smelter, and costs coke at a normal one.
 
 [REACTION:HA_FORGE_TWINKLING_BAR]
 	[NAME:forge twinkling metal bar]

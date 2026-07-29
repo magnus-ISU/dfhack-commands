@@ -1,5 +1,27 @@
 # ha-playable-civs — fork changelog
 
+## v0.9a — shaping tree art rebuilt on the real 5x6 grid
+- Same sprite and the same fix as ha-high-elves 0.11a, keyed to `HA_SHAPING_TREE` /
+  `HA_SHAPING_TREE_PAGE`: DF gives a 5x5 workshop a 5 x (DIM_Y+1) = 5x6 art grid whose
+  row 0 is the tile ABOVE the footprint, so the tokens are now `wy` 0..5 and the art
+  leaves row 0 transparent for the living tree. 160x768 page, 120 tokens, four
+  construction stages that grow the fern ring in from the trunk.
+- Patched into `installed_mods/HA_playable_civs (9)` in place -- applies on save reload.
+
+## v0.9 — shaping tree crown moved onto the trunk
+- **SUPERSEDED by v0.9a.** This tried to lift the crown with `wy - 2` and to vary the art
+  per workshop using the four variants. Neither works: negative `wy` rows are silently
+  dropped (the art lost its top two rows), and the variants are construction stages, not
+  random picks, so the four crowns animated as the workshop was built.
+- **A shaping tree now needs a living tree**: the companion script cancels, while still under
+  construction, any tree without a tree tile on the spot the crown wraps -- build the workshop
+  hugging a standing trunk. (A trunk pillar is tiletype material `TREE` but shape `WALL`, not
+  `TRUNK_BRANCH`.)
+- **Crash fix in the companion script**: `custom_type` only exists on workshops/furnaces, so
+  the shaping-tree scans now test `building_workshopst` first -- reading it off a farm plot
+  aborted the whole tick (sky-access and regrow-cooldown included).
+- Graphics + script change -- applies on save reload, no new world needed.
+
 ## v0.8 — shaping tree art bottom row
 - Rescaled `shaping_tree.png` so the full crown (including its bottom fringe) fits the lower
   four tile-rows -- the previous down-shift cropped the bottom row of the art.
