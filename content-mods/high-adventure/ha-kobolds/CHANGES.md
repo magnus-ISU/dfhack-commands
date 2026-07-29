@@ -1,11 +1,11 @@
 # ha-kobolds — build notes
 
-## v0.17 -- ten ancient dragon castes
-- **The single ancient dragon becomes 10 castes**, applied identically to the standalone
+## v0.17 -- six ancient dragon castes, procedural head shapes
+- **The single ancient dragon becomes multiple castes**, applied identically to the standalone
   `HA_ANCIENT_DRAGON` megabeast and to the draconic caste-set inside `HA_KOBOLD`:
-  head count 1/2/3 at 80/10/10, spiked vs clubbed tail 50/50, and 2/4/6 horns split
-  evenly across the single-headed castes. Multi-headed frames carry a fixed four horns
-  per head, which is how upstream bundles them, so they have no horn axis.
+  head count 1/2/3 at 80/10/10 and spiked vs clubbed tail 50/50 (the horn axis was
+  dropped -- see below). Multi-headed frames carry a fixed four horns
+  per head, which is how upstream bundles them.
 - `POP_RATIO` sums to 300. The two kobold castes were rescaled from 500 to **74850** each
   so the draconic share stays exactly **0.2%**. Worldgen megabeast counts are per creature,
   not per caste, so this adds no extra megabeasts.
@@ -30,6 +30,23 @@
   pairs.
 - Version bumped to 17 rather than patched into 16 in place: the `ANCIENT_DRAGON` caste no
   longer exists, so an existing save holding dragons of that caste must keep loading 16.
+- **Revised down to 6 castes and procedural head shapes.** The horn axis was dropped: the
+  atlas carries exactly three horn positions per head shape (a top pair plus one lower
+  left horn) and no 4- or 6-horn art at all, so 2/4/6-horn castes would have looked
+  identical. Every dragon now gets the same three-horn set (`HA_HEAD_HORNS`) and the
+  castes reduce to head count x tail = **6**: `POP_RATIO` 120 per single-headed caste and
+  15 per multi-headed one, still summing to 300 and still exactly 0.2% of kobolds.
+- **Head shape is now procedural, not caste-bound.** The head sprite is chosen from the
+  head's own `BP_APPEARANCE_MODIFIER` rolls, upstream's own mechanism: narrow and short
+  reads as a **wyvern** head, broad as a **wyrm**, tall (with a tall upper body) as a
+  **drake**, and anything else falls back to the default **dragon** head. Added
+  `BROADNESS`/`HEIGHT` rolls on the head and `HEIGHT` on the upper body to drive it.
+- These four sprites carry the face themselves, so the separate eye layer was dropped --
+  it existed only because the old head sprite was a featureless silhouette.
+- **Horns are shape-matched**: wyvern heads get Naut's WYVHORN set, wyrm heads the
+  WYRMHORN set, drake and dragon heads the plain long and medium sets, each gated on the
+  real `TRHORN`/`TLHORN`/`LHORN` body parts.
+
 - **Needs a new world.**
 
 ## v0.16b -- the ancient dragon gets its face back

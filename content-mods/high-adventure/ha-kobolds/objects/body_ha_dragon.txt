@@ -133,41 +133,19 @@ tail tips -- both attach to the vanilla TAIL part
 	[BP:TAIL_CLUBBED:clubbed tail:STP][CON:TAIL][CATEGORY:CLUB]
 		[DEFAULT_RELSIZE:600]
 
-horns. CONTYPE:HEAD attaches by category, so these bolt onto the HD head with no
-other change. TRHORN/TLHORN are the top pair every horned dragon carries; RHORN/LHORN
-add the lower pair, MRHORN/MLHORN the middle. HA_2HEAD_HORN has no upstream equivalent
-(Naut ships only 4- and 6-horn sets) so it is written here as the top pair alone.
-[BODY:HA_2HEAD_HORN]
+horns. CONTYPE:HEAD attaches by category, so these bolt onto the HD head with no other
+change. Three positions, because the atlas carries exactly three horn sprites per head
+shape: a top pair plus one lower left horn. Their SHAPE is chosen procedurally from the
+head's own appearance rolls, not by caste.
+
+[BODY:HA_HEAD_HORNS]
 	[BP:TRHORN:top right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
 		[DEFAULT_RELSIZE:100]
 	[BP:TLHORN:top left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
 		[DEFAULT_RELSIZE:100]
-
-[BODY:HA_4HEAD_HORN]
-	[BP:TRHORN:top right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:100]
-	[BP:RHORN:bottom right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:50]
-	[BP:TLHORN:top left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:100]
-	[BP:LHORN: bottom left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
+	[BP:LHORN:lower left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
 		[DEFAULT_RELSIZE:50]
 
-[BODY:HA_6HEAD_HORN]
-	[BP:TRHORN:top right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:100]
-	[BP:MRHORN:mid right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:50]
-	[BP:RHORN:bottom right horn:STP][CONTYPE:HEAD][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:50]
-	[BP:TLHORN:top left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:100]
-	[BP:MLHORN:mid left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:50]
-	[BP:LHORN:bottom left horn:STP][CONTYPE:HEAD][SMALL][LEFT][SKELETON][CATEGORY:HORN]
-		[DEFAULT_RELSIZE:50]
-
-per-head horn sets for the multi-headed castes: four horns on each head
 [BODY:HA_2HEADNECKS_HORNS]
 	[BP:TRHORN1:top right horn, first head:STP][CON:HD1][SMALL][RIGHT][SKELETON][CATEGORY:HORN]
 		[DEFAULT_RELSIZE:100]
