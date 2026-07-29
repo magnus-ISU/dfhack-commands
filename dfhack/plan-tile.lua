@@ -8,11 +8,17 @@ lay down a whole GRID of that building in one gesture instead of clicking each o
 tiled by their FOOTPRINT: a 1x1 statue every 1 tile, a 3x3 Carpenter's every 3 tiles, a 5x5 Trade
 Depot every 5 tiles -- so they sit edge-to-edge without overlapping.
 
-It is purely additive and never swallows a click:
-  * DFHack's own placement puts the FIRST building where you press (a plain click still places one,
-    exactly as before). On release, this fills the rest of the dragged box with copies aligned to
-    that first one, stepping by the footprint. Overlapping/blocked cells are silently skipped
-    (constructBuilding refuses occupied tiles), so nothing double-places.
+Placement is deferred to MOUSE-UP:
+  * The mouse-down that would normally place a building is INTERCEPTED before buildingplan's
+    planner sees it (overlay input order between widgets is arbitrary hash order, so we wrap the
+    planner widget's own onInput rather than racing it). Nothing is placed while the button is
+    held -- you only see ghosts. On release over the map the whole dragged box is placed at once
+    (a plain click yields exactly one building, on release). Releasing over UI or on another
+    z-level -- or cancelling placement with right-click mid-drag -- places nothing.
+    Overlapping/blocked cells are silently skipped (constructBuilding refuses occupied tiles),
+    so nothing double-places. The click is only ever intercepted when a drag could actually
+    begin (planner on, clear map tile, no DF placement errors); otherwise the planner and DF
+    handle it exactly as before.
   * It only engages for fixed-footprint buildings that have NO native area drag (workshops,
     furniture, machines...). Walls, floors, farm plots, bridges and the like already have DF's own
     build-more area UI, so `cur_building_has_no_area()` is false for them and this stays out of the
@@ -162,6 +168,53 @@ local function planner_on()
     return false                              -- toggle not found: don't engage (the safe default)
 end
 
+-- ---- mouse-down interception ----------------------------------------------
+-- Overlay input order between widgets is pairs() hash order -- there is no reliable way to
+-- receive _MOUSE_L before buildingplan.planner does. So we wrap the planner WIDGET's own
+-- onInput: when a plan-tile drag should begin, the wrapper swallows the click (the planner
+-- never places its mouse-down building) and records the press for our onupdate. The wrap is
+-- re-installed lazily because overlay rescans recreate the widget, and the check closure is
+-- refreshed per module load (HOOK_TOKEN) so hot-reloads don't strand a stale upvalue.
+
+local pending_press = nil     -- map pos of a swallowed mouse-down, awaiting onupdate
+local HOOK_TOKEN = {}         -- fresh per module load
+
+-- would a drag begin at this click? (cheap checks first; planner_on scans the screen)
+local function want_press()
+    if not engaged() then return nil end
+    if #uibs.errors > 0 then return nil end        -- DF refuses placement here; so do we
+    local pos = map_pos_if_clear()
+    if not pos then return nil end
+    if not planner_on() then return nil end        -- plain non-planner placement: stay out
+    return pos
+end
+
+local function install_planner_hook()
+    local ok, e = pcall(function() return overlay.get_state().db['buildingplan.planner'] end)
+    if not (ok and e and e.widget) then return end
+    local w = e.widget
+    if w.plan_tile_token == HOOK_TOKEN then return end
+    w.plan_tile_token = HOOK_TOKEN
+    w.plan_tile_check = function(keys)
+        if keys._MOUSE_L then
+            local pos = want_press()
+            if pos then
+                pending_press = pos
+                return true
+            end
+        end
+        return false
+    end
+    if not w.plan_tile_wrapped then
+        local orig = w.onInput
+        w.onInput = function(wself, keys)
+            if wself.plan_tile_check and wself.plan_tile_check(keys) then return true end
+            return orig(wself, keys)
+        end
+        w.plan_tile_wrapped = true
+    end
+end
+
 -- ---- per-tile placement validity ------------------------------------------
 -- DF refuses some furniture outdoors ("must be built inside"): seen in 53.x for beds, coffins
 -- and seats (quickfort's db only knows about beds -- it's stale on this). constructBuilding
@@ -212,22 +265,6 @@ end
 
 -- ---- the grid ------------------------------------------------------------
 
--- DFHack's PlannerOverlay places ONE building where you press. Find it (our exact type, at the
--- mouse-down tile) so we can tile the rest FLUSH with its real footprint -- reading its actual
--- corner avoids any guesswork about how the game rounds a workshop's origin.
-local function find_anchor_bld(cap)
-    local best
-    for _, b in ipairs(df.global.world.buildings.all) do
-        if b:getType() == cap.type and b:getSubtype() == cap.subtype
-                and b:getCustomType() == cap.custom and b.z == cap.anchor.z
-                and math.abs((b.x1 + b.x2) / 2 - cap.anchor.x) <= 1.5
-                and math.abs((b.y1 + b.y2) / 2 - cap.anchor.y) <= 1.5 then
-            if not best or b.id > best.id then best = b end
-        end
-    end
-    return best
-end
-
 -- top-left corners of every building in the grid, tiled FLUSH from the first building's corner
 -- (ox, oy) toward the release tile, stepping by footprint. (0,0) is the first building itself.
 local function grid_corners(ox, oy, fw, fh, rel)
@@ -246,15 +283,12 @@ local function grid_corners(ox, oy, fw, fh, rel)
     return out
 end
 
--- place every grid cell except the first (which DFHack's overlay already placed at mouse-down).
+-- place every grid cell -- anchor included, since the mouse-down building was retracted.
 local function place_grid(cap, rel)
-    local o = find_anchor_bld(cap)                         -- the building DFHack placed
     local fw, fh, z = cap.fw, cap.fh, cap.anchor.z
-    local ox = o and o.x1 or cap.ox                        -- flush reference = its real corner
-    local oy = o and o.y1 or cap.oy
     local blds = {}
-    for _, c in ipairs(grid_corners(ox, oy, fw, fh, rel)) do
-        if not c.is_anchor and cell_ok(cap, c.x, c.y) then
+    for _, c in ipairs(grid_corners(cap.ox, cap.oy, fw, fh, rel)) do
+        if cell_ok(cap, c.x, c.y) then
             local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = xyz2pos(c.x, c.y, z),
                 type = cap.type, subtype = cap.subtype, custom = cap.custom,
                 width = fw, height = fh, direction = cap.direction, filters = cap.filters})
@@ -288,53 +322,39 @@ PlanTile.ATTRS{
     overlay_onupdate_max_freq_seconds = 0,
 }
 
--- watch the left mouse button: capture the building on press, place the grid on release.
+-- consume the press our planner hook swallowed; commit the grid on release.
 function PlanTile:overlay_onupdate()
-    local ld = df.global.enabler.mouse_lbut_down
+    install_planner_hook()             -- self-heals after overlay rescans / module reloads
     if not engaged() then
-        self.cap = nil
-        self.lbut = ld
+        pending_press, self.cap = nil, nil
         return
     end
-    if ld == 1 and self.lbut ~= 1 then                 -- press: snapshot what we're placing
-        -- only engage when the buildingplan planner is actually on (else it's a plain building
-        -- and we must not turn it into a row of planned ones), AND DF reports no placement
-        -- errors here ("must be built inside" etc.) -- with errors up, the planner swallows
-        -- the click without placing the first building, so we must not fill a grid either.
-        local pos = #uibs.errors == 0 and planner_on() and map_pos_if_clear() or nil
-        if pos then
-            local fw, fh = footprint()
-            local cap = {
-                anchor = copyall(pos), fw = fw, fh = fh,
-                need_inside = INSIDE_ONLY[uibs.building_type] or false, vcache = {},
-                type = uibs.building_type, subtype = uibs.building_subtype,
-                custom = uibs.custom_type, direction = uibs.direction,
-                filters = dfhack.buildings.getFiltersByType({},
-                    uibs.building_type, uibs.building_subtype, uibs.custom_type),
-            }
-            -- flush reference for the preview: DFHack's building (placed this same press) if we can
-            -- read it, else the corner it would use (cursor - footprint/2). place_grid re-reads it.
-            local o = find_anchor_bld(cap)
-            cap.ox = o and o.x1 or (pos.x - fw // 2)
-            cap.oy = o and o.y1 or (pos.y - fh // 2)
-            self.cap = cap
-        else
-            self.cap = nil
-        end
-    elseif ld ~= 1 and self.lbut == 1 then             -- release: fill the box
-        if self.cap then
-            local rel = dfhack.gui.getMousePos()
-            if rel and rel.z == self.cap.anchor.z then
-                local n = place_grid(self.cap, rel)
-                if n > 0 then
-                    print(('plan-tile: placed %d more %s'):format(n,
-                        n == 1 and 'building' or 'buildings'))
-                end
-            end
-            self.cap = nil
-        end
+    if pending_press then              -- drag begins: the planner never saw this click
+        local pos = pending_press
+        pending_press = nil
+        local fw, fh = footprint()
+        self.cap = {
+            anchor = copyall(pos), fw = fw, fh = fh,
+            need_inside = INSIDE_ONLY[uibs.building_type] or false, vcache = {},
+            type = uibs.building_type, subtype = uibs.building_subtype,
+            custom = uibs.custom_type, direction = uibs.direction,
+            filters = dfhack.buildings.getFiltersByType({},
+                uibs.building_type, uibs.building_subtype, uibs.custom_type),
+            -- the same corner math the planner itself uses (cursor - footprint/2)
+            ox = pos.x - fw // 2, oy = pos.y - fh // 2,
+        }
     end
-    self.lbut = ld
+    if self.cap and df.global.enabler.mouse_lbut_down ~= 1 then   -- release: commit
+        local rel = dfhack.gui.getMousePos()
+        if rel and rel.z == self.cap.anchor.z then
+            local n = place_grid(self.cap, rel)
+            if n > 0 then
+                print(('plan-tile: placed %d %s'):format(n,
+                    n == 1 and 'building' or 'buildings'))
+            end
+        end
+        self.cap = nil
+    end
 end
 
 -- live preview: a transparent GHOST of the actual building on every grid cell.
@@ -401,24 +421,23 @@ function PlanTile:onRenderFrame(dc, rect)
     end
 
     for _, c in ipairs(grid_corners(cap.ox, cap.oy, fw, fh, cur)) do
-        if not c.is_anchor then           -- the anchor cell holds the real building already
-            local valid = cell_ok(cap, c.x, c.y)
-            for i = 0, fw - 1 do
-                for j = 0, fh - 1 do
-                    local pos = {x = c.x + i, y = c.y + j, z = z}
-                    if vp:isVisible(pos) then
-                        local g = valid and captured and ghost[i * fh + j] or 0
-                        if g ~= 0 then
-                            local vx, vy = pos.x - vp.x1, pos.y - vp.y1
-                            if vx >= 0 and vx < dimx and vy >= 0 and vy < dimy then
-                                local dst = vx * dimy + vy
-                                if arr[dst] == 0 then arr[dst] = g end
-                            end
-                        else
-                            local s = vp:tileToScreen(pos)
-                            dfhack.screen.paintTile(valid and PREVIEW_PEN or BAD_PEN,
-                                s.x, s.y, nil, nil, true)
+        -- anchor cell included: the mouse-down building was retracted, so it's all ghosts
+        local valid = cell_ok(cap, c.x, c.y)
+        for i = 0, fw - 1 do
+            for j = 0, fh - 1 do
+                local pos = {x = c.x + i, y = c.y + j, z = z}
+                if vp:isVisible(pos) then
+                    local g = valid and captured and ghost[i * fh + j] or 0
+                    if g ~= 0 then
+                        local vx, vy = pos.x - vp.x1, pos.y - vp.y1
+                        if vx >= 0 and vx < dimx and vy >= 0 and vy < dimy then
+                            local dst = vx * dimy + vy
+                            if arr[dst] == 0 then arr[dst] = g end
                         end
+                    else
+                        local s = vp:tileToScreen(pos)
+                        dfhack.screen.paintTile(valid and PREVIEW_PEN or BAD_PEN,
+                            s.x, s.y, nil, nil, true)
                     end
                 end
             end
