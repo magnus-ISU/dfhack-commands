@@ -31,6 +31,11 @@ constructBuilding does NOT check -- it would happily create a plan DF can never 
     furniture DF requires indoors (beds / coffins / seats), not an outside tile. Cells that fail
     are skipped, and the drag preview paints them red instead of green.
 
+While dragging, each grid cell previews a TRANSPARENT GHOST of the actual building: the live
+placement hologram under the mouse is copied, within DF's own alpha-rendered hologram layer
+(screentexpos_interface), onto every cell that will receive a building. Invalid cells show red;
+if the hologram can't be captured the preview falls back to plain green tiles.
+
 Loaded as an overlay (`plan-tile.tile` on the building-placement screen); auto-enabled on `overlay
 rescan`.
 ]]
@@ -98,9 +103,12 @@ local function placement_active()
         and uibs.building_type ~= -1
 end
 
--- the current building's footprint (its natural size), min 1x1
+-- the current building's footprint (its natural size), min 1x1.
+-- NB getCorrectSize returns is_flexible FIRST, then width/height -- reading width from
+-- slot 1 gives you a boolean and silently collapses every workshop to fw=1 (the vertical
+-- axis still looked right for square buildings, which hid the bug for a long time).
 local function footprint()
-    local ok, w, h = pcall(dfhack.buildings.getCorrectSize, 1, 1,
+    local ok, _flex, w, h = pcall(dfhack.buildings.getCorrectSize, 1, 1,
         uibs.building_type, uibs.building_subtype, uibs.custom_type, uibs.direction)
     if not ok then return 1, 1 end
     return math.max(1, w or 1), math.max(1, h or 1)
@@ -329,9 +337,18 @@ function PlanTile:overlay_onupdate()
     self.lbut = ld
 end
 
--- live preview: paint every grid cell's footprint while the button is held and dragging.
--- reuse buildingplan's own placement tiles: green where a building will go, red where the
--- cell fails the placement rules and will be skipped.
+-- live preview: a transparent GHOST of the actual building on every grid cell.
+--
+-- DF draws the placement hologram (the see-through building under the mouse) into
+-- gps.main_viewport.screentexpos_interface and renders that layer with alpha. paintTile
+-- can't produce transparency, so instead we capture the hologram's texpos block from under
+-- the mouse each frame and write copies into that same layer at every other grid cell --
+-- DF's own renderer then draws true transparent ghosts of the actual building for us.
+-- (Writes are re-done every frame because DF rebuilds the layer each frame; slots already
+-- nonzero are left alone so we never overwrite DF's own drawings.)
+--
+-- Cells that fail the placement rules are painted red instead; if the hologram can't be
+-- captured (mouse over UI, odd zoom edge cases) valid cells fall back to green tiles.
 local ok_pens, bp_pens = pcall(require, 'plugins.buildingplan.pens')
 local PREVIEW_PEN = (ok_pens and bp_pens and bp_pens.GOOD_TILE_PEN)
     or dfhack.pen.parse{ch = 'X', fg = COLOR_GREEN, keep_lower = true}
@@ -344,15 +361,65 @@ function PlanTile:onRenderFrame(dc, rect)
     if not cur or cur.z ~= self.cap.anchor.z then return end
     local vp = guidm.Viewport.get()
     if vp.z ~= self.cap.anchor.z then return end
-    local fw, fh, z = self.cap.fw, self.cap.fh, self.cap.anchor.z
-    for _, c in ipairs(grid_corners(self.cap.ox, self.cap.oy, fw, fh, cur)) do
-        local pen = (c.is_anchor or cell_ok(self.cap, c.x, c.y)) and PREVIEW_PEN or BAD_PEN
-        for ty = c.y, c.y + fh - 1 do
-            for tx = c.x, c.x + fw - 1 do
-                local pos = {x = tx, y = ty, z = z}
-                if vp:isVisible(pos) then
-                    local s = vp:tileToScreen(pos)
-                    dfhack.screen.paintTile(pen, s.x, s.y, nil, nil, true)
+    local cap = self.cap
+    local fw, fh, z = cap.fw, cap.fh, cap.anchor.z
+
+    -- capture the live hologram: the fw x fh block of interface-layer texpos under the
+    -- mouse. DF's anchoring of the hologram varies subtly with building size, so don't
+    -- assume mouse-centering: search around the expected corner for a FULLY nonzero
+    -- fw x fh block (a hologram covers its whole footprint) and take the closest match.
+    local gvp = df.global.gps.main_viewport
+    local arr = gvp.screentexpos_interface
+    local dimx, dimy = gvp.dim_x, gvp.dim_y
+    local gx, gy = cur.x - fw // 2 - vp.x1, cur.y - fh // 2 - vp.y1  -- expected corner
+    local best, bestd
+    for cx = gx - fw, gx + fw do
+        for cy = gy - fh, gy + fh do
+            if cx >= 0 and cy >= 0 and cx + fw <= dimx and cy + fh <= dimy then
+                local full = true
+                for i = 0, fw - 1 do
+                    for j = 0, fh - 1 do
+                        if arr[(cx + i) * dimy + (cy + j)] == 0 then full = false; break end
+                    end
+                    if not full then break end
+                end
+                if full then
+                    local d = math.abs(cx - gx) + math.abs(cy - gy)
+                    if not bestd or d < bestd then best, bestd = cx * dimy + cy, d end
+                end
+            end
+        end
+    end
+    local ghost, captured = {}, best ~= nil
+    if captured then
+        local bx, by = best // dimy, best % dimy
+        for i = 0, fw - 1 do
+            for j = 0, fh - 1 do
+                ghost[i * fh + j] = arr[(bx + i) * dimy + (by + j)]
+            end
+        end
+    end
+
+    for _, c in ipairs(grid_corners(cap.ox, cap.oy, fw, fh, cur)) do
+        if not c.is_anchor then           -- the anchor cell holds the real building already
+            local valid = cell_ok(cap, c.x, c.y)
+            for i = 0, fw - 1 do
+                for j = 0, fh - 1 do
+                    local pos = {x = c.x + i, y = c.y + j, z = z}
+                    if vp:isVisible(pos) then
+                        local g = valid and captured and ghost[i * fh + j] or 0
+                        if g ~= 0 then
+                            local vx, vy = pos.x - vp.x1, pos.y - vp.y1
+                            if vx >= 0 and vx < dimx and vy >= 0 and vy < dimy then
+                                local dst = vx * dimy + vy
+                                if arr[dst] == 0 then arr[dst] = g end
+                            end
+                        else
+                            local s = vp:tileToScreen(pos)
+                            dfhack.screen.paintTile(valid and PREVIEW_PEN or BAD_PEN,
+                                s.x, s.y, nil, nil, true)
+                        end
+                    end
                 end
             end
         end
