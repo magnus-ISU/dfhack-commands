@@ -24,6 +24,18 @@
   gated on the `TAIL_CLUBBED` part so it lands only on the club castes; the spiked castes
   keep just the fan at the tip. Alignment checked against the tail sprite at `6:0`.
 
+- **Multi-headed dragons now use Naut's real per-slot head anchors.** The upstream layer
+  *names* are misleading: its `HEAD1` layer is gated on `HD5` and `HEAD2` on `HD4` -- they
+  are hydra slots, not "first and second head". Read off the actual `CONDITION_BP` tokens,
+  the anchors are `HD1` -> `6:10`, `HD2` -> `3:10`, `HD3` -> `9:10`, with horn trios at
+  `9:26`/`12:26`/`15:26`, `0:26`/`3:26`/`6:26` and `18:26`/`21:26`/`24:26`. We had the second
+  head drawn at slot 4's anchor and no slot-1 head at all, which is why the combinations
+  looked offset and crowded.
+- The shape-varied heads are gated back on `BY_TOKEN:HD`, which only single-headed frames
+  have, so they no longer double up on multi-headed dragons. Consequence, matching upstream:
+  **multi-headed castes have fixed per-slot heads and no wyvern/wyrm/drake shape variation** --
+  those sprites exist only for the single `HD` head.
+
 - **Needs a new world.**
 
 ## v0.17 -- six ancient dragon castes, procedural head shapes
