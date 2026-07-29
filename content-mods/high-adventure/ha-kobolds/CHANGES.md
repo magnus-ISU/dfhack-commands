@@ -47,6 +47,13 @@
   WYRMHORN set, drake and dragon heads the plain long and medium sets, each gated on the
   real `TRHORN`/`TLHORN`/`LHORN` body parts.
 
+- **Multi-headed dragons were one head (and one horn pair) short.** The head and horn
+  layers were gated on `BY_TOKEN:HD` / `TRHORN`, but the 2- and 3-head frames name their
+  parts `HD1`/`HD2`/`HD3` and `TRHORN1`... -- there is no plain `HD` on them, so the primary
+  head simply never drew. Caught by spawning 100 of each caste and counting heads on screen.
+  Head presence is now `BY_CATEGORY:HEAD`, which matches every frame, and each first-head
+  horn layer gained a numbered alternate so the group resolves either spelling.
+
 - **Needs a new world.**
 
 ## v0.16b -- the ancient dragon gets its face back
