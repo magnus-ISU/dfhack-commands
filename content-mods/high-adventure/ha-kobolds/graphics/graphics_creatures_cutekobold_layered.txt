@@ -1530,6 +1530,20 @@ graphics_creatures_cutekobold_layered
 
 		tail tips. Both are gated on the tail-tip body part, so a spiked-tail caste
 		draws the spike and a clubbed-tail caste the club. Unpalettized, like the horns.
+		a ridge of spikes running the length of the tail. Gated on the club tip, so the
+		clubbed-tail castes get spikes down the tail AND the club on the end, while the
+		spiked-tail castes keep just the fan at the tip.
+		[LAYER_GROUP]
+		[LAYER:DR_TAIL_SPINES:HA_ANCIENT_DRAGONS:LARGE_IMAGE:21:2:23:3]
+			[CONDITION_CASTE:DRAGON_H1_SPIKE]
+			[CONDITION_CASTE:DRAGON_H1_CLUB]
+			[CONDITION_CASTE:DRAGON_H2_SPIKE]
+			[CONDITION_CASTE:DRAGON_H2_CLUB]
+			[CONDITION_CASTE:DRAGON_H3_SPIKE]
+			[CONDITION_CASTE:DRAGON_H3_CLUB]
+			[CONDITION_BP:BY_TOKEN:TAIL_CLUBBED]
+				[BP_PRESENT]
+
 		[LAYER_GROUP]
 		[LAYER:DR_TAIL_SPIKE:HA_ANCIENT_DRAGONS:LARGE_IMAGE:6:28:8:29]
 			[CONDITION_CASTE:DRAGON_H1_SPIKE]
@@ -4887,6 +4901,20 @@ graphics_creatures_cutekobold_layered
 
 		tail tips, gated on the tail-tip body part so a spiked-tail caste draws the
 		spike and a clubbed-tail caste the club. Unpalettized, like the horns.
+		a ridge of spikes running the length of the tail. Gated on the club tip, so the
+		clubbed-tail castes get spikes down the tail AND the club on the end, while the
+		spiked-tail castes keep just the fan at the tip.
+		[LAYER_GROUP]
+		[LAYER:DR_TAIL_SPINES:HA_ANCIENT_DRAGONS:LARGE_IMAGE:21:2:23:3]
+			[CONDITION_CASTE:DRAGON_H1_SPIKE]
+			[CONDITION_CASTE:DRAGON_H1_CLUB]
+			[CONDITION_CASTE:DRAGON_H2_SPIKE]
+			[CONDITION_CASTE:DRAGON_H2_CLUB]
+			[CONDITION_CASTE:DRAGON_H3_SPIKE]
+			[CONDITION_CASTE:DRAGON_H3_CLUB]
+			[CONDITION_BP:BY_TOKEN:TAIL_CLUBBED]
+				[BP_PRESENT]
+
 		[LAYER_GROUP]
 		[LAYER:DR_TAIL_SPIKE:HA_ANCIENT_DRAGONS:LARGE_IMAGE:6:28:8:29]
 			[CONDITION_CASTE:DRAGON_H1_SPIKE]
@@ -8242,6 +8270,20 @@ graphics_creatures_cutekobold_layered
 
 		tail tips, gated on the tail-tip body part so a spiked-tail caste draws the
 		spike and a clubbed-tail caste the club. Unpalettized, like the horns.
+		a ridge of spikes running the length of the tail. Gated on the club tip, so the
+		clubbed-tail castes get spikes down the tail AND the club on the end, while the
+		spiked-tail castes keep just the fan at the tip.
+		[LAYER_GROUP]
+		[LAYER:DR_TAIL_SPINES:HA_ANCIENT_DRAGONS:LARGE_IMAGE:21:2:23:3]
+			[CONDITION_CASTE:DRAGON_H1_SPIKE]
+			[CONDITION_CASTE:DRAGON_H1_CLUB]
+			[CONDITION_CASTE:DRAGON_H2_SPIKE]
+			[CONDITION_CASTE:DRAGON_H2_CLUB]
+			[CONDITION_CASTE:DRAGON_H3_SPIKE]
+			[CONDITION_CASTE:DRAGON_H3_CLUB]
+			[CONDITION_BP:BY_TOKEN:TAIL_CLUBBED]
+				[BP_PRESENT]
+
 		[LAYER_GROUP]
 		[LAYER:DR_TAIL_SPIKE:HA_ANCIENT_DRAGONS:LARGE_IMAGE:6:28:8:29]
 			[CONDITION_CASTE:DRAGON_H1_SPIKE]

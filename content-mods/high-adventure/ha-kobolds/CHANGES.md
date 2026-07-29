@@ -19,6 +19,11 @@
 - Caste `POP_RATIO`s divided through by their GCD of 15: kobolds are now 4990/4990 with
   the six draconic castes at 8/8/1/1/1/1, summing to a round 10000 and still exactly
   0.2%. The megabeast's are 8/8/1/1/1/1.
+- **Clubbed-tail castes now grow a spike ridge down the tail** as well as the club on the
+  end, matching the look Naut's dragons have. Uses the row-2 tail-spine sprite (`21:2`),
+  gated on the `TAIL_CLUBBED` part so it lands only on the club castes; the spiked castes
+  keep just the fan at the tip. Alignment checked against the tail sprite at `6:0`.
+
 - **Needs a new world.**
 
 ## v0.17 -- six ancient dragon castes, procedural head shapes
