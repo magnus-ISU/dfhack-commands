@@ -23,6 +23,14 @@ It is purely additive and never swallows a click:
 Each placed copy is registered with buildingplan (same material filters as the one you placed), so
 they respect your filters and get suspended until materials are available, just like a normal plan.
 
+Placement RULES are enforced per tile, mirroring DF's own placement errors (which
+constructBuilding does NOT check -- it would happily create a plan DF can never build):
+  * it doesn't engage at all when DF is showing placement errors at the mouse-down tile (the same
+    gate buildingplan's planner uses -- if the first building can't go down, neither can a grid);
+  * each fill cell must be buildable floor (unhidden, unoccupied, no deep liquid) and, for
+    furniture DF requires indoors (beds / coffins / seats), not an outside tile. Cells that fail
+    are skipped, and the drag preview paints them red instead of green.
+
 Loaded as an overlay (`plan-tile.tile` on the building-placement screen); auto-enabled on `overlay
 rescan`.
 ]]
@@ -146,6 +154,54 @@ local function planner_on()
     return false                              -- toggle not found: don't engage (the safe default)
 end
 
+-- ---- per-tile placement validity ------------------------------------------
+-- DF refuses some furniture outdoors ("must be built inside"): seen in 53.x for beds, coffins
+-- and seats (quickfort's db only knows about beds -- it's stale on this). constructBuilding
+-- enforces none of DF's placement rules, so the fill checks each tile the way quickfort's
+-- build module does, plus the indoors rule where DF demands it.
+local INSIDE_ONLY = utils.invert{
+    df.building_type.Bed,
+    df.building_type.Coffin,
+    df.building_type.Chair,
+}
+
+local OK_SHAPES = utils.invert{
+    df.tiletype_shape.FLOOR,
+    df.tiletype_shape.BOULDER,
+    df.tiletype_shape.PEBBLES,
+    df.tiletype_shape.TWIG,
+    df.tiletype_shape.SAPLING,
+    df.tiletype_shape.SHRUB,
+}
+
+local function tile_ok(pos, need_inside)
+    local flags, occ = dfhack.maps.getTileFlags(pos)
+    if not flags or flags.hidden or occ.building ~= df.tile_building_occ.None then return false end
+    if flags.flow_size > 1 or (flags.liquid_type == df.tile_liquid.Magma and flags.flow_size > 0) then
+        return false
+    end
+    if need_inside and flags.outside then return false end
+    local tt = dfhack.maps.getTileType(pos)
+    return (tt and OK_SHAPES[df.tiletype.attrs[tt].shape]) and true or false
+end
+
+-- is every tile of the footprint cell at corner (cx, cy) placeable? memoized per drag, so the
+-- per-frame preview doesn't re-read the map for cells it has already judged.
+local function cell_ok(cap, cx, cy)
+    local key = cx .. ',' .. cy
+    local hit = cap.vcache[key]
+    if hit ~= nil then return hit end
+    local ok = true
+    for ty = cy, cy + cap.fh - 1 do
+        for tx = cx, cx + cap.fw - 1 do
+            if not tile_ok(xyz2pos(tx, ty, cap.anchor.z), cap.need_inside) then ok = false; break end
+        end
+        if not ok then break end
+    end
+    cap.vcache[key] = ok
+    return ok
+end
+
 -- ---- the grid ------------------------------------------------------------
 
 -- DFHack's PlannerOverlay places ONE building where you press. Find it (our exact type, at the
@@ -190,7 +246,7 @@ local function place_grid(cap, rel)
     local oy = o and o.y1 or cap.oy
     local blds = {}
     for _, c in ipairs(grid_corners(ox, oy, fw, fh, rel)) do
-        if not c.is_anchor then
+        if not c.is_anchor and cell_ok(cap, c.x, c.y) then
             local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = xyz2pos(c.x, c.y, z),
                 type = cap.type, subtype = cap.subtype, custom = cap.custom,
                 width = fw, height = fh, direction = cap.direction, filters = cap.filters})
@@ -234,12 +290,15 @@ function PlanTile:overlay_onupdate()
     end
     if ld == 1 and self.lbut ~= 1 then                 -- press: snapshot what we're placing
         -- only engage when the buildingplan planner is actually on (else it's a plain building
-        -- and we must not turn it into a row of planned ones)
-        local pos = planner_on() and map_pos_if_clear() or nil
+        -- and we must not turn it into a row of planned ones), AND DF reports no placement
+        -- errors here ("must be built inside" etc.) -- with errors up, the planner swallows
+        -- the click without placing the first building, so we must not fill a grid either.
+        local pos = #uibs.errors == 0 and planner_on() and map_pos_if_clear() or nil
         if pos then
             local fw, fh = footprint()
             local cap = {
                 anchor = copyall(pos), fw = fw, fh = fh,
+                need_inside = INSIDE_ONLY[uibs.building_type] or false, vcache = {},
                 type = uibs.building_type, subtype = uibs.building_subtype,
                 custom = uibs.custom_type, direction = uibs.direction,
                 filters = dfhack.buildings.getFiltersByType({},
@@ -271,10 +330,13 @@ function PlanTile:overlay_onupdate()
 end
 
 -- live preview: paint every grid cell's footprint while the button is held and dragging.
--- reuse buildingplan's own "good placement" green tile so it matches DF's placement ghost.
+-- reuse buildingplan's own placement tiles: green where a building will go, red where the
+-- cell fails the placement rules and will be skipped.
 local ok_pens, bp_pens = pcall(require, 'plugins.buildingplan.pens')
 local PREVIEW_PEN = (ok_pens and bp_pens and bp_pens.GOOD_TILE_PEN)
     or dfhack.pen.parse{ch = 'X', fg = COLOR_GREEN, keep_lower = true}
+local BAD_PEN = (ok_pens and bp_pens and bp_pens.BAD_TILE_PEN)
+    or dfhack.pen.parse{ch = 'X', fg = COLOR_RED, keep_lower = true}
 
 function PlanTile:onRenderFrame(dc, rect)
     if not (self.cap and df.global.enabler.mouse_lbut_down == 1) then return end
@@ -284,12 +346,13 @@ function PlanTile:onRenderFrame(dc, rect)
     if vp.z ~= self.cap.anchor.z then return end
     local fw, fh, z = self.cap.fw, self.cap.fh, self.cap.anchor.z
     for _, c in ipairs(grid_corners(self.cap.ox, self.cap.oy, fw, fh, cur)) do
+        local pen = (c.is_anchor or cell_ok(self.cap, c.x, c.y)) and PREVIEW_PEN or BAD_PEN
         for ty = c.y, c.y + fh - 1 do
             for tx = c.x, c.x + fw - 1 do
                 local pos = {x = tx, y = ty, z = z}
                 if vp:isVisible(pos) then
                     local s = vp:tileToScreen(pos)
-                    dfhack.screen.paintTile(PREVIEW_PEN, s.x, s.y, nil, nil, true)
+                    dfhack.screen.paintTile(pen, s.x, s.y, nil, nil, true)
                 end
             end
         end
