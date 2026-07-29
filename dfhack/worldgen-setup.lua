@@ -18,12 +18,16 @@ Two mechanisms, chosen per step:
 * **Synthetic clicks, where that works.** The title menu responds to a fed `_MOUSE_L`
   once `gps.mouse_x/y` is parked on the label, so `open` is automatic.
 
-Known boundary: the world-creation screen itself ignores synthetic input entirely. Its
-buttons and sliders are widgets driven by real SDL mouse events, not by fed keys -- a fed
-click on "Low" does not even move a slider, and neither holding `enabler.mouse_lbut` nor
-any interface key reaches the Create-world button (there are no worldgen interface keys at
-all). So the last step is yours: press **Create world**. Everything before it, including
-the mod list and the sliders that button acts on, is set from data.
+Known boundary: **Create world has to be clicked by a human.** The world-creation screen
+ignores synthetic input entirely -- a fed `_MOUSE_L` does not even move a slider, no
+interface key reaches the button (DF defines none for worldgen), and holding
+`enabler.mouse_lbut` across frames does nothing. xdotool is no help either: on Wayland it
+can move the pointer (DF polls the cursor position, so `gps.mouse_x/y` does follow) but
+button and key events never arrive -- `click`, `mousedown`/`mouseup` and `key` were all
+tested, via XTEST and `--window`. `/dev/uinput` is root-only and ydotool is absent.
+
+So `generate` parks the pointer on the button and asks. Everything the button acts on --
+the mod list and the sliders -- is already set from data.
 
 Usage::
 
@@ -252,9 +256,8 @@ function generate()
         print('generation started')
         return true
     end
-    print('the Create world button did not respond to a synthetic click -- it never does;')
-    print('everything else is set, so click "Create world" yourself (bottom right),')
-    print('then run `worldgen-setup verify` to confirm the mods loaded.')
+    print('the Create world button does not take synthetic input (see the notes at the top).')
+    print('the DF cursor is parked on it -- click once, then run `worldgen-setup verify`.')
     return false
 end
 
