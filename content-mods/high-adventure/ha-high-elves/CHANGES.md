@@ -1,5 +1,23 @@
 # Changes — HA High Elves
 
+## 0.3 -- embark food & drink
+- High-elf civs generated with EMPTY food/drink resource lists (verified live in region2:
+  plants=0 seeds=0 booze=0 meat=0), so embark offered no provisions at all. The entity had no
+  farming tokens: worldgen only fills crop/seed/booze lists from *_FARMING/*_GARDENS tokens.
+- Added `[OUTDOOR_FARMING]` `[OUTDOOR_GARDENS]` `[OUTDOOR_ORCHARDS]` `[USE_ANIMAL_PRODUCTS]`
+  `[RIVER_PRODUCTS]`; jobs PLANTER/BREWER/COOK/THRESHER/MILLER/CHEESE_MAKER/MILKER; reactions
+  BREW_DRINK_FROM_PLANT(_GROWTH), MAKE_MEAD, PROCESS_PLANT_TO_BAG, MILL_SEEDS_NUTS_TO_PASTE,
+  PRESS_OIL_FRUIT.
+- De-bracketed comment tokens (`[ACTIVE_SEASON]` in the entity, divine-metal token names in
+  inorganic_ha_twinkling.txt) -- the raw parser reads bracketed tokens even in comment prose.
+- Needs a fresh world.
+
+## 0.2 — fort-mode playable
+- Added `[SITE_CONTROLLABLE]` to HA_HIGH_ELF so high-elf civs appear in the
+  fort-mode embark civilization picker. (Worldgen itself was never broken —
+  region2 has 7 living high-elf town civs; they were just unpickable.)
+  Needs a fresh world, like all raw changes.
+
 ## 0.1 (initial)
 - New civ: **high elves** — elf-stock with dwarven metal artifice, no fey moods.
 - **Twinkling metal** (`HA_TWINKLING_METAL`): fixed divine metal. Properties from

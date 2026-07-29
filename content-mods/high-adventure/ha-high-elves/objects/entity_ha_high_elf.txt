@@ -10,6 +10,7 @@ behind each block.
 	[CREATURE:HA_HIGH_ELF]
 	[TRANSLATION:ELF]
 	[ALL_MAIN_POPS_CONTROLLABLE]
+	[SITE_CONTROLLABLE]
 
 	weapons: elf blades + bow, plus the pick (they mine). No axe -- they do not
 	cut trees.
@@ -79,6 +80,16 @@ behind each block.
 	[USE_GOOD_PLANTS]
 	[USE_GOOD_WOOD]
 	[USE_ANY_PET_RACE]
+
+	food + drink: without farming tokens the civ's worldgen resource lists (crops,
+	seeds, booze) stay EMPTY, so embark offers no food or drink at all (verified
+	live in region2: plants=0 seeds=0 booze=0). They grow, they never kill plants
+	they did not plant.
+	[OUTDOOR_FARMING]
+	[OUTDOOR_GARDENS]
+	[OUTDOOR_ORCHARDS]
+	[USE_ANIMAL_PRODUCTS]
+	[RIVER_PRODUCTS]
 	[COMMON_DOMESTIC_PACK]
 	[METAL_PREF]
 	[STONE_PREF]
@@ -107,6 +118,13 @@ behind each block.
 	[PERMITTED_JOB:CLOTHIER]
 	[PERMITTED_JOB:LEATHERWORKER]
 	[PERMITTED_JOB:HERBALIST]
+	[PERMITTED_JOB:PLANTER]
+	[PERMITTED_JOB:BREWER]
+	[PERMITTED_JOB:COOK]
+	[PERMITTED_JOB:THRESHER]
+	[PERMITTED_JOB:MILLER]
+	[PERMITTED_JOB:CHEESE_MAKER]
+	[PERMITTED_JOB:MILKER]
 	[PERMITTED_JOB:ANIMAL_CARETAKER]
 	[PERMITTED_JOB:POTTER]
 	[PERMITTED_JOB:GLASSMAKER]
@@ -134,6 +152,13 @@ behind each block.
 	[PERMITTED_REACTION:HA_HE_MAKE_WOODEN_MECHANISMS]
 	[PERMITTED_REACTION:HA_CATCH_STARLIGHT]
 	[PERMITTED_REACTION:HA_FORGE_TWINKLING_BAR]
+	food + drink processing
+	[PERMITTED_REACTION:BREW_DRINK_FROM_PLANT]
+	[PERMITTED_REACTION:BREW_DRINK_FROM_PLANT_GROWTH]
+	[PERMITTED_REACTION:MAKE_MEAD]
+	[PERMITTED_REACTION:PROCESS_PLANT_TO_BAG]
+	[PERMITTED_REACTION:MILL_SEEDS_NUTS_TO_PASTE]
+	[PERMITTED_REACTION:PRESS_OIL_FRUIT]
 
 	--- sites: a few human-style castles, little expansion ---
 	[DEFAULT_SITE_TYPE:CITY]
@@ -157,7 +182,8 @@ behind each block.
 	[SCHOLAR:ENGINEER]
 
 	--- no trade: no ACTIVE_SEASON means they never send caravans ---
-	(intentionally omitted: [ACTIVE_SEASON])
+	(intentionally omitted: the ACTIVE_SEASON token -- never write it bracketed
+	here, the raw parser reads tokens even inside comment text)
 
 	progress triggers (kept modest; they are peaceful and reclusive)
 	[PROGRESS_TRIGGER_POPULATION:2]

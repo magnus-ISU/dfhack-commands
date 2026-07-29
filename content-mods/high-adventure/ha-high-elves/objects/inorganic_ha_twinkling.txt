@@ -6,19 +6,19 @@ Twinkling metal -- High Adventure's fixed "divine metal" for the high elves.
 
 Material PROPERTIES are cloned from vanilla's generated divine metal
 (vanilla_procedural/scripts/generators/divine.lua, materials.divine.metal.default)
--- crucially [MELTING_POINT:NONE] and [BOILING_POINT:NONE], which is what makes
+-- crucially MELTING_POINT:NONE and BOILING_POINT:NONE, which is what makes
 divine metal truly dragonfire-safe (it cannot melt at any temperature; adamantine
 melts at 25000 and is NOT dragonfire-safe). Same strength/density/edge as divine
 metal, so twinkling gear is light, effective, and indestructible by fire.
 
-We then add adamantine's THREAD-metal flags ([ITEMS_SOFT], [WAFERS],
-[STOCKPILE_THREAD_METAL]) so it can also be woven into cloth and processed into
+We then add adamantine's THREAD-metal flags (ITEMS_SOFT, WAFERS,
+STOCKPILE_THREAD_METAL) so it can also be woven into cloth and processed into
 bars/wafers -- vanilla divine metal is metal-only; we want a divine metal that is
 ALSO a fabric, so twinkling cloaks are near-armour AND fireproof.
 
 Name/colour = the STARS-sphere divine metal actually named "twinkling metal" in
 divine.lua. It is grown at the Shaping Tree ("catch starlight"), never mined, so
-no [DEEP_SPECIAL].
+no DEEP_SPECIAL.
 
 [INORGANIC:HA_TWINKLING_METAL]
 	[USE_MATERIAL_TEMPLATE:METAL_TEMPLATE]
