@@ -510,6 +510,17 @@ entity_ha_illithid
 		[DO_NOT_CULL]
 		[DUTY_BOUND]
 		[MILITARY_SCREEN_ONLY]
+	Whisperer: unlimited messenger noble; thralls only (illithids do not run errands).
+	[POSITION:MESSENGER]
+		[NAME:whisperer:whisperers]
+		[ALLOWED_CLASS:HA_THRALL]
+		[SITE]
+		[NUMBER:AS_NEEDED]
+		[RESPONSIBILITY:DELIVER_MESSAGES]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[PRECEDENCE:250]
+		[DO_NOT_CULL]
+
 	[POSITION:MANAGER]
 		[NAME:calculator:calculators]
 		[SITE]

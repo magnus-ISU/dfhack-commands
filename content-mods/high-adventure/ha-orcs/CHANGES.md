@@ -1,5 +1,9 @@
 # ha-orcs — fork changelog
 
+## 0.24 -- Mouth of the Horde
+- Added **Mouth of the Horde** (position id MESSENGER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES,
+  appointed by boss/big boss -- the messenger role the civ lacked. Needs a fresh world.
+
 ## v0.17
 - **PEON caste**: identical to the common orc but with no baby/child stage (born
   a working adult) at POP_RATIO 1 against 100,000 (all other ratios scaled x1000,

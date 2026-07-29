@@ -1,5 +1,10 @@
 # ha-kobolds — build notes
 
+## v0.15 -- Speaker messengers
+- Added **Speaker** (position id SPEAKER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES, appointed by
+  the unique Head Speaker chain -- so the Head Speaker must exist before speakers are assignable,
+  and the civ finally has unlimited messengers. Needs a fresh world.
+
 ## v0.14 -- dragon legs + new description
 - The layered Ancient Dragon sprite was missing all four legs: the HA adaptation of Naut's sheet
   carried body/tail/wings/head layer groups but dropped Naut's leg+foot groups entirely. Added all

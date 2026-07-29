@@ -1498,6 +1498,20 @@ TODO:
 		[REQUIRED_TOMB:500]
 
 
+	Speaker: unlimited messenger noble, appointed by the (unique) Head Speaker --
+	the Head Speaker must exist before more speakers are assignable.
+	[POSITION:SPEAKER]
+		[NAME:speaker:speakers]
+		[SITE]
+		[NUMBER:AS_NEEDED]
+		[RESPONSIBILITY:DELIVER_MESSAGES]
+		[APPOINTED_BY:HEAD_SPEAKER]
+		[APPOINTED_BY:HEAD_SPEAKER_2]
+		[APPOINTED_BY:HEAD_SPEAKER_3]
+		[APPOINTED_BY:HEAD_SPEAKER_4]
+		[PRECEDENCE:250]
+		[DO_NOT_CULL]
+
 	[POSITION:HEAD_SPEAKER]
 		[NAME:head speaker:head speakers]
 		[DESCRIPTION:Communicates with visitors and traders, delivers messages to other holdings, and represents the settlement in negotiations]

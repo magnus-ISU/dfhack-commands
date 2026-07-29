@@ -1,5 +1,11 @@
 # ha-illithids — build notes (v0.1)
 
+## 0.47 -- Whisperer messengers (thralls only)
+- Added **Whisperer** (position id MESSENGER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES,
+  APPOINTED_BY expedition leader -- the messenger role the civ lacked entirely.
+- Restricted to thralls: new CREATURE_CLASS **HA_THRALL** on the THRALL_M/THRALL_F castes,
+  Whisperer gated with ALLOWED_CLASS:HA_THRALL. Needs a fresh world.
+
 ## v0.45 — cage rites teleport their reagent too + resonate/reclaim skill tuning
 - The cage rites (implant a tadpole / devour a caged prisoner) now also move their reagent to the
   bath: while the bath is staffed, a prisoner-bearing CAGE is teleported into the ring of 8 tiles

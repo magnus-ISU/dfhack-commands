@@ -1,5 +1,13 @@
 # Changes — HA High Elves
 
+## 0.4 -- nobles: Lady of Light, Diplomat, Protector
+- Renamed the high queen to **Lady of Light** (Ladies of Light).
+- Added **Diplomat** (position id MESSENGER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES, rootless
+  (no APPOINTED_BY) so a player fort can assign it directly.
+- Added **Protector** (SITE, NUMBER:1, squad, COMMANDER of blade singers, rootless): the fort-level
+  militia commander the civ was missing; blade singers now also APPOINTED_BY:PROTECTOR, fixing the
+  broken fort squad chain (previously gated on the civ-level warden only). Needs a fresh world.
+
 ## 0.3 -- embark food & drink
 - High-elf civs generated with EMPTY food/drink resource lists (verified live in region2:
   plants=0 seeds=0 booze=0 meat=0), so embark offered no provisions at all. The entity had no

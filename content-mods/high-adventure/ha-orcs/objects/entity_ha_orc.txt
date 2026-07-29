@@ -610,6 +610,17 @@ entity_ha_orc
 		[DO_NOT_CULL]
 		[DUTY_BOUND]
 		[MILITARY_SCREEN_ONLY]
+	Mouth of the Horde: unlimited messenger noble.
+	[POSITION:MESSENGER]
+		[NAME:mouth of the horde:mouths of the horde]
+		[SITE]
+		[NUMBER:AS_NEEDED]
+		[RESPONSIBILITY:DELIVER_MESSAGES]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[APPOINTED_BY:MAYOR]
+		[PRECEDENCE:250]
+		[DO_NOT_CULL]
+
 	[POSITION:MANAGER]
 		[NAME:taskmaster:taskmasters]
 		[DESCRIPTION:The manager handles work orders. Once your fortress reaches a certain population, the manager must work in an office to validate work orders.]

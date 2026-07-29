@@ -1,6 +1,6 @@
 [ID:HA_illithids]
-[NUMERIC_VERSION:46]
-[DISPLAYED_VERSION:0.46]
+[NUMERIC_VERSION:47]
+[DISPLAYED_VERSION:0.47]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
 [AUTHOR:High Adventure (psionics and body forked from Illithids by Myphicbowser; language by DPh Kraken)]
