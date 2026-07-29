@@ -108,6 +108,8 @@ stock DFHack tools and a few extras.
   with "keep N in stock" repeats.
 - **`labor-groups`** — Tidies the Labor screen and creates any missing crafting work details.
 - **`no-pausing`** — Stops the game from ever pausing.
+- **`worldgen-setup`** — Sets up a fresh test world: selects every installed mod and maxes
+  the civilization/site sliders from data, so only the Create-world click is left to you.
 
 ### 🔎 Info & description overlays
 
