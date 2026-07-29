@@ -1,5 +1,22 @@
 # ha-playable-civs — fork changelog
 
+## v0.8 — shaping tree art bottom row
+- Rescaled `shaping_tree.png` so the full crown (including its bottom fringe) fits the lower
+  four tile-rows -- the previous down-shift cropped the bottom row of the art.
+
+## v0.7 — shaping tree: skill-scaled yield, build cooldown, message
+- **Skill now grows more wood**: a legendary strand extractor previously just halved the
+  regrow cooldown. Now the grow-wood/feather reaction yields **one native log plus one
+  bonus log per EXTRACT_STRAND level**, capped at 21 total (legendary+5 == rating 20).
+  Bonus logs are minted at the worker's feet; reaction PRODUCT dropped from 4 to 1.
+- **Fresh trees start on cooldown**: a newly built shaping tree is immediately placed on a
+  full one-month cooldown.
+- **Reworded the too-soon message** to: "The shaping tree is not yet ready to grow into new
+  forms; it only yields new logs once a moon."
+- **Art seated lower**: `shaping_tree.png` shifted down one 32px tile so the crown sits
+  flush with a wall below and no longer clips into the tile above.
+- Reaction/PRODUCT change needs a fresh world; script + graphics changes apply on reload.
+
 ## v0.6 — vanilla kobolds no longer playable
 - Removed `[SELECT_ENTITY:SKULKING][SITE_CONTROLLABLE]`. Making vanilla kobolds
   (entity SKULKING) fort-playable produced broken forts where the kobolds appeared

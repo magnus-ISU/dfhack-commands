@@ -1,5 +1,14 @@
 # ha-illithids — build notes (v0.1)
 
+## 0.48 -- Lord Therapist + duplicate-tag fix
+- Added **Lord Therapist** (position id CHIEF_MEDICAL_DWARF): SITE, NUMBER:1,
+  `HEALTH_MANAGEMENT`, appointed by the Voice of the Colony -- the civ had no health
+  management at all, so the health screen and hospital assignment were unavailable.
+- Gated with `ALLOWED_CLASS:HA_TRUE_ILLITHID` (illithid / ulitharid / elder brain castes),
+  so a human thrall can never hold it.
+- Removed the duplicated `[SITE_CONTROLLABLE]` + `[ALL_MAIN_POPS_CONTROLLABLE]` pair in the
+  entity header. Needs a fresh world.
+
 ## 0.47 -- Whisperer messengers (thralls only)
 - Added **Whisperer** (position id MESSENGER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES,
   APPOINTED_BY expedition leader -- the messenger role the civ lacked entirely.

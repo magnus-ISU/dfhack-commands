@@ -13,14 +13,14 @@ the Shaping Tree, and make wooden mechanisms at the Craftsdwarf's. Unpaced (no
 	[NAME:grow wood from seed]
 	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_W]
 	[REAGENT:A:1:SEEDS:NONE:NONE:NONE][UNROTTEN]
-	[PRODUCT:100:4:WOOD:NONE:PLANT_MAT:HA_HE_GROWN:WOOD]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:HA_HE_GROWN:WOOD]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:HA_HE_GROW_FEATHER]
 	[NAME:grow feather tree wood from good seed]
 	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_F]
 	[REAGENT:A:1:SEEDS:NONE:PLANT_MAT:BERRY_SUN:SEED][UNROTTEN]
-	[PRODUCT:100:4:WOOD:NONE:PLANT_MAT:HA_HE_FEATHER:WOOD]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:HA_HE_FEATHER:WOOD]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:HA_HE_MAKE_WOODEN_MECHANISMS]
@@ -35,6 +35,12 @@ strand (THREAD of HA_TWINKLING_METAL). Weave at a loom into twinkling cloth ->
 clothes (vanilla adamantine path -- VERIFY the loom accepts a custom thread-metal
 in-game), or forge into a bar below. Strand dimension 15000 = 1 bar / 1 cloth.
 
+NOTE: the twinkling strand is NOT a native [PRODUCT] here. DF hardcodes a fuel
+requirement onto any reaction that outputs a *metal* item (twinkling metal is a
+METAL_TEMPLATE inorganic), even at a fuel-less custom workshop. To keep starlight-
+catching fuel-free, this reaction only consumes its reagents; the high-elves.lua
+script hooks HA_CATCH_STARLIGHT and mints the dimension-15000 twinkling THREAD itself.
+
 [REACTION:HA_CATCH_STARLIGHT]
 	[NAME:catch starlight]
 	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_S]
@@ -44,8 +50,6 @@ in-game), or forge into a bar below. Strand dimension 15000 = 1 bar / 1 cloth.
 	[REAGENT:silk thread:1:THREAD:NO_SUBTYPE:NONE:NONE]
 		[ANY_SILK_MATERIAL]
 		[UNROTTEN]
-	[PRODUCT:100:1:THREAD:NO_SUBTYPE:METAL:HA_TWINKLING_METAL]
-		[PRODUCT_DIMENSION:15000]
 	[SKILL:CLOTHESMAKING]
 
 FORGE TWINKLING BAR: 1 strand + 1 silver bar + fuel -> 1 twinkling metal bar.

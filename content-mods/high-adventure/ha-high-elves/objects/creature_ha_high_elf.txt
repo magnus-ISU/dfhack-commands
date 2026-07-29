@@ -255,8 +255,11 @@ until then they fall back to this tile.
 		 [PLUS_TL_GROUP:BY_CATEGORY:HEAD:SIDEBURNS]
 		 [PLUS_TL_GROUP:BY_CATEGORY:HEAD:EYEBROW]
 		 [PLUS_TL_GROUP:BY_CATEGORY:EYELID:EYELASH]
-	all six hair colours the moon-elf art has layers for
-	[TL_COLOR_MODIFIER:AQUA:1:BLACK:1:MIDNIGHT_BLUE:1:PALE_BLUE:1:SILVER:1:WHITE:1]
+	only hair colours BOTH the portrait art AND the world-sprite hair art have layers
+	for: their intersection is SILVER/WHITE. (GOLDEN_YELLOW renders in the portrait but
+	has no world-sprite hair layer -> bald world sprite; the old AQUA/BLACK/MIDNIGHT_BLUE/
+	PALE_BLUE render on the world sprite but had no portrait layer.)
+	[TL_COLOR_MODIFIER:SILVER:2:WHITE:1]
 				[TLCM_NOUN:hair:SINGULAR]
 		[SET_TL_GROUP:BY_CATEGORY:HEAD:EYEBROW]
 			[TISSUE_LAYER_APPEARANCE_MODIFIER:LENGTH:50:80:90:100:110:120:150]
@@ -275,6 +278,13 @@ until then they fall back to this tile.
 				[APP_MOD_RATE:1:DAILY:0:1000:0:0:NO_END]
 				[APP_MOD_NOUN:hair:SINGULAR]
 				[APP_MOD_DESC_RANGE:10:25:75:125:200:300]
+		override head hair only with a long nonzero minimum so no high elf is ever bald;
+		facial hair keeps its own length distribution above
+		[SET_TL_GROUP:BY_CATEGORY:HEAD:HAIR]
+			[TISSUE_LAYER_APPEARANCE_MODIFIER:LENGTH:300:400:500:600:700:800:900]
+				[APP_MOD_RATE:1:DAILY:0:1000:0:0:NO_END]
+				[APP_MOD_NOUN:hair:SINGULAR]
+				[APP_MOD_DESC_RANGE:10:25:75:125:200:300]
 		[SET_TL_GROUP:BY_CATEGORY:HEAD:HAIR]
 			[TISSUE_STYLE_UNIT:HAIR:STANDARD_HAIR_SHAPINGS]
 				[TSU_NOUN:hair:SINGULAR]
@@ -289,9 +299,10 @@ until then they fall back to this tile.
 			[TISSUE_STYLE_UNIT:SIDEBURNS:STANDARD_SIDEBURNS_SHAPINGS]
 				[TSU_NOUN:sideburns:PLURAL]
 		[SET_TL_GROUP:BY_CATEGORY:ALL:SKIN]
-	first three of the four moon-elf skin variants (rows 1-3 PALE_PINK, 4-6 PALE_BLUE,
-	7-9 WHITE); the 4th (rows 10-12 CERULEAN) is dropped as too blue/drow-like
-	[TL_COLOR_MODIFIER:PALE_PINK:1:PALE_BLUE:1:WHITE:1]
+	only skin colours BOTH the portrait art AND the world-sprite body art have a light
+	layer for: their intersection is PALE_PINK/PINK. (TAUPE_PALE renders in the portrait
+	but has no world-sprite body layer -> invisible body; PALE_BLUE/WHITE render in neither.)
+	[TL_COLOR_MODIFIER:PALE_PINK:2:PINK:1]
 				[TLCM_NOUN:skin:SINGULAR]
 		[SET_TL_GROUP:BY_CATEGORY:EYE:EYE]
 	[TL_COLOR_MODIFIER:IRIS_EYE_AQUA:1:IRIS_EYE_AQUAMARINE:1:IRIS_EYE_AZURE:1:IRIS_EYE_BLUE:1:IRIS_EYE_CERULEAN:1:IRIS_EYE_DARK_BLUE:1:IRIS_EYE_DARK_GREEN:1:IRIS_EYE_DARK_OLIVE:1:IRIS_EYE_EMERALD:1:IRIS_EYE_FERN_GREEN:1:IRIS_EYE_GREEN:1:IRIS_EYE_JADE:1:IRIS_EYE_LIGHT_BLUE:1:IRIS_EYE_MINT_GREEN:1:IRIS_EYE_MOSS_GREEN:1:IRIS_EYE_OLIVE:1:IRIS_EYE_PALE_BLUE:1:IRIS_EYE_PINE_GREEN:1:IRIS_EYE_SEA_GREEN:1:IRIS_EYE_SKY_BLUE:1:IRIS_EYE_SPRING_GREEN:1:IRIS_EYE_TEAL:1:IRIS_EYE_TURQUOISE:1:IRIS_EYE_AMBER:1:IRIS_EYE_GOLD:1:IRIS_EYE_GOLDEN_YELLOW:1:IRIS_EYE_YELLOW:1]

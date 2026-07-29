@@ -8,9 +8,10 @@ Tags: fort | gameplay
 
 Support script for the High Adventure playable-civilizations mod:
 
-- **Shaping Tree pacing**: growing wood from seeds takes one month per tree;
-  a legendary strand extractor halves that. Jobs finished too soon wither
-  (products are consumed) with an announcement.
+- **Shaping Tree pacing**: growing wood from seeds takes one month per tree, and a
+  freshly built tree starts on a full month cooldown. A skilled strand extractor grows
+  MORE wood -- the one native log plus one bonus log per skill level, up to 21 total
+  (legendary+5). Jobs finished too soon wither (products consumed) with an announcement.
 - **Shaping Trees need open sky**: a tree placed without an "outside" (open to
   sky) work tile is cancelled while still under construction.
 - **Elves can remove their own walls**: elves have no picks, so Remove-Construction
@@ -30,10 +31,16 @@ local eventful = require("plugins.eventful")
 
 local GLOBAL_KEY = "haPlayableCivs"
 local GROW_REACTIONS = { GROW_WOOD_HA = true, GROW_FEATHER_HA = true }
+-- material each grow reaction yields, so we can mint skill-scaled bonus logs
+local GROW_MAT = {
+    GROW_WOOD_HA    = 'PLANT_MAT:GROWN_HA:WOOD',
+    GROW_FEATHER_HA = 'PLANT_MAT:FEATHER_HA:WOOD',
+}
 local MONTH = 33600
 
 enabled = enabled or false
 next_ok = next_ok or {}   -- building id -> earliest tick for next harvest
+cooldown_init = cooldown_init or {}  -- building id -> already given its build-time cooldown
 
 function isEnabled()
     return enabled
@@ -57,13 +64,28 @@ local function shaping_tree_type()
     return nil
 end
 
-local function worker_is_legendary(unit)
+-- EXTRACT_STRAND skill rating (0 if unskilled/no soul); drives bonus-log yield
+local function extract_strand_rating(unit)
     local soul = unit.status.current_soul
-    if not soul then return false end
+    if not soul then return 0 end
     for _, s in ipairs(soul.skills) do
-        if s.id == df.job_skill.EXTRACT_STRAND then return s.rating >= 15 end
+        if s.id == df.job_skill.EXTRACT_STRAND then return s.rating end
     end
-    return false
+    return 0
+end
+
+-- drop `count` extra logs of `matspec` at the worker's feet -- the skill-scaled
+-- bonus above the one native log
+local function mint_logs(unit, matspec, count)
+    if count <= 0 then return end
+    local mi = dfhack.matinfo.find(matspec)
+    if not mi then return end
+    local pos = {x = unit.pos.x, y = unit.pos.y, z = unit.pos.z}
+    for _ = 1, count do
+        local created = dfhack.items.createItem(unit, df.item_type.WOOD, -1, mi.type, mi.index)
+        local it = created and created[1]
+        if it then dfhack.items.moveToGround(it, pos) end
+    end
 end
 
 local function job_building(unit)
@@ -84,12 +106,13 @@ local function on_reaction(reaction, reaction_product, unit, input_items, input_
     if next_ok[bid] and t < next_ok[bid] then
         if call_native then call_native.value = false end
         dfhack.gui.showAnnouncement(
-            "The shaping tree has not yet regrown; the young wood withers away.",
+            "The shaping tree is not yet ready to grow into new forms; it only yields new logs once a moon.",
             COLOR_YELLOW, true)
         return
     end
-    local period = worker_is_legendary(unit) and (MONTH // 2) or MONTH
-    next_ok[bid] = t + period
+    next_ok[bid] = t + MONTH
+    -- one native log plus one bonus log per EXTRACT_STRAND level, capped at 21 total
+    mint_logs(unit, GROW_MAT[reaction.code], math.min(extract_strand_rating(unit), 20))
 end
 
 local function elf_fort()
@@ -157,9 +180,26 @@ local function enforce_sky_access()
     end
 end
 
+-- a freshly built shaping tree starts on a full one-month cooldown, so it cannot
+-- be harvested the instant it finishes construction
+local function init_new_trees()
+    local btype = shaping_tree_type()
+    if not btype then return end
+    local t = now()
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+           and not cooldown_init[bld.id]
+           and bld.construction_stage >= bld:getMaxBuildStage() then
+            cooldown_init[bld.id] = true
+            next_ok[bld.id] = t + MONTH
+        end
+    end
+end
+
 local function tick()
     complete_wall_removals()
     pcall(enforce_sky_access)
+    pcall(init_new_trees)
     -- dispel goblin ghosts
     local grace = goblin_race_id()
     if grace then

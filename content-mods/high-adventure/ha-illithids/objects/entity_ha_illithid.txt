@@ -17,8 +17,6 @@ entity_ha_illithid
 	[PERMITTED_REACTION:HA_EXTRACT_UR_BRAIN]
 	[PERMITTED_REACTION:HA_ASCEND]
 	[PERMITTED_REACTION:HA_RESONATE]
-	[SITE_CONTROLLABLE]
-	[ALL_MAIN_POPS_CONTROLLABLE]
 	[CREATURE:HA_ILLITHID]
 	[TRANSLATION:HA_ILLITHID]
 	[DIGGER:ITEM_WEAPON_PICK]
@@ -520,6 +518,22 @@ entity_ha_illithid
 		[APPOINTED_BY:EXPEDITION_LEADER]
 		[PRECEDENCE:250]
 		[DO_NOT_CULL]
+
+	Lord Therapist: the chief medical officer. ALLOWED_CLASS gates it to true
+	illithids (illithid / ulitharid / elder brain castes) so a human thrall can
+	never hold it -- the colony does not let cattle tend the flesh of its masters.
+	[POSITION:CHIEF_MEDICAL_DWARF]
+		[NAME:Lord Therapist:Lord Therapists]
+		[DESCRIPTION:The Lord Therapist allows you to see the overall health of the colony.]
+		[ALLOWED_CLASS:HA_TRUE_ILLITHID]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:HEALTH_MANAGEMENT]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[PRECEDENCE:165]
+		[DO_NOT_CULL]
+		[COLOR:5:0:0]
+		[DUTY_BOUND]
 
 	[POSITION:MANAGER]
 		[NAME:calculator:calculators]

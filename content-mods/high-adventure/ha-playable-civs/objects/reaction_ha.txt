@@ -101,14 +101,14 @@ These reactions are used by the elves to grow wood from seeds and make wooden we
 	[NAME:grow wood from seed]
 	[BUILDING:HA_SHAPING_TREE:CUSTOM_W]
 	[REAGENT:A:1:SEEDS:NONE:NONE:NONE][UNROTTEN]
-	[PRODUCT:100:4:WOOD:NONE:PLANT_MAT:GROWN_HA:WOOD]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:GROWN_HA:WOOD]
 	[SKILL:EXTRACT_STRAND]
 
 [REACTION:GROW_FEATHER_HA]
 	[NAME:grow feather tree wood from good seed]
 	[BUILDING:HA_SHAPING_TREE:CUSTOM_F]
 	[REAGENT:A:1:SEEDS:NONE:PLANT_MAT:BERRY_SUN:SEED][UNROTTEN]
-	[PRODUCT:100:4:WOOD:NONE:PLANT_MAT:FEATHER_HA:WOOD]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:FEATHER_HA:WOOD]
 	[SKILL:EXTRACT_STRAND]
 
 These reactions are used in Adventure mode to tan hides and make various useful items.

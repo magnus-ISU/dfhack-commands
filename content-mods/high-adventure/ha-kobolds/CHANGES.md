@@ -1,5 +1,11 @@
 # ha-kobolds — build notes
 
+## v0.16 -- the Dread Wyrm executes
+- Added `[RESPONSIBILITY:EXECUTIONS]` to the **Dread Wyrm**. The civ had no executioner of
+  any kind; an ancient dragon overlord answers to nobody and kills whoever it likes.
+- Note: the Dread Wyrm is a civ-level position (no `[SITE]`), so it only carries out
+  sentences at the site it actually rules from. Needs a fresh world.
+
 ## v0.15 -- Speaker messengers
 - Added **Speaker** (position id SPEAKER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES, appointed by
   the unique Head Speaker chain -- so the Head Speaker must exist before speakers are assignable,

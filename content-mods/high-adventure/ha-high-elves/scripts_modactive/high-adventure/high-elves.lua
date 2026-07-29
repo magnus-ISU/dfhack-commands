@@ -9,9 +9,12 @@ Tags: fort | adventure | gameplay
 Support script for the self-contained high-elf civilization. Three jobs:
 
 - **Shaping Tree pacing**: growing wood at HA_HE_SHAPING_TREE takes one month per
-  tree (halved by a legendary strand extractor); wood grown before the tree
-  regrows withers, with an announcement. (Catch-starlight is NOT paced -- it is
-  gated by its plant/silk thread cost.)
+  tree; a freshly built tree starts on a full month cooldown; wood grown before the
+  tree regrows withers, with an announcement. A skilled strand extractor grows MORE
+  wood -- the one native log plus one bonus log per skill level, up to 21 total
+  (legendary+5). (Catch-starlight is NOT paced -- gated by its thread cost -- but its
+  twinkling strand is minted here, not as a native reaction PRODUCT, so the fuel-less
+  Shaping Tree escapes DF's hardcoded metal-item fuel requirement.)
 - **Shaping Trees need open sky**: a tree placed without an "outside" (open to
   sky) work tile is cancelled while still under construction -- they catch
   starlight, so they cannot be built under a roof or underground.
@@ -39,6 +42,11 @@ local RACE_ID    = 'HA_HIGH_ELF'
 local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'
 local MONTH      = 33600
 local GROW_REACTIONS = { HA_HE_GROW_WOOD = true, HA_HE_GROW_FEATHER = true }
+-- material each grow reaction yields, so we can mint skill-scaled bonus logs
+local GROW_MAT = {
+    HA_HE_GROW_WOOD    = 'PLANT_MAT:HA_HE_GROWN:WOOD',
+    HA_HE_GROW_FEATHER = 'PLANT_MAT:HA_HE_FEATHER:WOOD',
+}
 
 -- Only these item types/subtypes are ever generated (prevents impossible items).
 -- Edit freely -- this is the whole point of the allowlist.
@@ -61,6 +69,7 @@ local EQUIPPED = {[df.inv_item_role_type.Weapon]=true, [df.inv_item_role_type.Wo
 enabled = enabled or false
 done = done or {}
 next_ok = next_ok or {}       -- shaping-tree building id -> earliest tick for next harvest
+cooldown_init = cooldown_init or {}  -- shaping-tree building id -> already given its build-time cooldown
 
 function isEnabled() return enabled end
 
@@ -129,13 +138,14 @@ local function shaping_tree_type()
     end
 end
 
-local function worker_is_legendary(unit)
+-- EXTRACT_STRAND skill rating (0 if unskilled/no soul); drives bonus-log yield
+local function extract_strand_rating(unit)
     local soul = unit.status.current_soul
-    if not soul then return false end
+    if not soul then return 0 end
     for _, s in ipairs(soul.skills) do
-        if s.id == df.job_skill.EXTRACT_STRAND then return s.rating >= 15 end
+        if s.id == df.job_skill.EXTRACT_STRAND then return s.rating end
     end
-    return false
+    return 0
 end
 
 local function job_building(unit)
@@ -147,7 +157,23 @@ local function job_building(unit)
     return nil
 end
 
--- pace grow-wood: one month per tree, wither if worked too soon
+-- drop `count` extra logs of `matspec` (e.g. PLANT_MAT:HA_HE_GROWN:WOOD) at the
+-- worker's feet -- used to pay out the skill-scaled bonus above the one native log
+local function mint_logs(unit, matspec, count)
+    if count <= 0 then return end
+    local mi = dfhack.matinfo.find(matspec)
+    if not mi then return end
+    local pos = {x = unit.pos.x, y = unit.pos.y, z = unit.pos.z}
+    for _ = 1, count do
+        local created = dfhack.items.createItem(unit, df.item_type.WOOD, -1, mi.type, mi.index)
+        local it = created and created[1]
+        if it then dfhack.items.moveToGround(it, pos) end
+    end
+end
+
+-- pace grow-wood: one month per tree, wither if worked too soon. A skilled strand
+-- extractor grows MORE wood: the one native log plus one bonus log per skill level,
+-- capped at 21 total (legendary+5 == rating 20 -> 1 + 20).
 local function on_grow(reaction, rp, unit, ii, ir, oi, call_native)
     if not reaction or not GROW_REACTIONS[reaction.code] or not unit then return end
     local bid = job_building(unit) or -1
@@ -155,11 +181,27 @@ local function on_grow(reaction, rp, unit, ii, ir, oi, call_native)
     if next_ok[bid] and t < next_ok[bid] then
         if call_native then call_native.value = false end
         dfhack.gui.showAnnouncement(
-            "The shaping tree has not yet regrown; the young wood withers away.",
+            "The shaping tree is not yet ready to grow into new forms; it only yields new logs once a moon.",
             COLOR_YELLOW, true)
         return
     end
-    next_ok[bid] = t + (worker_is_legendary(unit) and (MONTH // 2) or MONTH)
+    next_ok[bid] = t + MONTH
+    mint_logs(unit, GROW_MAT[reaction.code], math.min(extract_strand_rating(unit), 20))
+end
+
+-- catch starlight: the reaction has NO native product (a metal [PRODUCT] would force
+-- DF's hardcoded metal-item fuel requirement onto this fuel-less workshop). Instead we
+-- mint the dimension-15000 twinkling THREAD here after the reagents are consumed.
+local function on_catch_starlight(reaction, rp, unit, ii, ir, oi, call_native)
+    if not reaction or reaction.code ~= 'HA_CATCH_STARLIGHT' or not unit then return end
+    local mi = dfhack.matinfo.find(MAT_ID)
+    if not mi then return end
+    local created = dfhack.items.createItem(unit, df.item_type.THREAD, -1, mi.type, mi.index)
+    local it = created and created[1]
+    if it then
+        if it.dimension ~= nil then it.dimension = 15000 end
+        dfhack.items.moveToGround(it, {x = unit.pos.x, y = unit.pos.y, z = unit.pos.z})
+    end
 end
 
 -- shaping trees must be built under open sky; cancel a roofed/underground one
@@ -179,11 +221,28 @@ local function enforce_sky_access(btype)
     end
 end
 
+-- a freshly built shaping tree starts on a full one-month cooldown, so it cannot
+-- be harvested the instant it finishes construction
+local function init_new_trees(btype)
+    if not btype then return end
+    local t = now()
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if bld.custom_type == btype and df.building_workshopst:is_instance(bld)
+           and not cooldown_init[bld.id]
+           and bld.construction_stage >= bld:getMaxBuildStage() then
+            cooldown_init[bld.id] = true
+            next_ok[bld.id] = t + MONTH
+        end
+    end
+end
+
 -- ------------------------------------------------------------- engine ----
 
 local function tick()
     if dfhack.world.isFortressMode() then
-        pcall(enforce_sky_access, shaping_tree_type())
+        local btype = shaping_tree_type()
+        pcall(enforce_sky_access, btype)
+        pcall(init_new_trees, btype)
     end
     local race = target_race(); if not race then return end
     local mtype, mindex = target_mat(); if not mtype then return end
@@ -199,6 +258,7 @@ local function do_enable()
     enabled = true
     eventful.registerReaction("HA_HE_GROW_WOOD", on_grow)
     eventful.registerReaction("HA_HE_GROW_FEATHER", on_grow)
+    eventful.registerReaction("HA_CATCH_STARLIGHT", on_catch_starlight)
     repeatUtil.scheduleEvery(GLOBAL_KEY, 100, 'ticks', tick)
 end
 
@@ -206,6 +266,7 @@ local function do_disable()
     enabled = false
     eventful.registerReaction("HA_HE_GROW_WOOD", nil)
     eventful.registerReaction("HA_HE_GROW_FEATHER", nil)
+    eventful.registerReaction("HA_CATCH_STARLIGHT", nil)
     repeatUtil.cancel(GLOBAL_KEY)
 end
 
