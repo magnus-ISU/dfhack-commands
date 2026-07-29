@@ -1,5 +1,24 @@
 # ha-kobolds — build notes
 
+## v0.16b -- the ancient dragon gets its face back
+- **The head rendered as a featureless blob.** The base head sprite (Naut's `HEAD1`,
+  page region 12:10:14:11) is only a snout-and-jaw silhouette -- it carries no face at
+  all. Upstream stacks the eye and the two crown horns on top of it as separate layer
+  groups; our port took the base and nothing else, on both the kobold ANCIENT_DRAGON
+  caste and the standalone HA_ANCIENT_DRAGON megabeast.
+- Added the eye plus both horns after the head group in all four composites (the caste's
+  BABY/CHILD/DEFAULT layer sets and the megabeast's DEFAULT).
+- The upstream conditions could not be copied verbatim: Naut gates these on its own body
+  part tokens (`LEYE5`, `TRHORN5`, `TLHORN5`) and colours the iris from an `IRIS_EYE_*`
+  tissue palette. Our dragons have `LEYE`/`REYE` but **no horn body parts at all**, and
+  no `IRIS_EYE` colours are declared anywhere in the mod -- which is why the layers were
+  dropped in the first place. So the eye is gated on `CONDITION_BP:BY_TOKEN:LEYE`
+  (it correctly vanishes if the eye is destroyed) and renders in its baked colour, while
+  the horns draw unconditionally, the same convention the legs port used.
+- Smoke and the animated-neck layers were left out: they need a `FIRE_ORGAN` body part
+  and a zombie syndrome class respectively.
+- Graphics change: applies on save reload / new world.
+
 ## v0.16a -- the ancient dragon caste grows its legs back
 - **Kobold ancient dragons rendered as a legless winged serpent.** The dragon composite
   in `graphics_creatures_cutekobold_layered.txt` had only five of the thirteen layer
