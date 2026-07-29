@@ -1,5 +1,26 @@
 # ha-kobolds — build notes
 
+## v0.18 -- horn alignment, tail tips, coloured extra heads
+- **The default dragon head wore the wrong horns.** Naut's horn sprites on atlas row
+  14 are anchored to the DRAKE head (they carry drake's `HEAD.HEIGHT 110-500` +
+  `BODY_UPPER.HEIGHT 90-500` conditions); the set with no shape condition at all --
+  the one drawn for the plain dragon head -- lives on row 16. The fallback head was
+  using row 14, so those dragons wore horns a couple of pixels up and to the right
+  while wyvern, wyrm and drake heads looked correct. Now uses row 16 (`18:16`, `21:16`,
+  `24:16`).
+- **Spiked and clubbed tails now draw their tips.** The body parts existed but nothing
+  referenced them, so every tail rendered plain. Added `DRAGON_TAILCLUB1` (`0:28`) and
+  the matching spike (`6:28`), gated on `TAIL_CLUBBED`/`TAIL_SPIKED`; both verified to
+  align with the tail sprite at `6:0`.
+- **Second and third heads were red on every dragon.** Those layers had no
+  `CONDITION_TISSUE_LAYER`/`TISSUE_MAY_HAVE_COLOR`, and that condition is what tints a
+  layer to the creature's scale colour -- not `USE_PALETTE`, which the kobold head
+  layers do not even carry. Expanded both into the full 15 colour variants.
+- Caste `POP_RATIO`s divided through by their GCD of 15: kobolds are now 4990/4990 with
+  the six draconic castes at 8/8/1/1/1/1, summing to a round 10000 and still exactly
+  0.2%. The megabeast's are 8/8/1/1/1/1.
+- **Needs a new world.**
+
 ## v0.17 -- six ancient dragon castes, procedural head shapes
 - **The single ancient dragon becomes multiple castes**, applied identically to the standalone
   `HA_ANCIENT_DRAGON` megabeast and to the draconic caste-set inside `HA_KOBOLD`:
