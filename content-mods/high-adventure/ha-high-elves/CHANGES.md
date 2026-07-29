@@ -1,5 +1,14 @@
 # Changes — HA High Elves
 
+## 0.9 -- plain skirt renders without a dress
+- **A plain skirt worn without a dress showed bare legs on the world sprite.** The moon-elf
+  waist-hang layers are AND-conditioned: `CLOTHING_WAIST_SKIRT` (the sprite that drapes a
+  medium skirt over the legs) required `ITEM_ARMOR_DRESS` **and** `ITEM_PANTS_SKIRT`, so a
+  skirt worn with anything other than a dress (e.g. a tunic) never drew its lower half.
+  Removed the spurious `ITEM_ARMOR_DRESS` requirement from all 18 `CLOTHING_WAIST_SKIRT`
+  layers, so a plain skirt now renders on its own (dress+skirt still works unchanged).
+- Graphics change; applies to a fresh world / on graphics reload.
+
 ## 0.8 -- the missing noble roster
 The civ had only six positions (Lady of Light, warden, protector, blade singer, diplomat,
 emissary) and no site-level administration at all: no fort leader, no work orders, no
