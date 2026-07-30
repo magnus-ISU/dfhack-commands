@@ -1,5 +1,10 @@
 # ha-drow — fork changelog
 
+## v0.45 -- expansion limited to mountains and forests
+- Dropped `SETTLEMENT_BIOME` grassland/savanna/shrubland and their `BIOME_SUPPORT`
+  entries; drow now only settle (and expand to) mountains and forests. River and
+  subterranean support weights kept.
+
 ## v0.38 -- drop the ocean experiment
 - Removed the 10:1 ocean `BIOME_SUPPORT` and restored MOUNTAIN 3 / subterranean 3-2. MOUNTAIN
   stays the first entry because it is the `EXCLUSIVE_START_BIOME`.
