@@ -1,6 +1,6 @@
 [ID:HA_beasts]
-[NUMERIC_VERSION:6]
-[DISPLAYED_VERSION:0.6]
+[NUMERIC_VERSION:7]
+[DISPLAYED_VERSION:0.7]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
 [AUTHOR:High Adventure (gibberling forked from Highfantasy's feral goblin by Kiiranaux et al, itself a berserk copy of the vanilla goblin; blue goblin graphics rebound from vanilla)]
