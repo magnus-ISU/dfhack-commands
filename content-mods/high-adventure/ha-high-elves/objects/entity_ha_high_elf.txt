@@ -164,16 +164,14 @@ behind each block.
 	[DEFAULT_SITE_TYPE:CITY]
 	[LIKES_SITE:CITY]
 	[TOLERATES_SITE:CITY]
-	[START_BIOME:ANY_FOREST]
-	Exactly one BIOME_SUPPORT, on the start biome, at the lowest weight, so territory
-	cannot spread outside forest at all. Dropping BIOME_SUPPORT entirely made worldgen
-	reject world after world, so this is the tightest setting that still generates.
+	EXCLUSIVE_START_BIOME with no SETTLEMENT_BIOME and no START_BIOME. Per the raw
+	reference that founds one settlement and no more. Territory spread is NOT the
+	limiter: BIOME_SUPPORT numbers are relative to each other only, so a lone entry at
+	weight 1 still puts the entire expansion budget into forest. What actually grants
+	the right to build is SETTLEMENT_BIOME and START_BIOME, so those are gone.
+	BIOME_SUPPORT has to stay: with none at all worldgen rejects every candidate world.
+	[EXCLUSIVE_START_BIOME:ANY_FOREST]
 	[BIOME_SUPPORT:ANY_FOREST:1]
-	High elves settle woodland, scrub and mountains -- NOT ANY_LAND. They were the only
-	civ in the world with ANY_LAND, and reached 373 sites and 76,302 population with it.
-	[SETTLEMENT_BIOME:ANY_FOREST]
-	[SETTLEMENT_BIOME:ANY_SHRUBLAND]
-	[SETTLEMENT_BIOME:MOUNTAIN]
 	tiny, reclusive people: a single small castle's worth
 	[MAX_STARTING_CIV_NUMBER:10]
 	[MAX_POP_NUMBER:10000]
