@@ -292,9 +292,9 @@ function CreatureDescOverlay:overlay_onupdate()
         changed = true
     end
     local sw, sh = dfhack.screen.getWindowSize()
-    -- in adventure mode the box's LEFT border sits 8 columns further right; the
+    -- in adventure mode the box's LEFT border sits 10 columns further right; the
     -- overlay anchor can't move per-mode, so the inner panel is indented instead
-    local indent = dfhack.world.isAdventureMode() and 8 or 0
+    local indent = dfhack.world.isAdventureMode() and 10 or 0
     local panel = self.subviews.panel
     if (panel.frame.l or 0) ~= indent then panel.frame.l = indent; changed = true end
     -- width tracks the screen so the RIGHT edge stays RIGHT_MARGIN cols in from the border (just

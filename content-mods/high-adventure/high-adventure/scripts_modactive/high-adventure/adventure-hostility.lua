@@ -223,14 +223,38 @@ local function create_conflict(adv, u)
     u.activities:insert('#', newid)
 end
 
+-- Force two sides of an event to full combat. DF decays conflict_level over
+-- time (a de-escalated conflict reads level 0 = no aggression), and units
+-- added to an existing event inherit whatever stale level it has -- both left
+-- everyone "in conflict" yet passive. Re-assert 5 (fighting) in BOTH
+-- directions every sweep, creating the enemy entry if it is missing.
+local function ensure_fighting(ev, ia, ib)
+    local function bump(side, enemy_id)
+        for _, e in ipairs(side.enemies) do
+            if e.id == enemy_id then
+                if e.conflict_level < 5 then e.conflict_level = 5 end
+                return
+            end
+        end
+        local st = df.conflict_statest:new()
+        st.id = enemy_id
+        st.conflict_level = 5
+        side.enemies:insert('#', st)
+    end
+    bump(ev.sides[ia], ev.sides[ib].id)
+    bump(ev.sides[ib], ev.sides[ia].id)
+end
+
 local function make_hostile(u, adv)
     local act, ev, advside = adv_conflict(adv)
     if ev then
-        if in_event(ev, u.id) then return end
         local uside = (advside == 0) and 1 or 0
-        utils.insert_sorted(ev.sides[uside].unit_ids, u.id)
-        if u.hist_figure_id >= 0 then utils.insert_sorted(ev.sides[uside].histfig_ids, u.hist_figure_id) end
-        u.activities:insert('#', act.id)
+        if not in_event(ev, u.id) then
+            utils.insert_sorted(ev.sides[uside].unit_ids, u.id)
+            if u.hist_figure_id >= 0 then utils.insert_sorted(ev.sides[uside].histfig_ids, u.hist_figure_id) end
+            u.activities:insert('#', act.id)
+        end
+        ensure_fighting(ev, advside, uside)
     else
         create_conflict(adv, u)
     end

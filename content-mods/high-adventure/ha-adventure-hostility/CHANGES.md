@@ -5,6 +5,14 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.5 -- passive "in conflict" units actually fight now
+- `make_hostile` re-asserts conflict_level 5 (fighting) in both directions on
+  every sweep. Previously level 5 was only set when the script CREATED a
+  conflict: units added to an existing event inherited its stale level, and DF
+  decays levels over time -- either way targets ended up "in conflict" at
+  level 0 and stood around peacefully (observed: six HA_KOBOLDs sharing the
+  adventurer's conflict, all passive).
+
 ## v0.4 -- own-civ members never attack the adventurer
 - Civ membership now beats race: units sharing the adventurer's `civ_id` are
   never force-hostiled. Previously the rules matched on creature race only, so

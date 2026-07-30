@@ -15,8 +15,10 @@ This repo holds two kinds of deliverables for **Dwarf Fortress 0.53.x + DFHack**
 |---|---|
 | DF install (`$DF`) | `~/.local/share/Steam/steamapps/common/Dwarf Fortress` |
 | DFHack install (`$DFH`) — **separate folder!** | `~/.local/share/Steam/steamapps/common/DFHack` |
+| DF user data (`$B12`) — saves + snapshots | `~/.local/share/Bay 12 Games/Dwarf Fortress` |
 | Worldgen mod source (seeds NEW worlds) | `$DF/mods/<mod-id>` |
-| Per-world baked mod snapshots (active save) | `$DF/installed_mods/<mod-id>` |
+| Saves | `$B12/save/<region>` |
+| Per-world baked mod snapshots | `$B12/data/installed_mods/<MOD_ID> (n)` |
 | DFHack command-script deploy target | `$DF/dfhack-config/scripts` |
 | Stock DFHack scripts (read-only reference) | `$DFH/hack/scripts` |
 
@@ -53,8 +55,13 @@ grep DISPLAYED_VERSION "$DF/mods/ha-illithids/info.txt"
 for d in "$DF/mods/"ha-*; do echo "$(basename "$d"): $(grep -h DISPLAYED_VERSION "$d/info.txt")"; done
 ```
 
-An **active save** bakes raws in at gen time (in the save's own `raw/`), so raw changes
-never reach an existing world — only its scripts and (via `installed_mods/`) graphics do.
+An **active save** bakes raws in at gen time, so raw changes never reach an existing
+world. Each world's scripts + graphics load from its own versioned snapshot under
+`$B12/data/installed_mods/<MOD_ID> (n)` (find the live one via
+`dfhack.findScript('high-adventure/<name>')`). To hot-patch a script into an existing
+world, copy it into that snapshot and `reqscript` + overlay-rescan. **Never delete
+old-version snapshots wholesale — every save depends on the exact versions it was
+generated with.**
 
 ## Deploy a content mod
 
