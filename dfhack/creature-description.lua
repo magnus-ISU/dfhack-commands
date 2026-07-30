@@ -266,6 +266,8 @@ CreatureDescOverlay.ATTRS{
 function CreatureDescOverlay:init()
     self:addviews{
         widgets.Panel{
+            view_id = 'panel',
+            frame = {t = 0, l = 0, r = 0, b = 0},
             frame_style = gui.FRAME_THIN,
             frame_background = gui.CLEAR_PEN,
             subviews = {
@@ -290,13 +292,18 @@ function CreatureDescOverlay:overlay_onupdate()
         changed = true
     end
     local sw, sh = dfhack.screen.getWindowSize()
+    -- in adventure mode the box's LEFT border sits 8 columns further right; the
+    -- overlay anchor can't move per-mode, so the inner panel is indented instead
+    local indent = dfhack.world.isAdventureMode() and 8 or 0
+    local panel = self.subviews.panel
+    if (panel.frame.l or 0) ~= indent then panel.frame.l = indent; changed = true end
     -- width tracks the screen so the RIGHT edge stays RIGHT_MARGIN cols in from the border (just
     -- left of the native creature window); the left edge (frame.l) stays put
     local w = math.max(MIN_W, sw - RIGHT_MARGIN - (self.frame.l or 0))
     if self.frame.w ~= w then self.frame.w = w; changed = true end
     -- grow the box to fit the wrapped text (incl. the Kills line), so nothing is
     -- cut off; cap so it stays on screen
-    local h = math.max(4, math.min(wrapped_lines(text, self.frame.w - 2) + 2, sh - 6))
+    local h = math.max(4, math.min(wrapped_lines(text, self.frame.w - indent - 2) + 2, sh - 6))
     if self.frame.h ~= h then self.frame.h = h; changed = true end
     if changed then self:updateLayout() end
 end
