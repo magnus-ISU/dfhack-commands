@@ -1,5 +1,12 @@
 # ha-drow — fork changelog
 
+## v0.48 -- drop the dead HA_DROW_BODY_SPECIAL tile page
+- The page declared `[FILE:images/dark_elf_body_special.png]`, which has never
+  existed in this mod or in upstream Dark Elves Redux, and which no creature
+  graphic references. Removed rather than left pointing at nothing.
+- Upstream has the identical dead declaration; this is a fix, not a divergence in
+  behaviour -- nothing rendered from it either way.
+
 ## v0.45 -- expansion limited to mountains and forests
 - Dropped `SETTLEMENT_BIOME` grassland/savanna/shrubland and their `BIOME_SUPPORT`
   entries; drow now only settle (and expand to) mountains and forests. River and

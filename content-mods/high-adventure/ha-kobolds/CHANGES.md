@@ -1,5 +1,15 @@
 # ha-kobolds — build notes
 
+## v0.25 -- fix six portrait tile pages declaring a canvas wider than the image
+- The six `HA_PORTRAIT_CUTEKOBOLD_CLOTHING_*` pages declared
+  `[PAGE_DIM_PIXELS:679:...]` against images that are 672px wide (7 tiles of 96px;
+  679 is not even a multiple of 96). DF was told the sheet had an eighth, partial
+  column that does not exist. Clamped to 672.
+- Inherited verbatim from upstream Cute Kobold Caverns -- the pristine Workshop copy
+  (975370/3477662286) declares the same 679. Not introduced by this fork.
+- Safe: the highest tile any graphic references on these pages is column 6, inside
+  the real 7-column image.
+
 ## v0.20 -- population caps normalised
 - `MAX_SITE_POP_NUMBER` confirmed at 120 (unchanged); version bumped with the suite-wide pass.
 

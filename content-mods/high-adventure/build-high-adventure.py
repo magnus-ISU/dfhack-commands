@@ -24,8 +24,8 @@ NAME = 'High Adventure'
 # "<MOD_ID> (numeric_version)", so leaving this pinned makes DF keep reusing the
 # old snapshot -- the mod picker then shows a stale bundle description listing
 # member versions that no longer match what mods/ actually contains.
-NUMERIC_VERSION = 2
-DISPLAYED_VERSION = '0.2'
+NUMERIC_VERSION = 4
+DISPLAYED_VERSION = '0.4'
 
 # raw definition tokens that must be globally unique, per [OBJECT:x] file type
 DEF_TOKENS = {

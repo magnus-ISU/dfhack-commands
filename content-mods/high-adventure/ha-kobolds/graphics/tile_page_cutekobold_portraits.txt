@@ -10,32 +10,32 @@ tile_page_cutekobold_portraits
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_SHIRT]
 	[FILE:images/portraits/kobold_portrait_clothing_shirt.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:192]
+	[PAGE_DIM_PIXELS:672:192]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_METALHELMET]
 	[FILE:images/portraits/kobold_portrait_clothing_metalhelmet.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:96]
+	[PAGE_DIM_PIXELS:672:96]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_CHAINMAIL]
 	[FILE:images/portraits/kobold_portrait_clothing_chainmail.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:96]
+	[PAGE_DIM_PIXELS:672:96]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_BREASTPLATE]
 	[FILE:images/portraits/kobold_portrait_clothing_breastplate.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:96]
+	[PAGE_DIM_PIXELS:672:96]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_CAPE]
 	[FILE:images/portraits/kobold_portrait_clothing_cape.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:96]
+	[PAGE_DIM_PIXELS:672:96]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING_LEATHER]
 	[FILE:images/portraits/kobold_portrait_clothing_leather.png]
 	[TILE_DIM:96:96]
-	[PAGE_DIM_PIXELS:679:96]
+	[PAGE_DIM_PIXELS:672:96]
 
 [TILE_PAGE:HA_PORTRAIT_CUTEKOBOLD_CLOTHING]
 	[FILE:images/portraits/kobold_portrait_clothing.png]
