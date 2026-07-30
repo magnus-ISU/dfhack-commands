@@ -5,8 +5,9 @@ adv/right-click-move
 
 Right-clicking a tile in adventure mode opens a "What do you want to do?" menu offering only
 two things -- "Path to here" and "Path to here (no climbing/jumping)" -- and then, once you
-pick one, up to two more confirmations ("Finish action", "In conflict - finish anyway?").
-That is four clicks to walk somewhere. With this running, a right-click just moves you.
+pick one, up to two more confirmations ("Finish action", and in conflict "In conflict!
+Finish anyway"). That is four clicks to walk somewhere. With this running, a right-click
+just moves you.
 
     adv/right-click-move           start watching (idempotent)
     adv/right-click-move stop      stop
@@ -49,7 +50,12 @@ local overlay = require('plugins.overlay')
 local CONFIRM_WINDOW_MS = 9000   -- how long to watch for confirmations after a path
 local CONFIRM_SCAN_MS = 250      -- min gap between confirmation screen scans
 local RETRY_MS = 400             -- min gap between auto-select attempts on one menu
-local CONFIRM_TEXTS = {'finish anyway', 'Finish action'}
+-- Exact wording from the dwarfort binary's string table: the conflict prompt is
+-- "In conflict!  Finish anyway" -- capital F. find_text matches case-SENSITIVELY, so the
+-- old lowercase 'finish anyway' needle never hit and the conflict prompt sat there
+-- unconfirmed. Conflict variant first: 'Finish action' can't match its row anyway, but if
+-- both are ever on screen the conflict one is the one blocking.
+local CONFIRM_TEXTS = {'Finish anyway', 'Finish action'}
 
 running = running or false
 autopathed = autopathed or 0   -- auto-selected "Path to here"
@@ -151,7 +157,7 @@ local a_attempts, retry_at = 0, 0
 -- is why it worked while throttled). So a negative is retried a few times before it sticks.
 local verdict, verify_at, verify_tries = nil, 0, 0
 local VERIFY_RETRY_MS, VERIFY_MAX_TRIES = 60, 10   -- ~0.6s of grace, <=10 scans per menu
-local confirm_until, confirm_scan_at, c_attempts = 0, 0, 0
+local confirm_until, confirm_scan_at, c_attempts, c_last = 0, 0, 0, nil
 
 local function step()
     if not running or not dfhack.world.isAdventureMode() then return end
@@ -180,11 +186,14 @@ local function step()
             press_or_click(a_attempts, 'CUSTOM_A', 'Path to here')
             if a_attempts == 1 then autopathed = autopathed + 1 end
             retry_at = now + RETRY_MS
-            confirm_until, confirm_scan_at, c_attempts = now + CONFIRM_WINDOW_MS, now + 150, 0
+            confirm_until, confirm_scan_at, c_attempts, c_last =
+                now + CONFIRM_WINDOW_MS, now + 150, 0, nil
         end
     end
 
-    -- 2. after pathing, dismiss "Finish action" / "In conflict - finish anyway?"
+    -- 2. after pathing, dismiss "Finish action" / "In conflict!  Finish anyway".
+    -- In conflict these STACK: confirm "Finish action" and the conflict prompt follows,
+    -- wanting its own `c`.
     if now < confirm_until and now >= confirm_scan_at then
         confirm_scan_at = now + CONFIRM_SCAN_MS
         local hit
@@ -192,9 +201,15 @@ local function step()
             if find_text(needle) then hit = needle break end
         end
         if hit then
+            -- a different prompt text = a fresh confirmation: press `c` again, don't
+            -- inherit the previous prompt's key/click parity (the click is the fallback)
+            if hit ~= c_last then c_last, c_attempts = hit, 0 end
             c_attempts = c_attempts + 1
             press_or_click(c_attempts, 'CUSTOM_C', hit)
-            if c_attempts % 2 == 1 then confirmed = confirmed + 1 end
+            if c_attempts == 1 then confirmed = confirmed + 1 end
+            -- keep watching while confirmations keep appearing; expire only after the
+            -- LAST one, so a chain of prompts can't outlive the original window
+            confirm_until = math.max(confirm_until, now + CONFIRM_WINDOW_MS)
         end
     end
 end
