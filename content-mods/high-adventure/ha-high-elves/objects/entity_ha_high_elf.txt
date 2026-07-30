@@ -164,8 +164,8 @@ behind each block.
 	BUILDS_OUTDOOR_FORTIFICATIONS turns mead halls into castles, but only at hamlet or
 	town sites, which is why it does nothing for the succubi: they carry the token and
 	land holders both, and build CAVE_DETAILED. High elves build towns, so it should
-	apply here. They still have no LAND_HOLDER position, which may be the other half of
-	the requirement.
+	apply here. The other half of the requirement, a LAND_HOLDER position, is on the
+	Lady of Light below.
 	[BUILDS_OUTDOOR_FORTIFICATIONS]
 	[DEFAULT_SITE_TYPE:CITY]
 	[LIKES_SITE:CITY]
@@ -179,7 +179,7 @@ behind each block.
 	[EXCLUSIVE_START_BIOME:ANY_FOREST]
 	[BIOME_SUPPORT:ANY_FOREST:1]
 	tiny, reclusive people: a single small castle's worth
-	[MAX_STARTING_CIV_NUMBER:10]
+	[MAX_STARTING_CIV_NUMBER:100]
 	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:120]
 	[RELIGION:REGIONAL_FORCE]
@@ -270,6 +270,11 @@ behind each block.
 		[NAME:Lady of Light:Ladies of Light]
 		[NUMBER:1]
 		[RULES_FROM_LOCATION]
+		LAND_HOLDER is the other half of BUILDS_OUTDOOR_FORTIFICATIONS: castles are
+		raised for a land holder. Vanilla hangs it on appointed site nobles, but the
+		Lady of Light is the only ruler these civs have, so it goes on her.
+		[LAND_HOLDER:1]
+		[LAND_NAME:a wood]
 		[MENIAL_WORK_EXEMPTION]
 		[PUNISHMENT_EXEMPTION]
 		[GENDER:FEMALE]

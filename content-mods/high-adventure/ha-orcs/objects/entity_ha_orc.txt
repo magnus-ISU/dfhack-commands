@@ -161,18 +161,23 @@ entity_ha_orc
 	[TOLERATES_SITE:CITY]
 	[TOLERATES_SITE:TREE_CITY]
 	[TOLERATES_SITE:CAVE_DETAILED]
-	[START_BIOME:ANY_GRASSLAND]
+	This block used to be a byte-for-byte copy of vanilla PLAINS, so orcs were a second
+	human civilization fighting humans for the same tiles, and winning: 547 sites against
+	533, on hills 293 against 264 and grassland 214 against 207. They are pushed onto the
+	harsh margins instead. Prime grassland is left to the humans at weight 1, and the
+	ANY_OCEAN:12 that let them island-hop the whole coastline is cut to 1.
 	[START_BIOME:ANY_SAVANNA]
 	[START_BIOME:ANY_SHRUBLAND]
-	[BIOME_SUPPORT:ANY_WETLAND:1]
-	[BIOME_SUPPORT:ANY_DESERT:1]
+	[START_BIOME:ANY_DESERT]
+	[BIOME_SUPPORT:ANY_SAVANNA:4]
+	[BIOME_SUPPORT:ANY_SHRUBLAND:4]
+	[BIOME_SUPPORT:ANY_DESERT:4]
+	[BIOME_SUPPORT:ANY_WETLAND:2]
 	[BIOME_SUPPORT:ANY_FOREST:2]
-	[BIOME_SUPPORT:ANY_OCEAN:12]
-	[BIOME_SUPPORT:ANY_LAKE:3]
-	[BIOME_SUPPORT:ANY_GRASSLAND:3]
-	[BIOME_SUPPORT:ANY_SAVANNA:2]
-	[BIOME_SUPPORT:ANY_SHRUBLAND:2]
-	[BIOME_SUPPORT:ANY_RIVER:4]
+	[BIOME_SUPPORT:ANY_GRASSLAND:1]
+	[BIOME_SUPPORT:ANY_OCEAN:1]
+	[BIOME_SUPPORT:ANY_LAKE:1]
+	[BIOME_SUPPORT:ANY_RIVER:2]
 	[MERCHANT_NOBILITY]
 	[DIPLOMAT_BODYGUARDS]
 	[MERCHANT_BODYGUARDS]

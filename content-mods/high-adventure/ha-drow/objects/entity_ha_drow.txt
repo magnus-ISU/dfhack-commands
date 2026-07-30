@@ -7,6 +7,10 @@ entity_ha_drow
 	[ALL_MAIN_POPS_CONTROLLABLE]
 	[BABYSNATCHER]
 	[ABUSE_BODIES]
+	No LAYER_LINKED. It was tried and reverted: a layer-linked civ behaves like the
+	vanilla animal peoples, which hold 230 civilizations and zero sites. Drow fell to
+	3 entities and no sites at all, illithids vanished from the world outright, so
+	neither could be embarked as.
 	No MYTHICAL here. That flag belongs to angel/vault style entities: DF's own
 	generated mythical entity pairs it with SITE_GUARDIAN and the DIVINE_MAT tokens
 	and has zero population. Putting it on a farming civ made worldgen reject every
