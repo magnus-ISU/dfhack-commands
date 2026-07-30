@@ -1,0 +1,13 @@
+tile_page_ha_elder
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_ELDER64]
+	[FILE:images/elder-brain-96x64.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:64]
+
+[TILE_PAGE:HA_ELDER32]
+	[FILE:images/elder-brain-32.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]

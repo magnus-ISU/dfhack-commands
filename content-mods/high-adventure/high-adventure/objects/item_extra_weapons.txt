@@ -1,0 +1,153 @@
+item_extra_weapons
+
+[OBJECT:ITEM]
+
+SMALL WEAPONS:
+Small tools and weapons, wieldable by kobolds and animal folk
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_AXE]
+[NAME:hatchet:hatchets]
+[SIZE:500]
+[SKILL:AXE]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:EDGE:20000:4000:hack:hacks:NO_SUB:1250]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:BLUNT:20000:4000:slap:slaps:flat:1250]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:BLUNT:100:1000:strike:strikes:pommel:1000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_PICK]
+[NAME:mattock:mattocks]
+[SIZE:300]
+[SKILL:MINING]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:EDGE:100:2000:strike:strikes:NO_SUB:2000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_HAMMER]
+[NAME:mallet:mallets]
+[SIZE:300]
+[SKILL:HAMMER]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:BLUNT:10:100:bash:bashes:NO_SUB:2000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_MACE]
+[NAME:club:club]
+[SIZE:400]
+[SKILL:MACE]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:BLUNT:20:100:bash:bashes:NO_SUB:2000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_SWORD]
+[NAME:dirk:dirks]
+[SIZE:200]
+[SKILL:SWORD]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:EDGE:10000:3000:slash:slashes:NO_SUB:1250]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:EDGE:50:1000:stab:stabs:NO_SUB:1000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:BLUNT:10000:3000:slap:slaps:flat:1250]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:BLUNT:100:1000:strike:strikes:pommel:1000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+----------------------------------------------------------------
+
+KNIVES:
+Knife expansion, replacing single Large Dagger with a slightly faster stab-focused weapon class.
+
+	CUT_ITEM:ITEM_WEAPON_DAGGER_LARGE
+
+Can be wielded by any sentient creature larger than a fairy.
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SMALL_KNIFE]
+[NAME:knife:knives]
+[SIZE:100]
+[SKILL:DAGGER]
+[TWO_HANDED:5000]
+[MINIMUM_SIZE:100]
+[MATERIAL_SIZE:1]
+[ATTACK:EDGE:5:1000:stab:stabs:NO_SUB:1000]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+[ATTACK:EDGE:2000:1000:slash:slashes:NO_SUB:1250]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+[ATTACK:BLUNT:20:1000:strike:strikes:pommel:1000]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_KNIFE]
+[NAME:dagger:daggers]
+[SIZE:200]
+[SKILL:DAGGER]
+[TWO_HANDED:12500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:EDGE:10:2000:stab:stabs:NO_SUB:1000]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+[ATTACK:EDGE:4000:2000:slash:slashes:NO_SUB:1250]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+[ATTACK:BLUNT:20:1000:strike:strikes:pommel:1000]
+	[ATTACK_PREPARE_AND_RECOVER:2:2]
+
+
+----------------------------------------------------------------
+
+STAVES:
+Staves, which are a new mace class focused on blunt jabs and high-velocity bashes
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_STAFF]
+[NAME:staff:staves]
+[SIZE:400]
+[SKILL:MACE]
+[TWO_HANDED:32500]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:2]
+[ATTACK:BLUNT:8000:4000:bash:bashes:NO_SUB:2000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+[ATTACK:BLUNT:50:1000:jab:jabs:NO_SUB:1000]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+
+----------------------------------------------------------------
+
+SLING:
+Throwing-based ranged blunt weapon, which can be made from leather/cloth.
+
+[ITEM_WEAPON:HA_ITEM_WEAPON_SLING]
+[NAME:sling:slings]
+[SIZE:200]
+[SKILL:WHIP]
+[RANGED:THROW:BULLET]
+[AIM_DIFFICULTY:5] I doubt aiming sling throws is easier than aiming a bow.. maybe harder, even.
+[LOADED:4:1] Very fast to load, especially if you have the pattern down.
+[INITIATE_SHOT_TIME:4] Slow to fire..
+[SHOT_RECOVERY_TIME:1] .. And slight recovery from inertia.
+[SHOT_FORCE_REQUIRES:AGILITY:1500] Highly dependant on proper use of lever force.
+[SHOT_FORCE_REQUIRES:THROW:7] Some knowledge of chucking is beneficial, but at some point only provides better accuracy.
+[SHOOT_FORCE:2500]
+[SHOOT_MAXVEL:2500]
+[TWO_HANDED:0]
+[MINIMUM_SIZE:5000]
+[MATERIAL_SIZE:1]
+[ATTACK:BLUNT:50:1000:bash:bashes:NO_SUB:2500]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]
+
+[ITEM_AMMO:HA_ITEM_AMMO_BULLETS]
+[NAME:bullet:bullets]
+[CLASS:BULLET]
+[SIZE:250]
+[ATTACK:BLUNT:5:5000:strike:strikes:NO_SUB:2500]
+	[ATTACK_PREPARE_AND_RECOVER:3:3]

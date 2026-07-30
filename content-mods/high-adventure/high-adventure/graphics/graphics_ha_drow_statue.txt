@@ -1,0 +1,6 @@
+graphics_ha_drow_statue
+
+[OBJECT:GRAPHICS]
+
+[STATUE_CREATURE_GRAPHICS:HA_DROW]
+        [DEFAULT:HA_DROW_STATUES:0:0:0:1]

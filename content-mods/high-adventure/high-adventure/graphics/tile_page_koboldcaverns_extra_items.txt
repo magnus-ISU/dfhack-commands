@@ -1,0 +1,8 @@
+tile_page_koboldcaverns_extra_items
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_EXTRA_WEAPONS]
+	[FILE:images/koboldcaverns/koboldcaverns_extra_weapons.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:512]

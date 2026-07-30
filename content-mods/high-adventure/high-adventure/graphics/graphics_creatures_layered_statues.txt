@@ -1,0 +1,6 @@
+graphics_creatures_layered_statues
+
+[OBJECT:GRAPHICS]
+
+[STATUE_CREATURE_GRAPHICS:HA_KOBOLD]
+        [DEFAULT:HA_CUTEKOBOLD_STATUES_LAYERED:0:8:0:9]

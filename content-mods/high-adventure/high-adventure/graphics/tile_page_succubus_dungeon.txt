@@ -1,0 +1,133 @@
+tile_page_succubus_dungeon
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_SUCCUBUS_SHADOW]
+	[FILE:succubus_dungeon/succubus_shadow.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_SUCCUBUS_BODY]
+	[FILE:succubus_dungeon/succubus_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:320:1152]
+
+[TILE_PAGE:HA_SUCCUBUS_BODY_CORPSE]
+	[FILE:succubus_dungeon/succubus_body_corpse.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:352]
+
+[TILE_PAGE:HA_SUCCUBUS_HEAD]
+	[FILE:succubus_dungeon/succubus_head.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:160:1056]
+
+[TILE_PAGE:HA_SUCCUBUS_EYES]
+	[FILE:succubus_dungeon/succubus_eyes.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:96]
+
+[TILE_PAGE:HA_SUCCUBUS_HEAD_FEATURES]
+	[FILE:succubus_dungeon/succubus_head_features.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:224:256]
+
+[TILE_PAGE:HA_SUCCUBUS_HEAD_CORPSE]
+	[FILE:succubus_dungeon/succubus_head_corpse.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:32]
+
+[TILE_PAGE:HA_SUCCUBUS_WINGS]
+	[FILE:succubus_dungeon/succubus_wings.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:1408]
+
+[TILE_PAGE:HA_SUCCUBUS_WIELDABLE_LEFT_EXTRAS]
+	[FILE:succubus_dungeon/succubus_wieldables_left.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:64]
+
+[TILE_PAGE:HA_SUCCUBUS_WIELDABLE_RIGHT_EXTRAS]
+	[FILE:succubus_dungeon/succubus_wieldables_right.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:864:64]
+
+[TILE_PAGE:HA_SUCCUBUS_CLOTHING_EXTRAS]
+	[FILE:succubus_dungeon/succubus_clothing.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:288]
+
+[TILE_PAGE:HA_SUCCUBUS_BABY]
+	[FILE:succubus_dungeon/succubus_baby.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_SUCCUBUS_ARMOR_EXTRAS]
+	[FILE:succubus_dungeon/succubus_armor.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:64:64]
+
+[TILE_PAGE:HA_SUCCUBUS_POWERS]
+	[FILE:succubus_dungeon/power-effect.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:128:96]
+
+[TILE_PAGE:HA_SUCCUBUS_STATUE]
+	[FILE:succubus_dungeon/succubus_statues.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:64:64]
+
+[TILE_PAGE:HA_SUCCUBUS_PETS]
+	[FILE:succubus_dungeon/pets.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:128]
+
+[TILE_PAGE:HA_SUCCUBUS_PETS_LARGE]
+	[FILE:succubus_dungeon/pets_large.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:416:256]
+
+[TILE_PAGE:HA_SUCCUBUS_PETS_TALL]
+	[FILE:succubus_dungeon/pets_tall.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:64]
+
+[TILE_PAGE:HA_SUCCUBUS_PETS_STATUE]
+	[FILE:succubus_dungeon/pets_statues.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:640]
+
+[TILE_PAGE:HA_SUCCUBUS_WORKSHOPS_ICONS]
+	[FILE:succubus_dungeon/workshops_icons.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:192:32]
+
+[TILE_PAGE:HA_SUCCUBUS_WORKSHOPS_3x3]
+	[FILE:succubus_dungeon/workshops_3x3.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:768:512]
+
+[TILE_PAGE:HA_SUCCUBUS_WORKSHOPS_3x4]
+	[FILE:succubus_dungeon/workshops_3x4.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:768:160]
+
+[TILE_PAGE:HA_SUCCUBUS_WORKSHOPS_5x5]
+	[FILE:succubus_dungeon/workshops_5x5.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:1120:192]
+
+[TILE_PAGE:HA_SUCCUBUS_ITEMS]
+	[FILE:succubus_dungeon/items.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:128:160]
+
+[TILE_PAGE:HA_SUCCUBUS_UPRIGHT]
+	[FILE:succubus_dungeon/upright.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:320:64]
+
+[TILE_PAGE:HA_SUCCUBUS_PLANT]
+	[FILE:succubus_dungeon/plant.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:384:32]

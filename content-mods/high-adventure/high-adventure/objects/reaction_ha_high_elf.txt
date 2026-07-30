@@ -1,0 +1,71 @@
+reaction_ha_high_elf
+
+[OBJECT:REACTION]
+
+High elf reactions -- fully self-contained (own HA_HE_SHAPING_TREE building and
+own HA_HE_GROWN wood material; no dependency on HA_playable_civs).
+
+Wood-growing (high elves never cut trees): grow wood/feather wood from seeds at
+the Shaping Tree, and make wooden mechanisms at the Craftsdwarf's. Unpaced (no
+"wither" cooldown) -- gated only by seed/wood supply.
+
+[REACTION:HA_HE_GROW_WOOD]
+	[NAME:grow wood from seed]
+	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_W]
+	[REAGENT:A:1:SEEDS:NONE:NONE:NONE][UNROTTEN]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:HA_HE_GROWN:WOOD]
+	[SKILL:EXTRACT_STRAND]
+
+[REACTION:HA_HE_GROW_FEATHER]
+	[NAME:grow feather tree wood from good seed]
+	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_F]
+	[REAGENT:A:1:SEEDS:NONE:PLANT_MAT:BERRY_SUN:SEED][UNROTTEN]
+	[PRODUCT:100:1:WOOD:NONE:PLANT_MAT:HA_HE_FEATHER:WOOD]
+	[SKILL:EXTRACT_STRAND]
+
+[REACTION:HA_HE_MAKE_WOODEN_MECHANISMS]
+	[NAME:make wooden mechanisms]
+	[BUILDING:CRAFTSMAN:CUSTOM_SHIFT_K]
+	[REAGENT:A:1:WOOD:NONE:NONE:NONE]
+	[PRODUCT:100:1:TRAPPARTS:NONE:GET_MATERIAL_FROM_REAGENT:A:NONE]
+	[SKILL:WOODCRAFT]
+
+CATCH STARLIGHT (Shaping Tree): 1 plant thread + 1 silk thread -> 1 twinkling
+strand (THREAD of HA_TWINKLING_METAL). Weave at a loom into twinkling cloth ->
+clothes (vanilla adamantine path -- VERIFY the loom accepts a custom thread-metal
+in-game), or forge into a bar below. Strand dimension 15000 = 1 bar / 1 cloth.
+
+NOTE: the twinkling strand is NOT a native PRODUCT here. DF hardcodes a fuel
+requirement onto any reaction that outputs a *metal* item (twinkling metal is a
+METAL_TEMPLATE inorganic), even at a fuel-less custom workshop. To keep starlight-
+catching fuel-free, this reaction only consumes its reagents; the high-elves.lua
+script hooks HA_CATCH_STARLIGHT and mints the dimension-15000 twinkling THREAD itself.
+
+NEVER write a raw token in square brackets anywhere in these comments: DF's parser
+scans for an opening bracket on every line, comment or not, and applies what it finds
+to the reaction that is currently open. A stray bracketed FUEL token in the prose
+below this block is exactly what put a fuel cost on catch starlight.
+
+[REACTION:HA_CATCH_STARLIGHT]
+	[NAME:catch starlight]
+	[BUILDING:HA_HE_SHAPING_TREE:CUSTOM_S]
+	[REAGENT:plant thread:1:THREAD:NO_SUBTYPE:NONE:NONE]
+		[ANY_PLANT_MATERIAL]
+		[UNROTTEN]
+	[REAGENT:silk thread:1:THREAD:NO_SUBTYPE:NONE:NONE]
+		[ANY_SILK_MATERIAL]
+		[UNROTTEN]
+	[SKILL:EXTRACT_STRAND]
+
+FORGE TWINKLING BAR: 1 strand + 1 silver bar + fuel -> 1 twinkling metal bar.
+Its fuel token is free at a magma smelter, and costs coke at a normal one.
+
+[REACTION:HA_FORGE_TWINKLING_BAR]
+	[NAME:forge twinkling metal bar]
+	[BUILDING:SMELTER:CUSTOM_SHIFT_T]
+	[REAGENT:strands:15000:THREAD:NO_SUBTYPE:METAL:HA_TWINKLING_METAL]
+	[REAGENT:silver:150:BAR:NO_SUBTYPE:METAL:SILVER]
+	[PRODUCT:100:1:BAR:NO_SUBTYPE:METAL:HA_TWINKLING_METAL]
+		[PRODUCT_DIMENSION:150]
+	[FUEL]
+	[SKILL:SMELT]

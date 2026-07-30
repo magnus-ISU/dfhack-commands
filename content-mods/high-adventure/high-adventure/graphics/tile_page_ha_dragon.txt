@@ -1,0 +1,8 @@
+tile_page_ha_dragon
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_ANCIENT_DRAGONS]
+	[FILE:images/dragon/ha_ancient_dragons.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:1344:960]

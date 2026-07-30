@@ -1,0 +1,26 @@
+graphics_ha_drider
+
+[OBJECT:GRAPHICS]
+
+Drider: the drow spider-caste 3x2 sprite. It MUST be a LAYERED graphic
+(LAYER_SET + LAYER), NOT a simple a plain DEFAULT layer with LARGE_IMAGE. DF renders a
+creature in grayscale whenever the game flashes it (status/legendary indicator)
+or it is underwater/underworld -- but creatures drawn with LAYERED graphics are
+EXEMPT and stay in colour. A simple large sprite is not exempt, so it flickered
+gray<->colour every flash. One unconditioned body layer over the pre-coloured
+3x2 image is all that's needed. Large portraits fall through to the drow file.
+
+Deliberately NO item layers (no CONDITION_ITEM_WORN / WIELD): worn clothing,
+armor and weapons are only drawn where the graphic defines a layer for them, so
+with none here nothing gets overlaid on the drider's spider body. Do NOT add
+humanoid item layers -- they would land at random spots on the 3x2 sprite. (The
+base HA_DROW item layers are all gated to the FEMALE/MALE castes and never match
+a DRIDER-caste unit anyway.)
+
+[CREATURE_CASTE_GRAPHICS:HA_DROW:DRIDER]
+	[LIST_ICON:HA_DRIDER32:0:0]
+	[CORPSE:HA_DRIDER_DEAD:0:0:AS_IS]
+	[LAYER_SET:DEFAULT]
+		[LAYER_GROUP]
+		[LAYER:BODY:HA_DRIDER64:LARGE_IMAGE:0:0:2:1]
+		[END_LAYER_GROUP]

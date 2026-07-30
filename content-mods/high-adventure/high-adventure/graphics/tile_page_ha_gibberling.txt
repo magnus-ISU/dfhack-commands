@@ -1,0 +1,23 @@
+tile_page_ha_gibberling
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_GIBBERLING_BODY]
+	[FILE:images/gibberling_body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:288:224]
+
+[TILE_PAGE:HA_GIBBERLING_PORTRAIT_BODY]
+	[FILE:images/gibberling_portrait_body.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:1632:576]
+
+[TILE_PAGE:HA_GIBBERLING_PORTRAIT_CHILD_BODY]
+	[FILE:images/gibberling_portrait_child_body.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:960:576]
+
+[TILE_PAGE:HA_GIBBERLING_PORTRAIT_BABY]
+	[FILE:images/gibberling_portrait_baby.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:192:96]

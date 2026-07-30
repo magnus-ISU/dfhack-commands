@@ -1,0 +1,18 @@
+tile_page_ha_drider
+
+[OBJECT:TILE_PAGE]
+
+[TILE_PAGE:HA_DRIDER64]
+	[FILE:images/drider-96x64.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:64]
+
+[TILE_PAGE:HA_DRIDER32]
+	[FILE:images/drider-32x32.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_DRIDER_DEAD]
+	[FILE:images/drider-dead-32x32.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]

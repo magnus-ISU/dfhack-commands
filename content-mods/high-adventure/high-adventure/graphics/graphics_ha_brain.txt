@@ -1,0 +1,8 @@
+graphics_ha_brain
+
+[OBJECT:GRAPHICS]
+
+Preserved ulitharid brain tool: reuse the vanilla body-part brain sprite. BODYPARTS is a
+global vanilla tile page (images/bodyparts.png), so we reference it by ID and ship no art;
+0:13 is the brain tile (same cell vanilla uses for BODYPART_BRAIN).
+[TOOL_GRAPHICS:BODYPARTS:0:13:ITEM_TOOL_HA_UR_BRAIN]
