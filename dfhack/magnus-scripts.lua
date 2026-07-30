@@ -109,11 +109,17 @@ if not dfhack.world.isFortressMode() then
         if ({...})[1] == 'disable' then
             atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
+            atry('stop adv/fear-no-goblin', function() dfhack.run_script('adv/fear-no-goblin', 'stop') end)
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
             atry('adv/im-sure (auto-dismiss "can\'t act" prompt; auto-path + finish confirms)',
                 function() dfhack.run_script('adv/im-sure') end)
+            -- presents every dark fortress as a town so fast travel works in, out
+            -- of and through goblin pits; lifts the patch whenever a save screen
+            -- is up, and keeps a stash so a crash mid-session is recoverable
+            atry('adv/fear-no-goblin (fast travel in/out/through goblin dark pits)',
+                function() dfhack.run_script('adv/fear-no-goblin') end)
             -- unit-sheet description + kills + weight/volume panel; registered for
             -- dungeonmode too, so make sure it is loaded and switched on here
             atry('creature-description overlay (unit sheet info panel)', function()
