@@ -165,19 +165,18 @@ behind each block.
 	[LIKES_SITE:CITY]
 	[TOLERATES_SITE:CITY]
 	[START_BIOME:ANY_FOREST]
-	EXPERIMENT (worldgen balance): a 10:1 pull toward ocean. Territory spreads over
-	water the civ cannot actually build on, so most of its expansion budget is spent
-	at sea and few outlying settlements get founded. The start biome stays first, which
-	is required for any settlement past the first to be founded at all.
-	[BIOME_SUPPORT:ANY_FOREST:1]
-	[BIOME_SUPPORT:ANY_OCEAN:10]
+	[BIOME_SUPPORT:ANY_FOREST:2]
 	[BIOME_SUPPORT:ANY_TEMPERATE:1]
 	[BIOME_SUPPORT:ANY_LAKE:1]
 	[BIOME_SUPPORT:ANY_RIVER:1]
-	[SETTLEMENT_BIOME:ANY_LAND]
+	High elves settle woodland, scrub and mountains -- NOT ANY_LAND. They were the only
+	civ in the world with ANY_LAND, and reached 373 sites and 76,302 population with it.
+	[SETTLEMENT_BIOME:ANY_FOREST]
+	[SETTLEMENT_BIOME:ANY_SHRUBLAND]
+	[SETTLEMENT_BIOME:MOUNTAIN]
 	tiny, reclusive people: a single small castle's worth
 	[MAX_STARTING_CIV_NUMBER:10]
-	[MAX_POP_NUMBER:120]
+	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:120]
 	[RELIGION:REGIONAL_FORCE]
 	[SCHOLAR:PHILOSOPHER]

@@ -197,6 +197,24 @@ local function open_creation()
     return region_screen() ~= nil
 end
 
+-- Copy a value out of the available-mod list rather than aliasing it.
+--
+-- This matters a great deal. The string vectors hold POINTERS, so inserting `src[i]`
+-- straight into the load order puts the *same* std::string into two vectors. DF then
+-- shows the mod as both available and selected, and on teardown frees it twice -- which
+-- is the `free(): invalid pointer` abort that killed several sessions at export_region.
+-- Allocate a fresh string and give DF sole ownership of it.
+local function copy_entry(v)
+    if type(v) ~= 'userdata' then return v end        -- ints copy by value
+    local ok, n = pcall(function()
+        local x = df.new('string')
+        x.value = v.value
+        return x
+    end)
+    if ok and n then return n end
+    return str(v)                                     -- fall back to a plain Lua string
+end
+
 local function apply_mods(mode)
     if mode == 'none' then print('mods: leaving the load order alone'); return end
     local vs = region_screen()
@@ -210,7 +228,7 @@ local function apply_mods(mode)
         elseif not have[id] then
             for _, f in ipairs(MOD_FIELDS) do
                 local s, d = vs['available_' .. f], vs['object_load_order_' .. f]
-                if s and d then d:insert('#', s[i]) end
+                if s and d then d:insert('#', copy_entry(s[i])) end
             end
             have[id] = true
             added[#added + 1] = id
