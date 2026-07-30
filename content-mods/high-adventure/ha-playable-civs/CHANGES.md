@@ -1,5 +1,13 @@
 # ha-playable-civs — fork changelog
 
+## v0.10 — docs corrected: kobolds are not fort-playable
+- Replaced README.txt (which was still the upstream mod's kobold-raw modding
+  tutorial and implied kobold play) with an accurate description of the fork,
+  and fixed the info.txt DESCRIPTION that still claimed kobolds were playable
+  in fortress mode. Kobold fort play was removed in v0.6 (broken livestock
+  citizens); ha-kobolds supplies the real kobold civ. Kobold adventure-mode
+  outsiders remain playable. Docs only — no raw changes.
+
 ## v0.9a — shaping tree art rebuilt on the real 5x6 grid
 - Same sprite and the same fix as ha-high-elves 0.11a, keyed to `HA_SHAPING_TREE` /
   `HA_SHAPING_TREE_PAGE`: DF gives a 5x5 workshop a 5 x (DIM_Y+1) = 5x6 art grid whose
