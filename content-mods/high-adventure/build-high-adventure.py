@@ -20,8 +20,12 @@ ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'high-adventure'
 MOD_ID = 'HIGH_ADVENTURE'
 NAME = 'High Adventure'
-NUMERIC_VERSION = 1
-DISPLAYED_VERSION = '0.1'
+# Bump these whenever a member mod bumps. DF keys its per-world snapshot by
+# "<MOD_ID> (numeric_version)", so leaving this pinned makes DF keep reusing the
+# old snapshot -- the mod picker then shows a stale bundle description listing
+# member versions that no longer match what mods/ actually contains.
+NUMERIC_VERSION = 2
+DISPLAYED_VERSION = '0.2'
 
 # raw definition tokens that must be globally unique, per [OBJECT:x] file type
 DEF_TOKENS = {
