@@ -40,6 +40,9 @@ Activates the "always-on" helpers in this pack:
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
     * plan-tile                 (overlay: left-drag during building placement -> tile a grid of it)
+    * hide-tutorials            (stock tool: suppresses the tutorial popups; covers
+                                 ADVENTURE popups too, so the adventure-mode branch
+                                 enables it as well)
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
@@ -49,8 +52,7 @@ interpolates creature sprites between tiles -- source is the
 other-authors/df-smooth-movement submodule, binary in DFHack's hack/plugins),
 and enable a batch of stock DFHack tools:
     enable: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
-            `name+` burrows), hide-tutorials, prioritize, seedwatch, suspendmanager,
-            timestream
+            `name+` burrows), prioritize, seedwatch, suspendmanager, timestream
     tweak:  fast-heat, realistic-melting
 It also applies autobutcher EMBARK PROTECTION once per fort: any animal you
 arrive with in numbers above autobutcher's target for its category (e.g. 9
@@ -111,6 +113,7 @@ if not dfhack.world.isFortressMode() then
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
             atry('stop adv/fear-no-goblin', function() dfhack.run_script('adv/fear-no-goblin', 'stop') end)
             atry('stop adv/autosave', function() dfhack.run_script('adv/autosave', 'stop') end)
+            atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
@@ -121,14 +124,19 @@ if not dfhack.world.isFortressMode() then
             -- is up, and keeps a stash so a crash mid-session is recoverable
             atry('adv/fear-no-goblin (fast travel in/out/through goblin dark pits)',
                 function() dfhack.run_script('adv/fear-no-goblin') end)
+            -- hide-tutorials handles ADVENTURE_POPUP_* too, not just fortress popups
+            atry('hide-tutorials (suppress adventure tutorial popups)',
+                function() dfhack.run_command('enable', 'hide-tutorials') end)
             -- unit-sheet description + kills + weight/volume panel; registered for
             -- dungeonmode too, so make sure it is loaded and switched on here
             atry('creature-description overlay (unit sheet info panel)', function()
                 dfhack.run_script('creature-description')
                 dfhack.run_command('overlay', 'enable', 'creature-description.desc')
             end)
-            -- periodic native save + refreshed "adventure-autosave" backup folder
-            atry('adv/autosave (save + refresh "adventure-autosave", default 20 min)',
+            -- adventure mode cannot be saved programmatically (see the script's
+            -- header): this reminds you every 20 min and then handles the naming,
+            -- overwrite prompt and the triple-Escape when you start the save
+            atry('adv/autosave (save reminders + automatic save-dialog handling)',
                 function() dfhack.run_script('adv/autosave') end)
         end
     end
@@ -179,6 +187,7 @@ if ({...})[1] == 'disable' then
     try('disable auto-elf-chop', function() dfhack.run_command('disable', 'auto-elf-chop') end)
     try('disable tarrasque', function() dfhack.run_command('disable', 'tarrasque') end)
     try('disable caravan-unstick', function() dfhack.run_command('disable', 'caravan-unstick') end)
+    try('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
@@ -235,6 +244,9 @@ try('military-labor (daily-sync the Military work detail)', function() dfhack.ru
 try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'auto-tomb') end)
 try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'auto-elf-chop') end)
 try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'caravan-unstick') end)
+-- stock DFHack tool, but always-on rather than `lovely`-only: it also covers ADVENTURE
+-- popups (it keys off an ADVENTURE_POPUP_ prefix), so the adventure branch enables it too
+try('hide-tutorials (suppress fort AND adventure tutorial popups)', function() dfhack.run_command('enable', 'hide-tutorials') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
@@ -358,8 +370,10 @@ if lovely then
     -- `inside+`) expand into adjacent tiles as they're dug out. inside-burrow only
     -- enables it when it seeds -- enable it here unconditionally so manually-made
     -- `name+` burrows grow too.
+    -- hide-tutorials is NOT in this list: it moved to the always-on set above, so
+    -- plain `magnus-scripts` gets it (and so does the adventure branch).
     for _, c in ipairs({'autoclothing', 'autonestbox', 'autotraining', 'burrow',
-                        'hide-tutorials', 'prioritize', 'seedwatch', 'suspendmanager',
+                        'prioritize', 'seedwatch', 'suspendmanager',
                         'timestream'}) do enable_tool(c) end
     for _, c in ipairs({'fast-heat', 'realistic-melting'}) do tweak_tool(c) end
 end

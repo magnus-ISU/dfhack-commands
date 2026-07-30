@@ -1,68 +1,65 @@
--- Adventure mode: periodically save the game to an "adventure-autosave" folder.
+-- Adventure mode: reminds you to save, then does all the fiddly parts for you.
 --@module = true
 --[[
 adv/autosave
 
-Adventure mode has no save command, so this drives DF's own manual-save code
-path every N minutes (default 20). It is pure data + two fed keys -- no mouse
-clicks, no external tools:
+Adventure mode cannot be saved programmatically -- see "Why not fully automatic"
+below. What this does instead, every N minutes (default 20):
 
-    1. feed OPTIONS                     -> the escape menu opens
-    2. options.entering_manual_str = "adventure-autosave"   (the folder name)
-       options.do_manual_save = true, manual_save_timer = 5 -> DF saves
-    3. wait for options.saver.stage to come back to 51      (save finished)
-    4. clear entering_manual_folder / confirm_manual_overwrite, feed LEAVESCREEN
+  * reminds you that a save is due (announcement + a line in the log), and
+  * as soon as you start one (Esc -> "Save and continue playing"), takes over:
+    names the folder `adventure-autosave`, answers the "overwrite?" prompt,
+    waits for the write to actually finish, and closes the menus afterwards.
 
-Notes from working this out live against DF 53.15:
+So a save costs you one keypress and one click; everything error-prone is
+handled. In particular it fixes the "now press Escape three times" trap at the
+end, because DF re-opens the name prompt when the save completes.
 
-* `plotinfo.main.autosave_request` (what `quicksave` uses in fortress mode) is
-  never consumed by the adventure loop, and `do_manual_save` is only processed
-  while the escape menu is OPEN -- hence step 1.
-* Setting `do_manual_save` directly skips the name prompt AND the
-  "folder already exists, overwrite?" prompt, so nothing has to be clicked.
-  That matters because those buttons are hover-driven: a fed `_MOUSE_L` lands
-  wherever the real pointer happens to be, and can activate the wrong one.
-* DF re-opens the name prompt when the save finishes, and a fed `LEAVESCREEN`
-  does NOT reach a text-entry dialog -- that is the "press Escape three times"
-  trap. Clearing the two prompt flags first makes one fed Escape close the menu.
-* **Completion is read from the game, never from disk**: `options.saver.stage`
-  dips below 51 while DF writes and returns to 51 when the save is done. (Under
-  Steam the script's idea of the save path is redirected, so file timestamps
-  cannot be trusted anyway.)
-* **The name/overwrite prompt flags are NOT completion signals.** DF raises them
-  as part of starting the save. An early version treated them as "done", cleared
-  `do_manual_save` and escaped the menu, which cancelled the save after all 1925
-  data files but before `world.sav` -- a folder DF then refuses to list. Nothing
-  is touched until the stage counter says the write finished.
-* Frame timers freeze while the menu is up, so a timer loop AND an overlay
-  watchdog both step the machine.
+Why not fully automatic (all verified live against DF 53.15):
 
-A cycle only starts from a calm `dungeonmode/Default` frame, so it never
-interrupts combat prompts, menus or fast travel.
+  * `plotinfo.main.autosave_request` -- what `quicksave` uses in fortress mode --
+    is never consumed by the adventure loop.
+  * `main_interface.options.do_manual_save` IS how the save gets triggered, but
+    DF only consumes it from inside the manual-save flow that the
+    "Save and continue playing" button starts. Setting it at the top-level menu
+    does nothing; faking `entering_manual_folder` does not enter the flow either
+    (DF just closes the menu).
+  * That button cannot be activated without a real mouse: the menu has no
+    keyboard cursor (every row renders unhighlighted, and there is no selection
+    field on the struct -- unlike `viewscreen_titlest.sel_menu_line`), and a fed
+    `_MOUSE_L` clicks wherever the REAL pointer is, since these widgets ignore
+    `gps.mouse_x/y`. Shelling out to move the pointer is not an option: DFHack's
+    lua sandbox has no `os.execute`/`io.popen`, and it would be the wrong layer.
+  * DF's own autosave (`game.autosave_cycle`, values from `df.d_init_autosave`:
+    NONE/SEASONAL/YEARLY/SEMIANNUAL) is game-time based, so it cannot give a
+    wall-clock interval -- but setting it to SEASONAL is a decent extra net.
 
-HEADS UP: a manual save makes that folder DF's active save, so after the first
-autosave the game continues in (and later saves to) "adventure-autosave"; the
-folder you started from is left untouched at its last save.
+What IS proven and used here: the name is written straight into
+`options.entering_manual_str` (typing cannot be fed), a fed `SELECT` accepts it,
+clearing `confirm_manual_overwrite` while setting `do_manual_save` +
+`manual_save_timer` inside the flow performs the save, completion is read from
+`options.saver.stage` returning to 51 (never from disk -- Steam redirects the
+path DF reports), and clearing the two prompt flags lets one fed `LEAVESCREEN`
+close the menu.
 
-    adv/autosave           start with the current interval (default 20 min)
-    adv/autosave 15        start, saving every 15 minutes
-    adv/autosave now       run a save cycle immediately
-    adv/autosave cleanup   clear a stuck save dialog / close the options menu
+    adv/autosave           start; remind every 20 minutes
+    adv/autosave 15        remind every 15 minutes
+    adv/autosave remind    remind right now
     adv/autosave stop      stop
-    adv/autosave status    running? interval? saves so far? last result?
+    adv/autosave status    running? interval? saves assisted? last result?
 ]]
 
 local overlay = require('plugins.overlay')
 
 running = running or false
 interval_min = interval_min or 20
-next_at = next_at or 0
+next_remind = next_remind or 0
 saves_done = saves_done or 0
 last_result = last_result or 'none yet'
 
-local SAVE_NAME    = 'adventure-autosave'
-local SAVER_DONE   = 51    -- options.saver.stage once a save has completed
-local SAVE_TIMEOUT = 600   -- seconds a single save may take before we give up
+local SAVE_NAME  = 'adventure-autosave'
+local SAVER_DONE = 51     -- options.saver.stage once a save has completed
+local ASSIST_GIVEUP = 900 -- frames to wait for each step of the flow
 
 local function opts()
     return df.global.game.main_interface.options
@@ -72,7 +69,6 @@ local function feed_key(key)
     require('gui').simulateInput(dfhack.gui.getCurViewscreen(true), key)
 end
 
--- the two prompt flags that make a fed LEAVESCREEN bounce off the menu
 local function clear_prompts()
     local o = opts()
     o.entering_manual_folder = false
@@ -84,21 +80,17 @@ local function announce(msg, color)
     pcall(dfhack.gui.showAnnouncement, 'adv/autosave: ' .. msg, color or COLOR_GREEN)
 end
 
--- ---- state machine -------------------------------------------------------------
+-- ---- assist state machine ------------------------------------------------------
 
-local state, st_frames, st_started = 'idle', 0, 0
-local saw_progress, failure, esc_tries = false, nil, 0
-local failure_safe = true    -- false => a save may still be writing: touch NOTHING
+local state, st_frames = 'watch', 0
+local saw_progress, esc_tries = false, 0
 
 local function enter(s)
-    state, st_frames, st_started = s, 0, os.time()
+    state, st_frames = s, 0
 end
 
--- `safe` must be false whenever a save may be in flight, so the cleanup path
--- does not yank do_manual_save out from under DF mid-write
-local function fail(why, safe)
-    failure, failure_safe = why, safe ~= false
-    enter('done')
+local function schedule()
+    next_remind = os.time() + interval_min * 60
 end
 
 local function step()
@@ -106,83 +98,82 @@ local function step()
     st_frames = st_frames + 1
     local o = opts()
 
-    if state == 'idle' then
-        if os.time() < next_at or not dfhack.isMapLoaded() then return end
+    if state == 'watch' then
+        -- you started a save: DF is asking for the folder name
+        if o.entering_manual_folder then
+            saw_progress, esc_tries = false, 0
+            o.entering_manual_str = SAVE_NAME
+            feed_key('SELECT')
+            enter('confirm')
+            return
+        end
+        -- otherwise just handle the reminder
+        if os.time() < next_remind or not dfhack.isMapLoaded() then return end
         local focus = dfhack.gui.getCurFocus(true)
         if #focus ~= 1 or focus[1] ~= 'dungeonmode/Default' then return end
-        if o.open or not dfhack.world.getAdventurer() then return end
-        saw_progress, failure, esc_tries = false, nil, 0
-        feed_key('OPTIONS')
-        enter('arm')
+        announce(('save due -- press Esc then "Save and continue playing"'
+            .. ' and I will name it "%s" and clean up'):format(SAVE_NAME), COLOR_YELLOW)
+        schedule()
 
-    elseif state == 'arm' then
-        if o.open then
-            -- name the save, then hand DF the same request its own menu makes
+    elseif state == 'confirm' then
+        if st_frames < 10 then return end
+        if o.confirm_manual_overwrite then
+            -- inside the flow, this both answers the prompt and starts the save
             clear_prompts()
             o.entering_manual_str = SAVE_NAME
             o.do_manual_save = true
             o.manual_save_timer = 5
             enter('saving')
-        elseif st_frames > 180 then
-            fail('escape menu never opened')
+        elseif o.saver.stage < SAVER_DONE then
+            enter('saving')                      -- fresh name, saving already
+        elseif not o.open then
+            last_result = 'you left the save menu'
+            enter('watch')
+        elseif st_frames > ASSIST_GIVEUP then
+            last_result = 'could not answer the overwrite prompt'
+            announce('could not finish the save -- do it by hand', COLOR_LIGHTRED)
+            enter('watch')
         end
 
     elseif state == 'saving' then
-        -- The ONLY completion signal is the stage counter: it dips below
-        -- SAVER_DONE while DF writes and returns to it when the save is complete.
-        -- DF also raises the name/overwrite prompt as part of STARTING the save,
-        -- so those flags must NOT be read as "finished" -- doing that cancelled
-        -- saves after the 1925 data files but before world.sav (the 56MB state
-        -- file), leaving a folder DF refuses to list. Just clear the prompt and
-        -- keep waiting.
+        -- The stage counter is the ONLY completion signal: it dips below 51 while
+        -- DF writes and returns to 51 when done. The name/overwrite prompts are
+        -- raised as part of STARTING a save, so treating them as "finished" is
+        -- what once cancelled a save after all 1925 data files but before
+        -- world.sav, leaving a folder DF refused to list. Clear and ignore them.
         if o.entering_manual_folder or o.confirm_manual_overwrite then clear_prompts() end
         local stage = o.saver.stage
         if stage < SAVER_DONE then saw_progress = true end
         if saw_progress and stage >= SAVER_DONE then
-            enter('done')                      -- now it is safe to touch flags
-        elseif not saw_progress and st_frames > 600 then
-            -- request never consumed; nothing has been written, so cleanup is safe
-            fail('DF never started the save', true)
-        elseif saw_progress and os.time() - st_started > SAVE_TIMEOUT then
-            -- a write may still be in progress: report but do not interfere
-            fail('save still unfinished after ' .. SAVE_TIMEOUT .. 's', false)
+            enter('finish')
+        elseif not saw_progress and st_frames > ASSIST_GIVEUP then
+            last_result = 'DF never started the save'
+            announce('the save never started -- do it by hand', COLOR_LIGHTRED)
+            enter('watch')
         end
 
-    elseif state == 'done' then
-        if failure and not failure_safe then
-            -- a save might still be writing: leave every flag and the menu alone
-            last_result = 'failed: ' .. failure
-            next_at = os.time() + 60
-            announce('save may still be writing (' .. failure
-                .. ') -- left it alone; check the menu', COLOR_LIGHTRED)
-            enter('idle')
-            return
-        end
-        -- clear the post-save re-prompt, then one Escape closes the menu
+    elseif state == 'finish' then
+        -- safe now: the write is complete
         clear_prompts()
         o.do_manual_save = false
         o.manual_save_timer = 0
         if not o.open then
-            if failure then
-                last_result = 'failed: ' .. failure
-                next_at = os.time() + 60
-                announce('save failed (' .. failure .. ') -- retrying in a minute', COLOR_LIGHTRED)
-            else
-                saves_done = saves_done + 1
-                last_result = 'saved ' .. os.date('%H:%M')
-                next_at = os.time() + interval_min * 60
-                announce(('saved to "%s" (next in %d min)'):format(SAVE_NAME, interval_min))
-            end
-            enter('idle')
+            saves_done = saves_done + 1
+            last_result = 'saved to ' .. SAVE_NAME .. ' at ' .. os.date('%H:%M')
+            schedule()
+            announce(('saved to "%s" -- next reminder in %d min')
+                :format(SAVE_NAME, interval_min))
+            enter('watch')
             return
         end
-        if st_frames % 15 ~= 0 then return end    -- one Escape every ~15 frames
+        if st_frames % 15 ~= 0 then return end
         esc_tries = esc_tries + 1
         if esc_tries > 8 then
-            last_result = 'saved, but the menu stayed open -- press Esc'
-            next_at = os.time() + interval_min * 60
+            saves_done = saves_done + 1
+            last_result = 'saved, but the menu stayed open'
+            schedule()
             announce('saved, but I could not close the menu -- press Esc', COLOR_YELLOW)
-            enter('idle')
+            enter('watch')
             return
         end
         feed_key('LEAVESCREEN')
@@ -190,8 +181,9 @@ local function step()
 end
 
 -- ---- drivers -------------------------------------------------------------------
--- The timer loop runs between frames, where fed keys land reliably; the overlay
--- watchdog covers the stretches where an open menu freezes frame timers.
+-- The timer loop runs between frames, where fed keys land; the overlay watchdog
+-- covers the stretches where an open menu freezes frame timers (which is exactly
+-- when the save dialogs are up).
 
 gen = gen or 0
 local last_step = 0
@@ -210,7 +202,7 @@ end
 
 AutosaveOverlay = defclass(AutosaveOverlay, overlay.OverlayWidget)
 AutosaveOverlay.ATTRS{
-    desc = 'Watchdog for adv/autosave: periodic adventure-mode save.',
+    desc = 'Drives adv/autosave: save reminders + automatic save-dialog handling.',
     default_enabled = true,
     viewscreens = 'dungeonmode',
     overlay_onupdate_max_freq_seconds = 0,
@@ -232,15 +224,6 @@ function stop()
     gen = gen + 1
 end
 
--- exported: get out of a half-open save dialog / options menu
-function cleanup()
-    clear_prompts()
-    local o = opts()
-    o.do_manual_save = false
-    o.manual_save_timer = 0
-    if o.open then feed_key('LEAVESCREEN') end
-end
-
 if dfhack_flags.module then return end
 
 if not dfhack.world.isAdventureMode() then
@@ -252,26 +235,23 @@ if arg == 'stop' then
     stop()
     print('adv/autosave: stopped.')
 elseif arg == 'status' then
-    print(('adv/autosave: %s | every %d min | %d saved | state %s | next in %s | last: %s')
+    print(('adv/autosave: %s | remind every %d min | %d assisted | state %s | next in %s | last: %s')
         :format(running and 'RUNNING' or 'stopped', interval_min, saves_done, state,
-            running and (math.max(0, next_at - os.time()) .. 's') or 'n/a', last_result))
-elseif arg == 'cleanup' then
-    cleanup()
-    print('adv/autosave: cleared save prompts and closed the menu.')
-elseif arg == 'now' then
+            running and (math.max(0, next_remind - os.time()) .. 's') or 'n/a', last_result))
+elseif arg == 'remind' then
     running = true
-    next_at = 0
+    next_remind = 0
     overlay.rescan()
     start_loop()
-    print('adv/autosave: saving on the next calm frame.')
+    print('adv/autosave: reminding on the next calm frame.')
 else
     local mins = tonumber(arg)
-    if arg and not mins then qerror('usage: adv/autosave [minutes|now|cleanup|stop|status]') end
+    if arg and not mins then qerror('usage: adv/autosave [minutes|remind|stop|status]') end
     if mins and mins > 0 then interval_min = math.floor(mins) end
     running = true
-    next_at = os.time() + interval_min * 60
+    schedule()
     overlay.rescan()
     start_loop()
-    print(('adv/autosave: saving every %d min to "%s" (adv/autosave now to test).')
-        :format(interval_min, SAVE_NAME))
+    print(('adv/autosave: reminding every %d min; start a save (Esc -> Save and continue'
+        .. ' playing) and I will name it "%s" and clean up.'):format(interval_min, SAVE_NAME))
 end
