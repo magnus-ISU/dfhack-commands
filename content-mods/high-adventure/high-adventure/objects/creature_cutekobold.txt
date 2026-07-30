@@ -3,7 +3,7 @@ creature_cutekobold
 [OBJECT:CREATURE]
 
 [CREATURE:HA_KOBOLD]
-	[DESCRIPTION:A small, squat humanoid with large pointy ears and yellow glowing eyes.]
+	[DESCRIPTION:A small, cute humanoid with pointy ears and glowing yellow eyes.]
 	[NAME:kobold:kobolds:kobold]
 	[CASTE_NAME:kobold:kobolds:kobold]
 	[CREATURE_TILE:'k'][COLOR:6:0:0]
@@ -427,7 +427,7 @@ creature_cutekobold
 		[NO_PHYS_ATT_RUST]
 		[TRANCES]
 		[EXTRAVISION]
-		[DESCRIPTION:A huge winged creature full of dread majesty, it soars the skies with iron-hard scales immune to any fire.]
+		[DESCRIPTION:A huge winged creature of dread majesty, scaled in iron and untouched by fire.]
 		[PREFSTRING:terrible majesty]
 		[PREFSTRING:iron-hard scales]
 		[BODY_DETAIL_PLAN:STANDARD_MATERIALS]

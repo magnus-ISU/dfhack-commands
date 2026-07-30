@@ -160,7 +160,7 @@ creature_civ_succubus
 	// Common for all castes, specific pure succubi tags are defined at the end
 	[CASTE:FEMALE]
 		[CREATURE_CLASS:HA_SUCCUBUS_FEMALE]
-		[DESCRIPTION:A female hedonistic demon with caprine legs twisted into humanoid form. The succubi are often associated with lust, depravity and fire.]
+		[DESCRIPTION:A hedonistic female creature which plays with hearts and fire.]
 		[FEMALE]
 		[POP_RATIO:90000] // 90%
 		[MULTIPLE_LITTER_RARE]
@@ -196,7 +196,7 @@ creature_civ_succubus
 
 	[CASTE:MALE]
 		[CREATURE_CLASS:HA_SUCCUBUS_MALE]
-		[DESCRIPTION:A male hedonistic demon with caprine legs twisted into humanoid form. The incubi are associated with lust, depravity and fire.]
+		[DESCRIPTION:A hedonistic male creature which plays with hearts and fire.]
 		[MALE]
 		[BODY_DETAIL_PLAN:FACIAL_HAIR_TISSUE_LAYERS]
 

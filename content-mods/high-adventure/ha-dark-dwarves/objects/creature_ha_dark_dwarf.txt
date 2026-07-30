@@ -5,7 +5,7 @@ creature_ha_dark_dwarf
 [CREATURE:HA_DARK_DWARF]
 	[EVIL]
 	[OUTSIDER_CONTROLLABLE]
-	[DESCRIPTION:A short, sturdy creature whose mind is bent wholly on evil. Dark dwarves are carnivorous cannibals with an ironclad loyalty to their own, fond of drink and industry.]
+	[DESCRIPTION:A short, sturdy creature fond of drink and villainy.]
 	[NAME:dark dwarf:dark dwarves:dark dwarven]
 	[CASTE_NAME:dark dwarf:dark dwarves:dark dwarven]
 	[CREATURE_TILE:1][COLOR:3:0:0]

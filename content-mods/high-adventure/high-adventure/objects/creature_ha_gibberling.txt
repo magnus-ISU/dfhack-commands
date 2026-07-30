@@ -10,7 +10,7 @@ Named for the gibberlings that slew the parents of Cacame Awemedinade.
 [OBJECT:CREATURE]
 
 [CREATURE:HA_GIBBERLING]
-	[DESCRIPTION:A small, quick predator plated in blue chitin, with a whipping tail, hooked claws and a mouth of needle teeth. It skitters in gibbering, shrieking packs, tearing living prey apart and devouring the dead where they fall - its own slain kin included. It can learn and it chatters ceaselessly, but its cries are only mad babble.]
+	[DESCRIPTION:A small, gibbering predator plated in blue chitin, which swarms the living and devours the dead, its own kin included.]
 	[NAME:gibberling:gibberlings:gibberling]
 	[CASTE_NAME:gibberling:gibberlings:gibberling]
 	[CREATURE_TILE:'g'][COLOR:1:0:1]

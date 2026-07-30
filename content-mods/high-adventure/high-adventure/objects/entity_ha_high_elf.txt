@@ -183,11 +183,7 @@ behind each block.
 	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:120]
 	[RELIGION:REGIONAL_FORCE]
-	[SCHOLAR:PHILOSOPHER]
-	[SCHOLAR:ASTRONOMER]
-	[SCHOLAR:NATURALIST]
-	[SCHOLAR:MATHEMATICIAN]
-	[SCHOLAR:ENGINEER]
+	[SCHOLAR:ALL]
 
 	--- no trade: no ACTIVE_SEASON means they never send caravans ---
 	(intentionally omitted: the ACTIVE_SEASON token -- never write it bracketed

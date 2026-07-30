@@ -12,7 +12,7 @@ never gets them. Graphics are TODO (reuse elf sprites / workshop art off-blue);
 until then they fall back to this tile.
 
 [CREATURE:HA_HIGH_ELF]
-	[DESCRIPTION:A medium-sized elf-kin of great artifice, who shape starlight into metal and dwell in a few reclusive castles.]
+	[DESCRIPTION:A tall, reclusive elf who cares little for mortals and asks questions of the stars.]
 	[NAME:high elf:high elves:high elven]
 	[CASTE_NAME:high elf:high elves:high elven]
 	[GENERAL_BABY_NAME:high elven baby:high elven babies]
@@ -106,12 +106,14 @@ until then they fall back to this tile.
 	[MENT_ATT_RANGE:KINESTHETIC_SENSE:700:1200:1400:1500:1600:1800:2500]
 	[MENT_ATT_RANGE:EMPATHY:450:950:1150:1250:1350:1550:2250]
 	[MENT_ATT_RANGE:SOCIAL_AWARENESS:450:950:1150:1250:1350:1550:2250]
-	[BODY_SIZE:0:0:3000]
-	[BODY_SIZE:1:168:15000]
-	[BODY_SIZE:12:0:60000]
-	[BODY_APPEARANCE_MODIFIER:HEIGHT:75:95:98:100:102:105:125]
+	Tall and slight: a shade under a human's 70,000 in mass, but the height curve sits
+	above a human's and the broadness curve below it, so they read as taller and leaner.
+	[BODY_SIZE:0:0:3800]
+	[BODY_SIZE:1:168:16800]
+	[BODY_SIZE:12:0:67000]
+	[BODY_APPEARANCE_MODIFIER:HEIGHT:85:103:106:108:110:113:135]
 		[APP_MOD_IMPORTANCE:500]
-	[BODY_APPEARANCE_MODIFIER:BROADNESS:75:95:98:100:102:105:125]
+	[BODY_APPEARANCE_MODIFIER:BROADNESS:65:85:88:90:92:95:115]
 		[APP_MOD_IMPORTANCE:500]
 	[SET_BP_GROUP:BY_CATEGORY:EYE]
 		[BP_APPEARANCE_MODIFIER:CLOSE_SET:0:70:90:100:110:130:200]

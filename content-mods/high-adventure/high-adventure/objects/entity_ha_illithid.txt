@@ -206,6 +206,8 @@ entity_ha_illithid
 	[MAX_STARTING_CIV_NUMBER:4]
 	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:1000]
+	Scholars of every discipline: the colony's whole purpose is knowledge.
+	[SCHOLAR:ALL]
 	[RELIGION:PANTHEON]
 	[RELIGION_SPHERE:SCHOLARSHIP]
 	[RELIGION_SPHERE:MINERALS]
