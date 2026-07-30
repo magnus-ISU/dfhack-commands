@@ -161,6 +161,12 @@ behind each block.
 	[PERMITTED_REACTION:PRESS_OIL_FRUIT]
 
 	--- sites: a few human-style castles, little expansion ---
+	BUILDS_OUTDOOR_FORTIFICATIONS turns mead halls into castles, but only at hamlet or
+	town sites, which is why it does nothing for the succubi: they carry the token and
+	land holders both, and build CAVE_DETAILED. High elves build towns, so it should
+	apply here. They still have no LAND_HOLDER position, which may be the other half of
+	the requirement.
+	[BUILDS_OUTDOOR_FORTIFICATIONS]
 	[DEFAULT_SITE_TYPE:CITY]
 	[LIKES_SITE:CITY]
 	[TOLERATES_SITE:CITY]

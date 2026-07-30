@@ -7,6 +7,37 @@ Two kinds of statement below, kept deliberately separate:
   [OBSERVED]  measured in a world we generated. Cited with the numbers.
   [UNTESTED]  a theory we hold but have not demonstrated. Do not rely on these.
 
+Measured against DF v0.53.15.
+
+====================================================================================
+0. THE CURRENT SUITE AT A GLANCE
+====================================================================================
+
+Caps and site tokens as they stand, vanilla civs included for comparison:
+
+  entity              startCivs  maxPop  sitePop  fortif  landHold  siteType
+  PLAINS (human)          100     10000     120    yes      -       CITY
+  MOUNTAIN (dwarf)        100     10000     120     -      yes      CAVE_DETAILED
+  FOREST (elf)            100     10000     120     -       -       TREE_CITY
+  EVIL (goblin)           100     10000     120     -       -       DARK_FORTRESS
+  SKULKING (kobold)       100      2000     120     -       -       CAVE
+  HA_ORC_CIV              100     10000     120     -       -       CITY
+  HA_HIGH_ELF              10     10000     120    yes      -       CITY
+  HA_DROW_CIV             100     10000     500     -      yes      CAVE_DETAILED
+  HA_ILLITHID_CIV         100     10000    1000     -       -       DARK_FORTRESS
+  HA_SUCCUBUS              40     10000     500    yes     yes      CAVE_DETAILED
+  HA_DARK_DWARF_CIV       100     10000     120     -      yes      CAVE_DETAILED
+  HA_KOBOLD_CAVES         100     10000     120     -       -       DARK_FORTRESS
+
+There is no "max starting sites" token. MAX_STARTING_CIV_NUMBER is the only starting
+quantity, and it caps civilizations, not settlements.
+
+Lifespans, which matter more than any of the above (see section 5):
+
+  immortal (no MAXAGE): elf, goblin, high elf, illithid, succubus, drow
+  150-170: dwarf, dark dwarf, kobold
+  60-120:  human, orc
+
 ====================================================================================
 1. SPAWNING -- does the civ exist at all
 ====================================================================================
@@ -20,6 +51,10 @@ Two kinds of statement below, kept deliberately separate:
        start biomes are rare, or already taken, may not spawn at all. Civs whose start
        biomes do not overlap cannot block each other.
 [WIKI] MAX_STARTING_CIV_NUMBER is a hard per-entity cap (default 3; vanilla uses 100).
+
+[OBSERVED] MAX_STARTING_CIV_NUMBER is obeyed exactly when the civ cannot expand. High
+       elves ship 10 and finished a 100-year world with exactly 10 civilizations, each
+       holding exactly one town.
 
 [OBSERVED] Absence at the end of worldgen does NOT mean the civ failed to spawn. In a
        100-year world, drow / illithids / succubi had zero entities AND zero historical
@@ -38,7 +73,24 @@ Two kinds of statement below, kept deliberately separate:
        Never draw a balance conclusion from a single world.
 
 ====================================================================================
-2. TERRITORY AND SITE FOUNDING -- how far the civ spreads
+2. WORLDGEN REJECTION -- when no world generates at all
+====================================================================================
+
+[OBSERVED] A bad entity does not produce an error; it produces an endless reject loop.
+       The counter on the generation screen climbs ("88 rejected") and the year never
+       advances past 1. The reason is printed briefly at the top of that screen, so read
+       it there -- it is not written to errorlog.txt.
+
+[OBSERVED] Two causes found so far, both printing FARMING CIVILIZATION PLACED WITHOUT
+       CROPS:
+
+       a) Removing BIOME_SUPPORT entirely from a farming civ. Some support entry has to
+          remain or the civ cannot be placed anywhere it can feed itself.
+
+       b) Putting [MYTHICAL] on a farming civ. See section 6.
+
+====================================================================================
+3. TERRITORY vs THE RIGHT TO BUILD -- the important distinction
 ====================================================================================
 
 [WIKI] BIOME_SUPPORT:<biome>:<freq> controls how fast territory spreads through a biome.
@@ -58,57 +110,149 @@ Two kinds of statement below, kept deliberately separate:
        that vanilla EVIL does not use.
 [WIKI] LIKES_SITE: most residents migrate to that site type. TOLERATES_SITE: some do.
 
-[OBSERVED] Site type strongly affects how reachable a civ is by war -- see section 3.
+[OBSERVED] *** BIOME_SUPPORT IS THE WRONG LEVER FOR CONTAINING A CIV. *** Because its
+       values are relative to each other only, cutting a civ down to a single entry at
+       weight 1 does not throttle anything -- it hands that biome the entire expansion
+       budget. What grants the right to build is SETTLEMENT_BIOME / START_BIOME. The
+       high elf progression, all at 100 years, max civs, max sites:
 
-[UNTESTED] Our current experiment: giving a civ a 10:1 BIOME_SUPPORT toward ANY_OCEAN
-       should burn its expansion budget on water it cannot build on, yielding few outlying
-       settlements. Applied to high elves and drow. Also: removing BIOME_SUPPORT for a
-       civ's own START_BIOMEs should pin it to its founding site. Applied to illithids.
-       Neither is confirmed yet.
+           SETTLEMENT_BIOME:ANY_LAND                        373 sites   76,302 pop
+           forest + shrubland + mountain                    ~292 towns  27,086 pop
+           the same, plus only one BIOME_SUPPORT at weight 1  94 sites  10,995 pop
+           EXCLUSIVE_START_BIOME only, no SETTLEMENT_BIOME    20 sites   1,483 pop
+
+       The last configuration is 10 civs holding one town each, plus 10 camps. That is
+       EXCLUSIVE_START_BIOME behaving exactly as documented, and it is the only setting
+       that actually pinned them.
+
+[OBSERVED] Site type strongly affects how reachable a civ is by war -- see section 4.
 
 ====================================================================================
-3. WAR -- who attacks, who suffers, who wins
+4. WAR -- who attacks, who suffers, who wins
 ====================================================================================
 
-[OBSERVED] Aggression tracks growth almost one-for-one. Over 100 years, war actions
-       launched vs final entity count:
-           orcs        437 launched  -> 717 entities, 23,265 population  (largest power)
-           high elves  374           -> 259 entities, 12,019
-           humans      242           -> 553 entities, 17,796
-           elves       187           -> 209
-           succubi     137           ->  68
-           drow         72           -> 147
-           dark dwarves 56           ->  68
-           illithids    18           ->  42
-       Aggression rose sharply over time for the winners: orc offensives per 25-year
-       period went 61 / 61 / 123 / 192; high elves 79 / 47 / 82 / 166.
+Read war events with `attacker_civ` and `defender_civ`. NOT `attacker_civ_id` /
+`defender_civ_id` -- those fields do not exist, and reading them under pcall silently
+yields zero war activity for every civ in the world.
 
-[OBSERVED] Being unreachable matters more than being strong. War actions SUFFERED over the
-       same century:
-           humans 684, orcs 289, elves 262, goblins 128, high elves 74,
-           illithids 73, succubi 47, dark dwarves 36, kobolds 29, DROW 2.
-       Drow use DEFAULT_SITE_TYPE:CAVE_DETAILED and were attacked twice in a century.
-       Humans (CITY, open plains) absorbed nearly half of all war actions in the world.
-       => Site type and terrain look like the dominant survival factor, ahead of any
-          combat statistic.
+[OBSERVED] A 100-year world, 208,660 events, after the current round of changes:
 
-[OBSERVED] Civs rarely die by a single collapse event. Only 6 ENTITY_DISSOLVED events
-       occurred in 100 years (3 orc, 2 human, 1 drow) despite large swings in population.
-       Decline is site-by-site attrition.
+           civ            launched  suffered
+           humans             1321       473
+           orcs                552      1744
+           elves               233        87
+           kobolds             224        10
+           high elves          202       133
+           drow                 82         2
+           illithids            44       167
+           dwarves              40         9
+           goblins              20        13
+           succubi              14        20
+           skulking kobolds      0        30
+           dark dwarves          0        44
+
+[OBSERVED] Being unreachable is worth more than being strong. Drow use CAVE_DETAILED and
+       absorbed 2 attacks in a century while launching 82. In an earlier world they took
+       2 against humans' 684. Site type and terrain look like the dominant survival
+       factor, ahead of any combat statistic.
+
+[OBSERVED] Aggression does not track territory. Ten high elf civs holding one town each,
+       1,483 people between them, launched 202 war actions -- more than dwarves, goblins,
+       drow and succubi combined. Pinning a civ's settlements caps its footprint and
+       leaves its belligerence untouched.
+
+[OBSERVED] Raiding is not conquering. Of those 202 high elf actions, 96 were site attacks
+       and 81 plunders, but only three sites changed hands all century in either
+       direction (they took one human town, lost one to succubi and one to humans), and
+       they lost field battles on volume, 24 launched against 37 suffered.
+
+[OBSERVED] Civs rarely die by a single collapse event. In the same world only 7
+       ENTITY_DISSOLVED events fired in a century: orcs 5, drow 1, humans 1. Decline is
+       site-by-site attrition.
 
 [UNTESTED] *** Does high DISCIPLINE help a civ win wars? *** We gave drow and illithids
-       very high discipline on that theory. It is NOT demonstrated. What the data shows so
-       far is that drow survive because almost nothing reaches them, not because they win
-       fights -- they launched only 72 attacks and received 2. Illithids have high
-       discipline too and were the weakest aggressor in the world (18 attacks) while
-       suffering 73. If discipline mattered much at civ scale we would expect illithids to
-       trade better than that.
-       To test properly: hold site type and biome constant, vary only the skill/discipline
-       tokens across several seeds, and compare WAR_* event win rates rather than
-       population.
+       very high discipline on that theory. It is NOT demonstrated. Drow survive because
+       almost nothing reaches them, not because they win fights. Illithids have the same
+       discipline and trade 44 launched against 167 suffered.
+       To test properly: hold site type and biome constant, vary only the skill tokens
+       across several seeds, and compare WAR_* win rates rather than population.
 
 ====================================================================================
-4. POPULATION CAPS -- weaker than they look
+5. WHAT ACTUALLY KEEPS A CIV ALIVE -- immortality, not expansion
+====================================================================================
+
+[OBSERVED] This is the single strongest effect measured so far, and it is easy to trip
+       over by accident. Illithids were immortal, were given [MAXAGE:60:120] on their
+       three base castes, and collapsed inside 25 years:
+
+           illithid base castes mortal      18 population,  11 sites,  0 elder brains
+           the same castes immortal again  3,393 population, 48 sites, elder brains back
+
+       Nothing else about them changed. Their biomes, site type, caps and expansion were
+       identical in both worlds.
+
+[OBSERVED] Conversely, a civ that cannot expand at all survives comfortably if it is
+       immortal. High elves are pinned to one town per civ, yet all 10 civs were still
+       standing at year 100 with 1,483 people. Population per site actually stayed
+       healthy at 74, in line with elves (82) and dwarves (76).
+       => Expansion drives how BIG a civ gets. Mortality drives whether it SURVIVES.
+
+[OBSERVED] Shortening a lifespan can grow a civ rather than shrink it. Orcs went from
+       MAXAGE 450:550 to 60:120 and rose from ~2,600 to 5,254 historical figures and
+       31,491 population, becoming the largest civ in the world. Faster generational
+       turnover appears to outweigh the earlier deaths.
+
+====================================================================================
+6. MYTHICAL SITES -- a worldgen lever, not a raws one
+====================================================================================
+
+[OBSERVED] "Mysterious lairs / dungeons / palaces" are Monument-type sites owned by an
+       entity carrying the MYTHICAL flag. DF generates exactly one such entity for
+       itself, MYTHICAL_ENTITY_1, and its raw has: MYTHICAL, SITE_GUARDIAN, CLOTHING and
+       all four DIVINE_MAT_* flags; default site type CITY; 3 starting civs; 500 max pop;
+       50 max site pop; and zero creatures, zero positions, zero biome support and no
+       settlement biomes.
+
+[OBSERVED] The three flavours are one site type separated by `world_site.size`:
+       size 5 = mysterious lair, size 15 = mysterious dungeon, size 100 = mysterious
+       palace. Every world measured produced the same split: 38 / 10 / 2.
+
+[OBSERVED] The count is a global worldgen budget: `worldgen_parms.mythical_site_num`,
+       default 50. Adding four more mythical entities in the raws did NOT add any
+       structures -- the same 50 were simply divided among the five (10/11/9/9/11).
+
+[OBSERVED] The basic creation screen rebuilds `worldgen_parms` from its sliders when
+       "Create world" is pressed, so writing mythical_site_num beforehand is discarded.
+       Changing it needs detailed mode.
+
+[OBSERVED] MYTHICAL on a normal civ is fatal to worldgen. Applied to drow, illithids,
+       succubi and dark dwarves it rejected every candidate world with FARMING
+       CIVILIZATION PLACED WITHOUT CROPS -- DF places mythical entities as structures,
+       where a farming civ cannot feed itself.
+
+====================================================================================
+7. CASTLES
+====================================================================================
+
+[WIKI] BUILDS_OUTDOOR_FORTIFICATIONS makes the civilization build castles from mead
+       halls. Only functions when the type of site built is a hamlet/town. This, combined
+       with the correct type of position associated with a site, is why adventurers can
+       only lay claim to human sites. (Bug 8001)
+
+[OBSERVED] It matches the data. In a 100-year world, 89 of the world's 117 Fortress-type
+       sites were human. PLAINS is the only vanilla entity with the token, and it builds
+       CITY sites.
+
+[OBSERVED] The token alone is not enough -- the site type gates it. Succubi carry both
+       BUILDS_OUTDOOR_FORTIFICATIONS and LAND_HOLDER positions, but build CAVE_DETAILED,
+       and built zero castles.
+
+[UNTESTED] High elves have just been given the token. They build CITY sites, so the site
+       type requirement is met, but they have no LAND_HOLDER position, which the wiki
+       note implies is the other half of the requirement. Unverified.
+
+====================================================================================
+8. POPULATION CAPS -- weaker than they look
 ====================================================================================
 
 [WIKI] MAX_POP_NUMBER: max historical population per entity. Default 500; vanilla uses
@@ -116,24 +260,83 @@ Two kinds of statement below, kept deliberately separate:
        settlements upon reaching the number."
 [WIKI] MAX_SITE_POP_NUMBER: max historical population per site. Default 50; vanilla 120.
 
-[OBSERVED] These really do not cap population. High elves ship MAX_POP_NUMBER:120 and
-       MAX_SITE_POP_NUMBER:120 -- the tightest caps in the suite -- and still reached
-       12,019 population across 259 entities, second only to orcs. The cap gates new
-       settlement founding, not head count.
-       => If a civ is too populous, MAX_POP_NUMBER is the wrong lever. Reach for territory
-          spread (BIOME_SUPPORT) and site type instead.
+[OBSERVED] MAX_POP_NUMBER does not cap population. High elves once shipped 120/120 -- the
+       tightest caps in the suite -- and still reached 12,019 population across 259
+       entities. The cap gates new settlement founding, not head count.
 
-[OBSERVED] Large MAX_SITE_POP_NUMBER does have a knock-on effect elsewhere: the drow use
-       1000 against vanilla's 120, which is what makes their sieges roughly 8x normal size.
+[OBSERVED] MAX_SITE_POP_NUMBER does work, but only once a civ is big enough to press
+       against it. Setting it to 120 took high elves from 205 residents per site to 92.
+       Raising it afterwards changed nothing for the small civs, because they never
+       approached the old value:
+
+           drow      cap 120 -> 66/site      cap 500  -> 63/site
+           succubi   cap 120                 cap 500  -> 82/site
+
+       => If a civ is too populous, reach for settlement rights (section 3) and site
+          type. If a civ is too thinly spread, the site cap will not gather it up.
+
+[OBSERVED] A large MAX_SITE_POP_NUMBER has a knock-on effect elsewhere: the drow used
+       1000 against vanilla's 120, which is what made their sieges roughly 8x normal size.
 
 ====================================================================================
-5. CREATURE SIZE -- the megabeast survival trap
+9. NECROMANCY -- no lever found yet
+====================================================================================
+
+[OBSERVED] Counting necromancers: classify by `hf.info.curse.active_interactions` being
+       non-empty. Filtering on `curse.name == "necromancer"` misses almost everything,
+       because worldgen names each secret procedurally.
+
+[OBSERVED] We do not have a working lever. A model fitted to one world -- necromancers
+       need both mortality and RELIGION:PANTHEON -- separated every race cleanly in that
+       world and then failed to replicate. Between worlds, with no relevant raw change,
+       elves went 2 -> 57 and dwarves 10 -> 50. Deliberate changes moved less than the
+       seed did:
+
+           orcs, pantheon removed          161 -> 184   (wanted ~0)
+           kobolds, DEATH sphere removed    48 ->  17   (wanted "rare")
+           drow, made mortal + DEATH sphere   2 ->   4   (wanted ~50)
+
+[OBSERVED] `worldgen_parms.secret_number` (default 28) is the world-wide count of
+       secrets, and is the most likely real lever. Untried, and it is a worldgen setting
+       rather than a per-race one.
+
+[UNTESTED] Immortality still looks like a genuine suppressor -- succubi, at 1,791
+       population, produced zero necromancers across two worlds -- but elves at 57
+       contradict it, so treat it as unproven.
+
+====================================================================================
+10. TOOLING NOTES
+====================================================================================
+
+[OBSERVED] DF scans mods/ ONCE, at startup. Deploying a mod while DF is running has no
+       effect; the world will silently generate against the old raws. Restart DF after
+       every raw change.
+
+[OBSERVED] DF lists a mod once per copy it can see -- the live one under mods/ and any
+       older snapshot left in data/installed_mods -- under the same id and different
+       versions. Anything selecting mods by id must take the highest version or it will
+       quietly pick a stale one. Two worlds were generated against old raws this way
+       before it was noticed. Deleting a mod from mods/ is not enough; purge its
+       data/installed_mods copies too, or it stays selectable forever.
+
+[OBSERVED] Saves live in ~/.local/share/Bay 12 Games/Dwarf Fortress/save, NOT in the
+       Steam install directory.
+
+[OBSERVED] "Keep world and return to main menu" now completes reliably; the export_region
+       crash seen in earlier sessions did not recur across four saves.
+
+[OBSERVED] The first-run "Welcome to Dwarf Fortress" modal reappears after a restart and
+       swallows the Create-world click silently, leaving the sliders untouched and no
+       error. Always dismiss it before setting up a world.
+
+====================================================================================
+11. CREATURE SIZE -- the megabeast survival trap
 ====================================================================================
 
 [OBSERVED] BODY_SIZE growth timing decides whether a megabeast survives worldgen, and it
        is easy to get catastrophically wrong.
 
-       Our ancient dragon had:      6,000 -> ... no: 500,000 at age 0
+       Our ancient dragon had:      500,000 at age 0
                                     5,000,000 at age 100
                                     10,000,000 at age 1000
        A vanilla dragon has:        6,000 at age 0
@@ -143,11 +346,10 @@ Two kinds of statement below, kept deliberately separate:
        A vanilla dragon is at full combat size by age 10. Ours needed a CENTURY, so for its
        whole first hundred years it sat at 500,000 -- exactly elephant-sized.
 
-       Result: all 3 ancient dragon megabeasts in the world died in years 1, 9 and 19,
-       killed by a CENOZOIC_PLATYBELODON, an orc and a dwarf. The kobold-caste ancient
-       dragons died in years 85-95 to elephants (x2), cave dragons (x2), a jabberer, a
-       succubus brute, an orc, and a tame helmet snake. Every slayer was an anonymous
-       creature, not a hero.
+       Result: all 3 ancient dragon megabeasts died in years 1, 9 and 19, killed by a
+       CENOZOIC_PLATYBELODON, an orc and a dwarf. The kobold-caste ancient dragons died in
+       years 85-95 to elephants (x2), cave dragons (x2), a jabberer, a succubus brute, an
+       orc and a tame helmet snake. Every slayer was an anonymous creature, not a hero.
 
        This was NOT a stats problem. Ours had STR/TOU 2000-3000 against a vanilla dragon's
        200-2000, six attacks, LARGE_PREDATOR, FIREIMMUNE_SUPER and iron-hard scales. Mass
@@ -155,6 +357,9 @@ Two kinds of statement below, kept deliberately separate:
 
        => For anything meant to be a terror during worldgen, reach full size by ~age 10.
           Megabeasts spawn at age 0 and are killed long before a slow growth curve pays off.
+
+       After the curve was fixed to reach 5,000,000 at age 10, ancient dragons held 2 or 3
+       of their starting 3 through a century instead of losing all of them.
 
        For reference, other sizes in the suite:
           human            4,000 -> 17,500 (age 1) -> 70,000 (age 12)
@@ -164,18 +369,15 @@ Two kinds of statement below, kept deliberately separate:
           ulitharid        12,000 -> 60,000 -> 120,000
           elder brain      1,000,000 -> 5,000,000 (age 1) -> 10,000,000 (age 12)
 
-       Note the elder brain reaches 10,000,000 by age 12 -- larger than our dragon ever
-       became within a century -- yet elder brains still fell from 12 to 3 over 100 years.
-       Size is necessary, not sufficient; immobility and siege exposure presumably matter.
-
 ====================================================================================
-6. OPEN QUESTIONS
+12. OPEN QUESTIONS
 ====================================================================================
 
+- Does BUILDS_OUTDOOR_FORTIFICATIONS alone give high elves castles, or is a LAND_HOLDER
+  position also required?
+- Why are orcs growing to 31,491 population while absorbing 1,744 attacks -- the most
+  punished civ in the world and still the largest?
+- Does worldgen_parms.secret_number move necromancer counts, and does it respect race?
 - Does DISCIPLINE (or any skill token) measurably change war outcomes at civ scale?
-- Does the ocean-BIOME_SUPPORT trick actually suppress outlying settlements?
-- Does removing BIOME_SUPPORT for a civ's own start biome pin it to one site?
-- Why do elder brains decline despite enormous size?
-- What makes humans the universal punching bag -- CITY site type, open biomes, or ethics?
-- Is the recurring worldgen/export crash caused by the mod suite, the very high civ/site
-  counts, or DFHack querying a very large event log?
+- Why do elder brains decline even when illithids are healthy?
+- What makes humans the universal aggressor -- CITY site type, open biomes, or ethics?
