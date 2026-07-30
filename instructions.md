@@ -60,9 +60,24 @@ An **active save** bakes raws in at gen time, so raw changes never reach an exis
 world. Each world's scripts + graphics load from its own versioned snapshot under
 `$B12/data/installed_mods/<MOD_ID> (n)` (find the live one via
 `dfhack.findScript('high-adventure/<name>')`). To hot-patch a script into an existing
-world, copy it into that snapshot and `reqscript` + overlay-rescan. **Never delete
-old-version snapshots wholesale — every save depends on the exact versions it was
-generated with.**
+world, copy it into that snapshot and `reqscript` + overlay-rescan.
+
+**Delete old-version snapshots — `rm -rf` them.** This project keeps exactly ONE version
+of each mod alive: the current one. Old snapshots under `$B12/data/installed_mods/` are
+purged even though that breaks any world generated against them. Old worlds are expendable
+here; a mod list cluttered with stale versions is not worth keeping them for. Two concrete
+harms the clutter causes: DF lists a mod once per copy it can see, so the picker fills with
+versions you can pick by mistake, and a stale snapshot keeps serving its old description
+and old `scripts_modactive/` to anything still pointed at it.
+
+```sh
+B12="$HOME/.local/share/Bay 12 Games/Dwarf Fortress"
+# every snapshot whose NUMERIC_VERSION is below the copy in $DF/mods
+ls -d "$B12/data/installed_mods/"*/          # inspect first, then rm -rf the old ones
+```
+
+Snapshots that MATCH the current `$DF/mods` version are not "old" — leave those; they are
+what the live world loads scripts and graphics from.
 
 ## Deploy a content mod
 
@@ -87,7 +102,24 @@ Source of truth is `content-mods/high-adventure/<mod>/`. To ship a change:
      | xargs grep -l "ID:HA_illithids" 2>/dev/null           # should be a single mods/ hit
    ```
    If an older duplicate exists under `mods/`, `rm -rf` it — DF may otherwise load the
-   stale one.
+   stale one. Same for old snapshots under `$B12/data/installed_mods/`.
+
+4. **Regenerate the bundle — every time any member mod changes.** The all-in-one
+   `high-adventure` mod is GENERATED from the sibling `ha-*` mods; it is not edited by
+   hand and it does not update itself. Leave it stale and the bundle ships the old raws,
+   old scripts and a description advertising member versions that no longer exist.
+   ```sh
+   cd content-mods/high-adventure
+   # bump NUMERIC_VERSION / DISPLAYED_VERSION at the top of the build script FIRST
+   python3 build-high-adventure.py      # 11 mods, N files, 0 duplicate defs
+   ```
+   **Bump the bundle's own version on every rebuild.** DF keys its snapshot by
+   `<MOD_ID> (numeric_version)`, so a rebuild that keeps the old number leaves DF serving
+   the previous `HIGH_ADVENTURE (n)` snapshot — the contents change and DF never notices.
+   Then deploy `high-adventure` like any other mod and `rm -rf` the superseded snapshot.
+   The build script wipes its output directory, so anything hand-added inside
+   `high-adventure/` (a CHANGES.md, say) is destroyed on the next run — keep such files in
+   the member mods or beside the script.
 
 **Raws (`objects/`) take effect only in a newly generated world.** Regenerate to test civ
 spawning, creature/caste/reaction changes, etc. A mod's `scripts_modactive/` scripts *do*
@@ -147,8 +179,8 @@ raws. This has produced two full worlds' worth of misleading data.
 
 **DF lists a mod once per copy it can see** — the live one under `mods/` and any older
 snapshot in `installed_mods/` — under the same ID at different versions. `gen-world` takes
-the highest version, but deleting a mod from `mods/` is not enough to retire it: purge its
-`installed_mods/` copies too or it stays selectable forever.
+the highest version, but deleting a mod from `mods/` is not enough to retire it: `rm -rf`
+its `installed_mods/` copies too or it stays selectable forever.
 
 **The first-run "Welcome to Dwarf Fortress" modal reappears after every restart**, swallows
 the Create-world click silently, and leaves the sliders untouched with no error. `gen-world`
