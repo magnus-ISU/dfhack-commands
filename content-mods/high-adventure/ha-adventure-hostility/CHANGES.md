@@ -5,6 +5,112 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.15 -- no duplicate boots/gauntlets from stacked footwear
+- 0.14 let PAIRED slots promote every piece, which is right for two gloves but wrong
+  for socks+shoes: both live in item_type.SHOES, so a unit wearing socks and shoes on
+  both feet offered FOUR candidates and would have come out in four boots.
+- Paired slots now promote at most one piece PER BODY PART, with MAX_PER_PAIRED_SLOT
+  (2) as a backstop in case body_part_id is not usable. Candidates are sorted so an
+  UNDERLAYER (socks, chausses, mittens) is only promoted when nothing else covers that
+  part -- the sock stays a sock underneath the new boot.
+
+## v0.14 -- paired slots promote both pieces; handedness self-repairs
+- The one-promotion-per-slot guard added in 0.12 was wrong for PAIRED slots: a unit
+  came out wearing one gauntlet and one ordinary glove. Gloves and shoes now promote
+  every piece; the guard still applies to body slots so a shirt+tunic does not become
+  two breastplates.
+- Added a handedness repair pass. Minted gauntlets default to RIGHT, so a pair could
+  end up both right-handed -- which is also the legacy damage left by every version
+  before 0.13, where handedness was never carried at all. If a unit's two hand pieces
+  agree, the second is flipped.
+
+## v0.13 -- gauntlet handedness actually works; quiver crash fixed
+- HANDEDNESS was never being carried across. `handedness` is a BitArray FIELD, so
+  `newit.handedness = old.handedness` copied a reference and did nothing -- and it sat
+  inside a pcall, so the failure was silent. That is the real cause of the 'two right
+  gauntlets' the old high-elf code complained about. Now uses the accessors,
+  getGloveHandedness/setGloveHandedness (1 = right, 2 = left).
+- CRASH: `it.subtype` is not present on every item class -- item_quiverst has no such
+  field -- so reading it unguarded threw as soon as a unit carried a quiver. The read
+  is now guarded. It had been masked by a pcall around the whole pass until the plan
+  step moved outside it.
+
+## v0.12 -- leather cloaks, helms for bare heads, and a double-promotion fix
+- A leather outfit now also issues a leather CLOAK.
+- A unit with nothing at all on its head gets a helm 40% of the time. Restricted to
+  outfits that armor: a "weapon only" outfit means only a weapon. ITEM_HELM_HELM
+  carries both [LEATHER] and [METAL] so it is legal in either material.
+- BUG FOUND while adding the cloak: cloaks and capes share item_type.ARMOR with
+  tunics and shirts, so a unit wearing both a tunic and a cloak was getting TWO
+  breastplates and losing the cloak. Outerwear is now never promoted, only re-made in
+  the outfit's material, and at most ONE piece per slot is ever promoted.
+
+## v0.11 -- war-gear becomes a weighted OUTFIT roll per race
+- Replaces the single-metal-per-race model. Each race has a weighted list of outfits
+  (metal, whether clothing is promoted to armor, which weapon), rolled once per unit.
+  Dwarves/dark dwarves 40/30/15/15 copper-weapon-only / copper / bronze / iron;
+  orcs 30/30/20/20; goblins 40/15/15/15/15; humans 50% UNTOUCHED / 35 / 15.
+- Weapons now come from the unit's OWN CIV weapon list, whose REPEATS encode the
+  civ's preference ratio, instead of a hardcoded pick. Drow therefore still favour
+  scimitars (their entity lists SCIMITAR x10) but bows, pikes and whips now appear.
+  A scimitar roll mints a PAIR. Training weapons are filtered out.
+- Leather outfits armor the TORSO only: ITEM_ARMOR_LEATHER is [LEATHER] with no
+  [METAL] and there is no leather greave or gauntlet, so other slots stay clothing
+  rather than becoming impossible items.
+- Illithids, succubi, kobolds and vanilla elves are deliberately absent from the
+  table and are never processed.
+
+## v0.10 -- war-gear: children never armored or armed
+- Across every civ, a unit that is not an adult keeps clothing as clothing and gets
+  no minted weapon. Material upgrades still apply, so an elf child is rewoven in
+  twinkling fabric rather than left in rags -- the exemption is from ARMOR and ARMS,
+  not from the whole pass.
+
+## v0.9 -- war-gear: clothing promoted to armor, weapons minted, drow females in GCS silk
+- Dwarves, dark dwarves and drow now have their CLOTHING replaced by the ARMOR piece
+  for that slot rather than by better cloth: tunic -> breastplate, skirt -> greaves,
+  hood -> helm, gloves -> gauntlets, socks -> boots. High elves are exempt and keep
+  clothing as clothing in twinkling fabric.
+- Unarmed units get weapons minted from their own civ's entity raws. Drow get TWIN
+  scimitars -- their entity lists SCIMITAR ten times against one each of everything
+  else, so that is the civ's own preference. Dwarves and dark dwarves draw from the
+  MOUNTAIN list (battle axe, short sword, war hammer, mace, spear).
+- Minting is GATED ON MASTERWORK: a unit already carrying any masterwork or artifact
+  piece is left to it. Per-item masterwork protection is unchanged.
+- Drow FEMALE caste is no longer skipped -- it now has its own caste override: no
+  armor, no weapons, clothing re-made in giant cave spider silk. Castes can override
+  any field of their race's policy.
+
+## v0.8 -- war-gear allowlist gaps: skirts, veils, capes, chausses
+- A high-elf clothier kept a rope reed SKIRT while her tunic, gloves and socks all
+  became twinkling fabric: ITEM_PANTS_SKIRT was simply missing from ALLOW_FABRIC.
+  Checked the full itemdef list in a loaded world and added every other gap too --
+  SKIRT / SKIRT_SHORT / SKIRT_LONG / THONG, ARMOR_CAPE, SHOES_CHAUSSE, and the head
+  coverings TURBAN / MASK / VEIL_HEAD / VEIL_FACE / SCARF_HEAD.
+- ITEM_PANTS_LEGGINGS moved to ALLOW_METAL: its itemdef carries [METAL] and it is
+  armorlevel 1, so it is armor, not clothing.
+- ITEM_ARMOR_LEATHER dropped from both lists: [LEATHER] with neither [SOFT] nor
+  [METAL], so it can legally be made of neither fabric nor metal.
+
+## v0.7 -- absorbs the shared war-gear engine
+- New script `high-adventure/war-gear`: one re-gear engine for the whole suite,
+  replacing the duplicated copies that lived in ha-high-elves and ha-drow.
+  High elves -> twinkling metal + twinkling fabric; drow -> DRIDER always steel,
+  MALE 20% steel / 80% iron, FEMALE untouched; dark dwarves and VANILLA DWARVES
+  -> iron or bronze.
+- UPGRADES ONLY: a piece is replaced only when its current material ranks below
+  the metal rolled for that unit, so steel survives an iron-or-bronze policy and
+  a drow male who rolls iron keeps steel he already had. Rank is the material's
+  SHEAR yield read from the raws, not a hardcoded list, so modded metals slot in
+  by their own numbers. Bronze (172000) out-ranks iron (155000), which is why
+  'iron and bronze' behaves as one tier.
+- Never touches a masterwork or artifact. Never edits an item's material in place
+  (that can make impossible item/material combos) -- it mints a replacement at the
+  same quality and swaps it in. Never fills an empty slot.
+- Affects historical figures; never the adventurer, never fortress citizens.
+- Deliberately a SEPARATE script from adventure-hostility.lua: that one is an
+  adventure-only overlay, and this has to run in fortress mode too.
+
 ## v0.6 -- hostility is site-scoped: guests in a town leave you alone
 - While the adventurer stands inside a settlement, only that settlement's OWN
   people can be forced hostile. Anyone else there is a guest and is skipped --

@@ -26,17 +26,11 @@ Support script for the self-contained high-elf civilization. Three jobs:
   tree trunk, or the tree is cancelled while still under construction. DF gives a 5x5
   workshop a 5 x 6 art grid whose row 0 is that tile, and the art leaves row 0 blank,
   so the living tree stands in the mouth of the fern ring.
-- **Twinkling gear**: worldgen cannot equip a divine metal (metals come from
-  geology), so high elves never spawn in twinkling metal. This re-gears them.
-  It does NOT alter item materials (that can make impossible item/material combos);
-  instead, for each item a target already has EQUIPPED whose type+subtype is on the
-  ALLOWLIST, it GENERATES a fresh twinkling item of that type/subtype at the old
-  item's quality (lower qualities preserved), swaps it in, and removes the old one.
-  MASTERWORK and ARTIFACT items are left untouched; empty slots are never filled.
-  Targets fort-mode invaders/visitors (never citizens) and adventure-mode NPCs
-  (never historical figures -- so not the adventurer, retired citizens, or named
-  high elves).
-
+- **Twinkling gear** has MOVED: re-gearing high elves into twinkling metal and
+  twinkling fabric is now part of the shared high-adventure/war-gear engine in the
+  HA_adventure_hostility mod, which does the same job for drow, dark dwarves and
+  vanilla dwarves. Nothing about the behaviour changed except that it now upgrades
+  only -- a piece already at or above twinkling is left alone.
 UNTESTED until a high-elf world exists.
 
 Usage: enable high-adventure/high-elves
@@ -47,8 +41,6 @@ local eventful = require('plugins.eventful')
 
 local GLOBAL_KEY = 'haHighElves'
 local RACE_ID    = 'HA_HIGH_ELF'
-local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'    -- armour, weapons, shields
-local FABRIC_ID  = 'INORGANIC:HA_TWINKLING_FABRIC'   -- clothing (woven strands)
 local MONTH      = 33600
 -- catch starlight is a gamble: this much success chance per point of the worker's
 -- strand extractor rating (so rating 20, legendary+5, is a sure thing)
@@ -59,127 +51,23 @@ local GROW_MAT = {
     HA_HE_GROW_WOOD    = 'PLANT_MAT:HA_HE_GROWN:WOOD',
     HA_HE_GROW_FEATHER = 'PLANT_MAT:HA_HE_FEATHER:WOOD',
 }
-
--- Only these item types/subtypes are ever generated (prevents impossible items).
--- Edit freely -- this is the whole point of the allowlist.
--- Two allowlists, because a caught strand becomes two different things: WOVEN
--- into twinkling fabric (clothing) or SMELTED WITH SILVER into twinkling metal
--- (armour, weapons, shields). Metal armour is metal; a tunic is cloth.
--- Everyday clothing is included deliberately -- without it every high elf who is
--- not a soldier, children included, keeps their jute and ramie rags.
-local ALLOW_METAL = {
-    [df.item_type.WEAPON] = {
-        ITEM_WEAPON_SWORD_SHORT=true, ITEM_WEAPON_SWORD_LONG=true,
-        ITEM_WEAPON_SPEAR=true, ITEM_WEAPON_MACE=true,
-        ITEM_WEAPON_HAMMER_WAR=true, ITEM_WEAPON_PICK=true,
-    },
-    [df.item_type.ARMOR]  = {ITEM_ARMOR_BREASTPLATE=true, ITEM_ARMOR_MAIL_SHIRT=true},
-    [df.item_type.HELM]   = {ITEM_HELM_HELM=true, ITEM_HELM_CAP=true},
-    [df.item_type.GLOVES] = {ITEM_GLOVES_GAUNTLETS=true},
-    [df.item_type.SHOES]  = {ITEM_SHOES_BOOTS=true, ITEM_SHOES_BOOTS_LOW=true},
-    [df.item_type.PANTS]  = {ITEM_PANTS_GREAVES=true},
-    [df.item_type.SHIELD] = {ITEM_SHIELD_SHIELD=true, ITEM_SHIELD_BUCKLER=true},
-}
-local ALLOW_FABRIC = {
-    [df.item_type.ARMOR]  = {
-        ITEM_ARMOR_CLOAK=true, ITEM_ARMOR_LEATHER=true, ITEM_ARMOR_COAT=true,
-        ITEM_ARMOR_SHIRT=true, ITEM_ARMOR_TUNIC=true, ITEM_ARMOR_TOGA=true,
-        ITEM_ARMOR_VEST=true, ITEM_ARMOR_DRESS=true, ITEM_ARMOR_ROBE=true,
-    },
-    [df.item_type.HELM]   = {ITEM_HELM_HOOD=true},
-    [df.item_type.GLOVES] = {ITEM_GLOVES_GLOVES=true, ITEM_GLOVES_MITTENS=true},
-    [df.item_type.SHOES]  = {ITEM_SHOES_SHOES=true, ITEM_SHOES_SANDAL=true,
-                             ITEM_SHOES_SOCKS=true},
-    [df.item_type.PANTS]  = {ITEM_PANTS_LEGGINGS=true, ITEM_PANTS_PANTS=true,
-                             ITEM_PANTS_LOINCLOTH=true, ITEM_PANTS_BRAIES=true},
-}
-
-local EQUIPPED = {[df.inv_item_role_type.Weapon]=true, [df.inv_item_role_type.Worn]=true}
-
-enabled = enabled or false
-done = done or {}
-next_ok = next_ok or {}       -- shaping-tree building id -> earliest tick for next harvest
-cooldown_init = cooldown_init or {}  -- shaping-tree building id -> already given its build-time cooldown
-
-function isEnabled() return enabled end
-
--- ---------------------------------------------------------------- gear ----
+-- the twinkling materials. Only the FABRIC one is used here now (catch-starlight
+-- mints a twinkling thread); re-gearing elves into twinkling metal moved to the
+-- shared high-adventure/war-gear engine in the HA_adventure_hostility mod.
+local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'
+local FABRIC_ID  = 'INORGANIC:HA_TWINKLING_FABRIC'
 
 local function target_mat()
     local mi = dfhack.matinfo.find(MAT_ID)
     if mi then return mi.type, mi.index end
 end
 
--- Twinkling fabric, for clothing. Worlds generated before the fabric material
--- existed do not have it (raws are baked in at gen time), so fall back to the
--- metal there rather than leaving those elves in rags.
+-- Worlds generated before the fabric material existed do not have it (raws are
+-- baked in at gen time), so fall back to the metal rather than minting nothing.
 local function fabric_mat()
     local mi = dfhack.matinfo.find(FABRIC_ID)
     if mi then return mi.type, mi.index end
     return target_mat()
-end
-
-local function target_race()
-    for i, cr in ipairs(df.global.world.raws.creatures.all) do
-        if cr.creature_id == RACE_ID then return i end
-    end
-end
-
-local function should_regear(u, race)
-    if u.race ~= race or not dfhack.units.isActive(u) then return false end
-    if dfhack.world.isAdventureMode() then
-        -- Every high elf but the player, NAMED historical figures included. This
-        -- used to require `hist_figure_id < 0`, which silently excluded almost
-        -- everyone worth seeing: every high elf with a name -- townsfolk,
-        -- soldiers, children like Imaza Wabeathe -- is a historical figure, so
-        -- they all kept their jute and ramie rags.
-        local adv = dfhack.world.getAdventurer()
-        return not adv or u.id ~= adv.id
-    end
-    return not dfhack.units.isCitizen(u)        -- fort: invaders/visitors, never our citizens
-end
-
-local function equipped_targets(u)
-    local out = {}
-    for _, inv in ipairs(u.inventory) do
-        local it = inv.item
-        if it and EQUIPPED[inv.mode] then
-            local itype = it:getType()
-            local sub = it.subtype and it.subtype.id
-            -- which of the two divine materials this piece should be made of
-            local cloth = (ALLOW_FABRIC[itype] or {})[sub] and true or false
-            local allow = cloth or (ALLOW_METAL[itype] or {})[sub]
-            if allow and sub then
-                local q = it:getQuality()
-                if q < df.item_quality.Masterful then    -- leave masterworks AND artifacts untouched
-                    -- gloves are handed; a fresh item always comes out right-handed,
-                    -- so remember which side this one was (observed: a re-geared
-                    -- elf wearing two right gloves and nothing on the left hand)
-                    local hand
-                    pcall(function() hand = it.handedness end)
-                    out[#out+1] = {old=it, itype=itype, isub=it:getSubtype(),
-                                   mode=inv.mode, bp=inv.body_part_id, quality=q,
-                                   hand=hand, cloth=cloth}
-                end
-            end
-        end
-    end
-    return out
-end
-
-local function regear(u, mtype, mindex, ftype, findex)
-    for _, t in ipairs(equipped_targets(u)) do
-        local mt, mi = mtype, mindex
-        if t.cloth then mt, mi = ftype, findex end
-        local created = dfhack.items.createItem(u, t.itype, t.isub, mt, mi)
-        local newit = created and created[1]
-        if newit then
-            newit:setQuality(t.quality)
-            if t.hand ~= nil then pcall(function() newit.handedness = t.hand end) end
-            dfhack.items.remove(t.old)
-            dfhack.items.moveToInventory(newit, u, t.mode, t.bp)
-        end
-    end
 end
 
 -- ------------------------------------------------------- shaping tree ----
@@ -365,15 +253,6 @@ local function tick()
         pcall(init_new_trees, btype)
         pcall(enforce_trunk, btype)
     end
-    local race = target_race(); if not race then return end
-    local mtype, mindex = target_mat(); if not mtype then return end
-    local ftype, findex = fabric_mat()
-    for _, u in ipairs(df.global.world.units.active) do
-        if not done[u.id] and should_regear(u, race) then
-            pcall(regear, u, mtype, mindex, ftype, findex)
-            done[u.id] = true
-        end
-    end
 end
 
 local function do_enable()
@@ -395,7 +274,6 @@ end
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_UNLOADED then do_disable() end
     if sc == SC_MAP_LOADED and (dfhack.world.isFortressMode() or dfhack.world.isAdventureMode()) then
-        done = {}
         do_enable()
     end
 end

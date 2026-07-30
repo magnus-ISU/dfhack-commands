@@ -1,5 +1,13 @@
 # Changes — HA High Elves
 
+## v0.23 -- twinkling gear moved to the shared war-gear engine
+- The re-gear pass left high-elves.lua for high-adventure/war-gear in the
+  HA_adventure_hostility mod, which now does the same job for drow, dark dwarves
+  and vanilla dwarves. Behaviour is unchanged except that it upgrades only.
+- The shaping tree, its pacing, sky/trunk siting and the catch-starlight thread
+  all stay here. fabric_mat() is retained: catch-starlight still mints the
+  twinkling thread.
+
 ## 0.22 -- twinkling FABRIC for clothes, metal only for armour
 The caught strand is now fabric, not metal. A strand woven at a loom becomes
 twinkling fabric cloth; a strand smelted WITH SILVER becomes a twinkling metal

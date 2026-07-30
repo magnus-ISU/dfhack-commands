@@ -6,8 +6,12 @@ high-adventure/drow
 
 Tags: fort | gameplay
 
-Drow support script: goblin slaves trained for war are issued their fighting
-kit - an obsidian short sword and wooden armor (breastplate and helm).
+Drow support script: goblin slaves trained for war are issued their fighting kit --
+an obsidian short sword and wooden armor (breastplate and helm).
+
+Drow war gear (iron/steel by caste) used to live here; it is now part of the shared
+high-adventure/war-gear engine in the HA_adventure_hostility mod, alongside the same
+job for high elves, dark dwarves and vanilla dwarves.
 
 Usage
 -----
@@ -58,6 +62,8 @@ local function make_and_equip(unit, itype, subtype, mat, mode)
     return dfhack.items.moveToInventory(item, unit, mode, -1)
 end
 
+-- ------------------------------------------------------- war-slave kit ----
+
 local function equip_slaves()
     local race = race_id("HA_GOBLIN_SLAVE")
     if not race then return end
@@ -96,6 +102,8 @@ local function equip_slaves()
         end
     end
 end
+
+-- ------------------------------------------------------------ engine ----
 
 local function do_enable()
     enabled = true

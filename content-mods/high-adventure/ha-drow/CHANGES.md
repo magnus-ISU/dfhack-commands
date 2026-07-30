@@ -1,5 +1,26 @@
 # ha-drow — fork changelog
 
+## v0.50 -- drow war gear moved to the shared war-gear engine
+- The iron/steel-by-caste pass added in 0.49 moved to high-adventure/war-gear in
+  the HA_adventure_hostility mod, so one engine covers every race. Same rules
+  (DRIDER steel, MALE 20/80, FEMALE untouched), now upgrade-only.
+- drow.lua is back to just the goblin war-slave kit, fort mode only.
+
+## v0.49 -- drow war gear: iron or steel, driders always steel
+- Worldgen spreads a civ's equipment across every metal it knows, so most drow
+  spawned in copper or bronze. drow.lua now re-gears them, mirroring how
+  ha-high-elves issues twinkling metal: for each EQUIPPED weapon/armor piece on the
+  allowlist it mints a replacement in the target metal at the same quality and swaps
+  it in. Item MATERIALS are never edited in place -- that can produce impossible
+  item/material combos. Masterwork and artifact pieces are left alone, empty slots
+  are never filled, and clothing is untouched.
+- DRIDER caste always steel; MALE caste 20% steel / 80% iron, rolled once per drow
+  and remembered so nobody re-rolls into a different metal; FEMALE caste untouched.
+- The female exemption keys on CASTE, not unit.sex: the DRIDER caste carries
+  [CREATURE_CLASS:HA_DROW_FEMALE], so a sex test would have exempted driders too.
+- Also gained handedness carry-over on gauntlets (a fresh item is always
+  right-handed) and now runs in adventure mode, not just fort.
+
 ## v0.48 -- drop the dead HA_DROW_BODY_SPECIAL tile page
 - The page declared `[FILE:images/dark_elf_body_special.png]`, which has never
   existed in this mod or in upstream Dark Elves Redux, and which no creature
