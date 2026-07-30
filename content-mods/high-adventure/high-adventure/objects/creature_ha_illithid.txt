@@ -15,7 +15,7 @@ creature_illithid
 	[CREATURE_CLASS:HA_ILLITHID_CLASS]
 	[CARNIVORE]
 	[BONECARN]
-	[DESCRIPTION:A dread psionic with four tentacles, which hungers for mind and memory.]
+	[DESCRIPTION:A dread psionic with four tentacles, it hungers for mind and memory.]
 	[NAME:illithid:illithids:illithid]
 	[CASTE_NAME:illithid:illithids:illithid]
 	[CREATURE_TILE:'I'][COLOR:3:0:0]

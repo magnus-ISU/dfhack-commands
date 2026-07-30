@@ -10,7 +10,7 @@ Named for the gibberlings that slew the parents of Cacame Awemedinade.
 [OBJECT:CREATURE]
 
 [CREATURE:HA_GIBBERLING]
-	[DESCRIPTION:A small, gibbering predator plated in blue chitin, which swarms the living and devours the dead, its own kin included.]
+	[DESCRIPTION:A small, gibbering predator plated in blue chitin, which swarms the living and devours the dead.]
 	[NAME:gibberling:gibberlings:gibberling]
 	[CASTE_NAME:gibberling:gibberlings:gibberling]
 	[CREATURE_TILE:'g'][COLOR:1:0:1]

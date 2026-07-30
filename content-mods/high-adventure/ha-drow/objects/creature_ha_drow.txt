@@ -39,7 +39,7 @@ creature_ha_drow
 		[BODY:HUMANOID_NECK:2EYES:2EARS:NOSE:2LUNGS:HEART:GUTS:ORGANS:HUMANOID_JOINTS:THROAT:NECK:SPINE:BRAIN:SKULL:5FINGERS:5TOES:MOUTH:TONGUE:FACIAL_FEATURES:TEETH:RIBCAGE]
 	[CASTE:DRIDER]
 		[CASTE_NAME:drider:driders:drider]
-		[DESCRIPTION:A monstrous cross of spider and lady, blessed by evil gods to bring death.]
+		[DESCRIPTION:A monstrous cross of spider and lady, blessed by evil gods to bring death!]
 		[FEMALE]
 		[POP_RATIO:4]
 		[CREATURE_CLASS:HA_DROW_FEMALE]

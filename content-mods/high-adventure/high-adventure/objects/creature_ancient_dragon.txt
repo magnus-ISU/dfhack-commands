@@ -8,7 +8,7 @@ tail (with a tail-slam), iron-hard scales, dragonfire, flight, legendary combat,
 size of a full-grown dragon at 100 and a giant elephant at 1000, immortal like an elf (no MAXAGE).
 Based on the vanilla dragon.
 [CREATURE:HA_ANCIENT_DRAGON]
-	[DESCRIPTION:A huge winged creature of dread majesty, scaled in iron and untouched by fire.]
+	[DESCRIPTION:A huge winged creature full of dread majesty, it soars the skies with iron-hard scales immune to any fire.]
 	[NAME:ancient dragon:ancient dragons:draconic]
 	[CASTE_NAME:ancient dragon:ancient dragons:draconic]
 	[CREATURE_TILE:'D'][COLOR:4:0:1]

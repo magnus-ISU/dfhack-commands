@@ -427,7 +427,7 @@ creature_cutekobold
 		[NO_PHYS_ATT_RUST]
 		[TRANCES]
 		[EXTRAVISION]
-		[DESCRIPTION:A huge winged creature of dread majesty, scaled in iron and untouched by fire.]
+		[DESCRIPTION:A huge winged creature full of dread majesty, it soars the skies with iron-hard scales immune to any fire.]
 		[PREFSTRING:terrible majesty]
 		[PREFSTRING:iron-hard scales]
 		[BODY_DETAIL_PLAN:STANDARD_MATERIALS]
