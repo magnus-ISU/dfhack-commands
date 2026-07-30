@@ -112,7 +112,7 @@ if not dfhack.world.isFortressMode() then
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
-            atry('adv/im-sure (auto-dismiss the "can\'t act for a while" prompt)',
+            atry('adv/im-sure (auto-dismiss "can\'t act" prompt; auto-path + finish confirms)',
                 function() dfhack.run_script('adv/im-sure') end)
             -- unit-sheet description + kills + weight/volume panel; registered for
             -- dungeonmode too, so make sure it is loaded and switched on here
