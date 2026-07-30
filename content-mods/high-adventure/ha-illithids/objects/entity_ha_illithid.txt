@@ -179,18 +179,19 @@ entity_ha_illithid
 	mountains, settle mountain/forest/grassland/savanna/shrubland, and support the
 	subterranean layers. The earlier no-territory-in-the-start-biome experiment held them
 	to 31 entities and a death spiral, so it is retired.
+	Mountains and hill country. There is no HILLS biome token in DF: hills are a region
+	type derived from elevation, and a hill region is classified underneath whichever of
+	the open biomes covers it. So the closest expressible form of mountains-and-hills is
+	MOUNTAIN plus the open classes, with forest dropped.
 	[EXCLUSIVE_START_BIOME:MOUNTAIN]
 	[SETTLEMENT_BIOME:MOUNTAIN]
-	[SETTLEMENT_BIOME:ANY_FOREST]
 	[SETTLEMENT_BIOME:ANY_GRASSLAND]
 	[SETTLEMENT_BIOME:ANY_SAVANNA]
 	[SETTLEMENT_BIOME:ANY_SHRUBLAND]
-	[BIOME_SUPPORT:MOUNTAIN:3]
-	[BIOME_SUPPORT:ANY_FOREST:1]
+	[BIOME_SUPPORT:MOUNTAIN:4]
 	[BIOME_SUPPORT:ANY_GRASSLAND:1]
 	[BIOME_SUPPORT:ANY_SAVANNA:1]
 	[BIOME_SUPPORT:ANY_SHRUBLAND:1]
-	[BIOME_SUPPORT:ANY_RIVER:1]
 	[BIOME_SUPPORT:SUBTERRANEAN_CHASM:3]
 	[BIOME_SUPPORT:SUBTERRANEAN_WATER:2]
 	[BIOME_SUPPORT:SUBTERRANEAN_LAVA:1]
@@ -202,7 +203,7 @@ entity_ha_illithid
 	[PROGRESS_TRIGGER_PROD_SIEGE:4]
 	[PROGRESS_TRIGGER_TRADE_SIEGE:4]
 	[SIEGER]
-	[MAX_STARTING_CIV_NUMBER:100]
+	[MAX_STARTING_CIV_NUMBER:4]
 	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:1000]
 	[RELIGION:PANTHEON]

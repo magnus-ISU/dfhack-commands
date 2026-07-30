@@ -217,8 +217,8 @@ entity_slaver_succubus
 
 	// World sites
 	[FRIENDLY_COLOR:4:0:1]
-	[DEFAULT_SITE_TYPE:CAVE_DETAILED]
-	[LIKES_SITE:CAVE_DETAILED]
+	[DEFAULT_SITE_TYPE:CITY]
+	[LIKES_SITE:CITY]
 	[TOLERATES_SITE:CITY]
 	[TOLERATES_SITE:DARK_FORTRESS]
 	[TOLERATES_SITE:TREE_CITY]
@@ -228,19 +228,12 @@ entity_slaver_succubus
 	They used to take an EXCLUSIVE_START_BIOME on MOUNTAIN, which both boxed them in
 	and ate mountain tiles that the drow, illithids, dark dwarves and dwarves were all
 	competing for. Badlands and wetlands are close to unclaimed by comparison.
+	Desert only, start and settlement both. Given wetlands as well as badlands and a
+	100 civ allowance they ran to 29,080 population over 399 sites and led the world.
 	[START_BIOME:ANY_DESERT]
-	[START_BIOME:ANY_WETLAND]
-	[SETTLEMENT_BIOME:ANY_FOREST]
-	[SETTLEMENT_BIOME:ANY_GRASSLAND]
-	[SETTLEMENT_BIOME:ANY_SAVANNA]
-	[SETTLEMENT_BIOME:ANY_SHRUBLAND]
 	[BIOME_SUPPORT:ANY_DESERT:4]
-	[BIOME_SUPPORT:ANY_WETLAND:3]
-	[BIOME_SUPPORT:ANY_FOREST:1]
-	[BIOME_SUPPORT:ANY_GRASSLAND:1]
 	[BIOME_SUPPORT:SUBTERRANEAN_CHASM:3]
 	[BIOME_SUPPORT:SUBTERRANEAN_LAVA:2]
-	[BIOME_SUPPORT:ALL_MAIN:1]
 	[BIOME_SUPPORT:ANY_RIVER:1]
 
 	[BUILDS_OUTDOOR_FORTIFICATIONS]
@@ -250,7 +243,7 @@ entity_slaver_succubus
 	[WORLD_CONSTRUCTION:ROAD]
 	[WORLD_CONSTRUCTION:WALL]
 
-	[MAX_STARTING_CIV_NUMBER:100]
+	[MAX_STARTING_CIV_NUMBER:4]
 	[MAX_POP_NUMBER:10000]
 	[MAX_SITE_POP_NUMBER:500]
 
