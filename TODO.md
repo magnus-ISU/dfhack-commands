@@ -13,8 +13,10 @@ the rest fell out of worldgen sessions and code reading and are proposals, not d
 - [ ] **Drow adventure mode untested** entirely. **[user]**
 - [ ] **Illithid psionics in adventure mode.** Ten `HA_PSI_*` interactions exist; none have
       been fired from an adventurer. **[user]**
-- [ ] Second-humans civ (`HA_PLAINS_ALT`) is not referenced anywhere in the hostility
-      script — confirm it inherits normal human behaviour rather than falling through.
+- [x] ~~Second-humans civ inherits hostility behaviour.~~ **Resolved by inspection:**
+      `adventure-hostility.lua` matches on *creature race*, never on entity code, and
+      `HA_PLAINS_ALT` uses the vanilla `HUMAN` creature — so it falls under the existing
+      `good_civs` rule exactly as vanilla humans do. No change needed.
 
 ## Untested — sieges and war
 
@@ -31,12 +33,16 @@ the rest fell out of worldgen sessions and code reading and are proposals, not d
       summer, goblins single autumn caravan. **[user]**
 - [ ] **Drider armor** — a drow torso on a giant-spider body; check what actually equips.
       **[user]**
-- [ ] **Illithid armor.** Note the raws describe illithids as *unable to wear armor*, so the
-      expected result may be "nothing equips" — worth confirming that is deliberate and that
-      it fails cleanly rather than stalling the military screen. **[user]**
-- [ ] **Kobold ancient-dragon armor — confirm they CANNOT wear it.** Size should prevent it
-      (dragon castes reach 5,000,000 at age 10 against a kobold's ~60,000), but the check
-      has not been run. **[user]**
+- [ ] **Illithid armor — the raws and the description disagree, pick one.** `info.txt` says
+      illithids are *"unable to wear armor but robed and terrible"*, but
+      `entity_ha_illithid.txt` grants `ITEM_ARMOR_BREASTPLATE`, `ITEM_ARMOR_MAIL_SHIRT`,
+      `ITEM_ARMOR_LEATHER`, `ITEM_GLOVES_GAUNTLETS`, `ITEM_PANTS_GREAVES` and both shields,
+      and the creature carries `[EQUIPS]`. Either the description is stale or the armour
+      tokens were never removed. **[user]**
+- [ ] **Kobold ancient-dragon armor — confirm they CANNOT wear it.** Sizes say it is safe:
+      an adult kobold is `BODY_SIZE 20,000`, an adult dragon caste 5,000,000 at age 10 and
+      25,000,000 at 1000 — 250x to 1250x, far outside any DF fit tolerance. Low risk, but
+      still worth one in-game look. **[user]**
 - [ ] High elf Shaping Tree end to end: `HA_CATCH_STARLIGHT` success/cooldown, twinkling bar
       forging, wood and feather growing.
 - [ ] Illithid Neural Bath: devour brain, devour prisoner, ascension, tadpole implant,
@@ -63,9 +69,11 @@ the rest fell out of worldgen sessions and code reading and are proposals, not d
       of everyone else. Consider raising it in detailed worldgen.
 - [ ] **Nothing in the suite uses the ocean**, which is ~48% of every map. Highfantasy fields
       three aquatic civs there. Largest unclaimed niche available.
-- [ ] **Dark dwarves still carry the old wide settlement list** (mountain + forest + grassland
-      + savanna + shrubland) that made the drow leak onto grassland. Check whether they are
-      doing the same before deciding if it matters.
+- [ ] **Dark dwarves leak off the mountains — confirmed.** They still carry the wide list the
+      drow had (mountain + forest + grassland + savanna + shrubland) and in the last world
+      placed 33 sites on grassland against 13 in the mountains. The drow fix was
+      `SETTLEMENT_BIOME`/`BIOME_SUPPORT` limited to mountain and forest; the same edit applies
+      here if that behaviour is unwanted.
 - [ ] **No working necromancy lever.** Deliberate raw changes moved counts far less than the
       seed did. `worldgen_parms.secret_number` (default 28) is the untried candidate.
 - [ ] **Ancient dragons still end a century at 1–2 of 3–4.** Better than the total wipeout
@@ -78,8 +86,10 @@ the rest fell out of worldgen sessions and code reading and are proposals, not d
 
 - [ ] `Unrecognized tile: WORKSHOP_CUSTOM` fires on 40 of the 120 shaping-tree graphics
       lines in each buildings file, yet the art renders correctly. Harmless, but unexplained.
-- [ ] Gibberling's `CLAW` attack references a `CLAW` tissue layer group that the humanoid
-      body it was just given may not define. Verify the attack still lands.
+- [x] ~~Gibberling `CLAW` attack after the body fix.~~ **Resolved by inspection:** claws are
+      attached with `[TISSUE_LAYER:BY_CATEGORY:TOE:CLAW:FRONT]`, and the replacement body
+      supplies `5TOES`, so the TOE category still exists. A clean errorlog after the fix
+      confirms it.
 - [ ] `mythical_site_num` (mysterious lairs/dungeons/palaces, default 50) can only be changed
       through detailed worldgen — the basic screen rebuilds the params on Create world. If
       more of those sites are wanted, that is the route.
