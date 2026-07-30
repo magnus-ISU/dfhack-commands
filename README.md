@@ -168,16 +168,19 @@ its own `CHANGES.md`); design rules and fork provenance are in
 [`content-mods/README.md`](content-mods/README.md). The other folders under `content-mods/` are
 Steam-Workshop reference/fork sources, not part of the suite.
 
-| Mod | What it adds |
-|---|---|
-| **`ha-playable-civs`** | Play dwarves, humans, elves, goblins or kobolds in fortress mode, and any of them as adventure-mode outsiders (fork of *All Races Playable Redo*). Goblins gain bronze-working + a single autumn caravan. |
-| **`ha-drow`** | Evil, matriarchal mountain-fortress elves (scimitars/bows, no shields, forge any metal) escorted by domesticated giant cave spiders. 4% are born **driders** — a drow torso on a chitin giant-spider body with paralytic venom and webs. Fort + adventure. |
-| **`ha-illithids`** | Ageless psionic brain-eaters: **illithid / ulitharid / Elder Brain / human-thrall** castes and a **Neural Bath** workshop (devour brains, ascension, tadpole implants, coalesce a new Elder Brain), with 10 psionic levels scaling to scholarship. |
-| **`ha-orcs`** | Warlike pure-metal orcs (no alloys, iron above all) hostile to everyone. One in five is a pain-immune, frequently-raging **skull-cruncher champion**; ruled by a warband hierarchy. Fort + adventure. |
-| **`ha-dark-dwarves`** | Carnivorous cannibal evil dwarves with ironclad in-group loyalty (never tantrum), child-snatchers who sap fortress walls with great picks; winter evil-bloc trade. Fort + adventure. |
-| **`ha-succubi`** | Fork of *Succubus Dungeon* using vanilla weapons but keeping the full demonic wardrobe, corruption, summoning and magma wells; summer evil-bloc caravans. |
-| **`ha-beasts`** | New wild monsters to make evil regions genuinely dangerous. First beast: the **Gibberling**, a small blue feral goblinoid that roams in gibbering swarms (`OPPOSED_TO_LIFE` + `CRAZED`). Standalone. |
-| **`ha-increased-banditry`** | Raises the vanilla human/elf bandit-group rates (30 / 20) via `SELECT_ENTITY`; worldgen-only and independently toggleable. |
+| Mod | Fortress mode | Adventure mode & world |
+|---|---|---|
+| **`ha-playable-civs`** | Play dwarves, humans, elves, goblins or kobolds in fortress mode, with goblins gaining bronze-working and a single autumn caravan (fork of *All Races Playable Redo*). | Any of them can be rolled as an adventure-mode outsider, and the shared Shaping Tree lets tree-respecting civs grow wood instead of felling it. |
+| **`ha-high-elves`** | Elf-stock artisans who mine and forge like dwarves but never cut a tree or take a fey mood, growing their wood at the **Shaping Tree** and coaxing **twinkling metal** out of the night sky by catching starlight. | Founded in forests only, pinned to one town per civ, so they stay a rare, reclusive people rather than covering the map. |
+| **`ha-drow`** | Evil matriarchal elves in insular mountain fortresses — scimitars and bows, no shields, any metal forged, escorted by domesticated giant cave spiders. | 4% are born **driders**, a drow torso on a chitin giant-spider body with paralytic venom and webs; they settle mountains and forests only and are attacked less than anyone in the world. |
+| **`ha-illithids`** | Ageless psionic brain-eaters with **illithid / ulitharid / Elder Brain / human-thrall** castes and a **Neural Bath** for devouring brains, implanting tadpoles, ascension and coalescing a new Elder Brain. | Ten psionic interactions scaling with scholarship, in isolated dark fortresses in the mountains that trade with nobody and are hostile to all. |
+| **`ha-orcs`** | Warlike orcs bigger than humans working only pure metals — no alloys, no steel, iron above all — ruled by a warband hierarchy and breeding in the **Breeding Pit**. | One in five is a pain-immune, frequently-raging **skull-cruncher champion**; they hold savanna and scrubland hamlets and are hostile to every civilization, the evil bloc included. |
+| **`ha-dark-dwarves`** | Carnivorous cannibal dwarves with ironclad in-group loyalty — they never tantrum and never have bad thoughts — trading only with the evil bloc, in winter. | Child-snatchers who sap fortress walls with great picks, holding deep mountain halls and never hillocks. |
+| **`ha-succubi`** | Demonic realm-builders with corruption, summoning, bone-working and magma-well workshops, keeping the full demonic wardrobe while fighting with vanilla pikes, halberds, scourges and whips (fork of *Succubus Dungeon*). | Desert city-builders with summer-only evil-bloc caravans, land-holding Demon princes and outdoor fortifications. |
+| **`ha-kobolds`** | A self-contained fork of *Cute Kobold Caverns* with *Skulking Filth*'s item-thief hard mode baked in, occasionally ruled by an **Ancient Dragon** whose eldest becomes the civ's Dread Wyrm king. | Ancient Dragons also lair the world as fearsome megabeasts, in one-, two- and three-headed castes with spiked or clubbed tails. |
+| **`ha-second-humans`** | A second, independent human civilization identical to the vanilla one, so humans get two placement draws to an orc civ's one. | Adds no creature and modifies no vanilla raws — its entity block is regenerated from vanilla by `sync_from_vanilla.py`. The two human realms can war each other. |
+| **`ha-beasts`** | — | New wild monsters to make evil regions genuinely dangerous. First beast: the **Gibberling**, a small blue feral goblinoid roaming in swarms of one to twenty that attacks every living thing on sight (`OPPOSED_TO_LIFE` + `CRAZED`). Standalone. |
+| **`ha-adventure-hostility`** | — | Guarantees on-sight hostility between the suite's civilizations in adventure mode, including ancient dragons and their kobolds turning on a rival dragon adventurer unless yielded to. |
 
 > **Note:** raw changes (`objects/`) only take effect in a **newly generated world**; a mod's
 > `scripts_modactive/` scripts reload for an existing save. See

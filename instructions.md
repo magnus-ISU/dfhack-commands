@@ -112,6 +112,122 @@ cp dfhack/*.lua "$DF/dfhack-config/scripts/"
 `dfhack.findScript('name')` inside lua returns a script's real on-disk path (stock scripts
 resolve to `$DFH/hack/scripts`).
 
+## Generate a world
+
+`dfhack/gen-world.lua` drives world creation from the title screen. It writes
+`viewscreen_new_regionst`'s own fields for anything DF exposes as data (the mod list, the
+five sliders) and only *clicks* the buttons that have no data equivalent.
+
+```sh
+"$DFH/dfhack-run" gen-world civilizations=max sites=max history=2 mods=ha
+```
+
+`civilizations` / `sites` / `history` / `worldsize` / `beasts` / `savagery` / `minerals`
+each take `max`, `min` or `0`-`4`; `mods=` takes `ha` (everything installed bar upstream
+fork sources), `all` or `none`. History: `0`=5 years, `1`=50, `2`=100, `3`=250, `4`=500.
+World size: `0`=Pocket, `1`=Smaller, `2`=Small, `3`=Medium, `4`=Large.
+
+Then poll until the year stops climbing and sites appear:
+
+```sh
+"$DFH/dfhack-run" lua 'print(df.global.cur_year, #df.global.world.world_data.sites)'
+```
+
+**Restart DF after every raw change.** DF scans `$DF/mods/` exactly once, at startup, so a
+mod deployed while the game is running is invisible — worldgen will silently use the old
+raws. This has produced two full worlds' worth of misleading data.
+
+**DF lists a mod once per copy it can see** — the live one under `mods/` and any older
+snapshot in `installed_mods/` — under the same ID at different versions. `gen-world` takes
+the highest version, but deleting a mod from `mods/` is not enough to retire it: purge its
+`installed_mods/` copies too or it stays selectable forever.
+
+**The first-run "Welcome to Dwarf Fortress" modal reappears after every restart**, swallows
+the Create-world click silently, and leaves the sliders untouched with no error. `gen-world`
+detects it and asks you to dismiss it; when driving the screen by hand, search the text grid
+for `Welcome to Dwarf` and click its `Okay` first.
+
+**A bad entity gives an endless reject loop, not an error.** The counter on the generation
+screen climbs ("88 rejected") while the year never leaves 1. The reason is printed at the
+top of that screen and *nowhere else* — not in `errorlog.txt` — so read it there. Seen so
+far: `FARMING CIVILIZATION PLACED WITHOUT CROPS`, caused both by removing `BIOME_SUPPORT`
+entirely from a farming civ and by putting `[MYTHICAL]` on one.
+
+### Take the census
+
+```sh
+"$DFH/dfhack-run" ha-census
+```
+
+`dfhack/ha-census.lua` reports population at years 1/25/50/75/100, final population with
+civ counts, sites and castles, site terrain per civ, and the terrain available on the map.
+Run it **straight after generation, before saving**.
+
+Notes for writing your own queries:
+
+- DF stores no historical population. "Alive in year Y" is reconstructed from each
+  historical figure's `born_year` / `died_year`. Exact for megabeasts and rare castes;
+  a *sample* for bulk races. Say which you are reporting.
+- Current head count is `entity.total_pop` summed over `world.entities.all`, grouped by
+  `entity.entity_raw.code`. `entity.populations` is usually empty; don't trust it.
+- Civilization *count* means entities of type `df.historical_entity_type.Civilization` —
+  most entity records are site governments, and the vanilla animal peoples add hundreds.
+- Site terrain: `world_data.region_map[x]:_displace(y).region_id` into
+  `world_data.regions[...].type`, read through `df.world_region_type`. `region_map[x][y]`
+  does **not** work — the row is a pointer and needs `_displace`.
+- War events carry `attacker_civ` / `defender_civ`. There are no `*_civ_id` fields; reading
+  those under `pcall` silently reports zero wars for every civ in the world.
+- Necromancers: classify by `hf.info.curse.active_interactions` being non-empty. Filtering
+  on `curse.name == "necromancer"` misses nearly all of them, since worldgen names each
+  secret procedurally.
+- `df.history_event_type` does not enumerate as a Lua table; index it with the numeric type
+  from `event:getType()`.
+
+### Keep the world
+
+Click `Keep world and return to main menu` to save and land back at the title screen.
+Saves go to `~/.local/share/Bay 12 Games/Dwarf Fortress/save/regionN` — **not** the Steam
+install directory. Avoid the post-worldgen `Play now` shortcut; it has crashed DF on large
+worlds. To play, keep the world, then load it from the title screen.
+
+## Drive the DF UI
+
+Two ways, and picking right matters.
+
+**Write the data.** Wherever DF exposes state as fields, set them. Nothing to mis-target,
+no timing to get wrong.
+
+```lua
+local vs = dfhack.gui.getCurViewscreen(true)
+while vs and not df.viewscreen_new_regionst:is_instance(vs) do vs = vs.parent end
+vs.simple_civ_num, vs.simple_site_cap, vs.simple_history, vs.simple_world_size = 4, 4, 2, 3
+```
+
+**Feed a click** for buttons with no data equivalent: park DF's own cursor, then send the
+event. Works on every screen tried — title menu, world creation, the world load list, game
+type, the civ picker, the embark map and its popups.
+
+```lua
+df.global.gps.mouse_x, df.global.gps.mouse_y = cell_x, cell_y
+require('gui').simulateInput(dfhack.gui.getCurViewscreen(true), '_MOUSE_L')
+```
+
+Find the cell by reading the text grid with `dfhack.screen.readTile(x, y)` and searching for
+the button's label. Search from the bottom for labels that also appear in help text.
+
+- **Wait ~2s after any screen transition.** The grid you read is the last rendered frame;
+  clicking and immediately searching for the next screen's label returns nothing, which
+  looks exactly like a failed click.
+- **`row and row:find(...)` truncates to one return value** in a multiple assignment, so the
+  end index comes back nil. Check the nil first, then call `find`.
+- **xdotool cannot click DF.** On Wayland it moves the pointer — DF polls cursor position,
+  so `gps.mouse_x/y` follows — but no button or key event ever arrives. Use fed clicks.
+- **Sliders ignore fed clicks**, but they are plain ints you can assign.
+- Check DF is alive with `pgrep -x dwarfort`. Do **not** use
+  `pgrep -f "Dwarf Fortress/dwarfort"` — it matches your own shell command line and will
+  report a dead DF as running. Likewise `pkill -f` will kill your own shell.
+- Restart with `setsid steam -applaunch 2346660` (that appid is DFHack, which launches DF).
+
 ## Gotchas worth remembering
 
 - **New raws → new world.** No way to inject a new creature/syndrome into an existing save.
