@@ -3,7 +3,7 @@ graphics_ha_elder
 [OBJECT:GRAPHICS]
 
 Elder brain: the illithid 3x2 sprite. Defined as a LAYERED graphic (LAYER_SET +
-LAYER), NOT a simple [DEFAULT:...LARGE_IMAGE...]. DF renders a creature in
+LAYER), NOT a simple a plain DEFAULT layer with LARGE_IMAGE. DF renders a creature in
 grayscale whenever it flashes it (status/legendary indicator) or it is
 underworld/underwater -- creatures drawn with LAYERED graphics are EXEMPT and
 stay in colour, simple large sprites are not, which is why it flickered

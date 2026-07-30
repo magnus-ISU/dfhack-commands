@@ -205,14 +205,15 @@ end
 -- is the `free(): invalid pointer` abort that killed several sessions at export_region.
 -- Allocate a fresh string and give DF sole ownership of it.
 local function copy_entry(v)
-    if type(v) ~= 'userdata' then return v end        -- ints copy by value
-    local ok, n = pcall(function()
+    if type(v) ~= 'userdata' then return v end            -- numbers and Lua strings
+    local ok, dup = pcall(function()
+        local probe = v.value                              -- only std::string has .value
         local x = df.new('string')
-        x.value = v.value
+        x.value = probe
         return x
     end)
-    if ok and n then return n end
-    return str(v)                                     -- fall back to a plain Lua string
+    if ok and dup then return dup end
+    return v            -- mod_header is a struct, not a string: share the pointer
 end
 
 local function apply_mods(mode)

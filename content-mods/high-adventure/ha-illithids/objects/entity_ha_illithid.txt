@@ -167,19 +167,25 @@ entity_ha_illithid
 	[FRIENDLY_COLOR:7:0:1]
 	[DEFAULT_SITE_TYPE:DARK_FORTRESS]
 	[LIKES_SITE:DARK_FORTRESS]
-	[START_BIOME:ANY_GRASSLAND]
-	[START_BIOME:ANY_SAVANNA]
-	[START_BIOME:ANY_SHRUBLAND]
-	EXPERIMENT (worldgen balance): the three START_BIOMEs deliberately have NO
-	BIOME_SUPPORT entry, so the civ claims no territory where it begins. Territory
-	spread is what lets a civ found outlying settlements, so this should pin illithids
-	to their founding site -- few sites, no sprawl, and fragile to a single bad siege.
-	[BIOME_SUPPORT:ANY_WETLAND:1]
-	[BIOME_SUPPORT:ANY_DESERT:1]
-	[BIOME_SUPPORT:ANY_FOREST:2]
-	[BIOME_SUPPORT:ANY_OCEAN:12]
-	[BIOME_SUPPORT:ANY_LAKE:3]
-	[BIOME_SUPPORT:ANY_RIVER:4]
+	Mountain-tribe pattern, matching the drow, succubi and dark dwarves: start in the
+	mountains, settle mountain/forest/grassland/savanna/shrubland, and support the
+	subterranean layers. The earlier no-territory-in-the-start-biome experiment held them
+	to 31 entities and a death spiral, so it is retired.
+	[EXCLUSIVE_START_BIOME:MOUNTAIN]
+	[SETTLEMENT_BIOME:MOUNTAIN]
+	[SETTLEMENT_BIOME:ANY_FOREST]
+	[SETTLEMENT_BIOME:ANY_GRASSLAND]
+	[SETTLEMENT_BIOME:ANY_SAVANNA]
+	[SETTLEMENT_BIOME:ANY_SHRUBLAND]
+	[BIOME_SUPPORT:MOUNTAIN:3]
+	[BIOME_SUPPORT:ANY_FOREST:1]
+	[BIOME_SUPPORT:ANY_GRASSLAND:1]
+	[BIOME_SUPPORT:ANY_SAVANNA:1]
+	[BIOME_SUPPORT:ANY_SHRUBLAND:1]
+	[BIOME_SUPPORT:ANY_RIVER:1]
+	[BIOME_SUPPORT:SUBTERRANEAN_CHASM:3]
+	[BIOME_SUPPORT:SUBTERRANEAN_WATER:2]
+	[BIOME_SUPPORT:SUBTERRANEAN_LAVA:1]
 	[MERCHANT_NOBILITY]
 	[DIPLOMAT_BODYGUARDS]
 	[MERCHANT_BODYGUARDS]

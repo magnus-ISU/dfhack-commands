@@ -3,7 +3,7 @@ graphics_ha_drider
 [OBJECT:GRAPHICS]
 
 Drider: the drow spider-caste 3x2 sprite. It MUST be a LAYERED graphic
-(LAYER_SET + LAYER), NOT a simple [DEFAULT:...LARGE_IMAGE...]. DF renders a
+(LAYER_SET + LAYER), NOT a simple a plain DEFAULT layer with LARGE_IMAGE. DF renders a
 creature in grayscale whenever the game flashes it (status/legendary indicator)
 or it is underwater/underworld -- but creatures drawn with LAYERED graphics are
 EXEMPT and stay in colour. A simple large sprite is not exempt, so it flickered

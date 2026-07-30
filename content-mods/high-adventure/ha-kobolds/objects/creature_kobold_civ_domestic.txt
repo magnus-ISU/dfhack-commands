@@ -166,10 +166,10 @@ Wooly Spiders are dog sized jumping spiders that can be used for the silk indust
 
 --------------------------------------------------
 
-[SELECT_CREATURE:HELMET_SNAKE]
-	[DOES_NOT_EXIST]
-
 [CREATURE:HA_HELMET_SNAKE_TAME]
+	No wild spawn tokens: the vanilla counterpart still exists, and this copy
+	carried identical BIOME/FREQUENCY/POPULATION_NUMBER, which would have roughly
+	doubled the species in the world. Kobolds still get it via ANIMAL_TOKEN.
 	[DESCRIPTION:A fearsome, armor-scaled snake native to the underground. Its head is covered in horn-like plates that give it the appearance of a dragon. It's bite delivers a deadly venom.]
 	[NAME:helmet snake:helmet snakes:helmet snake]
 	[CASTE_NAME:helmet snake:helmet snakes:helmet snake]
@@ -179,17 +179,12 @@ Wooly Spiders are dog sized jumping spiders that can be used for the silk indust
 	[PETVALUE:200]
 	[PET_EXOTIC]
 	[TRAINABLE_WAR]
-	[FREQUENCY:30]
 
 	[NATURAL]
 	[CARNIVORE]
-	[LARGE_ROAMING]
 	[LARGE_PREDATOR]
 	[LOW_LIGHT_VISION:10000]
-	[BIOME:SUBTERRANEAN_CHASM]
 	[UNDERGROUND_DEPTH:1:2]
-	[POPULATION_NUMBER:10:25]
-	[CLUSTER_NUMBER:1:1]
 	[PREFSTRING:impressive heads]
 
 	[BODY:BASIC_1PARTBODY:BASIC_HEAD_NECK:TAIL:2EYES:NOSE:2LUNGS:HEART:GUTS:ORGANS:THROAT:NECK:SPINE:BRAIN:SKULL:MOUTH:FORKED_TONGUE:GENERIC_TEETH_WITH_FANGS:RIBCAGE:HEAD_HORN]
@@ -313,22 +308,15 @@ Wooly Spiders are dog sized jumping spiders that can be used for the silk indust
 
 --------------------------------------------------
 
-[SELECT_CREATURE:MONITOR_LIZARD]
-	[DOES_NOT_EXIST]
-
 [CREATURE:HA_MONITOR_LIZARD_TAME]
+	No wild spawn tokens: the vanilla counterpart still exists, and this copy
+	carried identical BIOME/FREQUENCY/POPULATION_NUMBER, which would have roughly
+	doubled the species in the world. Kobolds still get it via ANIMAL_TOKEN.
 	[DESCRIPTION:A large, mildly venomous reptile.  They can be found foraging for eggs, or hunting small prey.  They are said to be the most intelligent of their kind.]
 	[NAME:monitor lizard:monitor lizards:monitor lizard]
 	[CASTE_NAME:monitor lizard:monitor lizards:monitor lizard]
 	[CHILD:1][GENERAL_CHILD_NAME:monitor lizard hatchling:monitor lizard hatchlings]
 	[CREATURE_TILE:'M'][COLOR:6:0:0]
-	[BIOME:GRASSLAND_TROPICAL]
-	[BIOME:SAVANNA_TROPICAL]
-	[BIOME:SHRUBLAND_TROPICAL]
-	[BIOME:ANY_TROPICAL_FOREST]
-	[LARGE_ROAMING]
-	[POPULATION_NUMBER:5:10]
-	[CLUSTER_NUMBER:1:1]
 	[CARNIVORE][NATURAL]
 	[MEANDERER]
 	[PETVALUE:160]
@@ -438,10 +426,10 @@ Wooly Spiders are dog sized jumping spiders that can be used for the silk indust
 GIANT CAVE RATS:
 The primary kobold pack animal, and an exotic war-trainable mount for siegers.
 
-[SELECT_CREATURE:RAT_GIANT]
-	[DOES_NOT_EXIST]
-
 [CREATURE:HA_RAT_CAVE_GIANT]
+	No wild spawn tokens: the vanilla counterpart still exists, and this copy
+	carried identical BIOME/FREQUENCY/POPULATION_NUMBER, which would have roughly
+	doubled the species in the world. Kobolds still get it via ANIMAL_TOKEN.
 	[DESCRIPTION:A gigantic rodent found underground.]
 	[NAME:giant cave rat:giant cave rats:giant cave rat]
 	[CASTE_NAME:giant cave rat:giant cave rats:giant cave rat]
@@ -455,11 +443,8 @@ The primary kobold pack animal, and an exotic war-trainable mount for siegers.
 	[WAGON_PULLER]
 	[PACK_ANIMAL]
 	[TRADE_CAPACITY:1500]
-	[NATURAL]
-	[LARGE_ROAMING][FREQUENCY:100][DIFFICULTY:2]
+	[NATURAL][FREQUENCY:100][DIFFICULTY:2]
 	[BENIGN]
-	[POPULATION_NUMBER:10:20]
-	[BIOME:SUBTERRANEAN_CHASM]
 	[UNDERGROUND_DEPTH:1:2]
 	[PREFSTRING:strength]
 	[BODY:QUADRUPED_NECK:TAIL:2EYES:2EARS:NOSE:2LUNGS:HEART:GUTS:ORGANS:THROAT:NECK:SPINE:BRAIN:SKULL:4TOES_FQ_REG:5TOES_RQ_REG:MOUTH:TONGUE:RODENT_TEETH:RIBCAGE]
@@ -542,10 +527,10 @@ The primary kobold pack animal, and an exotic war-trainable mount for siegers.
 CAVE RAT:
 Changed name of Large Rat to Cave Rat (to fix ambiguity about "large rat leather clothes"), generally reduced cost, slightly increased speed, size, and growth rate, and boosted their litter size, to serve as a dedicated meat/leather ranch animal.
 
-[SELECT_CREATURE:RAT_LARGE]
-	[DOES_NOT_EXIST]
-
 [CREATURE:HA_RAT_CAVE]
+	No wild spawn tokens: the vanilla counterpart still exists, and this copy
+	carried identical BIOME/FREQUENCY/POPULATION_NUMBER, which would have roughly
+	doubled the species in the world. Kobolds still get it via ANIMAL_TOKEN.
 	[DESCRIPTION:A huge rodent found underground.]
 	[NAME:cave rat:cave rats:cave rat]
 	[CASTE_NAME:cave rat:cave rats:cave rat]
@@ -554,11 +539,8 @@ Changed name of Large Rat to Cave Rat (to fix ambiguity about "large rat leather
 	[CREATURE_CLASS:MAMMAL]
 	[PETVALUE:60]
 	[PET_EXOTIC]
-	[NATURAL]
-	[LARGE_ROAMING][FREQUENCY:100]
+	[NATURAL][FREQUENCY:100]
 	[BENIGN]
-	[POPULATION_NUMBER:10:20]
-	[BIOME:SUBTERRANEAN_CHASM]
 	[UNDERGROUND_DEPTH:1:1]
 	[PREFSTRING:strength]
 	[BODY:QUADRUPED_NECK:TAIL:2EYES:2EARS:NOSE:2LUNGS:HEART:GUTS:ORGANS:THROAT:NECK:SPINE:BRAIN:SKULL:4TOES_FQ_REG:5TOES_RQ_REG:MOUTH:TONGUE:RODENT_TEETH:RIBCAGE]
