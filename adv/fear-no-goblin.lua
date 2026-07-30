@@ -1,4 +1,4 @@
--- Adventure mode: fast travel into, out of and through goblin dark pits.
+-- Adventure mode: fast travel into and out of the goblin dark pit you are at.
 --@module = true
 --[[
 adv/fear-no-goblin
@@ -10,12 +10,15 @@ Dark pits."). Both checks read one field: `world_site.type`. Nothing else about
 the site matters -- verified live, a dark pit presented as a Town lets the
 travel check pass.
 
-So this presents every DarkFortress site as a Town while it is armed, and puts
-the real type back when it is not.
+So this presents ONE dark pit as a town: the closest one, and only while you are
+within 1 world tile of it. Every other dark fortress in the world is left alone,
+so the blast radius is a single site you are standing on or next to. The flip
+side is that pits elsewhere on your route still bump you -- get near one and it
+gets patched in turn.
 
 WHAT IT TOUCHES
-  Only `world_site.type`, only on sites whose type is DarkFortress. No units,
-  no map, no map blocks.
+  Only `world_site.type`, only on that one site, only while it is DarkFortress.
+  No units, no map, no map blocks.
 
 WHY IT HOLDS THE PATCH INSTEAD OF PULSING IT
   Travel does not start inside the keypress -- DF re-reads the site over the
@@ -24,31 +27,34 @@ WHY IT HOLDS THE PATCH INSTEAD OF PULSING IT
   and left alone; it is only ever removed at a standstill.
 
 HOW IT AVOIDS SAVING A TOWN-SHAPED DARK FORTRESS INTO YOUR WORLD
-  1. The patch drops the moment a viewscreen that can save appears (the ESC
-     menu, the save screen). It goes back on when you return to play. Adventure
-     mode has no timed autosave -- AUTOSAVE is a fortress-mode setting -- so a
-     save cannot happen without passing through one of those screens.
+  1. The patch is only held while `viewscreen_dungeonmodest` is up, i.e. while
+     you are actually playing. Anything else on screen -- the ESC menu, the save
+     screen, adventurer setup, the title -- drops it within a few frames, and it
+     goes back on when you return to play. Adventure mode has no timed autosave
+     (AUTOSAVE is a fortress-mode setting), so a save cannot happen without one
+     of those screens being up first.
   2. It also drops on world unload.
-  3. Every patched site is written to a stash file first, so if DF dies while
-     armed you can put the world back with `adv/fear-no-goblin restore`. On
-     start, a stash left over from a crash is replayed automatically.
+  3. The patched site is written to a per-world stash file first, so if DF dies
+     while armed you can put the world back with `adv/fear-no-goblin restore`.
+     On arm, a stash left over from a crash in THIS world is replayed
+     automatically; stashes belonging to other worlds are left untouched.
 
-    adv/fear-no-goblin           arm (idempotent)
+    adv/fear-no-goblin           arm (idempotent; re-run re-targets)
     adv/fear-no-goblin once      arm, and disarm by itself once you have
-                                 travelled clear of every dark pit
+                                 travelled clear of the pit
     adv/fear-no-goblin stop      restore + disarm
-    adv/fear-no-goblin status    armed? how many sites are patched?
-    adv/fear-no-goblin restore   put every patched site back, including ones
-                                 left over from a crashed session
+    adv/fear-no-goblin status    armed? which site is patched?
+    adv/fear-no-goblin restore   put the patched site back, including one left
+                                 over from a crashed session
 ]]
 
 local BAN_TYPE = df.world_site_type.DarkFortress
 local SAFE_TYPE = df.world_site_type.Town
-local STASH = dfhack.getDFPath() .. '/dfhack-config/fear-no-goblin-stash.txt'
 
--- viewscreens that can lead to a save; the patch is off while any is up
-local SAVE_SCREENS = {'viewscreen_optionst', 'viewscreen_savegamest',
-                      'viewscreen_titlest', 'viewscreen_loadgamest'}
+local RANGE = 1          -- world tiles: how close a pit must be to get patched
+local EVAL_EVERY = 100   -- frames between target re-evaluations
+local LIFT_AFTER = 10    -- consecutive off-screen frames before dropping the patch
+                         -- (debounced so a transient screen mid-travel cannot trip it)
 
 running = running or false
 once_mode = once_mode or false
@@ -58,6 +64,14 @@ local gen = gen or 0
 local function save_dir()
     local sg = df.global.world.cur_savegame
     return sg and sg.save_dir or ''
+end
+
+-- one stash per world: arming in a second world must not clobber the first
+-- world's recovery record
+local function stash_path()
+    local dir = save_dir():gsub('[^%w%-_]', '_')
+    if dir == '' then return end
+    return dfhack.getDFPath() .. '/dfhack-config/fear-no-goblin-stash-' .. dir .. '.txt'
 end
 
 local function sites_by_id()
@@ -70,20 +84,24 @@ end
 
 -- stash: line 1 is the save folder, then "<site id> <real type>" per line
 local function write_stash()
+    local path = stash_path()
+    if not path then return end
     local lines = {}
     for id, t in pairs(patched) do lines[#lines + 1] = ('%d %d'):format(id, t) end
     if #lines == 0 then
-        os.remove(STASH)
+        os.remove(path)
         return
     end
-    local f = io.open(STASH, 'w')
+    local f = io.open(path, 'w')
     if not f then return end
     f:write(save_dir(), '\n', table.concat(lines, '\n'), '\n')
     f:close()
 end
 
 local function read_stash()
-    local f = io.open(STASH, 'r')
+    local path = stash_path()
+    if not path then return end
+    local f = io.open(path, 'r')
     if not f then return end
     local dir = f:read('*l')
     local entries = {}
@@ -95,35 +113,49 @@ local function read_stash()
     return dir, entries
 end
 
-local function at_save_screen()
-    local vs = dfhack.gui.getCurViewscreen(true)
-    for _, name in ipairs(SAVE_SCREENS) do
-        local t = df[name]
-        if t and t:is_instance(vs) then return true end
-    end
-    return false
+-- the patch is only ever held while the adventure play screen is up
+local function in_play()
+    return dfhack.world.isAdventureMode()
+        and df.viewscreen_dungeonmodest:is_instance(dfhack.gui.getCurViewscreen(true))
 end
 
--- present every dark pit as a town; returns how many sites changed
-function apply()
-    local n = 0
+-- adventurer's world tile, via the loaded map: region_x/y are embark tiles,
+-- 48 map tiles to an embark tile, 16 embark tiles to a world tile
+local function player_world_tile()
+    if not dfhack.isMapLoaded() then return end
+    local map = df.global.world.map
+    local u = dfhack.world.getAdventurer()
+    local ex = map.region_x + (u and u.pos.x // 48 or 0)
+    local ey = map.region_y + (u and u.pos.y // 48 or 0)
+    return ex // 16, ey // 16
+end
+
+-- a site's footprint in world tiles (global_min/max are embark tiles)
+local function site_world_rect(site)
+    return site.global_min_x // 16, site.global_min_y // 16,
+           (site.global_max_x - 1) // 16, (site.global_max_y - 1) // 16
+end
+
+-- closest dark pit to the adventurer, or nil if none is within RANGE world tiles
+local function nearest_pit()
+    local wx, wy = player_world_tile()
+    if not wx then return end
+    local best, best_dist
     for _, site in ipairs(df.global.world.world_data.sites) do
-        if site.type == BAN_TYPE and patched[site.id] == nil then
-            patched[site.id] = site.type
-            site.type = SAFE_TYPE
-            n = n + 1
+        if site.type == BAN_TYPE or patched[site.id] then
+            local x0, y0, x1, y1 = site_world_rect(site)
+            local dx = math.max(x0 - wx, 0, wx - x1)
+            local dy = math.max(y0 - wy, 0, wy - y1)
+            local dist = math.max(dx, dy)   -- 0 while standing in the site
+            if dist <= RANGE and (not best_dist or dist < best_dist) then
+                best, best_dist = site, dist
+            end
         end
     end
-    if n > 0 then write_stash() end
-    -- DF ignores every further travel keypress until you move once you have
-    -- already been refused, so clear that latch or the first press does nothing
-    if dfhack.world.isAdventureMode() then
-        df.global.adventure.travel_not_moved = 0
-    end
-    return n
+    return best, best_dist
 end
 
--- put the real types back; only touches sites still sitting at SAFE_TYPE
+-- put the real type back; only touches sites still sitting at SAFE_TYPE
 function restore()
     if not next(patched) then return 0 end
     local by_id = sites_by_id()
@@ -140,15 +172,27 @@ function restore()
     return n
 end
 
+-- point the patch at the closest in-range pit, moving it off whatever it was on.
+-- returns the site now patched (nil if nothing is in range).
+function retarget()
+    local site = nearest_pit()
+    if site and patched[site.id] then return site end   -- already on the right one
+    restore()
+    if not site or site.type ~= BAN_TYPE then return end
+    patched[site.id] = site.type
+    site.type = SAFE_TYPE
+    write_stash()
+    -- DF ignores every further travel keypress until you move once you have
+    -- already been refused, so clear that latch or the first press does nothing
+    df.global.adventure.travel_not_moved = 0
+    return site
+end
+
 -- replay a stash left behind by a crashed session
 function recover()
     local dir, entries = read_stash()
     if not dir or not entries or #entries == 0 then return 0 end
-    if dir ~= save_dir() then
-        dfhack.printerr(('adv/fear-no-goblin: stash belongs to save "%s", not "%s"'
-            .. ' -- leaving it alone.'):format(dir, save_dir()))
-        return 0
-    end
+    if dir ~= save_dir() then return 0 end
     local by_id = sites_by_id()
     local n = 0
     for _, e in ipairs(entries) do
@@ -163,49 +207,31 @@ function recover()
     return n
 end
 
--- true while the loaded local map overlaps any site we have patched
-local function standing_in_a_patched_site()
-    if not dfhack.maps.isValid() then return true end   -- travelling: assume yes
-    local map = df.global.world.map
-    local x0, y0 = map.region_x, map.region_y
-    local x1 = x0 + math.max(1, map.x_count // 48) - 1
-    local y1 = y0 + math.max(1, map.y_count // 48) - 1
-    local by_id = sites_by_id()
-    for id in pairs(patched) do
-        local s = by_id[id]
-        if s and s.global_min_x <= x1 and s.global_max_x >= x0
-             and s.global_min_y <= y1 and s.global_max_y >= y0 then
-            return true
-        end
-    end
-    return false
+function site_label(site)
+    local ok, name = pcall(dfhack.translation.translateName, site.name, true)
+    return ('"%s" (site %d)'):format(ok and name or '?', site.id)
 end
 
 local function watch_loop()
     gen = gen + 1
     local my_gen = gen
-    local clear_for = 0
+    local off_screen, since_eval = 0, 0
     local function loop()
         if not running or my_gen ~= gen then return end
-        if dfhack.world.isAdventureMode() then
-            if at_save_screen() then
-                restore()
-            elseif not next(patched) then
-                apply()
-            elseif once_mode then
-                -- disarm once the adventurer has been clear of every dark pit
-                -- for a couple of seconds of settled local play
-                if standing_in_a_patched_site() then
-                    clear_for = 0
-                else
-                    clear_for = clear_for + 1
-                    if clear_for > 200 then
-                        local n = restore()
-                        running = false
-                        print(('adv/fear-no-goblin: travelled clear -- restored %d'
-                            .. ' dark pit(s), disarmed.'):format(n))
-                        return
-                    end
+        if not in_play() then
+            off_screen = off_screen + 1
+            if off_screen > LIFT_AFTER then restore() end
+        else
+            off_screen, since_eval = 0, since_eval + 1
+            -- re-evaluate on a slow cadence, and immediately after the patch was
+            -- dropped for a menu, so it comes straight back on return to play
+            if since_eval >= EVAL_EVERY or not next(patched) then
+                since_eval = 0
+                local site = retarget()
+                if once_mode and not site then
+                    running = false
+                    print('adv/fear-no-goblin: clear of the pit -- restored, disarmed.')
+                    return
                 end
             end
         end
@@ -235,57 +261,73 @@ local arg = ({...})[1]
 
 if arg == 'stop' then
     local n = stop()
-    print(('adv/fear-no-goblin: disarmed, %d dark pit(s) restored.'):format(n))
+    print(('adv/fear-no-goblin: disarmed, %d site(s) restored.'):format(n))
     return
 elseif arg == 'restore' then
     local n = restore()
     running = false
     gen = gen + 1
     if n == 0 then n = recover() end
-    print(('adv/fear-no-goblin: restored %d dark pit(s).'):format(n))
+    print(('adv/fear-no-goblin: restored %d site(s).'):format(n))
     return
 elseif arg == 'status' then
-    local n = 0
-    for _ in pairs(patched) do n = n + 1 end
-    print(('adv/fear-no-goblin: %s | %d dark pit(s) presented as towns%s')
-        :format(running and 'ARMED' or 'disarmed', n,
-                once_mode and ' | one-shot mode' or ''))
+    local by_id = sites_by_id()
+    local where = 'nothing patched'
+    for id in pairs(patched) do
+        local s = by_id[id]
+        where = s and ('patching ' .. site_label(s)) or ('patching site ' .. id)
+    end
+    print(('adv/fear-no-goblin: %s | %s%s'):format(running and 'ARMED' or 'disarmed',
+        where, once_mode and ' | one-shot mode' or ''))
     return
 end
 
-if not dfhack.world.isAdventureMode() then
-    qerror('adv/fear-no-goblin only works in adventure mode')
+-- arming is only legal from actual play: isAdventureMode() is also true on the
+-- adventurer-setup screen, and patching a world you are still setting up gets
+-- that world saved with a town-shaped dark fortress in it
+if not in_play() then
+    qerror('adv/fear-no-goblin only works while playing an adventurer'
+        .. ' (the adventure map screen)')
 end
 
 if arg and arg ~= 'once' then
     qerror('unknown argument: ' .. arg .. ' (try: once, stop, status, restore)')
 end
 
--- the already-armed check MUST come first: onMapLoad re-runs this on every map
--- load (including arriving somewhere after a travel), and recover() would read
--- our OWN live stash as crash leftovers, un-patch everything and then bail out
--- here, leaving the script "armed" over an unpatched world.
+-- the already-armed re-target MUST come before recover(): onMapLoad re-runs this
+-- on every map load, and recover() would otherwise read our OWN live stash as
+-- crash leftovers and un-patch the world behind the watcher's back
 if running then
-    print('adv/fear-no-goblin: already armed. `adv/fear-no-goblin stop` to disarm.')
+    local site = retarget()
+    print(site
+        and ('adv/fear-no-goblin: re-targeted -- %s presented as a town.')
+            :format(site_label(site))
+        or 'adv/fear-no-goblin: armed, no dark pit within 1 tile -- nothing patched.')
     return
 end
 
 local recovered = recover()
 if recovered > 0 then
-    print(('adv/fear-no-goblin: recovered %d dark pit(s) from a previous session.')
+    print(('adv/fear-no-goblin: recovered %d site(s) from a previous session.')
         :format(recovered))
 end
 
 once_mode = (arg == 'once')
 running = true
-local n = apply()
+local site = retarget()
 watch_loop()
-print(('adv/fear-no-goblin: armed -- %d dark pit(s) presented as towns.'):format(n))
-print('  Fast travel in, out of and through them now works.')
+
+if site then
+    print(('adv/fear-no-goblin: armed -- %s presented as a town.'):format(site_label(site)))
+    print('  Fast travel in and out of it now works.')
+else
+    print('adv/fear-no-goblin: armed -- no dark pit within 1 tile, nothing patched yet.')
+    print('  It will patch the closest pit as soon as you are next to one.')
+end
 if once_mode then
-    print('  One-shot: disarms itself once you have travelled clear of them all.')
+    print('  One-shot: disarms itself once you have travelled clear of the pit.')
 else
     print('  Run `adv/fear-no-goblin stop` when you are done.')
 end
-print('  The patch lifts by itself whenever the ESC/save screen is up, so a save'
+print('  The patch lifts by itself whenever you leave the play screen, so a save'
     .. ' cannot catch it.')
