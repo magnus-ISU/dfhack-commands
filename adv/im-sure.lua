@@ -22,16 +22,21 @@ Two annoyance-killers for adventure mode, in one watcher:
    the menu (DF50 widgets sometimes ignore synthetic keys), the retry clicks the
    option/button text directly.
 
+The watcher is driven by an OVERLAY, not a frame timer: while a menu or
+confirmation is open DF sits waiting for input and `dfhack.timeout` frame timers
+FREEZE -- an overlay's onupdate is the only driver that keeps firing then.
+
     adv/im-sure           start watching (idempotent)
     adv/im-sure stop      stop
     adv/im-sure status    running? how many handled?
 ]]
 
+local overlay = require('plugins.overlay')
+
 running = running or false
 dismissed = dismissed or 0     -- "Continue waiting" clicks
 autopathed = autopathed or 0   -- auto-selected "Path to here"
 confirmed = confirmed or 0     -- "Finish action" / "In conflict" confirms
-local gen = gen or 0
 
 -- find a text string on the rendered screen; returns its top-left text cell + length
 local function find_text(needle)
@@ -90,79 +95,91 @@ local function path_menu_open()
     return find_text('no climbing/jumping') ~= nil
 end
 
-local CONFIRM_WINDOW = 900   -- frames (~9s) to watch for confirmations after auto-path
+local CONFIRM_WINDOW = 900   -- overlay frames (~9s) to watch for confirmations
 local CONFIRM_TEXTS = {'finish anyway', 'Finish action'}
 
-local function watch_loop()
-    gen = gen + 1
-    local my_gen = gen
-    local stuck = 0
-    local cooldown = 0
-    local menu_cd, a_attempts = 0, 0
-    local confirm_left, confirm_cd, c_attempts = 0, 0, 0
-    local function loop()
-        if not running or my_gen ~= gen then return end
-        local adv_mode = dfhack.world.isAdventureMode()
-        local prompt = adv_mode
-            and df.global.adventure.player_control_state
-                == df.adventure_game_loop_type.TAKING_TOO_LONG_INPUT
-        if prompt then
-            stuck = stuck + 1
-            if cooldown > 0 then cooldown = cooldown - 1 end
-            -- give the prompt a moment to render, then click; retry at ~1/second
-            if stuck > 15 and cooldown <= 0 then
-                if dismiss() then dismissed = dismissed + 1 end
-                cooldown = 100
-            end
-        else
-            stuck, cooldown = 0, 0
-        end
+-- per-frame watcher state (locals, reset on script reload -- counters above persist)
+local stuck, cooldown = 0, 0
+local menu_cd, a_attempts = 0, 0
+local confirm_left, confirm_cd, c_attempts = 0, 0, 0
 
-        if adv_mode then
-            -- auto-select "Path to here" when it's the only real choice
-            if menu_cd > 0 then menu_cd = menu_cd - 1 end
-            if menu_cd <= 0 then
-                if path_menu_open() then
-                    a_attempts = a_attempts + 1
-                    -- 'Path to here' matches the PLAIN option first (listed above
-                    -- the no-climbing variant), so the click fallback stays correct
-                    press_or_click(a_attempts, 'CUSTOM_A', 'Path to here')
-                    if a_attempts == 1 then autopathed = autopathed + 1 end
-                    menu_cd = 50
-                    confirm_left = CONFIRM_WINDOW
-                    confirm_cd = 10   -- let the first confirmation render
-                    c_attempts = 0
-                else
-                    a_attempts = 0
-                end
+local function step()
+    if not running or not dfhack.world.isAdventureMode() then return end
+
+    -- 1. the "haven't been able to act for a while" prompt
+    local prompt = df.global.adventure.player_control_state
+        == df.adventure_game_loop_type.TAKING_TOO_LONG_INPUT
+    if prompt then
+        stuck = stuck + 1
+        if cooldown > 0 then cooldown = cooldown - 1 end
+        -- give the prompt a moment to render, then click; retry at ~1/second
+        if stuck > 15 and cooldown <= 0 then
+            if dismiss() then dismissed = dismissed + 1 end
+            cooldown = 100
+        end
+    else
+        stuck, cooldown = 0, 0
+    end
+
+    -- 2. auto-select "Path to here" when it's the only real choice
+    if menu_cd > 0 then menu_cd = menu_cd - 1 end
+    if menu_cd <= 0 then
+        if path_menu_open() then
+            a_attempts = a_attempts + 1
+            -- 'Path to here' matches the PLAIN option first (listed above the
+            -- no-climbing variant), so the click fallback stays correct
+            press_or_click(a_attempts, 'CUSTOM_A', 'Path to here')
+            if a_attempts == 1 then autopathed = autopathed + 1 end
+            menu_cd = 50
+            confirm_left = CONFIRM_WINDOW
+            confirm_cd = 10   -- let the first confirmation render
+            c_attempts = 0
+        else
+            a_attempts = 0
+        end
+    end
+
+    -- 3. after pathing, dismiss "Finish action" / "In conflict - finish anyway?"
+    if confirm_left > 0 then
+        confirm_left = confirm_left - 1
+        if confirm_cd > 0 then confirm_cd = confirm_cd - 1 end
+        -- scan the screen at most a few times a second
+        if confirm_cd <= 0 and confirm_left % 10 == 0 then
+            local hit = nil
+            for _, needle in ipairs(CONFIRM_TEXTS) do
+                if find_text(needle) then hit = needle break end
             end
-            -- after pathing, dismiss "Finish action" / "In conflict - finish anyway?"
-            if confirm_left > 0 then
-                confirm_left = confirm_left - 1
-                if confirm_cd > 0 then confirm_cd = confirm_cd - 1 end
-                -- scan the screen at most a few times a second
-                if confirm_cd <= 0 and confirm_left % 10 == 0 then
-                    local hit = nil
-                    for _, needle in ipairs(CONFIRM_TEXTS) do
-                        if find_text(needle) then hit = needle break end
-                    end
-                    if hit then
-                        c_attempts = c_attempts + 1
-                        press_or_click(c_attempts, 'CUSTOM_C', hit)
-                        if c_attempts % 2 == 1 then confirmed = confirmed + 1 end
-                        confirm_cd = 30
-                    end
-                end
+            if hit then
+                c_attempts = c_attempts + 1
+                press_or_click(c_attempts, 'CUSTOM_C', hit)
+                if c_attempts % 2 == 1 then confirmed = confirmed + 1 end
+                confirm_cd = 30
             end
         end
-        dfhack.timeout(1, 'frames', loop)
     end
-    loop()
 end
+
+-- ---- overlay driver ---------------------------------------------------------
+-- onupdate fires every render frame even while DF waits for input (menus,
+-- confirmations), which is exactly when frame timers stall.
+
+ImSureOverlay = defclass(ImSureOverlay, overlay.OverlayWidget)
+ImSureOverlay.ATTRS{
+    desc = 'Drives adv/im-sure: auto-dismisses adventure prompts and lone path menus.',
+    default_enabled = true,
+    viewscreens = 'dungeonmode',
+    overlay_onupdate_max_freq_seconds = 0,
+    frame = {w = 1, h = 1},
+}
+
+function ImSureOverlay:overlay_onupdate()
+    pcall(step)
+end
+
+OVERLAY_WIDGETS = {watch = ImSureOverlay}
 
 function stop()
     running = false
-    gen = gen + 1
 end
 
 if dfhack_flags.module then return end
@@ -179,13 +196,8 @@ elseif arg == 'status' then
     print(('adv/im-sure: %s | "Continue waiting" x%d | auto-path x%d | confirms x%d')
         :format(running and 'WATCHING' or 'stopped', dismissed, autopathed, confirmed))
 else
-    if running then
-        print(('adv/im-sure: already watching (%d waits, %d auto-paths, %d confirms).')
-            :format(dismissed, autopathed, confirmed))
-    else
-        running = true
-        watch_loop()
-        print('adv/im-sure: watching -- "Continue waiting", lone "Path to here" menus,'
-            .. ' and the finish-action confirmations are handled for you.')
-    end
+    running = true
+    overlay.rescan()
+    print('adv/im-sure: watching -- "Continue waiting", lone "Path to here" menus,'
+        .. ' and the finish-action confirmations are handled for you.')
 end

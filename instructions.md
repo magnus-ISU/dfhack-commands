@@ -25,6 +25,7 @@ This repo holds two kinds of deliverables for **Dwarf Fortress 0.53.x + DFHack**
 ```sh
 DF="$HOME/.local/share/Steam/steamapps/common/Dwarf Fortress"
 DFH="$HOME/.local/share/Steam/steamapps/common/DFHack"
+B12="$HOME/.local/share/Bay 12 Games/Dwarf Fortress"   # saves: $B12/save, snapshots: $B12/data/installed_mods
 ```
 
 ## Connect to the running game
