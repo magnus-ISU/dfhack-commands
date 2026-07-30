@@ -222,19 +222,28 @@ local function apply_mods(mode)
     local have = {}
     for i = 0, #vs.object_load_order_id - 1 do have[str(vs.object_load_order_id[i])] = true end
     local added, skipped = {}, {}
+    -- DF lists a mod once per copy it can see: the live one under mods/ and any
+    -- older snapshot left in data/installed_mods. Same id, different version. Take
+    -- the newest, or worldgen silently runs on stale raws.
+    local best = {}
     for i = 0, #vs.available_id - 1 do
         local id = str(vs.available_id[i])
+        local ver = tonumber(vs.available_numeric_version[i]) or 0
+        if not best[id] or ver > best[id].ver then best[id] = {idx = i, ver = ver} end
+    end
+    for id, pick in pairs(best) do
         if FORK_SOURCES[id] and mode ~= 'all' then
             skipped[#skipped + 1] = id
         elseif not have[id] then
             for _, f in ipairs(MOD_FIELDS) do
                 local s, d = vs['available_' .. f], vs['object_load_order_' .. f]
-                if s and d then d:insert('#', copy_entry(s[i])) end
+                if s and d then d:insert('#', copy_entry(s[pick.idx])) end
             end
             have[id] = true
-            added[#added + 1] = id
+            added[#added + 1] = ('%s v%d'):format(id, pick.ver)
         end
     end
+    table.sort(added)
     print(('mods: added %d (%s)'):format(#added, table.concat(added, ', ')))
     if #skipped > 0 then
         print(('mods: skipped fork source(s) %s -- use mods=all to include')

@@ -9,6 +9,10 @@ entity_ha_dark_dwarf
 	[BANDITRY:40]
 	[LOCAL_BANDITRY]
 	[ABUSE_BODIES]
+	No MYTHICAL here. That flag belongs to angel/vault style entities: DF's own
+	generated mythical entity pairs it with SITE_GUARDIAN and the DIVINE_MAT tokens
+	and has zero population. Putting it on a farming civ made worldgen reject every
+	world with FARMING CIVILIZATION PLACED WITHOUT CROPS.
 	[ALL_MAIN_POPS_CONTROLLABLE]
 	[CREATURE:HA_DARK_DWARF]
 	[TRANSLATION:DWARF]

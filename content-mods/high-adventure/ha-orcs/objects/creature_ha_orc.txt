@@ -17,7 +17,7 @@ creature_ha_orc
 	[EQUIPS]
 	[DIURNAL]
 	[EVIL]
-        [MAXAGE:450:550]
+        [MAXAGE:60:120]
 	
 	[PREFSTRING:putrid musk]
 			

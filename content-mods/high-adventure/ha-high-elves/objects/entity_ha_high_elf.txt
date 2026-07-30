@@ -165,10 +165,10 @@ behind each block.
 	[LIKES_SITE:CITY]
 	[TOLERATES_SITE:CITY]
 	[START_BIOME:ANY_FOREST]
-	[BIOME_SUPPORT:ANY_FOREST:2]
-	[BIOME_SUPPORT:ANY_TEMPERATE:1]
-	[BIOME_SUPPORT:ANY_LAKE:1]
-	[BIOME_SUPPORT:ANY_RIVER:1]
+	Exactly one BIOME_SUPPORT, on the start biome, at the lowest weight, so territory
+	cannot spread outside forest at all. Dropping BIOME_SUPPORT entirely made worldgen
+	reject world after world, so this is the tightest setting that still generates.
+	[BIOME_SUPPORT:ANY_FOREST:1]
 	High elves settle woodland, scrub and mountains -- NOT ANY_LAND. They were the only
 	civ in the world with ANY_LAND, and reached 373 sites and 76,302 population with it.
 	[SETTLEMENT_BIOME:ANY_FOREST]

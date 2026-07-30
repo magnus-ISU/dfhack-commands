@@ -7,6 +7,10 @@ entity_ha_drow
 	[ALL_MAIN_POPS_CONTROLLABLE]
 	[BABYSNATCHER]
 	[ABUSE_BODIES]
+	No MYTHICAL here. That flag belongs to angel/vault style entities: DF's own
+	generated mythical entity pairs it with SITE_GUARDIAN and the DIVINE_MAT tokens
+	and has zero population. Putting it on a farming civ made worldgen reject every
+	world with FARMING CIVILIZATION PLACED WITHOUT CROPS.
 	[BANDITRY:40]
 	[LOCAL_BANDITRY]
 	[ANIMAL]
@@ -186,8 +190,10 @@ entity_ha_drow
 	[SIEGE_SKILLED_MINERS]
 	[MAX_STARTING_CIV_NUMBER:100]
 	[MAX_POP_NUMBER:10000]
-	[MAX_SITE_POP_NUMBER:120]
+	[MAX_SITE_POP_NUMBER:500]
 	[RELIGION:PANTHEON]
+	[RELIGION_SPHERE:DEATH]
+	[SPHERE_ALIGNMENT:DEATH:512]
 	[RELIGION_SPHERE:CAVERNS]
 	[RELIGION_SPHERE:DARKNESS]
 	[RELIGION_SPHERE:NIGHT]
