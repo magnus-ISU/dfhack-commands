@@ -1,5 +1,41 @@
 # Changes — HA High Elves
 
+## 0.22 -- twinkling FABRIC for clothes, metal only for armour
+The caught strand is now fabric, not metal. A strand woven at a loom becomes
+twinkling fabric cloth; a strand smelted WITH SILVER becomes a twinkling metal
+bar. Clothes were coming out as "twinkling metal tunic" because there was only
+ever one material.
+- New material `INORGANIC:HA_TWINKLING_FABRIC`: the same divine strength values
+  but soft-only tokens (`ITEMS_SOFT`, no `ITEMS_HARD`/`ITEMS_METAL`/`ITEMS_ARMOR`/
+  `ITEMS_WEAPON`), so DF will make thread, cloth and clothing from it and nothing
+  else. Armour and weapons still require the metal bar.
+- `HA_CATCH_STARLIGHT` now mints the strand as fabric, and
+  `HA_FORGE_TWINKLING_BAR` consumes fabric strands plus silver to make the metal.
+- The re-gear allowlist is split in two: clothing (tunic, robe, dress, shirt,
+  coat, cloak, hood, gloves, mittens, shoes, sandals, socks, trousers, leggings,
+  loincloth, braies) is made of fabric; breastplates, mail shirts, helms, caps,
+  gauntlets, boots, greaves, shields and weapons stay metal.
+- Gloves keep their handedness -- a re-geared elf was ending up with two right
+  gloves and a bare left hand.
+- **Needs a new world** for the fabric material (raws are baked in at world gen).
+  In an existing world the script falls back to the metal for clothing rather
+  than leaving those elves in rags.
+
+## 0.21 -- re-gearing finally reaches named elves and ordinary clothes
+Two bugs kept most high elves in jute rags (found on the high elven child Imaza
+Wabeathe, who was still wearing jute trousers, a ramie tunic, rope reed gloves
+and jute socks):
+- **Named elves were skipped entirely.** In adventure mode the re-gear test was
+  `hist_figure_id < 0`, i.e. non-historical figures only -- but every high elf
+  with a name is a historical figure, so all townsfolk, soldiers and children
+  were excluded. It now re-gears every high elf except the player.
+- **Clothing was not in the allowlist.** Only armour pieces were listed
+  (breastplate, mail shirt, gauntlets, boots, greaves...), so tunics, pants,
+  gloves, socks, shoes, robes, dresses and hoods were left alone. Twinkling
+  metal carries `[ITEMS_SOFT]` -- the adamantine-cloth trick -- so cloth items
+  of it are legal, and those subtypes are now included.
+- Script-only change: applies on save reload, no new world needed.
+
 ## 0.13 -- settle woodland, not everywhere
 - **`SETTLEMENT_BIOME:ANY_LAND` was the sprawl.** High elves were the only civ in the world
   with it -- everyone else lists specific biomes or none -- and reached 373 sites and 76,302

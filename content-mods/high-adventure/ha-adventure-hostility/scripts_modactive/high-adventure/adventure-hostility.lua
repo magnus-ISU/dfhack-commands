@@ -6,7 +6,13 @@ A config-driven adventure-mode overlay: each turn it makes nearby members of a
 people -- unless the adventurer belongs to that faction (or, for good civs, unless
 the adventurer isn't evil). Units of the adventurer's OWN civilization are always
 left alone regardless of race: a dwarf snatched and raised in a drow civ is one of
-theirs (only the dragon challenge ignores this -- rival dragons duel even in-civ). It works by putting the unit into a Conflict activity
+theirs (only the dragon challenge ignores this -- rival dragons duel even in-civ).
+
+Hostility is also SITE-SCOPED: while the adventurer stands inside a settlement,
+only that settlement's own people can be made hostile. Everyone else there is a
+guest -- the drow merchant visiting a high elf town no longer jumps you -- unless
+they are actually invading. Out in the wilderness the faction rules apply as
+before, so travel stays dangerous. It works by putting the unit into a Conflict activity
 opposing the adventurer (creating one if needed) -- the same state the game builds
 when you attack someone -- so it targets the player specifically rather than using
 a blunt [CRAZED] that would also make them gut their own immigrants.
@@ -124,6 +130,46 @@ end
 local function dist(u, adv)
     return math.abs(u.pos.x - adv.pos.x) + math.abs(u.pos.y - adv.pos.y)
         + math.abs(u.pos.z - adv.pos.z) * 4
+end
+
+-- ---- "am I in someone's town?" ------------------------------------------------
+-- Visitors in a settlement someone else owns are guests, not enemies: a drow
+-- merchant standing in a high elf town has no business drawing steel on you.
+-- Same world-tile arithmetic adv/fear-no-goblin uses to find the site underfoot.
+
+local function player_world_tile(adv)
+    if not dfhack.isMapLoaded() then return end
+    local map = df.global.world.map
+    return (map.region_x + adv.pos.x // 48) // 16,
+           (map.region_y + adv.pos.y // 48) // 16
+end
+
+-- Set of civ ids that own the site the adventurer is standing in, or nil out in
+-- the wilderness. BOTH ids count: residents carry the site government id
+-- (`cur_owner_id`), while the parent civ id (`civ_id`) is what citizens and
+-- adventurers of that civ carry -- measured live in a high elf town, whose
+-- locals were civ 32 while the adventurer of the owning civ was civ 31.
+local function site_owner_civs(adv)
+    local wx, wy = player_world_tile(adv)
+    if not wx then return end
+    for _, s in ipairs(df.global.world.world_data.sites) do
+        local x0, y0 = s.global_min_x // 16, s.global_min_y // 16
+        local x1, y1 = (s.global_max_x - 1) // 16, (s.global_max_y - 1) // 16
+        if wx >= x0 and wx <= x1 and wy >= y0 and wy <= y1 then
+            local owners = {}
+            if s.civ_id >= 0 then owners[s.civ_id] = true end
+            if s.cur_owner_id >= 0 then owners[s.cur_owner_id] = true end
+            return owners
+        end
+    end
+end
+
+-- A siege is not a social visit: invaders stay hostile inside anyone's walls.
+-- (Visiting NPCs carry NO merchant/diplomat/visitor flag at all -- the drow
+-- merchant that prompted this had every one of them clear -- so ownership, not
+-- flags, is what separates guest from local.)
+local function is_invader(u)
+    return u.flags1.active_invader or u.flags1.invader_origin or u.flags1.marauder
 end
 
 -- a kobold-civ dragon OVERLORD: the HA_KOBOLD ANCIENT_DRAGON caste (NOT the HA_ANCIENT_DRAGON
@@ -297,6 +343,10 @@ local function process()
     -- retainer may be swept before its dragon. This is the one rule that can fire with no faction
     -- rule active at all (the kobold civ greets a dragon as an overlord), so it is gathered before
     -- the early-out below.
+    -- who owns the ground we are standing on (nil in the wilderness, where the
+    -- faction rules apply unchanged -- travel is supposed to be dangerous)
+    local owners = site_owner_civs(adv)
+
     local adv_is_dragon = is_ancient_dragon(adv, adv_race)
     local rival_dragons = {}
     if adv_is_dragon then
@@ -331,8 +381,12 @@ local function process()
             -- civs still attack). The dragon challenge below is deliberately
             -- exempt -- rival ancient dragons duel even within one civ.
             local same_civ = adv.civ_id >= 0 and u.civ_id == adv.civ_id
+            -- inside a settlement, only its OWN people pick fights; anyone else
+            -- there is a guest (merchant, diplomat, traveller) and is left alone
+            -- unless they are invading
+            local guest = owners ~= nil and not owners[u.civ_id] and not is_invader(u)
             local targeted = false
-            if not same_civ then
+            if not same_civ and not guest then
                 for _, races in ipairs(active) do if races[cid] then targeted = true break end end
             end
 

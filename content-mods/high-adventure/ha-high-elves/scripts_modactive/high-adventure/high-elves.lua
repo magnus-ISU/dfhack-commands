@@ -47,7 +47,8 @@ local eventful = require('plugins.eventful')
 
 local GLOBAL_KEY = 'haHighElves'
 local RACE_ID    = 'HA_HIGH_ELF'
-local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'
+local MAT_ID     = 'INORGANIC:HA_TWINKLING_METAL'    -- armour, weapons, shields
+local FABRIC_ID  = 'INORGANIC:HA_TWINKLING_FABRIC'   -- clothing (woven strands)
 local MONTH      = 33600
 -- catch starlight is a gamble: this much success chance per point of the worker's
 -- strand extractor rating (so rating 20, legendary+5, is a sure thing)
@@ -61,18 +62,36 @@ local GROW_MAT = {
 
 -- Only these item types/subtypes are ever generated (prevents impossible items).
 -- Edit freely -- this is the whole point of the allowlist.
-local ALLOW = {
+-- Two allowlists, because a caught strand becomes two different things: WOVEN
+-- into twinkling fabric (clothing) or SMELTED WITH SILVER into twinkling metal
+-- (armour, weapons, shields). Metal armour is metal; a tunic is cloth.
+-- Everyday clothing is included deliberately -- without it every high elf who is
+-- not a soldier, children included, keeps their jute and ramie rags.
+local ALLOW_METAL = {
     [df.item_type.WEAPON] = {
         ITEM_WEAPON_SWORD_SHORT=true, ITEM_WEAPON_SWORD_LONG=true,
         ITEM_WEAPON_SPEAR=true, ITEM_WEAPON_MACE=true,
         ITEM_WEAPON_HAMMER_WAR=true, ITEM_WEAPON_PICK=true,
     },
-    [df.item_type.ARMOR]  = {ITEM_ARMOR_BREASTPLATE=true, ITEM_ARMOR_MAIL_SHIRT=true, ITEM_ARMOR_CLOAK=true},
+    [df.item_type.ARMOR]  = {ITEM_ARMOR_BREASTPLATE=true, ITEM_ARMOR_MAIL_SHIRT=true},
     [df.item_type.HELM]   = {ITEM_HELM_HELM=true, ITEM_HELM_CAP=true},
     [df.item_type.GLOVES] = {ITEM_GLOVES_GAUNTLETS=true},
     [df.item_type.SHOES]  = {ITEM_SHOES_BOOTS=true, ITEM_SHOES_BOOTS_LOW=true},
-    [df.item_type.PANTS]  = {ITEM_PANTS_GREAVES=true, ITEM_PANTS_LEGGINGS=true},
+    [df.item_type.PANTS]  = {ITEM_PANTS_GREAVES=true},
     [df.item_type.SHIELD] = {ITEM_SHIELD_SHIELD=true, ITEM_SHIELD_BUCKLER=true},
+}
+local ALLOW_FABRIC = {
+    [df.item_type.ARMOR]  = {
+        ITEM_ARMOR_CLOAK=true, ITEM_ARMOR_LEATHER=true, ITEM_ARMOR_COAT=true,
+        ITEM_ARMOR_SHIRT=true, ITEM_ARMOR_TUNIC=true, ITEM_ARMOR_TOGA=true,
+        ITEM_ARMOR_VEST=true, ITEM_ARMOR_DRESS=true, ITEM_ARMOR_ROBE=true,
+    },
+    [df.item_type.HELM]   = {ITEM_HELM_HOOD=true},
+    [df.item_type.GLOVES] = {ITEM_GLOVES_GLOVES=true, ITEM_GLOVES_MITTENS=true},
+    [df.item_type.SHOES]  = {ITEM_SHOES_SHOES=true, ITEM_SHOES_SANDAL=true,
+                             ITEM_SHOES_SOCKS=true},
+    [df.item_type.PANTS]  = {ITEM_PANTS_LEGGINGS=true, ITEM_PANTS_PANTS=true,
+                             ITEM_PANTS_LOINCLOTH=true, ITEM_PANTS_BRAIES=true},
 }
 
 local EQUIPPED = {[df.inv_item_role_type.Weapon]=true, [df.inv_item_role_type.Worn]=true}
@@ -91,6 +110,15 @@ local function target_mat()
     if mi then return mi.type, mi.index end
 end
 
+-- Twinkling fabric, for clothing. Worlds generated before the fabric material
+-- existed do not have it (raws are baked in at gen time), so fall back to the
+-- metal there rather than leaving those elves in rags.
+local function fabric_mat()
+    local mi = dfhack.matinfo.find(FABRIC_ID)
+    if mi then return mi.type, mi.index end
+    return target_mat()
+end
+
 local function target_race()
     for i, cr in ipairs(df.global.world.raws.creatures.all) do
         if cr.creature_id == RACE_ID then return i end
@@ -100,7 +128,13 @@ end
 local function should_regear(u, race)
     if u.race ~= race or not dfhack.units.isActive(u) then return false end
     if dfhack.world.isAdventureMode() then
-        return u.hist_figure_id < 0            -- non-historical figures only
+        -- Every high elf but the player, NAMED historical figures included. This
+        -- used to require `hist_figure_id < 0`, which silently excluded almost
+        -- everyone worth seeing: every high elf with a name -- townsfolk,
+        -- soldiers, children like Imaza Wabeathe -- is a historical figure, so
+        -- they all kept their jute and ramie rags.
+        local adv = dfhack.world.getAdventurer()
+        return not adv or u.id ~= adv.id
     end
     return not dfhack.units.isCitizen(u)        -- fort: invaders/visitors, never our citizens
 end
@@ -111,13 +145,21 @@ local function equipped_targets(u)
         local it = inv.item
         if it and EQUIPPED[inv.mode] then
             local itype = it:getType()
-            local allow = ALLOW[itype]
             local sub = it.subtype and it.subtype.id
-            if allow and sub and allow[sub] then
+            -- which of the two divine materials this piece should be made of
+            local cloth = (ALLOW_FABRIC[itype] or {})[sub] and true or false
+            local allow = cloth or (ALLOW_METAL[itype] or {})[sub]
+            if allow and sub then
                 local q = it:getQuality()
                 if q < df.item_quality.Masterful then    -- leave masterworks AND artifacts untouched
+                    -- gloves are handed; a fresh item always comes out right-handed,
+                    -- so remember which side this one was (observed: a re-geared
+                    -- elf wearing two right gloves and nothing on the left hand)
+                    local hand
+                    pcall(function() hand = it.handedness end)
                     out[#out+1] = {old=it, itype=itype, isub=it:getSubtype(),
-                                   mode=inv.mode, bp=inv.body_part_id, quality=q}
+                                   mode=inv.mode, bp=inv.body_part_id, quality=q,
+                                   hand=hand, cloth=cloth}
                 end
             end
         end
@@ -125,12 +167,15 @@ local function equipped_targets(u)
     return out
 end
 
-local function regear(u, mtype, mindex)
+local function regear(u, mtype, mindex, ftype, findex)
     for _, t in ipairs(equipped_targets(u)) do
-        local created = dfhack.items.createItem(u, t.itype, t.isub, mtype, mindex)
+        local mt, mi = mtype, mindex
+        if t.cloth then mt, mi = ftype, findex end
+        local created = dfhack.items.createItem(u, t.itype, t.isub, mt, mi)
         local newit = created and created[1]
         if newit then
             newit:setQuality(t.quality)
+            if t.hand ~= nil then pcall(function() newit.handedness = t.hand end) end
             dfhack.items.remove(t.old)
             dfhack.items.moveToInventory(newit, u, t.mode, t.bp)
         end
@@ -229,9 +274,10 @@ local function on_catch_starlight(reaction, rp, unit, ii, ir, oi, call_native)
         return
     end
     next_ok[bid] = t + MONTH
-    local mi = dfhack.matinfo.find(MAT_ID)
-    if not mi then return end
-    local created = dfhack.items.createItem(unit, df.item_type.THREAD, -1, mi.type, mi.index)
+    -- the strand is FABRIC: weave it for cloth, or smelt it with silver for metal
+    local ftype, findex = fabric_mat()
+    if not ftype then return end
+    local created = dfhack.items.createItem(unit, df.item_type.THREAD, -1, ftype, findex)
     local it = created and created[1]
     if it then
         if it.dimension ~= nil then it.dimension = 15000 end
@@ -321,9 +367,10 @@ local function tick()
     end
     local race = target_race(); if not race then return end
     local mtype, mindex = target_mat(); if not mtype then return end
+    local ftype, findex = fabric_mat()
     for _, u in ipairs(df.global.world.units.active) do
         if not done[u.id] and should_regear(u, race) then
-            pcall(regear, u, mtype, mindex)
+            pcall(regear, u, mtype, mindex, ftype, findex)
             done[u.id] = true
         end
     end

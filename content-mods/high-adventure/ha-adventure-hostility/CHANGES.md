@@ -5,6 +5,23 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.6 -- hostility is site-scoped: guests in a town leave you alone
+- While the adventurer stands inside a settlement, only that settlement's OWN
+  people can be forced hostile. Anyone else there is a guest and is skipped --
+  fixing a drow merchant who attacked on sight in a high elf town the moment the
+  player joined it.
+- Ownership is read from the site under the adventurer (same world-tile
+  arithmetic `adv/fear-no-goblin` uses). BOTH of the site's ids count as "local":
+  residents carry the site government id (`cur_owner_id`) while citizens and
+  adventurers of the owning civ carry the parent `civ_id` -- measured live in a
+  high elf town whose locals were civ 32 and whose adventurer was civ 31.
+- Invaders are exempt: a siege is not a social visit, so `active_invader` /
+  `invader_origin` / `marauder` units still attack inside anyone's walls. Visiting
+  NPCs carry NO merchant/diplomat/visitor flag at all (the drow merchant had every
+  one clear), which is why ownership rather than flags is the discriminator.
+- Out in the wilderness nothing changes -- the faction rules apply in full, so
+  travel stays as dangerous as before.
+
 ## v0.5 -- passive "in conflict" units actually fight now
 - `make_hostile` re-asserts conflict_level 5 (fighting) in both directions on
   every sweep. Previously level 5 was only set when the script CREATED a

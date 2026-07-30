@@ -31,9 +31,11 @@ the Shaping Tree, and make wooden mechanisms at the Craftsdwarf's. Unpaced (no
 	[SKILL:WOODCRAFT]
 
 CATCH STARLIGHT (Shaping Tree): 1 plant thread + 1 silk thread -> 1 twinkling
-strand (THREAD of HA_TWINKLING_METAL). Weave at a loom into twinkling cloth ->
-clothes (vanilla adamantine path -- VERIFY the loom accepts a custom thread-metal
-in-game), or forge into a bar below. Strand dimension 15000 = 1 bar / 1 cloth.
+strand (THREAD of HA_TWINKLING_FABRIC). The strand is FABRIC, not metal: weave it
+at a loom into twinkling fabric cloth -> clothes (the vanilla adamantine path), or
+smelt it WITH SILVER into a twinkling metal bar below for armour and weapons. So
+the same caught strand becomes cloth if woven and metal only if smelted.
+Strand dimension 15000 = 1 bar / 1 cloth.
 
 NOTE: the twinkling strand is NOT a native PRODUCT here. DF hardcodes a fuel
 requirement onto any reaction that outputs a *metal* item (twinkling metal is a
@@ -63,7 +65,7 @@ Its fuel token is free at a magma smelter, and costs coke at a normal one.
 [REACTION:HA_FORGE_TWINKLING_BAR]
 	[NAME:forge twinkling metal bar]
 	[BUILDING:SMELTER:CUSTOM_SHIFT_T]
-	[REAGENT:strands:15000:THREAD:NO_SUBTYPE:METAL:HA_TWINKLING_METAL]
+	[REAGENT:strands:15000:THREAD:NO_SUBTYPE:METAL:HA_TWINKLING_FABRIC]
 	[REAGENT:silver:150:BAR:NO_SUBTYPE:METAL:SILVER]
 	[PRODUCT:100:1:BAR:NO_SUBTYPE:METAL:HA_TWINKLING_METAL]
 		[PRODUCT_DIMENSION:150]
