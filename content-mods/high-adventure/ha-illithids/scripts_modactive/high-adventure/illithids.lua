@@ -10,6 +10,9 @@ Illithid colony support:
 - Psionic ascension: base level by caste (illithid 1, ur 4, elder 6); +1 level at
   scholarly skill 3, 6, 12, and 24 (highest scholarly skill counts). Levels are
   granted as permanent syndromes carrying new abilities.
+- No armour: illithids are robed but never armoured. Armour is stripped out of squad
+  uniforms and taken off any illithid already wearing it; anything with armorlevel 0
+  (robes, cloaks, caps) is left alone, and thralls are exempt as human stock.
 - Labor policy: thralls may never extract strands; ulitharids and elder brains
   have it (and for elders, all labor) switched off on ascension/arrival - the
   player may re-enable ulitharids deliberately.
@@ -616,6 +619,44 @@ local function spec_is_armor(sp)
     return false
 end
 
+-- Same armorlevel test, but against a real item rather than a uniform spec. Robes, cloaks
+-- and caps are armorlevel 0 and stay on: illithids are robed, just never armoured. Shields
+-- have no armorlevel at all and are rejected outright.
+local function item_is_armor(item)
+    if not item then return false end
+    local ity = item:getType()
+    if ity == df.item_type.SHIELD then return true end
+    ARMOR_DEFS = ARMOR_DEFS or {
+        [df.item_type.ARMOR] = df.global.world.raws.itemdefs.armor,
+        [df.item_type.HELM] = df.global.world.raws.itemdefs.helms,
+        [df.item_type.PANTS] = df.global.world.raws.itemdefs.pants,
+        [df.item_type.GLOVES] = df.global.world.raws.itemdefs.gloves,
+        [df.item_type.SHOES] = df.global.world.raws.itemdefs.shoes,
+    }
+    local lst = ARMOR_DEFS[ity]
+    if not lst then return false end
+    local sub = item:getSubtype()
+    if sub < 0 or sub >= #lst then return false end
+    local d = lst[sub]
+    return d and d.armorlevel and d.armorlevel > 0
+end
+
+-- Clearing the uniform stops the military assigning armour, but it does nothing about a
+-- piece already on the body -- looted in adventure mode, carried over from a transformed
+-- unit, or assigned before this mod was enabled. Take those off too.
+local function strip_worn_armor(u)
+    local removed = 0
+    for i = #u.inventory - 1, 0, -1 do
+        local inv = u.inventory[i]
+        if inv and item_is_armor(inv.item) then
+            if dfhack.items.moveToGround(inv.item, xyz2pos(dfhack.units.getPosition(u))) then
+                removed = removed + 1
+            end
+        end
+    end
+    return removed
+end
+
 local function strip_illithid_armor()
     local race = race_id()
     local ent = df.global.plotinfo.main.fortress_entity
@@ -651,6 +692,11 @@ local function tick()
     strip_illithid_armor()
     for _, u in ipairs(df.global.world.units.active) do
         if u.race == race then
+            -- Illithids never wear armour. Thralls are human stock and may.
+            if not u.flags1.inactive and not u.flags2.killed then
+                local cn = caste_name(u)
+                if cn ~= "THRALL_M" and cn ~= "THRALL_F" then strip_worn_armor(u) end
+            end
             -- Thralls are mindless human stock; they never linger as ghosts. (Illithids may
             -- ghost normally unless devoured/reclaimed at the pool or memorialized.)
             if u.flags3.ghostly then
