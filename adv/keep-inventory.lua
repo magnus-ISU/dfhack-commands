@@ -18,8 +18,17 @@ SCROLL -- two things had to be true for this to work at all, both non-obvious:
     scroll_position while finishing the open, after a single write would have landed. During
     that window the saved value is also NOT refreshed from the struct, or DF's zero would
     immediately become the new "saved" position.
+  * The row count comes from `option_current`, NOT from `#inventory.option`. `option` is a
+    static ARRAY of nine vectors, one per adventure_inventory_option_list_type -- its length is
+    the constant 9 however many items you carry. Clamping to it pinned every restore to row 8,
+    so a short list came back exactly right and anything scrolled further down came back near
+    the top.
 
-It is clamped to the list length, since the list is usually one shorter than it was.
+It is clamped to the row count, since the list is usually one shorter than it was.
+
+The offset is only remembered while a TOP-LEVEL context is showing. Sub-lists (a container's
+contents, the put-in destination list) scroll independently, and the reopen returns to the last
+top-level context -- so saving a sub-list's offset would restore it into a different list.
 
     enable keep-inventory       keep the inventory open after actions (this session)
     disable keep-inventory      stop
@@ -65,6 +74,7 @@ reopens = reopens or 0    -- panel confirmed back open after our key feed
 restores = restores or 0  -- scroll offset written back
 
 local CTX = df.adventure_interface_inventory_context_type
+local LIST = df.adventure_inventory_option_list_type
 
 -- every inventory context DF can be opened straight into has its own key; the reopen feeds the
 -- one matching the context the panel was in. The remaining contexts (PUT_IN_DESTINATION,
@@ -81,8 +91,35 @@ local CONTEXT_KEY = {
     [CTX.THROW]     = 'A_THROW',
 }
 
+-- which bucket of inventory.option[] a context's rows live in. The two enums look alike but are
+-- NOT interchangeable: the list enum carries DETAILS at 1, so everything after MAIN sits one
+-- higher, and the sub-state contexts (PUT_IN_DESTINATION, INTERACT_LIST) have no bucket at all.
+local CONTEXT_LIST = {
+    [CTX.MAIN]               = LIST.MAIN,
+    [CTX.DROP]               = LIST.DROP,
+    [CTX.WEAR]               = LIST.WEAR,
+    [CTX.REMOVE]             = LIST.REMOVE,
+    [CTX.PUT_IN]             = LIST.PUT_IN,
+    [CTX.EAT_DRINK]          = LIST.EAT_DRINK,
+    [CTX.INTERACT]           = LIST.INTERACT,
+    [CTX.THROW]              = LIST.THROW,
+    [CTX.ONE_ITEM_FULL_LIST] = LIST.DETAILS,
+}
+
 local function inv() return df.global.game.main_interface.adventure.inventory end
 local function feed(k) gui.simulateInput(dfhack.gui.getDFViewscreen(true), k) end
+
+-- how many rows the panel is showing. `option_current` is the list on screen; the context's own
+-- bucket is a fallback for frames where DF has not filled that in yet. The LARGER of the two is
+-- what we want -- an undercount is what breaks the restore, an overcount only leaves a clamp
+-- loose enough for DF to tighten itself. Never `#inv().option`: see SCROLL in the header.
+local function row_count()
+    local i = inv()
+    local n = #i.option_current
+    local bucket = CONTEXT_LIST[i.context]
+    if bucket then n = math.max(n, #i.option[bucket]) end
+    return n
+end
 
 local function on_map()
     return (dfhack.gui.getCurFocus(true)[1] or '') == 'dungeonmode/Default'
@@ -129,7 +166,7 @@ end
 -- put the saved scroll offset back, clamped: the list may be shorter now (we just dropped
 -- the thing we were looking at), in which case DF's own offset would be out of range
 function KeepInventory:hold_scroll()
-    local ok, n = pcall(function() return #inv().option end)
+    local ok, n = pcall(row_count)
     if ok and n and n > 0 then
         inv().scroll_position = math.max(0, math.min(self.scroll, n - 1))
         restores = restores + 1
@@ -185,14 +222,19 @@ function KeepInventory:overlay_onupdate()
         end
         self.was_open = true
         self.escaped = false
-        if CONTEXT_KEY[inv().context] then self.context = inv().context end
         if dfhack.getTickCount() < (self.restore_until or 0) then
             -- still re-asserting after a reopen: keep writing our value, and do NOT read
             -- DF's back over it, or the zero it just wrote becomes the new "saved" position
             self:hold_scroll()
         else
             self.restore_until = 0
-            self.scroll = inv().scroll_position
+            -- only track a TOP-LEVEL list's offset -- that is the list the reopen comes back
+            -- to. A sub-list (container contents, put-in destination) scrolls on its own, and
+            -- its offset restored into the top-level list lands somewhere unrelated.
+            if CONTEXT_KEY[inv().context] then
+                self.context = inv().context
+                self.scroll = inv().scroll_position
+            end
         end
         self.job = nil
         return
