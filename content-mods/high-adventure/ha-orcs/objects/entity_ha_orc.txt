@@ -168,10 +168,12 @@ entity_ha_orc
 	ANY_OCEAN:12 that let them island-hop the whole coastline is cut to 1.
 	[START_BIOME:ANY_SAVANNA]
 	[START_BIOME:ANY_SHRUBLAND]
-	[START_BIOME:ANY_DESERT]
 	[BIOME_SUPPORT:ANY_SAVANNA:4]
 	[BIOME_SUPPORT:ANY_SHRUBLAND:4]
-	[BIOME_SUPPORT:ANY_DESERT:4]
+	No desert at all, neither start nor support. Pushed onto the margins they simply
+	took the badlands nobody else wanted, 148 desert sites, and finished ahead of the
+	humans again on both population and site count. With desert gone their territory
+	cannot spread through it either, so they cannot conquer across it.
 	[BIOME_SUPPORT:ANY_WETLAND:2]
 	[BIOME_SUPPORT:ANY_FOREST:2]
 	[BIOME_SUPPORT:ANY_GRASSLAND:1]
