@@ -1,5 +1,8 @@
 # ha-succubi — fork changelog
 
+## v0.16 -- population caps normalised
+- `MAX_SITE_POP_NUMBER` 1000 -> 120.
+
 ## v0.8
 - Worldgen survival package for the new insular mountain forts: all castes gain
   **Legendary Discipline** (never rout - fitting for demons) and **NOPAIN**

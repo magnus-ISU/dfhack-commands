@@ -1,5 +1,8 @@
 # ha-kobolds — build notes
 
+## v0.20 -- population caps normalised
+- `MAX_SITE_POP_NUMBER` confirmed at 120 (unchanged); version bumped with the suite-wide pass.
+
 ## v0.19 -- ancient dragons grow up in time to survive
 - **Ancient dragons were dying as elephant-sized juveniles.** Their `BODY_SIZE` reached full
   mass only at age 100, so for their first century they sat at 500,000 -- exactly elephant

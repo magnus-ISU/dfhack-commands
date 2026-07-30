@@ -1,5 +1,14 @@
 # Changes — HA High Elves
 
+## 0.13 -- settle woodland, not everywhere
+- **`SETTLEMENT_BIOME:ANY_LAND` was the sprawl.** High elves were the only civ in the world
+  with it -- everyone else lists specific biomes or none -- and reached 373 sites and 76,302
+  population. Replaced with `ANY_FOREST`, `ANY_SHRUBLAND`, `MOUNTAIN`.
+- Dropped the ocean `BIOME_SUPPORT` experiment; it had no measurable effect, which now makes
+  sense: territory spreading over water did not matter when they could settle any land it touched.
+- `MAX_POP_NUMBER` 120 -> 10000. The old cap was the tightest in the world and they blew
+  straight past it, so it was only noise.
+
 ## 0.12 -- experiment: ocean-weighted expansion
 - `BIOME_SUPPORT:ANY_OCEAN:10` against 1 for everything else, on the theory that territory
   spreading over water they cannot build on wastes their expansion budget. Start biome kept

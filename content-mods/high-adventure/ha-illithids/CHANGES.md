@@ -1,5 +1,9 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.50 -- population caps normalised
+- `MAX_SITE_POP_NUMBER` 1000 -> 120 and `MAX_POP_NUMBER` 500 -> 10000. Measurement showed these
+  caps do not bound population anyway; the start-biome experiment is what keeps illithids small.
+
 ## v0.49 -- experiment: no territory in the start biome
 - Removed `BIOME_SUPPORT` for all three `START_BIOME`s, so the civ claims no ground where it
   begins. Territory spread is what lets a civ found outlying settlements, so this should pin

@@ -1,5 +1,8 @@
 # ha-orcs — fork changelog
 
+## v0.25 -- population caps normalised
+- `MAX_SITE_POP_NUMBER` 80 -> 120.
+
 ## 0.24 -- Mouth of the Horde
 - Added **Mouth of the Horde** (position id MESSENGER): SITE, NUMBER:AS_NEEDED, DELIVER_MESSAGES,
   appointed by boss/big boss -- the messenger role the civ lacked. Needs a fresh world.

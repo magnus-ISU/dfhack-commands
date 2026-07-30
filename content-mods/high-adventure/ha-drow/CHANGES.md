@@ -1,5 +1,10 @@
 # ha-drow — fork changelog
 
+## v0.38 -- drop the ocean experiment
+- Removed the 10:1 ocean `BIOME_SUPPORT` and restored MOUNTAIN 3 / subterranean 3-2. MOUNTAIN
+  stays the first entry because it is the `EXCLUSIVE_START_BIOME`.
+- `MAX_SITE_POP_NUMBER` 1000 -> 120, matching vanilla.
+
 ## v0.37 -- experiment: ocean-weighted expansion
 - Same 10:1 ocean pull as the high elves, and MOUNTAIN moved to the first `BIOME_SUPPORT`
   entry because it is the `EXCLUSIVE_START_BIOME` -- the first entry should be the start biome

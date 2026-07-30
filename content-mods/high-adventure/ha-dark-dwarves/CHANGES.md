@@ -4,6 +4,9 @@ Standalone fork of the **vanilla dwarf raws** (creature_standard DWARF block + e
 MOUNTAIN block, DF v53 vanilla data). New IDs `HA_DARK_DWARF` / `HA_DARK_DWARF_CIV`; vanilla
 is untouched and both civs coexist.
 
+## v0.6 -- population caps normalised
+- `MAX_SITE_POP_NUMBER` 250 -> 120.
+
 ## Creature (`creature_ha_dark_dwarf.txt`)
 - Renamed; new name/description ("dark dwarf").
 - Added creature-level: `[EVIL]`, `[OUTSIDER_CONTROLLABLE]`.
