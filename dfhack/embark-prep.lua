@@ -5,19 +5,23 @@ Two overlays on the embark preparation screen, Dwarves tab
 (focus setupdwarfgame/Dwarves):
 
 * embark-prep.loadout -- three buttons that give the SELECTED dwarf the
-  skills for an office, 1 point in each skill that affects the role
-  (per the wiki):
-    Manager    -> Organizer                                  (1 pick)
-    Bookkeeper -> Record Keeper                              (1 pick)
+  skills for an office (per the wiki):
+    Manager    -> Organizer 5                                 (5 picks)
+    Bookkeeper -> Record Keeper 5                             (5 picks)
+    Doctor     -> Diagnostician, Surgeon, Bone Doctor
+                  at 3 each                                   (9 picks)
     Broker     -> Appraiser, Comedian, Flatterer, Intimidator,
-                  Judge of Intent, Liar, Negotiator, Persuader (8 picks)
-  Skills already at 1+ are left alone and not paid for again. If the
-  dwarf doesn't have enough picks left the skills are still set, but the
-  shortfall is reported (DF doesn't block embark on it).
+                  Judge of Intent, Liar, Negotiator, Persuader
+                  at 1 each                                   (8 picks)
+  Skills already at the target are left alone and not paid for again. If
+  the dwarf doesn't have enough picks left the skills are still set, but
+  the shortfall is reported (DF doesn't block embark on it).
 
-* embark-prep.prefs -- a window (lower-left) showing the selected dwarf's
-  likes: materials, creatures, foods, items, plants, colors, shapes, art
-  forms. Updates as you move the selection.
+* embark-prep.prefs -- a window showing what matters about the selected
+  dwarf's likes at embark: metals and weapon/armor items, inline
+  ("Prefers bismuth bronze and battle axes"), plus whether they like or
+  dislike combat (the MARTIAL_PROWESS personal value). Updates as you
+  move the selection.
 
 Reposition either with gui/overlay.
 ]]
@@ -28,21 +32,34 @@ local widgets = require('gui.widgets')
 
 -- ---------------------------------------------------------------- loadout --
 
--- 1 point in each skill that affects the office (per the DF wiki)
+-- raise each listed skill to `level` (per the DF wiki; embark caps at 5)
 OFFICES = {
     {
-        label = 'Manager (Organizer)',
+        label = 'Manager (Organizer 5)',
         key = 'CUSTOM_CTRL_M',
+        level = 5,
         skills = {df.job_skill.ORGANIZATION},
     },
     {
-        label = 'Bookkeeper (Record Keeper)',
+        label = 'Bookkeeper (Record Keeper 5)',
         key = 'CUSTOM_CTRL_K',
+        level = 5,
         skills = {df.job_skill.RECORD_KEEPING},
+    },
+    {
+        label = 'Doctor (Diag/Surgeon/Bones 3)',
+        key = 'CUSTOM_CTRL_D',
+        level = 3,
+        skills = {
+            df.job_skill.DIAGNOSE,
+            df.job_skill.SURGERY,
+            df.job_skill.SET_BONE,
+        },
     },
     {
         label = 'Broker (Appraiser + social)',
         key = 'CUSTOM_CTRL_B',
+        level = 1,
         skills = {
             df.job_skill.APPRAISAL,
             df.job_skill.COMEDY,
@@ -65,11 +82,13 @@ function apply_office(office)
     if not vs then return 'no embark screen?' end
     local di = vs.dwarf_info[vs.selected_u]
     if not di then return 'no dwarf selected' end
+    -- raise (never lower) each skill to the office's target level, paying
+    -- one pick per level actually added
     local raised = 0
     for _, sk in ipairs(office.skills) do
-        if di.skilllevel[sk] < 1 then
-            di.skilllevel[sk] = 1
-            raised = raised + 1
+        if di.skilllevel[sk] < office.level then
+            raised = raised + office.level - di.skilllevel[sk]
+            di.skilllevel[sk] = office.level
         end
     end
     local short = raised - di.skill_picks_left
@@ -82,11 +101,11 @@ function apply_office(office)
     if raised == 0 then
         return ('%s already has the %s skills'):format(name, role)
     elseif short > 0 then
-        return ('%s: +%d %s skills (%d over budget)'):format(name, raised,
-                                                             role, short)
+        return ('%s: +%d %s skill levels (%d over budget)'):format(
+            name, raised, role, short)
     end
-    return ('%s: +%d %s skills, %d picks left'):format(name, raised, role,
-                                                       di.skill_picks_left)
+    return ('%s: +%d %s skill levels, %d picks left'):format(
+        name, raised, role, di.skill_picks_left)
 end
 
 LoadoutButtons = defclass(LoadoutButtons, overlay.OverlayWidget)
@@ -95,11 +114,12 @@ LoadoutButtons.ATTRS{
     default_pos = {x = 21, y = -31},  -- just above the preferences window
     default_enabled = true,
     viewscreens = 'setupdwarfgame/Dwarves',
-    frame = {w = 44, h = 4},
+    frame = {w = 44, h = 5},   -- 4 office buttons + the result line
     version = 2,
 }
 
 function LoadoutButtons:init()
+    self.cur_sel = -1
     local views = {}
     for i, office in ipairs(OFFICES) do
         table.insert(views, widgets.TextButton{
@@ -111,13 +131,29 @@ function LoadoutButtons:init()
             end,
         })
     end
+    -- auto_height=false matters: Labels default to auto_height, which sizes the
+    -- label from its text at layout time and OVERRIDES an explicit frame.h -- a
+    -- label built with EMPTY text gets height 0, and setText() later never
+    -- re-layouts, so the text exists but has no body to render into
     table.insert(views, widgets.Label{
         view_id = 'result',
-        frame = {t = #OFFICES, l = 0},
+        frame = {t = #OFFICES, l = 0, h = 1},
+        auto_height = false,
         text = '',
         text_pen = COLOR_YELLOW,
     })
     self:addviews(views)
+end
+
+-- the result line talks about a specific dwarf; clear it when the selection
+-- moves on so it can't read as information about the newly selected dwarf
+function LoadoutButtons:render(dc)
+    local vs = get_screen()
+    if vs and vs.selected_u ~= self.cur_sel then
+        self.cur_sel = vs.selected_u
+        self.subviews.result:setText('')
+    end
+    LoadoutButtons.super.render(self, dc)
 end
 
 -- ------------------------------------------------------------ preferences --
@@ -214,14 +250,91 @@ function preference_lines(unit)
     return lines
 end
 
+-- ---- the filtered view the window actually shows ----------------------------
+-- At embark the likes that matter are the ones moods and masterworks feed on:
+-- metals and weapon/armor gear. Everything else (foods, colors, poems...) is noise.
+
+local GEAR_ITEM_TYPES = {
+    [df.item_type.WEAPON] = true,
+    [df.item_type.SHIELD] = true,
+    [df.item_type.ARMOR] = true,
+    [df.item_type.HELM] = true,
+    [df.item_type.GLOVES] = true,
+    [df.item_type.SHOES] = true,
+    [df.item_type.PANTS] = true,
+    [df.item_type.AMMO] = true,
+}
+
+local function is_metal_pref(p)
+    local ok, mi = pcall(dfhack.matinfo.decode, p.mattype, p.matindex)
+    return ok and mi and mi.material and mi.material.flags.IS_METAL or false
+end
+
+-- names of the unit's liked metals and weapon/armor items, in preference order
+function gear_likes(unit)
+    local likes = {}
+    if not unit or not unit.status.current_soul then return likes end
+    for _, p in ipairs(unit.status.current_soul.preferences) do
+        if p.type == df.unitpref_type.LikeMaterial and is_metal_pref(p) then
+            table.insert(likes, mat_name(p))
+        elseif p.type == df.unitpref_type.LikeItem
+            and GEAR_ITEM_TYPES[p.item_type] then
+            table.insert(likes, item_name(p))
+        end
+    end
+    return likes
+end
+
+-- "a", "a and b", "a, b and c"
+local function oxford(list)
+    if #list <= 1 then return list[1] end
+    return table.concat(list, ', ', 1, #list - 1) .. ' and ' .. list[#list]
+end
+
+-- the MARTIAL_PROWESS personal value: how this dwarf feels about combat.
+-- No entry in personality.values means the civ default, i.e. unremarkable.
+function combat_stance(unit)
+    local strength = 0
+    local soul = unit and unit.status.current_soul
+    if soul then
+        for _, v in ipairs(soul.personality.values) do
+            if v.type == df.value_type.MARTIAL_PROWESS then
+                strength = v.strength
+                break
+            end
+        end
+    end
+    local word = strength >= 41 and 'Loves' or strength >= 15 and 'Likes'
+        or strength <= -41 and 'Hates' or strength <= -15 and 'Dislikes'
+        or 'Indifferent to'
+    return ('%s combat (%+d)'):format(word, strength)
+end
+
+-- greedy word-wrap; the gui Label draws exactly the lines it's given
+local function wrap(s, width)
+    local lines, line = {}, ''
+    for word in s:gmatch('%S+') do
+        if #line > 0 and #line + #word + 1 > width then
+            table.insert(lines, line)
+            line = word
+        else
+            line = #line > 0 and (line .. ' ' .. word) or word
+        end
+    end
+    if #line > 0 then table.insert(lines, line) end
+    return lines
+end
+
 PrefsWindow = defclass(PrefsWindow, overlay.OverlayWidget)
 PrefsWindow.ATTRS{
-    desc = 'Embark screen window: show the selected dwarf\'s preferences.',
-    default_pos = {x = 21, y = -9},  -- lower-left corner
+    desc = 'Embark screen window: selected dwarf\'s metal/gear likes + combat stance.',
+    -- bottom-anchored (negative y = frame.b offset), so it rides the screen
+    -- bottom instead of drifting when the grid gets taller
+    default_pos = {x = 21, y = -17},
     default_enabled = true,
     viewscreens = 'setupdwarfgame/Dwarves',
-    frame = {w = 44, h = 20},
-    version = 2,
+    frame = {w = 44, h = 9},
+    version = 6,
 }
 
 function PrefsWindow:init()
@@ -233,15 +346,21 @@ function PrefsWindow:init()
             frame_title = 'Preferences',
             frame_background = gui.CLEAR_PEN,
             subviews = {
+                -- both labels start EMPTY, and auto_height (the Label default)
+                -- freezes an empty label at height 0 on first layout, overriding
+                -- even an explicit frame.h -- setText() alone never revives it.
+                -- Verified live: text set, frame_body y2 < y1, nothing rendered.
                 widgets.Label{
                     view_id = 'name',
-                    frame = {t = 0, l = 0},
+                    frame = {t = 0, l = 0, h = 1},
+                    auto_height = false,
                     text = '',
                     text_pen = COLOR_LIGHTCYAN,
                 },
                 widgets.Label{
                     view_id = 'prefs',
                     frame = {t = 1, l = 0, r = 0, b = 0},
+                    auto_height = false,
                     text = '',
                 },
             },
@@ -258,8 +377,13 @@ function PrefsWindow:refresh(vs)
         self.subviews.prefs:setText('(nobody selected)')
         return
     end
-    self.subviews.name:setText(dfhack.df2utf(dfhack.units.getReadableName(unit)))
-    local lines = preference_lines(unit)
+    -- NO df2utf here: screen text is cp437, and utf-8 multibyte chars (the
+    -- nickname guillemets, say) come out as garbage tiles
+    self.subviews.name:setText(dfhack.units.getReadableName(unit))
+    local gear = gear_likes(unit)
+    local lines = gear[1] and wrap('Prefers ' .. oxford(gear), 42)
+                          or {'No metal or weapon/armor likes'}
+    table.insert(lines, combat_stance(unit))
     self.subviews.prefs:setText(table.concat(lines, NEWLINE))
 end
 
