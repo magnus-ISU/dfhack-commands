@@ -112,8 +112,8 @@ if not dfhack.world.isFortressMode() then
             atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
             atry('stop adv/right-click-move', function() dfhack.run_script('adv/right-click-move', 'stop') end)
+            atry('stop adv/reveal', function() dfhack.run_script('adv/reveal', 'stop') end)
             atry('disable adv/keep-inventory', function() dfhack.run_command('disable', 'adv/keep-inventory') end)
-            atry('stop adv/fear-no-goblin', function() dfhack.run_script('adv/fear-no-goblin', 'stop') end)
             atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
@@ -125,15 +125,17 @@ if not dfhack.world.isFortressMode() then
             -- ungated version it replaced).
             atry('adv/right-click-move (right-click a tile to just walk there)',
                 function() dfhack.run_script('adv/right-click-move') end)
+            -- map stays revealed while it's safe; combat, the travel screen and sleep
+            -- unreveal it (unreveal-before-travel keeps the reveal plugin's backup valid)
+            atry('adv/reveal (map revealed while safe; hidden in combat/travel/sleep)',
+                function() dfhack.run_script('adv/reveal') end)
             -- keeps the inventory panel open after each action, in the same mode and at the
             -- same scroll offset; Escape/right-click still close it
             atry('adv/keep-inventory (inventory stays open after actions)',
                 function() dfhack.run_command('enable', 'adv/keep-inventory') end)
-            -- presents every dark fortress as a town so fast travel works in, out
-            -- of and through goblin pits; lifts the patch whenever a save screen
-            -- is up, and keeps a stash so a crash mid-session is recoverable
-            atry('adv/fear-no-goblin (fast travel in/out/through goblin dark pits)',
-                function() dfhack.run_script('adv/fear-no-goblin') end)
+            -- adv/fear-no-goblin is deliberately NOT armed here: it patches world_site
+            -- types, so it stays a manual toggle -- run `adv/fear-no-goblin` when you
+            -- actually want to fast-travel a goblin pit, `stop` when done.
             -- hide-tutorials handles ADVENTURE_POPUP_* too, not just fortress popups
             atry('hide-tutorials (suppress adventure tutorial popups)',
                 function() dfhack.run_command('enable', 'hide-tutorials') end)
