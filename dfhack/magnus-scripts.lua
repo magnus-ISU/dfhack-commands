@@ -110,6 +110,7 @@ if not dfhack.world.isFortressMode() then
             atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
             atry('stop adv/fear-no-goblin', function() dfhack.run_script('adv/fear-no-goblin', 'stop') end)
+            atry('stop adv/autosave', function() dfhack.run_script('adv/autosave', 'stop') end)
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
@@ -126,6 +127,9 @@ if not dfhack.world.isFortressMode() then
                 dfhack.run_script('creature-description')
                 dfhack.run_command('overlay', 'enable', 'creature-description.desc')
             end)
+            -- periodic native save + refreshed "adventure-autosave" backup folder
+            atry('adv/autosave (save + refresh "adventure-autosave", default 20 min)',
+                function() dfhack.run_script('adv/autosave') end)
         end
     end
     -- soft return (not qerror): onMapLoad.init also fires on other non-fort maps; do nothing there.
