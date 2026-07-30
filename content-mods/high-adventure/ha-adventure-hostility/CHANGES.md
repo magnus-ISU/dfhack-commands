@@ -5,6 +5,14 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.4 -- own-civ members never attack the adventurer
+- Civ membership now beats race: units sharing the adventurer's `civ_id` are
+  never force-hostiled. Previously the rules matched on creature race only, so
+  e.g. a dwarf adventurer born/raised in a drow civilization was attacked on
+  sight by their own people. Other civs of the same hostile race still attack.
+- The dragon challenge is deliberately exempt: rival ancient dragons (and the
+  kobolds standing with them) still turn on a dragon adventurer within one civ.
+
 ## v0.3 -- militant good (high elves + dwarves); kobolds are evil
 - Kobolds (`HA_KOBOLD`) are now part of the EVIL set, so the good factions treat a
   kobold adventurer as an enemy. The evil set is now orc, kobold, goblin, succubus,

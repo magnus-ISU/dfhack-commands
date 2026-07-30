@@ -4,7 +4,9 @@
 A config-driven adventure-mode overlay: each turn it makes nearby members of a
 "hostile faction" attack the adventurer -- ONLY the adventurer, not their own
 people -- unless the adventurer belongs to that faction (or, for good civs, unless
-the adventurer isn't evil). It works by putting the unit into a Conflict activity
+the adventurer isn't evil). Units of the adventurer's OWN civilization are always
+left alone regardless of race: a dwarf snatched and raised in a drow civ is one of
+theirs (only the dragon challenge ignores this -- rival dragons duel even in-civ). It works by putting the unit into a Conflict activity
 opposing the adventurer (creating one if needed) -- the same state the game builds
 when you attack someone -- so it targets the player specifically rather than using
 a blunt [CRAZED] that would also make them gut their own immigrants.
@@ -299,8 +301,16 @@ local function process()
     for _, u in ipairs(df.global.world.units.active) do
         if u.id ~= adv.id and dfhack.units.isAlive(u) and dist(u, adv) <= RANGE then
             local cid = creature_id(u.race)
+            -- Members of the adventurer's OWN civilization never turn on them:
+            -- civ membership beats race. A dwarf snatched and raised by the drow
+            -- is one of theirs, so drow of that civ leave them alone (other drow
+            -- civs still attack). The dragon challenge below is deliberately
+            -- exempt -- rival ancient dragons duel even within one civ.
+            local same_civ = adv.civ_id >= 0 and u.civ_id == adv.civ_id
             local targeted = false
-            for _, races in ipairs(active) do if races[cid] then targeted = true break end end
+            if not same_civ then
+                for _, races in ipairs(active) do if races[cid] then targeted = true break end end
+            end
 
             -- dragon challenge: a rival ancient dragon, or a kobold standing with one
             local challenge = false
