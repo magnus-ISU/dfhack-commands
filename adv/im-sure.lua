@@ -87,12 +87,36 @@ function dismiss()
     return true
 end
 
--- the right-click context menu offering ONLY the two pathing choices: exactly two
--- entries in adventure.commands AND the distinctive option text actually rendered
--- (the struct alone can hold stale entries; the text alone can appear in bigger menus)
+-- read `len` text cells of row y starting at cell x
+local function read_row(y, x, len)
+    local gps = df.global.gps
+    if y < 0 or y >= gps.dimy then return '' end
+    local row = {}
+    for cx = x, math.min(x + len, gps.dimx - 1) do
+        local ok, t = pcall(dfhack.screen.readTile, cx, y)
+        local ch = ok and t and t.ch or 0
+        row[#row + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    end
+    return table.concat(row)
+end
+
+-- The right-click "What do you want to do?" menu when pathing is the ONLY choice.
+-- Measured live (2026-07): options render at a 3-row pitch, each prefixed by its
+-- hotkey letter --
+--   row Y   : a Path to here
+--   row Y+3 : b Path to here (no climbing/jumping)
+--   row Y+6 : (blank => there is no option c)
+-- The "a " prefix requirement guarantees plain path IS the first option, so
+-- pressing `a` can never hit an Attack/Talk entry in a bigger menu. NOTE: the
+-- menu populates NO struct we could find (adventure.commands stays empty) --
+-- the rendered text is the only readable state.
 local function path_menu_open()
-    if #df.global.adventure.commands ~= 2 then return false end
-    return find_text('no climbing/jumping') ~= nil
+    local x, y = find_text('a Path to here')
+    if not x then return false end
+    if not read_row(y + 3, x, 50):find('b Path to here (no climbing/jumping)', 1, true) then
+        return false
+    end
+    return read_row(y + 6, x, 50):match('^%s*$') ~= nil
 end
 
 local CONFIRM_WINDOW = 900   -- overlay frames (~9s) to watch for confirmations
