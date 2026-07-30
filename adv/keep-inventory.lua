@@ -8,6 +8,19 @@ keep-inventory ENABLED the panel is reopened for you after every action, and reo
 SAME mode you were working in (drop stays drop, wear stays wear), scrolled back to where you
 were. Closing it with ESCAPE does NOT reopen it -- that's how you leave: press Esc.
 
+SCROLL -- two things had to be true for this to work at all, both non-obvious:
+
+  * The reopen is claimed in overlay_onupdate's "panel is open" branch, NOT in drive()'s
+    'verify' stage. overlay_onupdate tests inv().open BEFORE it ever calls drive(), so on the
+    frame the panel comes back it takes that branch and returns -- the verify success path is
+    unreachable. Restoring there looked correct and silently never ran.
+  * The offset is RE-ASSERTED for RESTORE_MS rather than written once, because DF zeroes
+    scroll_position while finishing the open, after a single write would have landed. During
+    that window the saved value is also NOT refreshed from the struct, or DF's zero would
+    immediately become the new "saved" position.
+
+It is clamped to the list length, since the list is usually one shorter than it was.
+
     enable keep-inventory       keep the inventory open after actions (this session)
     disable keep-inventory      stop
     keep-inventory              toggle
@@ -43,6 +56,13 @@ local overlay = require('plugins.overlay')
 
 enabled = enabled or false
 function isEnabled() return enabled end
+
+-- Counters, kept because they are what made this debuggable: they separate "the reopen never
+-- fired" from "it fired but the scroll write did nothing", which look identical in game.
+closes = closes or 0      -- panel closed while we were watching
+escapes = escapes or 0    -- ...of those, closed by Esc/right-click (no reopen)
+reopens = reopens or 0    -- panel confirmed back open after our key feed
+restores = restores or 0  -- scroll offset written back
 
 local CTX = df.adventure_interface_inventory_context_type
 
@@ -92,12 +112,28 @@ KeepInventory.ATTRS{
     overlay_onupdate_max_freq_seconds = 0,
 }
 
+-- how long to keep re-asserting the saved scroll after the panel comes back (wall clock, not
+-- frames: this overlay fires once per render frame and the game runs anywhere from ~60 to
+-- ~800 FPS, so a frame count is a different real duration every time)
+local RESTORE_MS = 400
+
 function KeepInventory:reset()
     self.was_open = false
     self.escaped = false
     self.job = nil
     self.context = CTX.MAIN
     self.scroll = 0
+    self.restore_until = 0
+end
+
+-- put the saved scroll offset back, clamped: the list may be shorter now (we just dropped
+-- the thing we were looking at), in which case DF's own offset would be out of range
+function KeepInventory:hold_scroll()
+    local ok, n = pcall(function() return #inv().option end)
+    if ok and n and n > 0 then
+        inv().scroll_position = math.max(0, math.min(self.scroll, n - 1))
+        restores = restores + 1
+    end
 end
 
 -- Drive a pending reopen across frames:
@@ -116,16 +152,11 @@ function KeepInventory:drive()
         feed(CONTEXT_KEY[self.context] or 'A_INV_LOOK')
         job.stage, job.tries = 'verify', 0
     elseif job.stage == 'verify' then
-        if inv().open then
-            -- back where we were rather than scrolled to the top; the list may be shorter now
-            -- (we just dropped something), so clamp
-            local ok, n = pcall(function() return #inv().option end)
-            if ok and n and n > 0 then
-                inv().scroll_position = math.max(0, math.min(self.scroll, n - 1))
-            end
-            self.job = nil
-            return
-        end
+        -- NOTE: the success case is NOT handled here. overlay_onupdate tests inv().open before
+        -- it ever calls drive(), so on the frame the panel comes back it takes that branch and
+        -- returns -- this one is unreachable on success. Claiming the reopen there is what
+        -- makes the scroll restore actually run; leaving it here silently did nothing.
+        if inv().open then self.job = nil return end
         job.tries = job.tries + 1
         if job.tries > 8 then
             job.attempts = job.attempts + 1
@@ -146,10 +177,23 @@ function KeepInventory:overlay_onupdate()
         -- panel is up: remember where we are. Clearing `escaped` here is what makes Escape out of
         -- a SUB-panel (put-in destination, interact list) harmless -- that Esc leaves the panel
         -- open, so the flag is dropped again before it can suppress a later reopen.
+        -- a pending reopen just landed: this is the only place that can observe it, so start
+        -- the scroll-restore window here
+        if self.job and self.job.stage == 'verify' then
+            reopens = reopens + 1
+            self.restore_until = dfhack.getTickCount() + RESTORE_MS
+        end
         self.was_open = true
         self.escaped = false
         if CONTEXT_KEY[inv().context] then self.context = inv().context end
-        self.scroll = inv().scroll_position
+        if dfhack.getTickCount() < (self.restore_until or 0) then
+            -- still re-asserting after a reopen: keep writing our value, and do NOT read
+            -- DF's back over it, or the zero it just wrote becomes the new "saved" position
+            self:hold_scroll()
+        else
+            self.restore_until = 0
+            self.scroll = inv().scroll_position
+        end
         self.job = nil
         return
     end
@@ -158,8 +202,10 @@ function KeepInventory:overlay_onupdate()
 
     if self.was_open then
         self.was_open = false
+        closes = closes + 1
         if self.escaped then                    -- Esc / right-click: that is how you leave
             self.escaped = false
+            escapes = escapes + 1
             return
         end
         -- anything else that closed it was an action -> bring it back
@@ -178,8 +224,10 @@ function KeepInventory:onInput(keys)
     -- note a close GESTURE while the panel is up, but do NOT consume it -- DF still has to act on
     -- it. Escape and right-click are the two ways to dismiss the panel; everything else that
     -- closes it is an action, and gets reopened.
-    if enabled and inv().open and (keys.LEAVESCREEN or keys._MOUSE_R or keys._MOUSE_R_DOWN) then
-        self.escaped = true
+    if enabled and inv().open then
+        if keys.LEAVESCREEN or keys._MOUSE_R or keys._MOUSE_R_DOWN then
+            self.escaped = true
+        end
     end
     return false
 end

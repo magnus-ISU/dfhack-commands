@@ -111,13 +111,24 @@ if not dfhack.world.isFortressMode() then
         if ({...})[1] == 'disable' then
             atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
+            atry('stop adv/right-click-move', function() dfhack.run_script('adv/right-click-move', 'stop') end)
+            atry('disable adv/keep-inventory', function() dfhack.run_command('disable', 'adv/keep-inventory') end)
             atry('stop adv/fear-no-goblin', function() dfhack.run_script('adv/fear-no-goblin', 'stop') end)
             atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
         else
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
-            atry('adv/im-sure (auto-dismiss "can\'t act" prompt; auto-path + finish confirms)',
+            atry('adv/im-sure (auto-dismiss the "can\'t act" prompt)',
                 function() dfhack.run_script('adv/im-sure') end)
+            -- the right-click pathing half of the old im-sure. Every screen scan sits behind
+            -- option_list.open, so it is free at rest (~800 FPS with it on, vs 59 for the
+            -- ungated version it replaced).
+            atry('adv/right-click-move (right-click a tile to just walk there)',
+                function() dfhack.run_script('adv/right-click-move') end)
+            -- keeps the inventory panel open after each action, in the same mode and at the
+            -- same scroll offset; Escape/right-click still close it
+            atry('adv/keep-inventory (inventory stays open after actions)',
+                function() dfhack.run_command('enable', 'adv/keep-inventory') end)
             -- presents every dark fortress as a town so fast travel works in, out
             -- of and through goblin pits; lifts the patch whenever a save screen
             -- is up, and keeps a stash so a crash mid-session is recoverable
