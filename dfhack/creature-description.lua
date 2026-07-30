@@ -5,7 +5,8 @@ When a creature is selected (its unit sheet is open), this shows the creature's
 description -- `caste.description` -- in a wrapping, scrollable block in the
 bottom-left. Most useful for forgotten beasts / titans / generated creatures,
 whose description is their full generated flavor (body, materials, special
-attacks). For ordinary creatures it's the species blurb.
+attacks). For ordinary creatures it's the species blurb. Shows on the unit
+sheet in BOTH fortress mode and adventure mode (dungeonmode).
 
 Registered automatically as overlay `creature-description.desc`.
 Reposition with `gui/overlay`.
@@ -256,7 +257,7 @@ CreatureDescOverlay.ATTRS{
     desc = "Shows the selected creature's description in the bottom-left.",
     default_pos = {x = 3, y = -4},   -- bottom-left
     default_enabled = true,
-    viewscreens = 'dwarfmode/ViewSheets/UNIT',
+    viewscreens = {'dwarfmode/ViewSheets/UNIT', 'dungeonmode/ViewSheets/UNIT'},
     frame = {w = 90, h = 12},
     version = 1,
     overlay_onupdate_max_freq_seconds = 0,

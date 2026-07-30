@@ -114,6 +114,12 @@ if not dfhack.world.isFortressMode() then
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
             atry('adv/im-sure (auto-dismiss the "can\'t act for a while" prompt)',
                 function() dfhack.run_script('adv/im-sure') end)
+            -- unit-sheet description + kills + weight/volume panel; registered for
+            -- dungeonmode too, so make sure it is loaded and switched on here
+            atry('creature-description overlay (unit sheet info panel)', function()
+                dfhack.run_script('creature-description')
+                dfhack.run_command('overlay', 'enable', 'creature-description.desc')
+            end)
         end
     end
     -- soft return (not qerror): onMapLoad.init also fires on other non-fort maps; do nothing there.
