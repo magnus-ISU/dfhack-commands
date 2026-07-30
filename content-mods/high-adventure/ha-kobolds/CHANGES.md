@@ -1,5 +1,17 @@
 # ha-kobolds — build notes
 
+## v0.19 -- ancient dragons grow up in time to survive
+- **Ancient dragons were dying as elephant-sized juveniles.** Their `BODY_SIZE` reached full
+  mass only at age 100, so for their first century they sat at 500,000 -- exactly elephant
+  size. All three megabeasts in a test world died in years 1, 9 and 19 to a platybelodon, an
+  orc and a dwarf; the kobold-caste dragons died to elephants, cave dragons, a jabberer and
+  even a tame helmet snake. Not a stats problem: STR/TOU were 2000-3000 against a vanilla
+  dragon's 200-2000. Mass beats stats.
+- Now four growth points, matching vanilla's pace early: 6,000 at age 0, **5,000,000 at age
+  10**, 10,000,000 at 100, 25,000,000 at 1000. Applied to the megabeast and the kobold castes.
+- Result over 250 years: megabeasts now persist to about year 150 (4/3/3/2/1/1/0/0) instead of
+  being gone by year 19, and dragon citizens hold steady at 4-6 for the whole run.
+
 ## v0.18 -- horn alignment, tail tips, coloured extra heads
 - **The default dragon head wore the wrong horns.** Naut's horn sprites on atlas row
   14 are anchored to the DRAKE head (they carry drake's `HEAD.HEIGHT 110-500` +

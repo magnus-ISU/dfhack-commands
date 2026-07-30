@@ -1,5 +1,13 @@
 # ha-drow — fork changelog
 
+## v0.37 -- experiment: ocean-weighted expansion
+- Same 10:1 ocean pull as the high elves, and MOUNTAIN moved to the first `BIOME_SUPPORT`
+  entry because it is the `EXCLUSIVE_START_BIOME` -- the first entry should be the start biome
+  or nothing past the first settlement is founded. Subterranean weights flattened to 1.
+- Result over 250 years: 129 entities, 3,006 population -- a small civ, and drow historical
+  figures peak at 282 and settle near 206. Suggestive but not proven; between-world variance
+  is large enough that this needs several seeds.
+
 ## v0.35
 - **Fixed driders flashing grayscale.** The drider has its own dedicated
   `CREATURE_CASTE_GRAPHICS:HA_DROW:DRIDER` (a LARGE_IMAGE sprite), but the parent

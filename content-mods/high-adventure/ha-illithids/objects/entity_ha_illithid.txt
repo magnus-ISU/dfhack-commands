@@ -170,14 +170,15 @@ entity_ha_illithid
 	[START_BIOME:ANY_GRASSLAND]
 	[START_BIOME:ANY_SAVANNA]
 	[START_BIOME:ANY_SHRUBLAND]
+	EXPERIMENT (worldgen balance): the three START_BIOMEs deliberately have NO
+	BIOME_SUPPORT entry, so the civ claims no territory where it begins. Territory
+	spread is what lets a civ found outlying settlements, so this should pin illithids
+	to their founding site -- few sites, no sprawl, and fragile to a single bad siege.
 	[BIOME_SUPPORT:ANY_WETLAND:1]
 	[BIOME_SUPPORT:ANY_DESERT:1]
 	[BIOME_SUPPORT:ANY_FOREST:2]
 	[BIOME_SUPPORT:ANY_OCEAN:12]
 	[BIOME_SUPPORT:ANY_LAKE:3]
-	[BIOME_SUPPORT:ANY_GRASSLAND:3]
-	[BIOME_SUPPORT:ANY_SAVANNA:2]
-	[BIOME_SUPPORT:ANY_SHRUBLAND:2]
 	[BIOME_SUPPORT:ANY_RIVER:4]
 	[MERCHANT_NOBILITY]
 	[DIPLOMAT_BODYGUARDS]

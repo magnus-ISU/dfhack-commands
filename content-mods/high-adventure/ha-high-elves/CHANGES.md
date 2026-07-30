@@ -1,5 +1,12 @@
 # Changes — HA High Elves
 
+## 0.12 -- experiment: ocean-weighted expansion
+- `BIOME_SUPPORT:ANY_OCEAN:10` against 1 for everything else, on the theory that territory
+  spreading over water they cannot build on wastes their expansion budget. Start biome kept
+  first, which is required for any settlement past the first to be founded.
+- Result over 250 years: **no visible effect** -- 953 entities and 76,302 population, still the
+  third largest civ. This lever did not work; the cause of high elf sprawl is elsewhere.
+
 ## 0.11a -- shaping tree art rebuilt on the real 5x6 grid; starlight is chancy and fuel-free
 - **"Catch starlight" showed `[Requires fuel]` at the Shaping Tree** even though the
   reaction has no `PRODUCT` and no fuel token of its own. Cause: a *comment* line in

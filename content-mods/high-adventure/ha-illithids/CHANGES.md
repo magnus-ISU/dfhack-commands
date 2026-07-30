@@ -1,5 +1,13 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.49 -- experiment: no territory in the start biome
+- Removed `BIOME_SUPPORT` for all three `START_BIOME`s, so the civ claims no ground where it
+  begins. Territory spread is what lets a civ found outlying settlements, so this should pin
+  illithids near their founding site.
+- Result over 250 years: 31 entities and 182 population, by far the smallest civ in the world.
+  The experiment works -- arguably too well; historical figures fall 83 -> 8 and elder brains
+  reach zero by year 200.
+
 ## 0.48 -- Lord Therapist + duplicate-tag fix
 - Added **Lord Therapist** (position id CHIEF_MEDICAL_DWARF): SITE, NUMBER:1,
   `HEALTH_MANAGEMENT`, appointed by the Voice of the Colony -- the civ had no health
