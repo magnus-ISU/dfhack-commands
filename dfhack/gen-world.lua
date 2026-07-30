@@ -25,8 +25,11 @@ Options (all optional, any order):
 
 :civilizations=: ``max`` | ``min`` | 0-4     how many civs the world gets
 :sites=:         ``max`` | ``min`` | 0-4     the site cap
-:everything=:    ``max`` | ``min``           every other slider too (slow: big world,
-                                             500 years of history)
+:history=:       ``max`` | ``min`` | 0-4     min is 5 years -- handy for asking "did this
+                                             civ ever get placed?" without waiting for
+                                             history to kill it off
+:worldsize=: :beasts=: :savagery=: :minerals=:   the remaining sliders
+:everything=:    ``max`` | ``min``           every slider not named explicitly
 :mods=:          ``ha`` | ``all`` | ``none`` ``ha`` selects every installed mod except
                                              upstream fork sources, ``all`` includes them
 :fortress: / :adventure:                     which mode to start (default fortress)
@@ -52,6 +55,11 @@ local SLIDER_MAX, SLIDER_MIN = 4, 0
 local SLIDERS = {
     civilizations = 'simple_civ_num',
     sites         = 'simple_site_cap',
+    history       = 'simple_history',     -- min = 5 years, max = 500
+    worldsize     = 'simple_world_size',
+    beasts        = 'simple_beast',
+    savagery      = 'simple_savagery',
+    minerals      = 'simple_minerals',
 }
 local OTHER_SLIDERS = {
     'simple_world_size', 'simple_history', 'simple_beast',
@@ -114,8 +122,12 @@ local function find_label(label, from_bottom)
     for y = 0, h - 1 do order[#order + 1] = from_bottom and (h - 1 - y) or y end
     for _, y in ipairs(order) do
         local row = rows[y]
-        local a, b = row and row:find(label, 1, true)
-        if a then return math.floor((a - 1 + b - 1) / 2), y end
+        -- NB: `row and row:find(...)` would truncate to a single return value and leave
+        -- the end index nil, so the nil check has to come first
+        if row then
+            local a, b = row:find(label, 1, true)
+            if a then return math.floor((a - 1 + b - 1) / 2), y end
+        end
     end
 end
 
