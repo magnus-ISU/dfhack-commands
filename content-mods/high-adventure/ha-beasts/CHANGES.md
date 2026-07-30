@@ -1,4 +1,4 @@
-# High Fantasy - Beasts — change log
+# HA - Beasts — change log
 
 A wild-monster pack for the Dwarf Fortress: High Adventure suite. Adds hostile,
 world-populating creatures (no civilization, no entity) that make travel — and
@@ -184,3 +184,7 @@ body while keeping our blue theme, cannibalism, and skill-tiered castes:
 no entity still spawns as roaming predators (if not, add `FEATURE_ATTACK_GROUP` or an
 entity); (2) that the sprite renders blue on the chitin body (the `CHITIN` graphics
 condition). Only affects newly-generated worlds (creature raws are baked per world).
+
+## v0.8 — renamed to "HA - Beasts"
+- Mod display name changed from "High Fantasy - Beasts" to "HA - Beasts" to match
+  the rest of the High Adventure suite. No content changes.
