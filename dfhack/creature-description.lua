@@ -139,11 +139,13 @@ function kill_summary(u)
     return ('%d kill%s: %s'):format(total, total == 1 and '' or 's', table.concat(parts, ', '))
 end
 
--- ---- metal + weapon/armor preference (citizens) ----------------------------
--- "Prefers steel and short swords". The preference `type` enum is inline (no
--- df.preference_type export): LikeMaterial = 0, LikeItem = 4. A weapon/armor
--- preference's item_type indexes one of the itemdef lists below; the metal
--- preference is a LikeMaterial on an INORGANIC (mattype 0) whose material is a metal.
+-- ---- metal + weapon/armor preference + combat stance ------------------------
+-- "Prefers steel and short swords; likes combat (+23)". The preference `type`
+-- enum is inline (no df.preference_type export): LikeMaterial = 0, LikeItem = 4.
+-- A weapon/armor preference's item_type indexes one of the itemdef lists below;
+-- the metal preference is a LikeMaterial on an INORGANIC (mattype 0) whose
+-- material is a metal. Shown for any unit with a soul (not just citizens), so
+-- it works on the adventure-mode unit sheet too.
 
 local PREF_MATERIAL, PREF_ITEM = 0, 4
 
@@ -161,7 +163,24 @@ local function gear_lists()
     }
 end
 
--- first preferred metal + first preferred weapon/armour piece, either nil
+-- how the unit feels about combat: the MARTIAL_PROWESS personal value, in the
+-- bands embark-prep uses (no entry in personality.values = civ default = 0)
+local function combat_stance(soul)
+    local strength = 0
+    for _, v in ipairs(soul.personality.values) do
+        if v.type == df.value_type.MARTIAL_PROWESS then
+            strength = v.strength
+            break
+        end
+    end
+    local word = strength >= 41 and 'loves' or strength >= 15 and 'likes'
+        or strength <= -41 and 'hates' or strength <= -15 and 'dislikes'
+        or 'indifferent to'
+    return ('%s combat (%+d)'):format(word, strength)
+end
+
+-- first preferred metal + first preferred weapon/armour piece + combat stance,
+-- all on one line; nil only when the unit has no soul
 local function prefs_line(u)
     local soul = u.status and u.status.current_soul
     if not soul then return end
@@ -183,9 +202,12 @@ local function prefs_line(u)
         end
         if metal and gear then break end
     end
-    if metal and gear then return ('Prefers %s and %s'):format(metal, gear)
-    elseif metal then return ('Prefers %s'):format(metal)
-    elseif gear then return ('Prefers %s'):format(gear) end
+    local pref
+    if metal and gear then pref = ('Prefers %s and %s'):format(metal, gear)
+    elseif metal or gear then pref = ('Prefers %s'):format(metal or gear) end
+    local combat = combat_stance(soul)
+    if pref then return pref .. '; ' .. combat end
+    return (combat:gsub('^%l', string.upper))   -- combat alone: "Likes combat (+23)"
 end
 
 -- ---- weight + volume --------------------------------------------------------
@@ -210,7 +232,7 @@ local function size_line(u)
         dwarves, dwarves == '1' and 'dwarf' or 'dwarves', fmt_num(sz / 100))
 end
 
--- description [+ weight/volume] [+ preferences for citizens] + kills line for the selected creature, or nil
+-- description [+ weight/volume] [+ prefs & combat stance, souled units] + kills line for the selected creature, or nil
 local function unit_info()
     local u = dfhack.gui.getSelectedUnit(true)
     if not u then return end
@@ -220,10 +242,8 @@ local function unit_info()
     local lines = {caste.description}
     local ok_sz, sz = pcall(size_line, u)
     if ok_sz and sz then lines[#lines + 1] = sz end
-    if dfhack.units.isCitizen(u) then
-        local ok, pref = pcall(prefs_line, u)
-        if ok and pref then lines[#lines + 1] = pref end
-    end
+    local ok_pref, pref = pcall(prefs_line, u)
+    if ok_pref and pref then lines[#lines + 1] = pref end
     local ok, kills = pcall(kill_summary, u)
     lines[#lines + 1] = ok and kills or 'Kills: ?'
     return table.concat(lines, '\n')
