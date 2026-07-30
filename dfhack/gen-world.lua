@@ -231,8 +231,15 @@ local function apply_mods(mode)
         local ver = tonumber(vs.available_numeric_version[i]) or 0
         if not best[id] or ver > best[id].ver then best[id] = {idx = i, ver = ver} end
     end
+    -- The HIGH_ADVENTURE bundle IS the ha-* member mods, regenerated. Loading it beside
+    -- them defines every object twice and worldgen aborts on the first duplicate
+    -- ("Duplicate Object: inorganic HA_ORC_SPAWNMIST"). When the bundle is installed,
+    -- `ha` loads only the bundle; `all` keeps the old behavior (duplicates and all).
+    local bundled = best['HIGH_ADVENTURE'] ~= nil and mode ~= 'all'
     for id, pick in pairs(best) do
         if FORK_SOURCES[id] and mode ~= 'all' then
+            skipped[#skipped + 1] = id
+        elseif bundled and id:find('^HA_') then
             skipped[#skipped + 1] = id
         elseif not have[id] then
             for _, f in ipairs(MOD_FIELDS) do

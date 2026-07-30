@@ -138,9 +138,14 @@ cp dfhack/auto-name.lua "$DF/dfhack-config/scripts/"
 "$DFH/dfhack-run" overlay trigger   # or: dfhack-run lua "require('plugins.overlay').reload()"
 ```
 
-Deploy the whole set at once:
+Deploy the whole set at once (category folders deploy as subdirectories, so the
+command name keeps its prefix — `adv/reveal`, `embark/adventurer-values`):
 ```sh
 cp dfhack/*.lua "$DF/dfhack-config/scripts/"
+mkdir -p "$DF/dfhack-config/scripts/"{adv,fix,embark}
+cp adv/*.lua "$DF/dfhack-config/scripts/adv/"
+cp fix/*.lua "$DF/dfhack-config/scripts/fix/"
+cp embark/*.lua "$DF/dfhack-config/scripts/embark/"
 ```
 
 ## Run a DFHack command
