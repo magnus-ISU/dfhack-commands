@@ -26,8 +26,14 @@ Notes from working this out live against DF 53.15:
   does NOT reach a text-entry dialog -- that is the "press Escape three times"
   trap. Clearing the two prompt flags first makes one fed Escape close the menu.
 * **Completion is read from the game, never from disk**: `options.saver.stage`
-  climbs back to 51 when the save is done. (Under Steam the script's idea of the
-  save path is redirected, so file timestamps cannot be trusted anyway.)
+  dips below 51 while DF writes and returns to 51 when the save is done. (Under
+  Steam the script's idea of the save path is redirected, so file timestamps
+  cannot be trusted anyway.)
+* **The name/overwrite prompt flags are NOT completion signals.** DF raises them
+  as part of starting the save. An early version treated them as "done", cleared
+  `do_manual_save` and escaped the menu, which cancelled the save after all 1925
+  data files but before `world.sav` -- a folder DF then refuses to list. Nothing
+  is touched until the stage counter says the write finished.
 * Frame timers freeze while the menu is up, so a timer loop AND an overlay
   watchdog both step the machine.
 
@@ -82,13 +88,16 @@ end
 
 local state, st_frames, st_started = 'idle', 0, 0
 local saw_progress, failure, esc_tries = false, nil, 0
+local failure_safe = true    -- false => a save may still be writing: touch NOTHING
 
 local function enter(s)
     state, st_frames, st_started = s, 0, os.time()
 end
 
-local function fail(why)
-    failure = why
+-- `safe` must be false whenever a save may be in flight, so the cleanup path
+-- does not yank do_manual_save out from under DF mid-write
+local function fail(why, safe)
+    failure, failure_safe = why, safe ~= false
     enter('done')
 end
 
@@ -119,18 +128,36 @@ local function step()
         end
 
     elseif state == 'saving' then
-        -- in-game signals only: the stage counter dips while saving and returns to
-        -- SAVER_DONE, and DF re-opens the name prompt once the save has landed
-        if o.saver.stage < SAVER_DONE then saw_progress = true end
-        local finished = (saw_progress and o.saver.stage >= SAVER_DONE)
-            or o.entering_manual_folder or o.confirm_manual_overwrite
-        if finished then
-            enter('done')
-        elseif os.time() - st_started > SAVE_TIMEOUT then
-            fail('save did not finish within ' .. SAVE_TIMEOUT .. 's')
+        -- The ONLY completion signal is the stage counter: it dips below
+        -- SAVER_DONE while DF writes and returns to it when the save is complete.
+        -- DF also raises the name/overwrite prompt as part of STARTING the save,
+        -- so those flags must NOT be read as "finished" -- doing that cancelled
+        -- saves after the 1925 data files but before world.sav (the 56MB state
+        -- file), leaving a folder DF refuses to list. Just clear the prompt and
+        -- keep waiting.
+        if o.entering_manual_folder or o.confirm_manual_overwrite then clear_prompts() end
+        local stage = o.saver.stage
+        if stage < SAVER_DONE then saw_progress = true end
+        if saw_progress and stage >= SAVER_DONE then
+            enter('done')                      -- now it is safe to touch flags
+        elseif not saw_progress and st_frames > 600 then
+            -- request never consumed; nothing has been written, so cleanup is safe
+            fail('DF never started the save', true)
+        elseif saw_progress and os.time() - st_started > SAVE_TIMEOUT then
+            -- a write may still be in progress: report but do not interfere
+            fail('save still unfinished after ' .. SAVE_TIMEOUT .. 's', false)
         end
 
     elseif state == 'done' then
+        if failure and not failure_safe then
+            -- a save might still be writing: leave every flag and the menu alone
+            last_result = 'failed: ' .. failure
+            next_at = os.time() + 60
+            announce('save may still be writing (' .. failure
+                .. ') -- left it alone; check the menu', COLOR_LIGHTRED)
+            enter('idle')
+            return
+        end
         -- clear the post-save re-prompt, then one Escape closes the menu
         clear_prompts()
         o.do_manual_save = false
