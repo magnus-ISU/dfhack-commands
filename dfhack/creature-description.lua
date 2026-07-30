@@ -187,7 +187,29 @@ local function prefs_line(u)
     elseif gear then return ('Prefers %s'):format(gear) end
 end
 
--- description [+ preferences for citizens] + kills line for the selected creature, or nil
+-- ---- weight + volume --------------------------------------------------------
+-- "Weighs 3.1 dwarves, is 60dm^3". size_info.size_cur is cubic centimeters / 10
+-- (so dm^3 = size_cur / 100); the dwarf figure matches gui/unit-info-viewer's
+-- comparison against an average 6000 dwarf.
+
+local DWARF_SIZE = 6000
+
+-- fixed-point with just enough decimals, trailing zeros trimmed: 60, 6, 3.1, 0.08
+local function fmt_num(v)
+    local prec = v >= 10 and 0 or v >= 1 and 1 or v >= 0.01 and 2 or 4
+    local s = ('%.' .. prec .. 'f'):format(v)
+    return s:find('%.') and (s:gsub('%.?0+$', '')) or s
+end
+
+local function size_line(u)
+    local sz = u.body.size_info.size_cur
+    if not sz or sz <= 0 then return end
+    local dwarves = fmt_num(sz / DWARF_SIZE)
+    return ('Weighs %s %s, is %sdm^3'):format(
+        dwarves, dwarves == '1' and 'dwarf' or 'dwarves', fmt_num(sz / 100))
+end
+
+-- description [+ weight/volume] [+ preferences for citizens] + kills line for the selected creature, or nil
 local function unit_info()
     local u = dfhack.gui.getSelectedUnit(true)
     if not u then return end
@@ -195,6 +217,8 @@ local function unit_info()
     local caste = cr and cr.caste[u.caste]
     if not (caste and caste.description and #caste.description > 0) then return end
     local lines = {caste.description}
+    local ok_sz, sz = pcall(size_line, u)
+    if ok_sz and sz then lines[#lines + 1] = sz end
     if dfhack.units.isCitizen(u) then
         local ok, pref = pcall(prefs_line, u)
         if ok and pref then lines[#lines + 1] = pref end

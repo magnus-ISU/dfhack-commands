@@ -1,0 +1,8 @@
+[ID:HA_second_humans]
+[NUMERIC_VERSION:1]
+[DISPLAYED_VERSION:0.1]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure]
+[NAME:High Adventure - Second Humans]
+[DESCRIPTION:Adds a second, independent human civilization identical to the vanilla one, so that humans get two draws against every one an orc civilization gets during placement. It adds no creature: a civilization in Dwarf Fortress is an entity, and an entity only references a creature, so this uses vanilla HUMAN untouched. The entity block itself is generated from the installed vanilla raws by sync_from_vanilla.py, so keeping it current after a Dwarf Fortress update is a matter of re-running that script rather than merging by hand. Nothing in vanilla is modified. The two human civs are separate powers and can go to war with each other.]
