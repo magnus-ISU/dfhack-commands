@@ -10,38 +10,61 @@ The greater world map (the `m` toggle) names whatever you hover; the lesser
 travel map you actually walk on shows nothing.  With this overlay loaded,
 hovering the lesser map pops a tooltip for whatever your cursor is directly
 over -- any site whose footprint covers the hovered tile, plus any army
-standing there.  For a site it shows:
+standing there.
 
-- type and name ("Town: Conjurewebs")
-- owning entity, its race and the head count -- the race is the OCCUPIER's,
-  so a goblin pit taken over by humans reads "human"
-- the population by race when the site is mixed ("dwarf 57, goblin 66, ...")
-- the top nobles (by position precedence -- lord, law-giver, militia
-  commander...), who are also the quest-giving residents
-- Legendary-skilled residents
-- worldgen quest postings, when the site has any
+Site cards lead with the occupier's race, so a conquered site reads as such
+("Human Dark Fortress: ..." for a taken pit):
+
+    Human Town: Conjurewebs
+      of The Knowing Fellowship, pop 119
+      Lord: Imo Admiredrhymed
+      ...
+      Legendary Weaver: Athel Oilyboards
+
+    Human Bandit Camp: Passionglades
+      of The Lancers of Yore
+      7 in all: orc 5, human 2
+      Named: Maceman, Lasher x2, Spearman
+      Chieftain: Cor Practicedprairie
+
+    Roc Lair: Clodmoth the Large Controller
+      Lives here: Ruxava the Earthen Wind (roc)
+
+A camp's population comes from two disjoint stores -- an abstract per-race
+head count (`populace.inhabitants`) and the individually named residents
+(`populace.nemesis`) -- so the card shows ONE merged total ("7 in all")
+whose breakdown always sums to it, and labels the profession list "Named:"
+because only named residents have professions.  Camps have no owning entity;
+the gang is a NomadicGroup entity on `site.entity_links`, which also
+surfaces the gang leader (Boss / Ringleader / Chieftain) through the normal
+position path.
+
+Armies get cards too: member count, race breakdown and the leading names
+(`army.members` -> nemesis -> histfig); a lone wanderer -- often a roaming
+megabeast, sometimes a hidden one -- reads "Roaming: <name> (<species>)".
 
 How the lesser map is decoded (all verified live against drawn markers):
 
 - The map renders through `gps.main_map_port`, a `dim_x x dim_y` grid of
   square cells, cell size = window_pixel_width / dim_x (16px here).  Its
   layer buffers are ROW-major (`idx = y*dim_x + x`).
-- One lesser-map cell = one MID TILE (1/16 world tile, 3 army-steps).  The
-  player army is always drawn at the center cell `(screen_x, screen_y)`, so
-  `mid = army.pos//3 + (cell - center)`.  (On the greater map one cell = one
-  world tile, same centering -- that map keeps DF's own hover text.)
+- One lesser-map cell = one MID TILE (1/16 world tile, 3 army-steps), or one
+  army-step when zoomed in near a site (`adventure.site_level_zoom` == 1).
+  The player army is always drawn at the center cell `(screen_x, screen_y)`,
+  so `mid = army.pos//3 + (cell - center)`.  (On the greater map one cell =
+  one world tile, same centering -- that map keeps DF's own hover text.)
 - Site footprints are `world_site.global_min/max_x/y`, in mid tiles, so a
   town lights up only while the cursor is over its actual span; camps, lairs
   and vaults are single-tile.  `hover_text_ax/ay` in
   `main_interface.adventure.travel` is greater-map-only and stays stale on
   the lesser map, which is why this reimplements the lookup instead.
 
-Site data sources (this build): population = `site.populace.inhabitants`
-count sum (the abstract population; falls back to `site.resident_count` for
-the currently-loaded site, whose counts have been materialized into units);
-notable residents = `site.populace.nemesis` -> nemesis_record -> histfig,
-whose worldgen skill points are level x 1000, so >= 15000 = Legendary;
-nobles = the owning entity's `positions.assignments` matched to residents.
+Other data sources (this build): town population = `populace.inhabitants`
+count sum, falling back to `site.resident_count` for the currently-loaded
+site (whose abstract counts have been materialized into units); notable
+residents = `populace.nemesis` -> nemesis_record -> histfig, whose worldgen
+skill points are level x 1000, so >= 15000 = Legendary; nobles = the owning
+entity's `positions.assignments` ranked by position precedence.
 
 Sites are looked up fresh only when the hovered cell or the army moves; the
 per-frame cost is one cached paint.
@@ -53,23 +76,38 @@ local overlay = require('plugins.overlay')
 
 local MAX_NOBLES = 3       -- top-precedence position holders shown
 local MAX_LEGENDS = 3      -- legendary residents shown
+local MAX_DWELLERS = 3     -- lair dwellers shown
+local MAX_ARMY_NAMES = 3   -- named army members shown
 local LEGEND_PTS = 15000   -- worldgen skill points = level x 1000; 15 = Legendary
 local MAX_WIDTH = 60       -- tooltip line clamp, in text cells
 
 -- world_site_type -> what a player calls it ("LairShrine" is the lair marker,
 -- vaults and the mysterious structures are ImportantLocation on this build)
 local TYPE_NAMES = {
-    PlayerFortress = 'Abandoned fortress',
-    DarkFortress = 'Dark fortress',
+    PlayerFortress = 'Abandoned Fortress',
+    DarkFortress = 'Dark Fortress',
     Cave = 'Cave',
-    MountainHalls = 'Mountain halls',
-    ForestRetreat = 'Forest retreat',
+    MountainHalls = 'Mountain Halls',
+    ForestRetreat = 'Forest Retreat',
     Town = 'Town',
     ImportantLocation = 'Vault',
     LairShrine = 'Lair',
     Fortress = 'Fortress',
     Camp = 'Camp',
     Monument = 'Monument',
+}
+
+-- a non-government occupying entity, as noun ("of the bandits") and as the
+-- adjective slotted into the headline ("Human Bandit Camp")
+local ENTITY_KIND = {
+    NomadicGroup = 'Bandit',
+    MigratingGroup = 'Migrant',
+    MilitaryUnit = 'Soldier',
+    Religion = 'Cult',
+    Guild = 'Guild',
+    MerchantCompany = 'Merchant',
+    PerformanceTroupe = 'Performer',
+    Outcast = 'Outcast',
 }
 
 local function type_name(t)
@@ -84,6 +122,10 @@ local function race_name(race)
     return ok and name or nil
 end
 
+local function title_case(s)
+    return (s:gsub('(%a)([%w]*)', function(a, b) return a:upper() .. b end))
+end
+
 local function hf_name(hf)
     local n = dfhack.translation.translateName(hf.name, true)
     return n ~= '' and n or 'someone'
@@ -94,9 +136,16 @@ local function skill_noun(skill)
     return ok and cap or (df.job_skill[skill] or '?')
 end
 
+local function prof_name(prof)
+    local cap = df.profession[prof] or '?'
+    pcall(function() cap = df.profession.attrs[prof].caption end)
+    return cap
+end
+
 -- ---- site details -----------------------------------------------------------
 
-local function population_lines(s, owner, lines, owner_kind, skip_races)
+-- abstract per-race population records; returns total and breakdown parts
+local function abstract_pop(s)
     local total, races, distinct, first_race = 0, {}, 0, nil
     pcall(function()
         for i = 0, #s.populace.inhabitants - 1 do
@@ -110,30 +159,10 @@ local function population_lines(s, owner, lines, owner_kind, skip_races)
             end
         end
     end)
-    -- the loaded site's abstract counts are zeroed (they became live units);
-    -- resident_count still has the head count
-    if total == 0 then total = s.resident_count end
-    local bits = {}
-    if owner then
-        local rn = race_name(owner.race)
-        if rn and owner_kind then rn = rn .. ' ' .. owner_kind end
-        bits[#bits + 1] = rn
-    end
-    if total > 0 then bits[#bits + 1] = ('pop %d'):format(total) end
-    local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
-    if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
-    if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
-    -- the breakdown matters when the population is mixed OR when the whole
-    -- population is a different race than the occupying entity; camps pass
-    -- skip_races because they print a merged head count of their own
-    if not skip_races and (distinct > 1
-            or (distinct == 1 and owner and first_race ~= owner.race)) then
-        lines[#lines + 1] = '  ' .. table.concat(races, ', ')
-    end
+    return total, races, distinct, first_race
 end
 
--- residents of the site, as {hf=, nemesis-order} -- the nemesis vector holds
--- the site's named (historical) residents
+-- residents of the site: the nemesis vector holds its named (historical) figures
 local function residents(s)
     local out = {}
     pcall(function()
@@ -146,10 +175,8 @@ local function residents(s)
     return out
 end
 
-local function noble_lines(s, owner, resident_hfs, lines)
+local function noble_lines(owner, lines)
     if not owner then return end
-    local by_id = {}
-    for _, hf in ipairs(resident_hfs) do by_id[hf.id] = true end
     local nobles = {}
     pcall(function()
         for i = 0, #owner.positions.assignments - 1 do
@@ -168,7 +195,6 @@ local function noble_lines(s, owner, resident_hfs, lines)
                         prec = pos.precedence or 30000,
                         title = pos.name[0] ~= '' and pos.name[0] or pos.code,
                         hf = hf,
-                        resident = by_id[hf_id] or false,
                     }
                 end
             end
@@ -213,13 +239,17 @@ end
 -- lairs and lair-like dwellings: name the creature(s) living there, or say
 -- the place is empty.  The dweller IS the site's nemesis list.
 local DWELLING = {LairShrine = true, Cave = true, Monument = true, ImportantLocation = true}
-local MAX_DWELLERS = 3
 
-local function dweller_lines(s, resident_hfs, lines)
+local function living(resident_hfs)
     local alive = {}
     for _, hf in ipairs(resident_hfs) do
         if hf.died_year < 0 then alive[#alive + 1] = hf end
     end
+    return alive
+end
+
+local function dweller_lines(s, resident_hfs, lines)
+    local alive = living(resident_hfs)
     for i, hf in ipairs(alive) do
         if i > MAX_DWELLERS then
             lines[#lines + 1] = ('  (+%d more dwellers)'):format(#alive - MAX_DWELLERS)
@@ -234,25 +264,14 @@ local function dweller_lines(s, resident_hfs, lines)
     end
 end
 
--- what to call a non-government occupying entity ("goblin bandits")
-local ENTITY_KIND = {
-    NomadicGroup = 'bandits',
-    MigratingGroup = 'migrants',
-    MilitaryUnit = 'soldiers',
-    Religion = 'cult',
-    Guild = 'guild',
-    MerchantCompany = 'merchants',
-    PerformanceTroupe = 'performers',
-    Outcast = 'outcasts',
-}
-
--- camps: who is actually there -- merged race head-count (abstract population
--- plus the named residents) and the named residents' professions
+-- camps: one merged head count (abstract population PLUS named residents, two
+-- disjoint stores) whose breakdown always sums to the printed total, and the
+-- named residents' professions under an explicit "Named:" label
 local function camp_lines(s, resident_hfs, lines)
     local by_race, order = {}, {}
     local function add(race, n)
         local rn = race_name(race)
-        if not rn then return end
+        if not rn or n <= 0 then return end
         if not by_race[rn] then order[#order + 1] = rn; by_race[rn] = 0 end
         by_race[rn] = by_race[rn] + n
     end
@@ -262,57 +281,84 @@ local function camp_lines(s, resident_hfs, lines)
             add(inh.pop_spec.race, inh.count)
         end
     end)
+    local alive = living(resident_hfs)
     local profs, porder = {}, {}
-    for _, hf in ipairs(resident_hfs) do
-        if hf.died_year < 0 then
-            add(hf.race, 1)
-            local cap = df.profession[hf.profession] or '?'
-            pcall(function() cap = df.profession.attrs[hf.profession].caption end)
-            if not profs[cap] then porder[#porder + 1] = cap; profs[cap] = 0 end
-            profs[cap] = profs[cap] + 1
-        end
+    for _, hf in ipairs(alive) do
+        add(hf.race, 1)
+        local cap = prof_name(hf.profession)
+        if not profs[cap] then porder[#porder + 1] = cap; profs[cap] = 0 end
+        profs[cap] = profs[cap] + 1
     end
-    local bits = {}
+    local total, bits = 0, {}
     for _, rn in ipairs(order) do
+        total = total + by_race[rn]
         bits[#bits + 1] = by_race[rn] > 1 and (rn .. ' ' .. by_race[rn]) or rn
     end
-    if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
+    if total > 0 then
+        lines[#lines + 1] = ('  %d in all: %s'):format(total, table.concat(bits, ', '))
+    end
     local pbits = {}
     for _, cap in ipairs(porder) do
         pbits[#pbits + 1] = profs[cap] > 1 and (cap .. ' x' .. profs[cap]) or cap
     end
-    if #pbits > 0 then lines[#lines + 1] = '  ' .. table.concat(pbits, ', ') end
+    if #pbits > 0 then lines[#lines + 1] = '  Named: ' .. table.concat(pbits, ', ') end
 end
 
 local function site_lines(s, lines)
+    local stype = df.world_site_type[s.type]
     local name = dfhack.translation.translateName(s.name, true)
-    lines[#lines + 1] = type_name(s.type) .. (name ~= '' and (': ' .. name) or '')
-    local owner, owner_kind
+
+    -- occupying entity: cur_owner, or (camps) the band on entity_links
+    local owner, kind_adj
     pcall(function() owner = df.historical_entity.find(s.cur_owner_id) end)
-    -- camps and other ownerless sites: the occupying band (a NomadicGroup for
-    -- bandit camps) hangs off the site's entity_links instead
     if not owner then
         pcall(function()
             for i = 0, #s.entity_links - 1 do
                 local e = df.historical_entity.find(s.entity_links[i].entity_id)
                 if e then
                     owner = e
-                    owner_kind = ENTITY_KIND[df.historical_entity_type[e.type]]
+                    kind_adj = ENTITY_KIND[df.historical_entity_type[e.type]]
                     break
                 end
             end
         end)
     end
-    local stype = df.world_site_type[s.type]
-    population_lines(s, owner, lines, owner_kind, stype == 'Camp')
+
+    -- headline: lead with the occupier's race ("Illithid Dark Fortress",
+    -- "Human Bandit Camp"); lairs lead with the dweller's species instead
     local resident_hfs = residents(s)
-    if stype == 'Camp' then
-        camp_lines(s, resident_hfs, lines)
+    local head = type_name(s.type)
+    if owner then
+        local rn = race_name(owner.race)
+        if rn then
+            head = title_case(rn) .. (kind_adj and (' ' .. kind_adj) or '') .. ' ' .. head
+        end
+    elseif DWELLING[stype] then
+        local alive = living(resident_hfs)
+        local species = #alive > 0 and race_name(alive[1].race) or nil
+        if species then head = title_case(species) .. ' ' .. head end
     end
-    if DWELLING[stype] then
-        dweller_lines(s, resident_hfs, lines)
+    lines[#lines + 1] = head .. (name ~= '' and (': ' .. name) or '')
+
+    -- occupier line; towns etc. carry the population here, camps show a
+    -- merged count of their own below
+    local total, races, distinct, first_race = abstract_pop(s)
+    if total == 0 then total = s.resident_count end
+    local bits = {}
+    local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
+    if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
+    if stype ~= 'Camp' and total > 0 then bits[#bits + 1] = ('pop %d'):format(total) end
+    if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
+    -- the breakdown matters when the population is mixed OR is a different
+    -- race than the occupier (a conquest not yet visible in the headline)
+    if stype ~= 'Camp' and (distinct > 1
+            or (distinct == 1 and owner and first_race ~= owner.race)) then
+        lines[#lines + 1] = '  ' .. table.concat(races, ', ')
     end
-    noble_lines(s, owner, resident_hfs, lines)
+
+    if stype == 'Camp' then camp_lines(s, resident_hfs, lines) end
+    if DWELLING[stype] then dweller_lines(s, resident_hfs, lines) end
+    noble_lines(owner, lines)
     legend_lines(resident_hfs, lines)
     pcall(function()
         if #s.wg_quest_posting > 0 then
@@ -320,6 +366,46 @@ local function site_lines(s, lines)
         end
     end)
 end
+
+-- ---- armies -----------------------------------------------------------------
+
+local function army_lines(a, lines)
+    local counts, order, named = {}, {}, {}
+    pcall(function()
+        for i = 0, #a.members - 1 do
+            local nr = df.nemesis_record.find(a.members[i].nemesis_id)
+            local hf = nr and nr.figure
+            if hf then
+                local rn = race_name(hf.race) or '?'
+                if not counts[rn] then order[#order + 1] = rn; counts[rn] = 0 end
+                counts[rn] = counts[rn] + 1
+                named[#named + 1] = ('%s (%s)'):format(hf_name(hf), rn)
+            end
+        end
+    end)
+    local n = #named
+    if n == 0 then
+        lines[#lines + 1] = 'An army'
+        return
+    end
+    if n == 1 then
+        lines[#lines + 1] = 'Roaming: ' .. named[1]
+        return
+    end
+    local bits = {}
+    for _, rn in ipairs(order) do
+        bits[#bits + 1] = counts[rn] > 1 and (rn .. ' ' .. counts[rn]) or rn
+    end
+    lines[#lines + 1] = ('Army (%d): %s'):format(n, table.concat(bits, ', '))
+    for i = 1, math.min(n, MAX_ARMY_NAMES) do
+        lines[#lines + 1] = '  ' .. named[i]
+    end
+    if n > MAX_ARMY_NAMES then
+        lines[#lines + 1] = ('  (+%d more)'):format(n - MAX_ARMY_NAMES)
+    end
+end
+
+-- ---- hover lookup -----------------------------------------------------------
 
 -- the lines to show for one hovered mid tile; nil when there is nothing there
 local function tile_info(mx, my)
@@ -337,9 +423,7 @@ local function tile_info(mx, my)
     for i = 0, #armies - 1 do
         local a = armies[i]
         if a.id ~= player_army and a.pos.x // 3 == mx and a.pos.y // 3 == my then
-            local n = 0
-            pcall(function() n = #a.members end)
-            lines[#lines + 1] = n > 0 and ('An army (%d)'):format(n) or 'An army'
+            army_lines(a, lines)
         end
     end
     for i, l in ipairs(lines) do
@@ -348,7 +432,7 @@ local function tile_info(mx, my)
     if #lines > 0 then return lines end
 end
 
--- exported for testing: the tooltip lines for a site id
+-- exported for testing
 function lines_for_site(id)
     local wd = df.global.world.world_data
     for i = 0, #wd.sites - 1 do
@@ -358,6 +442,14 @@ function lines_for_site(id)
             return lines
         end
     end
+end
+
+function lines_for_army(id)
+    local a = df.army.find(id)
+    if not a then return end
+    local lines = {}
+    army_lines(a, lines)
+    return lines
 end
 
 -- ---- overlay ----------------------------------------------------------------
@@ -392,8 +484,10 @@ local function paint()
     local key = ('%d:%d:%d:%d'):format(cx, cy, army.pos.x, army.pos.y)
     if key ~= cache_key then
         cache_key = key
-        local mx = army.pos.x // 3 + (cx - mp.screen_x)
-        local my = army.pos.y // 3 + (cy - mp.screen_y)
+        -- near a site the lesser map rescales to one army-unit per cell
+        local s = adv.site_level_zoom ~= 0 and 1 or 3
+        local mx = (army.pos.x + (cx - mp.screen_x) * s) // 3
+        local my = (army.pos.y + (cy - mp.screen_y) * s) // 3
         cache_lines = tile_info(mx, my)
     end
     if not cache_lines then return end
