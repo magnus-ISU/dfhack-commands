@@ -15,11 +15,18 @@ steps a player takes -- and can repeat it on a timer:
     adv/auto-save status           what it's doing
 
 The interval is counted from the last SUCCESSFUL save, and `enable` arms it
-from that moment -- enabling never fires a save immediately.  A cycle only
-begins from a completely quiet game (plain `dungeonmode/Default`, no options
-menu, no context menu, no conversation); otherwise it waits for a calm
-moment rather than driving a menu stack it does not understand.
-`fort/magnus-scripts` enables it on every adventure load.
+from that moment -- enabling never fires a save immediately.  TWO clocks
+must both agree before a save runs: the wall clock (the N minutes above) and
+the in-game clock, which must have advanced at least MIN_GAME_HOURS (2)
+since the last save.  Adventure mode only advances game time while you act,
+so an idle or AFK game is never saved over and over -- the pending save just
+waits and fires the moment you play again.
+
+A cycle only begins from a completely quiet game (plain
+`dungeonmode/Default`, no options menu, no context menu, no conversation);
+otherwise it waits for a calm moment rather than driving a menu stack it
+does not understand.  `fort/magnus-scripts` enables it on every adventure
+load.
 
 The save is named "adventurer-autosave" (DF then treats that as the active
 save folder: "Save and continue playing" RENAMES the running session into
@@ -67,6 +74,15 @@ local SAVE_TIMEOUT_MS = 180000
 local RETRY_MS = 700
 local SAVER_IDLE = 51        -- options.saver.stage when no save is running
 
+-- In-game clock, so an idle game is not saved over and over. DF counts
+-- 1200 ticks per day over 24 hours = 50 ticks per in-game hour, and
+-- cur_year_tick is the counter that matches the displayed date (18718 /
+-- 1200 = day 15.6 = "16th Granite"). Adventure mode only advances it while
+-- you actually act, so standing still parks it -- exactly the AFK case.
+local TICKS_PER_HOUR = 50
+local TICKS_PER_YEAR = 403200
+local MIN_GAME_HOURS = 2
+
 -- ALL cross-invocation state lives in env GLOBALS, never file locals: every
 -- command invocation re-executes this file in the shared script env, which
 -- re-initializes locals -- so a local set by the command would be invisible
@@ -77,6 +93,7 @@ saves_done = saves_done or 0
 -- the interval is counted from the last SUCCESSFUL save (or from `enable`,
 -- so enabling never fires an immediate save)
 last_save_ms = last_save_ms or nil
+last_save_game = last_save_game or nil    -- absolute in-game tick at that save
 
 phase = phase or nil       -- nil | open | click_save | type | submit | finish
 phase_deadline = phase_deadline or 0
@@ -85,6 +102,22 @@ cycle_name = cycle_name or DEFAULT_NAME
 
 local function opts() return df.global.game.main_interface.options end
 local function cur_focus() return dfhack.gui.getCurFocus(true)[1] or '' end
+
+-- absolute in-game tick, so a year rollover doesn't read as time going backwards
+local function game_time()
+    return df.global.cur_year * TICKS_PER_YEAR + df.global.cur_year_tick
+end
+
+-- in-game hours elapsed since the last save; huge when we have no baseline.
+-- A NEGATIVE delta (clock rolled back -- a reload of an older save, or
+-- timestream-style tick fiddling) counts as "enough", so a rewound clock can
+-- never wedge the timer the way a stale flag would.
+local function game_hours_since_save()
+    if not last_save_game then return math.huge end
+    local d = game_time() - last_save_game
+    if d < 0 then return math.huge end
+    return d / TICKS_PER_HOUR
+end
 
 local function read_row(y)
     local gps = df.global.gps
@@ -236,6 +269,7 @@ local function step()
         phase = nil
         saves_done = saves_done + 1
         last_save_ms = now
+        last_save_game = game_time()
         print(('adv/auto-save: saved as "%s" (%d this session)'):format(cycle_name, saves_done))
     end
 end
@@ -276,7 +310,14 @@ function AutoSave:overlay_onupdate()
             local now = dfhack.getTickCount()
             -- arm relative to enable, so enabling never triggers a save at once
             if not last_save_ms then last_save_ms = now end
-            if now - last_save_ms >= interval_min * 60 * 1000 and safe_to_start() then
+            if not last_save_game then last_save_game = game_time() end
+            -- BOTH clocks must agree it is time: the wall clock paces saves,
+            -- the in-game clock proves you actually played since the last one.
+            -- Standing idle freezes cur_year_tick, so an AFK game is never
+            -- re-saved; the pending save simply fires once you play again.
+            if now - last_save_ms >= interval_min * 60 * 1000
+                    and game_hours_since_save() >= MIN_GAME_HOURS
+                    and safe_to_start() then
                 start_cycle(DEFAULT_NAME)
             end
         end
@@ -305,10 +346,18 @@ function status()
     if last_save_ms then
         when = ('%ds ago'):format((dfhack.getTickCount() - last_save_ms) // 1000)
     end
-    print(('adv/auto-save: %s | timer %s (%d min) | %d save%s this session | last: %s')
+    local gh = game_hours_since_save()
+    print(('adv/auto-save: %s | timer %s (%d min, %d in-game h) | %d save%s this session | last: %s')
         :format(phase and ('SAVING (step ' .. phase .. ')') or 'idle',
-            enabled and 'ON' or 'off', interval_min,
+            enabled and 'ON' or 'off', interval_min, MIN_GAME_HOURS,
             saves_done, saves_done == 1 and '' or 's', when))
+    if enabled and last_save_ms then
+        local wall_left = interval_min * 60 * 1000 - (dfhack.getTickCount() - last_save_ms)
+        print(('  wall clock: %s | in-game: %s')
+            :format(wall_left > 0 and ('%d min to go'):format(wall_left // 60000 + 1) or 'due',
+                gh >= MIN_GAME_HOURS and 'played enough'
+                    or ('%.1f of %d h played'):format(gh, MIN_GAME_HOURS)))
+    end
 end
 
 if dfhack_flags.module then return end
