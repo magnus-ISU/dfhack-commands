@@ -32,7 +32,15 @@ changing, the journey aborts with a console note rather than wander.
 
 Screen decoding as in adv/read-the-map: the map renders through
 `gps.main_map_port` in square cells of window_px_width/dim_x pixels, and the
-player army is always drawn at the center cell `(screen_x, screen_y)`.
+player is always drawn at the center cell `(screen_x, screen_y)`.
+
+What sits at that center cell is NOT always the player army.  DF creates the
+army only once the journey starts; on a travel map you have just opened,
+`player_army_id` resolves to nothing and DF draws you at
+`adventure.travel_origin_x/y` (same army-unit scale) for as long as
+`adventure.travel_not_moved` is set.  Read the army alone and the overlay is
+inert until some click falls through to DF and starts the travel for you --
+which is exactly why this used to need one throwaway click to wake up.
 
     adv/map-travel             status
     adv/map-travel stop        cancel the current journey
@@ -61,8 +69,20 @@ local DIR_KEYS = {
     [1]  = {[-1] = 'A_MOVE_SW', [0] = 'A_MOVE_S', [1] = 'A_MOVE_SE'},
 }
 
-local function player_army()
-    return df.army.find(df.global.adventure.player_army_id)
+-- Where the travel map is centred, in army-units.
+--
+-- DF does not mint the player army until the journey actually starts: on a
+-- freshly opened travel map `player_army_id` points at nothing and DF instead
+-- draws the player at `travel_origin` for as long as `travel_not_moved`
+-- ("still_local") is set.  Reading the army first therefore made the overlay
+-- dead until one click had fallen through to DF and kicked off the travel.
+local function center_pos()
+    local adv = df.global.adventure
+    if adv.travel_not_moved ~= 0 then
+        return adv.travel_origin_x, adv.travel_origin_y
+    end
+    local army = df.army.find(adv.player_army_id)
+    if army then return army.pos.x, army.pos.y end
 end
 
 local function on_lesser_map()
@@ -104,17 +124,17 @@ local function step()
     end
     last_fire = now
     if not dest or now < next_step_at or not on_lesser_map() then return end
-    local army = player_army()
-    if not army then stop_journey(nil) return end
+    local ax, ay = center_pos()
+    if not ax then stop_journey(nil) return end
     local s = cell_scale()
-    local mx, my = army.pos.x // s, army.pos.y // s
+    local mx, my = ax // s, ay // s
     local tx, ty = dest.ax // s, dest.ay // s
     if mx == tx and my == ty then
         journeys = journeys + 1
         stop_journey('arrived.')
         return
     end
-    local pos_key = army.pos.x .. ':' .. army.pos.y
+    local pos_key = ax .. ':' .. ay
     if pos_key == last_pos then
         stuck = stuck + 1
         if stuck >= STUCK_LIMIT then
@@ -153,15 +173,15 @@ function MapTravel:onInput(keys)
             return false
         end
         if not keys._MOUSE_L then return false end
-        local army = player_army()
-        if not army then return false end
+        local ax, ay = center_pos()
+        if not ax then return false end
         local cx, cy = mouse_cell(true)     -- guarded: edge clicks fall through
         if not cx then return false end
         local mp = df.global.gps.main_map_port
         local s = cell_scale()
         dest = {
-            ax = army.pos.x + (cx - mp.screen_x) * s,
-            ay = army.pos.y + (cy - mp.screen_y) * s,
+            ax = ax + (cx - mp.screen_x) * s,
+            ay = ay + (cy - mp.screen_y) * s,
         }
         stuck, last_pos, next_step_at = 0, nil, 0
         return true
@@ -176,14 +196,14 @@ end
 function MapTravel:onRenderFrame(dc, rect)
     pcall(function()
         if not dest or not on_lesser_map() then return end
-        local army = player_army()
-        if not army then return end
+        local ax, ay = center_pos()
+        if not ax then return end
         local gps = df.global.gps
         local mp = gps.main_map_port
         local s = cell_scale()
         local cellpx = math.max(1, (gps.dimx * gps.tile_pixel_x) // mp.dim_x)
-        local cx = mp.screen_x + (dest.ax // s - army.pos.x // s)
-        local cy = mp.screen_y + (dest.ay // s - army.pos.y // s)
+        local cx = mp.screen_x + (dest.ax // s - ax // s)
+        local cy = mp.screen_y + (dest.ay // s - ay // s)
         if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
         -- map cells span cellpx/tile_pixel text cells; mark the cell's middle
         local tx = (cx * cellpx + cellpx // 2) // gps.tile_pixel_x
@@ -205,8 +225,8 @@ function go(ax, ay)
 end
 
 function status()
-    local army = player_army()
-    local where = army and (army.pos.x .. ',' .. army.pos.y) or '?'
+    local ax, ay = center_pos()
+    local where = ax and (ax .. ',' .. ay) or '?'
     print(('adv/map-travel: %s | at %s (zoom %d) | %d journey%s completed')
         :format(dest and ('heading to ' .. dest.ax .. ',' .. dest.ay) or 'idle',
             where, df.global.adventure.site_level_zoom, journeys,

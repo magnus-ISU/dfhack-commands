@@ -50,9 +50,15 @@ How the lesser map is decoded (all verified live against drawn markers):
   layer buffers are ROW-major (`idx = y*dim_x + x`).
 - One lesser-map cell = one MID TILE (1/16 world tile, 3 army-steps), or one
   army-step when zoomed in near a site (`adventure.site_level_zoom` == 1).
-  The player army is always drawn at the center cell `(screen_x, screen_y)`,
-  so `mid = army.pos//3 + (cell - center)`.  (On the greater map one cell =
+  The player is always drawn at the center cell `(screen_x, screen_y)`, so
+  `mid = center//3 + (cell - center_cell)`.  (On the greater map one cell =
   one world tile, same centering -- that map keeps DF's own hover text.)
+- That center is the player ARMY only once the journey has started.  DF mints
+  the army on the first travel step; before that `player_army_id` resolves to
+  nothing and DF draws you at `adventure.travel_origin_x/y` (same army-unit
+  scale) for as long as `adventure.travel_not_moved` is set.  Reading the army
+  alone left this tooltip dead on every freshly opened travel map, until a
+  click started the travel and brought the army into being.
 - Site footprints are `world_site.global_min/max_x/y`, in mid tiles, so a
   town lights up only while the cursor is over its actual span; camps, lairs
   and vaults are single-tile.  `hover_text_ax/ay` in
@@ -434,6 +440,22 @@ end
 
 -- ---- hover lookup -----------------------------------------------------------
 
+-- Where the travel map is centred, in army-units.
+--
+-- DF does not mint the player army until the journey actually starts: on a
+-- freshly opened travel map `player_army_id` points at nothing and DF instead
+-- draws the player at `travel_origin` for as long as `travel_not_moved`
+-- ("still_local") is set.  Reading the army first therefore left the tooltip
+-- dead until the player had clicked once and started travelling.
+local function center_pos()
+    local adv = df.global.adventure
+    if adv.travel_not_moved ~= 0 then
+        return adv.travel_origin_x, adv.travel_origin_y
+    end
+    local army = df.army.find(adv.player_army_id)
+    if army then return army.pos.x, army.pos.y end
+end
+
 -- the lines to show for one hovered mid tile; nil when there is nothing there
 local function tile_info(mx, my)
     local lines = {}
@@ -497,8 +519,8 @@ local cache_key, cache_lines = nil, nil
 local function paint()
     local adv = df.global.adventure
     if adv.travel_right_map ~= 0 then return end     -- greater map has DF's own hover
-    local army = df.army.find(adv.player_army_id)
-    if not army then return end
+    local ax, ay = center_pos()
+    if not ax then return end
     local gps = df.global.gps
     local mp = gps.main_map_port
     if mp.dim_x <= 0 or mp.dim_y <= 0 then return end
@@ -508,13 +530,13 @@ local function paint()
     local cy = gps.precise_mouse_y // cellpx
     if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
 
-    local key = ('%d:%d:%d:%d'):format(cx, cy, army.pos.x, army.pos.y)
+    local key = ('%d:%d:%d:%d'):format(cx, cy, ax, ay)
     if key ~= cache_key then
         cache_key = key
         -- near a site the lesser map rescales to one army-unit per cell
         local s = adv.site_level_zoom ~= 0 and 1 or 3
-        local mx = (army.pos.x + (cx - mp.screen_x) * s) // 3
-        local my = (army.pos.y + (cy - mp.screen_y) * s) // 3
+        local mx = (ax + (cx - mp.screen_x) * s) // 3
+        local my = (ay + (cy - mp.screen_y) * s) // 3
         cache_lines = tile_info(mx, my)
     end
     if not cache_lines then return end
