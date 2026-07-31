@@ -115,11 +115,17 @@ local function type_name(t)
     return TYPE_NAMES[raw] or raw:gsub('(%l)(%u)', '%1 %2')
 end
 
-local function race_name(race)
+local function race_name(race, plural)
     local ok, name = pcall(function()
-        return df.global.world.raws.creatures.all[race].name[0]
+        return df.global.world.raws.creatures.all[race].name[plural and 1 or 0]
     end)
     return ok and name or nil
+end
+
+-- "Lasher" -> "Lashers", "Maceman" -> "Macemen"
+local function plural_prof(cap)
+    if cap:sub(-3) == 'man' then return cap:sub(1, -4) .. 'men' end
+    return cap .. 's'
 end
 
 local function title_case(s)
@@ -144,22 +150,28 @@ end
 
 -- ---- site details -----------------------------------------------------------
 
--- abstract per-race population records; returns total and breakdown parts
+-- abstract per-race population, MERGED by race -- a site holds several
+-- records per race (one per culture/section); returns total and breakdown
 local function abstract_pop(s)
-    local total, races, distinct, first_race = 0, {}, 0, nil
+    local total, by_race, order, first_race = 0, {}, {}, nil
     pcall(function()
         for i = 0, #s.populace.inhabitants - 1 do
             local inh = s.populace.inhabitants[i]
-            local rn = race_name(inh.pop_spec.race)
-            if rn then
-                distinct = distinct + 1
-                if not first_race then first_race = inh.pop_spec.race end
+            local race = inh.pop_spec.race
+            if race_name(race) then
+                if not first_race then first_race = race end
+                if not by_race[race] then order[#order + 1] = race; by_race[race] = 0 end
+                by_race[race] = by_race[race] + inh.count
                 total = total + inh.count
-                races[#races + 1] = inh.count > 0 and (rn .. ' ' .. inh.count) or rn
             end
         end
     end)
-    return total, races, distinct, first_race
+    local races = {}
+    for _, race in ipairs(order) do
+        local n = by_race[race]
+        races[#races + 1] = n > 0 and (n .. ' ' .. race_name(race, n > 1)) or race_name(race)
+    end
+    return total, races, #order, first_race
 end
 
 -- residents of the site: the nemesis vector holds its named (historical) figures
@@ -175,7 +187,8 @@ local function residents(s)
     return out
 end
 
-local function noble_lines(owner, lines)
+-- with_prof prefixes the holder's profession ("Chieftain: Maceman Cor ...")
+local function noble_lines(owner, lines, with_prof)
     if not owner then return end
     local nobles = {}
     pcall(function()
@@ -207,7 +220,9 @@ local function noble_lines(owner, lines)
             lines[#lines + 1] = ('  (+%d more officials)'):format(#nobles - shown)
             break
         end
-        lines[#lines + 1] = ('  %s: %s'):format(n.title:gsub('^%l', string.upper), hf_name(n.hf))
+        local who = hf_name(n.hf)
+        if with_prof then who = prof_name(n.hf.profession) .. ' ' .. who end
+        lines[#lines + 1] = ('  %s: %s'):format(n.title:gsub('^%l', string.upper), who)
         shown = shown + 1
     end
 end
@@ -265,15 +280,14 @@ local function dweller_lines(s, resident_hfs, lines)
 end
 
 -- camps: one merged head count (abstract population PLUS named residents, two
--- disjoint stores) whose breakdown always sums to the printed total, and the
--- named residents' professions under an explicit "Named:" label
-local function camp_lines(s, resident_hfs, lines)
+-- disjoint stores) whose breakdown always sums to the printed total.
+-- "7 members: 5 orcs, 2 humans, of The Lancers of Yore"
+local function camp_members_line(s, resident_hfs, owner, lines)
     local by_race, order = {}, {}
     local function add(race, n)
-        local rn = race_name(race)
-        if not rn or n <= 0 then return end
-        if not by_race[rn] then order[#order + 1] = rn; by_race[rn] = 0 end
-        by_race[rn] = by_race[rn] + n
+        if n <= 0 or not race_name(race) then return end
+        if not by_race[race] then order[#order + 1] = race; by_race[race] = 0 end
+        by_race[race] = by_race[race] + n
     end
     pcall(function()
         for i = 0, #s.populace.inhabitants - 1 do
@@ -281,27 +295,37 @@ local function camp_lines(s, resident_hfs, lines)
             add(inh.pop_spec.race, inh.count)
         end
     end)
-    local alive = living(resident_hfs)
+    for _, hf in ipairs(living(resident_hfs)) do add(hf.race, 1) end
+    local total, bits = 0, {}
+    for _, race in ipairs(order) do
+        local n = by_race[race]
+        total = total + n
+        bits[#bits + 1] = n .. ' ' .. race_name(race, n > 1)
+    end
+    if total == 0 then return end
+    local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
+    if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
+    lines[#lines + 1] = ('  %d member%s: %s'):format(total, total == 1 and '' or 's',
+        table.concat(bits, ', '))
+end
+
+-- "Known members: 1 Maceman, 2 Lashers, 1 Spearman" -- named residents only,
+-- since only they have professions
+local function camp_known_line(resident_hfs, lines)
     local profs, porder = {}, {}
-    for _, hf in ipairs(alive) do
-        add(hf.race, 1)
+    for _, hf in ipairs(living(resident_hfs)) do
         local cap = prof_name(hf.profession)
         if not profs[cap] then porder[#porder + 1] = cap; profs[cap] = 0 end
         profs[cap] = profs[cap] + 1
     end
-    local total, bits = 0, {}
-    for _, rn in ipairs(order) do
-        total = total + by_race[rn]
-        bits[#bits + 1] = by_race[rn] > 1 and (rn .. ' ' .. by_race[rn]) or rn
-    end
-    if total > 0 then
-        lines[#lines + 1] = ('  %d in all: %s'):format(total, table.concat(bits, ', '))
-    end
     local pbits = {}
     for _, cap in ipairs(porder) do
-        pbits[#pbits + 1] = profs[cap] > 1 and (cap .. ' x' .. profs[cap]) or cap
+        local n = profs[cap]
+        pbits[#pbits + 1] = n .. ' ' .. (n > 1 and plural_prof(cap) or cap)
     end
-    if #pbits > 0 then lines[#lines + 1] = '  Named: ' .. table.concat(pbits, ', ') end
+    if #pbits > 0 then
+        lines[#lines + 1] = '  Known members: ' .. table.concat(pbits, ', ')
+    end
 end
 
 local function site_lines(s, lines)
@@ -340,25 +364,28 @@ local function site_lines(s, lines)
     end
     lines[#lines + 1] = head .. (name ~= '' and (': ' .. name) or '')
 
-    -- occupier line; towns etc. carry the population here, camps show a
-    -- merged count of their own below
-    local total, races, distinct, first_race = abstract_pop(s)
-    if total == 0 then total = s.resident_count end
-    local bits = {}
-    local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
-    if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
-    if stype ~= 'Camp' and total > 0 then bits[#bits + 1] = ('pop %d'):format(total) end
-    if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
-    -- the breakdown matters when the population is mixed OR is a different
-    -- race than the occupier (a conquest not yet visible in the headline)
-    if stype ~= 'Camp' and (distinct > 1
-            or (distinct == 1 and owner and first_race ~= owner.race)) then
-        lines[#lines + 1] = '  ' .. table.concat(races, ', ')
+    if stype == 'Camp' then
+        -- "7 members: 5 orcs, 2 humans, of X" / leader / "Known members: ..."
+        camp_members_line(s, resident_hfs, owner, lines)
+        noble_lines(owner, lines, true)
+        camp_known_line(resident_hfs, lines)
+    else
+        -- occupier line carries the population for towns etc.
+        local total, races, distinct, first_race = abstract_pop(s)
+        if total == 0 then total = s.resident_count end
+        local bits = {}
+        local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
+        if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
+        if total > 0 then bits[#bits + 1] = ('pop %d'):format(total) end
+        if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
+        -- the breakdown matters when the population is mixed OR is a different
+        -- race than the occupier (a conquest not yet visible in the headline)
+        if distinct > 1 or (distinct == 1 and owner and first_race ~= owner.race) then
+            lines[#lines + 1] = '  ' .. table.concat(races, ', ')
+        end
+        noble_lines(owner, lines)
     end
-
-    if stype == 'Camp' then camp_lines(s, resident_hfs, lines) end
     if DWELLING[stype] then dweller_lines(s, resident_hfs, lines) end
-    noble_lines(owner, lines)
     legend_lines(resident_hfs, lines)
     pcall(function()
         if #s.wg_quest_posting > 0 then
