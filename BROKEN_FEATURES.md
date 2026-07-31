@@ -79,6 +79,15 @@ A from-scratch animal-spawn attempt, kept for reference. Not referenced by `magn
 `migration-plan.md` records it as a **done, working spawn primitive**. Needs a live retest to
 settle which is true.
 
+### **`adv/fight`**
+Designate creatures on the local map as kill targets and have your adventurer hunt them down
+turn by turn, travelling to each and attacking until every target is dead. Never enabled by
+`magnus-scripts` — it is a manual command.
+
+### **`adv/fear-no-goblin`**
+Fast travel into and out of the goblin dark pit you are standing at. Deliberately **not** armed
+by `magnus-scripts`: it patches `world_site` types, so it stays a manual toggle.
+
 ### **`fort/noble-warriors`**
 Assigns each fort noble's symbols of office as specific items in their squad uniform, so
 nobles wear their regalia into battle. Implemented and verified live, but **parked pending a

@@ -1,4 +1,6 @@
-# Adventure mode features
+# Adventure mode
+
+## Adventure mode features
 
 ### **`adv/map-travel`** 
 Allow clicking to travel more than 1 tile in fast travel, like in
@@ -55,7 +57,7 @@ Automatically dismiss "you haven't acted in a while" for long-running move
 
 ![adv/im-sure demo](demos/adv-im-sure.gif)
 
-# Adventure mode embark features
+## Adventure mode embark features
 
 ### **`embark/adventurer-values`** 
 Modify adventurer needs easily when you create your adventurer
@@ -70,3 +72,9 @@ Automatically give you a decent starting gear loadout
   when creating an adventurer, and let you switch metals on your gear more easily.
 
 ![embark/adventurer-default-items demo](demos/embark-adventurer-default-items.png)
+
+### **`embark/adventurer-map`**
+The Background tab of adventurer creation shows a world map that names nothing. This hovers
+the same site card `adv/read-the-map` draws on the travel map — race-led headline, owner and
+population, nobles, legends, lair dwellers, camp crews — so you can see what you are starting
+next to before you commit.
