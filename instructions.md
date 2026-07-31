@@ -128,24 +128,21 @@ snapshot.
 
 ## Deploy a DFHack command script
 
-Standalone commands live in `dfhack/` (and `adv/`, `fix/`). Deploy by copying into DFHack's
-script path, then hot-reload — no game restart:
+Standalone commands live in `dfhack/`; its subfolders (`dfhack/adv/`, `dfhack/embark/`,
+`dfhack/fix/`) deploy as subdirectories, so the command name keeps its prefix —
+`adv/reveal`, `embark/adventurer-values`. Deploy by copying into DFHack's script path,
+then hot-reload — no game restart:
 
 ```sh
 cp dfhack/auto-name.lua "$DF/dfhack-config/scripts/"
 "$DFH/dfhack-run" lua 'reqscript("auto-name")'   # reload a reqscript module
 # for overlay-based tools, rescan overlays:
-"$DFH/dfhack-run" overlay trigger   # or: dfhack-run lua "require('plugins.overlay').reload()"
+"$DFH/dfhack-run" lua 'require("plugins.overlay").rescan()'
 ```
 
-Deploy the whole set at once (category folders deploy as subdirectories, so the
-command name keeps its prefix — `adv/reveal`, `embark/adventurer-values`):
+Deploy the whole set at once — `dfhack/` mirrors the deployed layout exactly:
 ```sh
-cp dfhack/*.lua "$DF/dfhack-config/scripts/"
-mkdir -p "$DF/dfhack-config/scripts/"{adv,fix,embark}
-cp adv/*.lua "$DF/dfhack-config/scripts/adv/"
-cp fix/*.lua "$DF/dfhack-config/scripts/fix/"
-cp embark/*.lua "$DF/dfhack-config/scripts/embark/"
+cp -r dfhack/. "$DF/dfhack-config/scripts/"
 ```
 
 ## Run a DFHack command

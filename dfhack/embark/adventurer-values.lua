@@ -321,6 +321,37 @@ AdventurerValues.ATTRS{
     frame = {w = 1, h = 1},
 }
 
+-- usage hint painted 4 rows above the top of the needs list
+local HINT = {'Left click to intensify a need', 'Right click to weaken it'}
+local PEN_HINT = dfhack.pen.parse{fg = COLOR_YELLOW, bg = COLOR_BLACK}
+local hint_pos, hint_at = nil, 0
+local HINT_TTL_MS = 500
+
+-- topmost need row on screen (cheap: stops at the first match)
+local function find_top_need()
+    local gps = df.global.gps
+    for y = 0, gps.dimy - 1 do
+        local name, x1 = parse_row(read_row(y))
+        if name then return {x = x1, y = y} end
+    end
+end
+
+function AdventurerValues:onRenderFrame(dc, rect)
+    pcall(function()
+        if not sheet() then return end
+        local now = dfhack.getTickCount()
+        if now - hint_at > HINT_TTL_MS then
+            hint_at = now
+            hint_pos = find_top_need()
+        end
+        if not hint_pos then return end
+        for i, line in ipairs(HINT) do
+            local y = hint_pos.y - 4 + (i - 1)
+            if y >= 0 then dfhack.screen.paintString(PEN_HINT, hint_pos.x, y, line) end
+        end
+    end)
+end
+
 function AdventurerValues:onInput(keys)
     if not keys._MOUSE_L and not keys._MOUSE_R then return false end
     local ok, handled = pcall(function()
