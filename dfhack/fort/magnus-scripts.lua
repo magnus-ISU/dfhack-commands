@@ -44,6 +44,10 @@ Activates the "always-on" helpers in this pack:
                                  ADVENTURE popups too, so the adventure-mode branch
                                  enables it as well)
 
+In ADVENTURE mode this script instead enables the adventure helpers, among them
+adv/auto-save (saves as "adventurer-autosave" every 20 minutes, timed from the
+last successful save and deferred until no menu is open).
+
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
@@ -109,6 +113,7 @@ if not dfhack.world.isFortressMode() then
             if not ok then print('       ' .. tostring(err)) end
         end
         if ({...})[1] == 'disable' then
+            atry('disable adv/auto-save', function() dfhack.run_script('adv/auto-save', 'disable') end)
             atry('disable adv/keep-talking', function() dfhack.run_command('disable', 'adv/keep-talking') end)
             atry('stop adv/im-sure', function() dfhack.run_script('adv/im-sure', 'stop') end)
             atry('stop adv/right-click-move', function() dfhack.run_script('adv/right-click-move', 'stop') end)
@@ -116,6 +121,11 @@ if not dfhack.world.isFortressMode() then
             atry('disable adv/keep-inventory', function() dfhack.run_command('disable', 'adv/keep-inventory') end)
             atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
         else
+            -- saves every 20 minutes by driving the escape menu the way a player
+            -- does. Counted from the last successful save, and it waits for a
+            -- quiet moment (no menu/conversation) rather than interrupt one.
+            atry('adv/auto-save (save "adventurer-autosave" every 20 minutes)',
+                function() dfhack.run_script('adv/auto-save', 'enable', '20') end)
             atry('adv/keep-talking (auto-reopen conversations after picking a topic)',
                 function() dfhack.run_command('enable', 'adv/keep-talking') end)
             atry('adv/im-sure (auto-dismiss the "can\'t act" prompt)',
