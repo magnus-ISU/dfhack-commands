@@ -8,24 +8,31 @@ Tags: adventure | interface
 
 On the lesser (zoomed-in) travel map, LEFT-CLICK a tile and your traveler
 walks there: the overlay feeds one `A_MOVE_*` key per step toward the
-destination, which DF answers by moving the army one map cell (one mid tile,
-3 army-units -- verified live: one fed A_MOVE_W moved the army pos by exactly
--3).  A red X marks the destination while the journey runs.
+destination.  A red X marks the destination while the journey runs.
+
+Works at BOTH lesser-map zooms.  The travel map silently rescales when you
+get close to a site (`adventure.site_level_zoom` flips to 1): one map cell is
+one mid tile (3 army-units) in the far state but one army-unit up close, and
+one fed A_MOVE_* moves one CELL in either state (measured: -3 far, -1 near).
+The destination is stored in army-units, so when a journey crosses the
+transition the target simply converts and the walk continues.
 
 The pathing is deliberately NAIVE: each step goes straight at the target
 (8-directional).  It does not route around rivers, oceans, mountains, farms
 or hostile sites -- when the straight line is blocked and the position stops
 changing, the journey aborts with a console note rather than wander.
 
-- Left-click: set / replace the destination (the click is consumed).
+- Left-click on the map: set / replace the destination (the click is
+  consumed).  Clicks within 5 cells of any map edge are IGNORED so the
+  buttons living around the screen edges -- including the DFHack overlay
+  launcher -- still work.
 - Right-click: cancel the journey (consumed; right-click again to leave the
   travel screen as usual).  Leaving the travel screen also cancels.
 - The greater map (`m`) is left alone.
 
-Screen-to-tile decoding is the same as adv/read-the-map: the map renders
-through `gps.main_map_port` in square cells of window_px_width/dim_x pixels,
-the player army is always drawn at the center cell `(screen_x, screen_y)`,
-and one lesser-map cell = one mid tile: `mid = army.pos//3 + (cell-center)`.
+Screen decoding as in adv/read-the-map: the map renders through
+`gps.main_map_port` in square cells of window_px_width/dim_x pixels, and the
+player army is always drawn at the center cell `(screen_x, screen_y)`.
 
     adv/map-travel             status
     adv/map-travel stop        cancel the current journey
@@ -37,11 +44,13 @@ local gui = require('gui')
 local STEP_MS = 140        -- wall-clock pace between fed steps
 local STUCK_LIMIT = 4      -- aborts after this many stepless attempts
 local GAP_CANCEL_MS = 1500 -- overlay silent this long (left the screen) = cancel
+local EDGE_GUARD = 5       -- map cells near an edge where clicks pass through
 
 journeys = journeys or 0   -- completed journeys (persists across reloads)
 
--- journey state (reset on reload)
-local dest = nil           -- {mx=, my=} in mid tiles
+-- journey state (reset on reload); dest is in ARMY-UNITS so it survives the
+-- near-site zoom transition
+local dest = nil           -- {ax=, ay=}
 local next_step_at = 0
 local last_fire = 0
 local stuck, last_pos = 0, nil
@@ -60,10 +69,13 @@ local function on_lesser_map()
     return df.global.adventure.travel_right_map == 0
 end
 
--- mouse position -> lesser-map mid tile, or nil off the map
-local function mouse_mid()
-    local army = player_army()
-    if not army then return end
+-- army-units per map cell (and per fed step) at the current zoom
+local function cell_scale()
+    return df.global.adventure.site_level_zoom ~= 0 and 1 or 3
+end
+
+-- mouse position -> map-port cell, or nil off the map / in the edge guard
+local function mouse_cell(guard)
     local gps = df.global.gps
     local mp = gps.main_map_port
     if mp.dim_x <= 0 or mp.dim_y <= 0 then return end
@@ -71,8 +83,11 @@ local function mouse_mid()
     local cx = gps.precise_mouse_x // cellpx
     local cy = gps.precise_mouse_y // cellpx
     if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
-    return army.pos.x // 3 + (cx - mp.screen_x),
-           army.pos.y // 3 + (cy - mp.screen_y)
+    if guard and (cx < EDGE_GUARD or cx >= mp.dim_x - EDGE_GUARD
+            or cy < EDGE_GUARD or cy >= mp.dim_y - EDGE_GUARD) then
+        return
+    end
+    return cx, cy
 end
 
 local function stop_journey(why)
@@ -91,8 +106,10 @@ local function step()
     if not dest or now < next_step_at or not on_lesser_map() then return end
     local army = player_army()
     if not army then stop_journey(nil) return end
-    local mx, my = army.pos.x // 3, army.pos.y // 3
-    if mx == dest.mx and my == dest.my then
+    local s = cell_scale()
+    local mx, my = army.pos.x // s, army.pos.y // s
+    local tx, ty = dest.ax // s, dest.ay // s
+    if mx == tx and my == ty then
         journeys = journeys + 1
         stop_journey('arrived.')
         return
@@ -107,8 +124,8 @@ local function step()
     else
         stuck, last_pos = 0, pos_key
     end
-    local dx = dest.mx > mx and 1 or dest.mx < mx and -1 or 0
-    local dy = dest.my > my and 1 or dest.my < my and -1 or 0
+    local dx = tx > mx and 1 or tx < mx and -1 or 0
+    local dy = ty > my and 1 or ty < my and -1 or 0
     local key = DIR_KEYS[dy] and DIR_KEYS[dy][dx]
     if not key then stop_journey(nil) return end
     gui.simulateInput(dfhack.gui.getCurViewscreen(true), key)
@@ -136,9 +153,16 @@ function MapTravel:onInput(keys)
             return false
         end
         if not keys._MOUSE_L then return false end
-        local mx, my = mouse_mid()
-        if not mx then return false end
-        dest = {mx = mx, my = my}
+        local army = player_army()
+        if not army then return false end
+        local cx, cy = mouse_cell(true)     -- guarded: edge clicks fall through
+        if not cx then return false end
+        local mp = df.global.gps.main_map_port
+        local s = cell_scale()
+        dest = {
+            ax = army.pos.x + (cx - mp.screen_x) * s,
+            ay = army.pos.y + (cy - mp.screen_y) * s,
+        }
         stuck, last_pos, next_step_at = 0, nil, 0
         return true
     end)
@@ -156,9 +180,10 @@ function MapTravel:onRenderFrame(dc, rect)
         if not army then return end
         local gps = df.global.gps
         local mp = gps.main_map_port
+        local s = cell_scale()
         local cellpx = math.max(1, (gps.dimx * gps.tile_pixel_x) // mp.dim_x)
-        local cx = mp.screen_x + (dest.mx - army.pos.x // 3)
-        local cy = mp.screen_y + (dest.my - army.pos.y // 3)
+        local cx = mp.screen_x + (dest.ax // s - army.pos.x // s)
+        local cy = mp.screen_y + (dest.ay // s - army.pos.y // s)
         if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
         -- map cells span cellpx/tile_pixel text cells; mark the cell's middle
         local tx = (cx * cellpx + cellpx // 2) // gps.tile_pixel_x
@@ -173,18 +198,19 @@ function stop()
     stop_journey('cancelled.')
 end
 
--- exported for testing
-function go(mx, my)
-    dest = {mx = mx, my = my}
+-- exported for testing: destination in army-units
+function go(ax, ay)
+    dest = {ax = ax, ay = ay}
     stuck, last_pos, next_step_at = 0, nil, 0
 end
 
 function status()
     local army = player_army()
-    local where = army and (army.pos.x // 3) .. ',' .. (army.pos.y // 3) or '?'
-    print(('adv/map-travel: %s | at mid %s | %d journey%s completed')
-        :format(dest and ('heading to ' .. dest.mx .. ',' .. dest.my) or 'idle',
-            where, journeys, journeys == 1 and '' or 's'))
+    local where = army and (army.pos.x .. ',' .. army.pos.y) or '?'
+    print(('adv/map-travel: %s | at %s (zoom %d) | %d journey%s completed')
+        :format(dest and ('heading to ' .. dest.ax .. ',' .. dest.ay) or 'idle',
+            where, df.global.adventure.site_level_zoom, journeys,
+            journeys == 1 and '' or 's'))
 end
 
 if dfhack_flags.module then return end

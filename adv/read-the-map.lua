@@ -96,7 +96,7 @@ end
 
 -- ---- site details -----------------------------------------------------------
 
-local function population_lines(s, owner, lines)
+local function population_lines(s, owner, lines, owner_kind, skip_races)
     local total, races, distinct, first_race = 0, {}, 0, nil
     pcall(function()
         for i = 0, #s.populace.inhabitants - 1 do
@@ -114,14 +114,20 @@ local function population_lines(s, owner, lines)
     -- resident_count still has the head count
     if total == 0 then total = s.resident_count end
     local bits = {}
-    if owner then bits[#bits + 1] = race_name(owner.race) end
+    if owner then
+        local rn = race_name(owner.race)
+        if rn and owner_kind then rn = rn .. ' ' .. owner_kind end
+        bits[#bits + 1] = rn
+    end
     if total > 0 then bits[#bits + 1] = ('pop %d'):format(total) end
     local ownername = owner and dfhack.translation.translateName(owner.name, true) or ''
     if ownername ~= '' then bits[#bits + 1] = 'of ' .. ownername end
     if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
     -- the breakdown matters when the population is mixed OR when the whole
-    -- population is a different race than the occupying entity
-    if distinct > 1 or (distinct == 1 and owner and first_race ~= owner.race) then
+    -- population is a different race than the occupying entity; camps pass
+    -- skip_races because they print a merged head count of their own
+    if not skip_races and (distinct > 1
+            or (distinct == 1 and owner and first_race ~= owner.race)) then
         lines[#lines + 1] = '  ' .. table.concat(races, ', ')
     end
 end
@@ -228,14 +234,82 @@ local function dweller_lines(s, resident_hfs, lines)
     end
 end
 
+-- what to call a non-government occupying entity ("goblin bandits")
+local ENTITY_KIND = {
+    NomadicGroup = 'bandits',
+    MigratingGroup = 'migrants',
+    MilitaryUnit = 'soldiers',
+    Religion = 'cult',
+    Guild = 'guild',
+    MerchantCompany = 'merchants',
+    PerformanceTroupe = 'performers',
+    Outcast = 'outcasts',
+}
+
+-- camps: who is actually there -- merged race head-count (abstract population
+-- plus the named residents) and the named residents' professions
+local function camp_lines(s, resident_hfs, lines)
+    local by_race, order = {}, {}
+    local function add(race, n)
+        local rn = race_name(race)
+        if not rn then return end
+        if not by_race[rn] then order[#order + 1] = rn; by_race[rn] = 0 end
+        by_race[rn] = by_race[rn] + n
+    end
+    pcall(function()
+        for i = 0, #s.populace.inhabitants - 1 do
+            local inh = s.populace.inhabitants[i]
+            add(inh.pop_spec.race, inh.count)
+        end
+    end)
+    local profs, porder = {}, {}
+    for _, hf in ipairs(resident_hfs) do
+        if hf.died_year < 0 then
+            add(hf.race, 1)
+            local cap = df.profession[hf.profession] or '?'
+            pcall(function() cap = df.profession.attrs[hf.profession].caption end)
+            if not profs[cap] then porder[#porder + 1] = cap; profs[cap] = 0 end
+            profs[cap] = profs[cap] + 1
+        end
+    end
+    local bits = {}
+    for _, rn in ipairs(order) do
+        bits[#bits + 1] = by_race[rn] > 1 and (rn .. ' ' .. by_race[rn]) or rn
+    end
+    if #bits > 0 then lines[#lines + 1] = '  ' .. table.concat(bits, ', ') end
+    local pbits = {}
+    for _, cap in ipairs(porder) do
+        pbits[#pbits + 1] = profs[cap] > 1 and (cap .. ' x' .. profs[cap]) or cap
+    end
+    if #pbits > 0 then lines[#lines + 1] = '  ' .. table.concat(pbits, ', ') end
+end
+
 local function site_lines(s, lines)
     local name = dfhack.translation.translateName(s.name, true)
     lines[#lines + 1] = type_name(s.type) .. (name ~= '' and (': ' .. name) or '')
-    local owner
+    local owner, owner_kind
     pcall(function() owner = df.historical_entity.find(s.cur_owner_id) end)
-    population_lines(s, owner, lines)
+    -- camps and other ownerless sites: the occupying band (a NomadicGroup for
+    -- bandit camps) hangs off the site's entity_links instead
+    if not owner then
+        pcall(function()
+            for i = 0, #s.entity_links - 1 do
+                local e = df.historical_entity.find(s.entity_links[i].entity_id)
+                if e then
+                    owner = e
+                    owner_kind = ENTITY_KIND[df.historical_entity_type[e.type]]
+                    break
+                end
+            end
+        end)
+    end
+    local stype = df.world_site_type[s.type]
+    population_lines(s, owner, lines, owner_kind, stype == 'Camp')
     local resident_hfs = residents(s)
-    if DWELLING[df.world_site_type[s.type]] then
+    if stype == 'Camp' then
+        camp_lines(s, resident_hfs, lines)
+    end
+    if DWELLING[stype] then
         dweller_lines(s, resident_hfs, lines)
     end
     noble_lines(s, owner, resident_hfs, lines)
