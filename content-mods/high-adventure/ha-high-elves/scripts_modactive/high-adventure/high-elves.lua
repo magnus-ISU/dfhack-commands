@@ -16,9 +16,9 @@ Support script for the self-contained high-elf civilization. Three jobs:
   extractor rating, so an unskilled elf always fails and a legendary+5 one always
   succeeds. A failure still spends both threads but does NOT rest the tree -- it can be
   tried again immediately; only a caught strand puts the tree on the same one-month
-  cooldown that growing wood uses. Its twinkling strand is minted here, not as a native
-  reaction PRODUCT, so the fuel-less Shaping Tree escapes DF's hardcoded metal-item fuel
-  requirement.
+  cooldown that growing wood uses. Its twinkling strand is minted here rather than as a
+  native reaction PRODUCT because a native product always fires: the per-level chance is
+  the whole point, and only a script can gate it.
 - **Shaping Trees need open sky**: a tree placed without an "outside" (open to
   sky) work tile is cancelled while still under construction -- they catch
   starlight, so they cannot be built under a roof or underground.
@@ -133,9 +133,11 @@ local function on_grow(reaction, rp, unit, ii, ir, oi, call_native)
     mint_logs(unit, GROW_MAT[reaction.code], math.min(extract_strand_rating(unit), 20))
 end
 
--- catch starlight: the reaction has NO native product (a metal [PRODUCT] would force
--- DF's hardcoded metal-item fuel requirement onto this fuel-less workshop). Instead we
--- mint the dimension-15000 twinkling THREAD here after the reagents are consumed.
+-- catch starlight: the reaction has NO native product, because a native [PRODUCT] always
+-- fires and this one must not -- the whole point is the per-skill-level chance below, which
+-- only a script can gate. (An earlier comment here blamed DF's metal-item fuel requirement
+-- for the design; that was a raws bug, not an engine rule. The chance is the real reason.)
+-- So we mint the dimension-15000 twinkling THREAD here after the reagents are consumed.
 -- Catching starlight is chancy: STARLIGHT_CHANCE_PER_LEVEL per point of the worker's
 -- strand extractor rating. A failure still burns the two threads -- the reagents are
 -- consumed by the job itself, and all we withhold is the strand -- but it does NOT put

@@ -17,15 +17,19 @@ opposing the adventurer (creating one if needed) -- the same state the game buil
 when you attack someone -- so it targets the player specifically rather than using
 a blunt [CRAZED] that would also make them gut their own immigrants.
 
-It also stops them yielding (clears flags3.adv_yield each turn) UNLESS the
-adventurer is a skilled enough Pacifier (Pacify skill >= the target race's
-threshold), in which case a surrender is respected. Optionally sets [NOFEAR] on a
-faction's castes (session-only) so they never break.
+PACIFY WORKS TWO WAYS, and the first one matters most: an adventurer whose Pacify
+skill meets the target race's threshold AND who has NOT DRAWN A WEAPON is never made
+hostile at all. You do not have to fight anyone first -- walk in sheathed and a good
+enough talker simply is not attacked. Draw steel and the exemption lapses on that same
+turn. Second, for anyone who HAS yielded, the same threshold decides whether the
+surrender sticks: below it, flags3.adv_yield is cleared each turn and the fight goes
+on. Optionally sets [NOFEAR] on a faction's castes (session-only) so they never break.
 
 GOOD races split into two: the weaker "good civs" (HUMAN, ELF) attack any EVIL
 adventurer but can surrender/flee, while "militant good" (HA_HIGH_ELF, DWARF) attack
-the same EVIL set yet NEVER break (NOFEAR) and NEVER yield (NO_YIELD threshold). The
-EVIL target set is orc, kobold, goblin, succubus, dark dwarf, drow and mind flayer.
+the same EVIL set and NEVER break (NOFEAR) -- but, like everyone else, they leave a
+sheathed Pacify-6 adventurer alone. The EVIL target set is orc, kobold, goblin,
+succubus, dark dwarf, drow and mind flayer.
 
 KOBOLDS are a special case (see pacify_threshold): the kobold civ AND its dragon
 overlords (the HA_KOBOLD ANCIENT_DRAGON caste, the same creature) are hostile to any
@@ -60,9 +64,9 @@ local BLOC = {HA_DROW=true, HA_DARK_DWARF=true, HA_SUCCUBUS=true, GOBLIN=true}
 local EVIL = {HA_ORC=true, HA_ILLITHID=true, HA_DROW=true, HA_DARK_DWARF=true,
               HA_SUCCUBUS=true, GOBLIN=true, HA_KOBOLD=true}
 
--- Pacify skill a yielded unit's slayer needs for the surrender to STICK, per race. Unreachable
--- values (NO_YIELD) mark races that fight to the death and never surrender.
-local NO_YIELD = 999
+-- Pacify skill that calls a race off, per race. It does two jobs: an adventurer who meets it
+-- and has NOT drawn a weapon is never attacked in the first place (see weapon_drawn), and a
+-- unit that HAS yielded stays yielded rather than being forced back into the fight.
 local PACIFY_THRESHOLD = {
     GOBLIN        = 1,
     HA_ORC        = 3,
@@ -70,9 +74,10 @@ local PACIFY_THRESHOLD = {
     HA_SUCCUBUS   = 6,
     HA_DARK_DWARF = 6,   -- not user-specified; matches the other CAVE_DETAILED evil civs
     HA_ILLITHID   = 12,
-    -- militant good (high elves + dwarves) never yield, unlike the weaker HUMAN/ELF good civs
-    HA_HIGH_ELF   = NO_YIELD,
-    DWARF         = NO_YIELD,
+    -- militant good (high elves + dwarves) still never BREAK (nofear), but a sheathed
+    -- Pacifier at 6 can walk among them unmolested like any other faction
+    HA_HIGH_ELF   = 6,
+    DWARF         = 6,
 }
 local DEFAULT_PACIFY = 3
 
@@ -91,8 +96,8 @@ local RULES = {
     {name = 'good_civs', races = {'HUMAN', 'ELF'}, nofear = false,
      friendly = function(adv) return not EVIL[adv] end},
     -- militant good (high elves + dwarves): same target set as the good civs -- hostile to any EVIL
-    -- adventurer -- but they NEVER break (NOFEAR) and NEVER yield (NO_YIELD threshold), unlike the
-    -- weaker HUMAN/ELF good civs who can surrender.
+    -- adventurer -- and they NEVER break (NOFEAR), unlike the weaker HUMAN/ELF good civs who
+    -- can flee. A sheathed Pacify-6 adventurer is still left alone, same as any other faction.
     {name = 'militant_good', races = {'HA_HIGH_ELF', 'DWARF'}, nofear = true,
      friendly = function(adv) return not EVIL[adv] end},
     -- kobold civ: hostile to any adventurer who is NOT a kobold. Their dragon overlords are the
@@ -212,6 +217,20 @@ local function pacify_threshold(u, cid, dragon_on_screen)
     return PACIFY_THRESHOLD[cid] or DEFAULT_PACIFY
 end
 
+-- Is the adventurer holding a weapon READY? A weapon stowed in a pack is not drawn (it rides
+-- as Hauled, or as contained cargo that never appears in `inventory` at all), and a shield
+-- occupies the same Weapon role without being a weapon -- so the item type is checked too.
+-- Walking in sheathed is what lets a skilled Pacifier pass unmolested.
+local function weapon_drawn(u)
+    for _, inv in ipairs(u.inventory) do
+        if inv.mode == df.inv_item_role_type.Weapon and inv.item
+            and inv.item:getType() == df.item_type.WEAPON then
+            return true
+        end
+    end
+    return false
+end
+
 local function adv_conflict(adv)
     for _, aid in ipairs(adv.activities) do
         local act = df.activity_entry.find(aid)
@@ -327,6 +346,7 @@ local function process()
     if not adv then return end
     local adv_race = creature_id(adv.race)
     local pacify = dfhack.units.getNominalSkill(adv, df.job_skill.PACIFY, true) or 0
+    local drawn = weapon_drawn(adv)
 
     local active = {}
     local kobolds_active = false
@@ -408,14 +428,22 @@ local function process()
             if targeted or challenge then
                 -- guard per-unit so one odd unit can't abort the whole sweep
                 pcall(function()
+                    local threshold = pacify_threshold(u, cid, dragon_on_screen)
+                    -- a dragon challenge is never called off below the dragon bar, whatever the
+                    -- challenger's own race would ask for
+                    if challenge and threshold < DRAGON_PACIFY then threshold = DRAGON_PACIFY end
+                    -- SHEATHED AND PERSUASIVE: a Pacifier who meets the bar and has NOT drawn a
+                    -- weapon is not attacked at all. You no longer have to beat someone down and
+                    -- then hold the surrender -- walking in unarmed is enough on its own. Draw
+                    -- steel and the rule lapses immediately, on the same turn.
+                    if not drawn and pacify >= threshold then return end
                     -- a challenger who has already yielded to a Pacify 12 adventurer is left in
                     -- peace: that surrender stands rather than reopening the challenge each turn
                     if challenge and u.flags3.adv_yield and pacify >= DRAGON_PACIFY then return end
                     make_hostile(u, adv)
-                    if u.flags3.adv_yield then
-                        local threshold = pacify_threshold(u, cid, dragon_on_screen)
-                        -- a skilled enough Pacifier gets to keep them surrendered
-                        if pacify < threshold then u.flags3.adv_yield = false end
+                    -- a skilled enough Pacifier gets to keep them surrendered
+                    if u.flags3.adv_yield and pacify < threshold then
+                        u.flags3.adv_yield = false
                     end
                 end)
             end

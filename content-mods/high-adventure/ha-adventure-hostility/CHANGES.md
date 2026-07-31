@@ -5,6 +5,22 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.16 -- sheathe your weapon and talk your way past
+
+- **A skilled Pacifier who has not drawn a weapon is no longer attacked at all.** Previously
+  the only use for Pacify was keeping an enemy yielded *after* you had beaten them down; now
+  meeting a race's threshold with no weapon in hand means they never turn on you in the first
+  place. Drawing steel lapses the exemption on that same turn.
+- "Weapon drawn" is a real weapon in the Weapon inventory role. A weapon stowed in a pack does
+  not count, and a shield rides in the same role without being a weapon, so the item type is
+  checked too.
+- **Militant good (high elves, dwarves) no longer fight to the death regardless.** Their
+  threshold was NO_YIELD (999), i.e. unreachable; it is now 6, like the other hardened civs.
+  They still carry NOFEAR, so they never break -- they simply are not hostile to a sheathed
+  Pacify-6 adventurer.
+- A dragon challenge is never called off below Pacify 12, whatever the challenger's own race
+  would otherwise ask for.
+
 ## v0.15 -- no duplicate boots/gauntlets from stacked footwear
 - 0.14 let PAIRED slots promote every piece, which is right for two gloves but wrong
   for socks+shoes: both live in item_type.SHOES, so a unit wearing socks and shoes on
