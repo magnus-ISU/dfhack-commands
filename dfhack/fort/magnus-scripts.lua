@@ -145,6 +145,15 @@ if not dfhack.world.isFortressMode() then
                 dfhack.run_script('fort/creature-description')
                 dfhack.run_command('overlay', 'enable', 'fort/creature-description.desc')
             end)
+            -- the adventurer-creation helpers are default-enabled overlays; re-assert
+            -- them here so they stay armed for the NEXT character even if toggled off
+            atry('embark creation overlays (auto-outfit, values, map tooltips)', function()
+                for _, w in ipairs({'embark/adventurer-default-items.auto',
+                                    'embark/adventurer-values.values',
+                                    'embark/adventurer-map.map'}) do
+                    dfhack.run_command('overlay', 'enable', w)
+                end
+            end)
         end
     end
     -- soft return (not qerror): onMapLoad.init also fires on other non-fort maps; do nothing there.

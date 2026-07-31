@@ -6,8 +6,20 @@ embark/adventurer-default-items
 
 Tags: adventure | embark | items
 
-Run on the **Equipment** page of adventurer creation.  Clears the default picks
-and buys, if the civilization offers them:
+Rebuilds the starting kit on the **Equipment** page of adventurer creation.
+An overlay AUTO-RUNS it once per new character the moment the Equipment page
+is first shown (it is a data rewrite, not an enableable service -- which is
+why the bare command never fired by itself).  Re-entering the page does not
+re-run it, so manual tweaks survive; run `embark/adventurer-default-items`
+by hand to force a redo.
+
+The same overlay puts a `[+ Metal -]` button left of each metal item's price.
+Clicking the `[+ Me` half upgrades the item one step along
+copper/bronze/iron/steel (shown only when the civ offers the next metal AND
+the points cover the difference); the `al -]` half downgrades one step and
+refunds the difference.  Items mutate in place, so rows keep their position.
+
+It clears the default picks and buys, if the civilization offers them:
 
 - full copper gear: breastplate, mail shirt, helm, 2 gauntlets, 2 high boots,
   greaves, shield, and your trained weapon (whatever weapon the archetype's
@@ -141,11 +153,7 @@ end
 
 local COPPER_FIRST = {'copper', 'bronze', 'iron'}
 
-local function run()
-    local cs = sheet()
-    if not cs then
-        qerror('run this during adventurer creation (Equipment page)')
-    end
+local function apply(cs)
 
     -- trained weapon = whatever weapon the default loadout holds; sword if none
     local weapon_def = 'ITEM_WEAPON_SWORD_SHORT'
@@ -285,6 +293,203 @@ local function run()
     cs.scroll_position_item = 0
     print(('embark/adventurer-default-items: done, %d points left over'):format(points))
 end
+
+local function run()
+    local cs = sheet()
+    if not cs then
+        qerror('run this during adventurer creation (Equipment page)')
+    end
+    apply(cs)
+end
+
+-- ---- overlay: auto-run + [+ Metal -] buttons --------------------------------
+
+local overlay = require('plugins.overlay')
+
+local LADDER = {'copper', 'bronze', 'iron', 'steel'}
+local LADDER_POS = {copper = 1, bronze = 2, iron = 3, steel = 4}
+local BTN_TTL_MS = 300
+local BTN_W = 11              -- '[+ Metal -]'
+local GEAR_CATS = {11, 12, 13, 15, 16, 17, 18, 19, 20, 21}
+
+-- the sheet, but only when the Equipment page is actually showing
+local function equipment_sheet()
+    local vs = dfhack.gui.getCurViewscreen(true)
+    while vs and not df.viewscreen_setupadventurest:is_instance(vs) do vs = vs.parent end
+    if not vs or vs.mode ~= 5 then return end
+    local idx = vs.active_sheet_index
+    if idx < 0 or idx >= #vs.csheet then idx = 0 end
+    local cs = vs.csheet[idx]
+    if cs and cs.sub_mode == 10 then return cs end
+end
+
+local function ladder_metal(it)
+    if it.mat_type ~= 0 then return end
+    local ok, mi = pcall(dfhack.matinfo.decode, it.mat_type, it.mat_index)
+    local name = ok and mi and mi:toString() or nil
+    return LADDER_POS[name] and name or nil
+end
+
+local function item_cost(it)
+    return dfhack.items.getItemBaseValue(it:getType(), it:getSubtype(),
+        it.mat_type, it.mat_index)
+end
+
+-- the civ's offer for this item one ladder step away, and the point delta
+local function step_offer(cs, cat, it, dir)
+    local cur = ladder_metal(it)
+    if not cur then return end
+    local tgt = LADDER[LADDER_POS[cur] + dir]
+    if not tgt then return end
+    local def_id = DEFS[cat] and it.subtype and it.subtype.id or nil
+    local e = offered(cs, cat, def_id, tgt)
+    if not e then return end
+    local delta = dfhack.items.getItemBaseValue(e.item_type, e.item_subtype,
+        e.mattype, e.matindex) - item_cost(it)
+    return e, delta
+end
+
+local function change_metal(cs, cat, idx, dir)
+    local it = cs.s_item[cat][idx]
+    if not it then return false end
+    local e, delta = step_offer(cs, cat, it, dir)
+    if not e then return false end
+    if delta > 0 and delta > cs.eqpet_points then return false end
+    -- mutate in place so the row keeps its position on screen
+    it.mat_type, it.mat_index = e.mattype, e.matindex
+    cs.eqpet_points = cs.eqpet_points - delta
+    return true
+end
+
+local function read_row(y)
+    local gps = df.global.gps
+    if y < 0 or y >= gps.dimy then return '' end
+    local row = {}
+    for x = 0, gps.dimx - 1 do
+        local t = dfhack.screen.readTile(x, y)
+        local ch = t and t.ch or 0
+        row[x + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    end
+    return table.concat(row)
+end
+
+-- Parse the Your Items panel into clickable buttons: each row reading
+-- '<desc>   <N> pts' left of column 70 is matched back to its s_item entry
+-- (k-th identical description = k-th matching item, scanning categories in
+-- display order).  Rebuilt on a timer and after every click.
+local buttons, buttons_at = {}, 0
+
+local function build_buttons(cs)
+    buttons = {}
+    local gps = df.global.gps
+    local seen = {}
+    for y = 0, gps.dimy - 1 do
+        local row = read_row(y)
+        local a = row:find('%d+ pts')
+        if a and a < 70 then
+            local desc = row:sub(1, a - 1):match('^%s*(.-)%s*$')
+            if desc ~= '' then
+                seen[desc] = (seen[desc] or 0) + 1
+                local occ, n = seen[desc], 0
+                local fcat, fidx, fit
+                for _, cat in ipairs(GEAR_CATS) do
+                    local ok, vec = pcall(function() return cs.s_item[cat] end)
+                    if ok then
+                        for i = 0, #vec - 1 do
+                            if dfhack.items.getDescription(vec[i], 0, true) == desc then
+                                n = n + 1
+                                if n == occ then fcat, fidx, fit = cat, i, vec[i] break end
+                            end
+                        end
+                    end
+                    if fit then break end
+                end
+                if fit and ladder_metal(fit) then
+                    local up_e, up_d = step_offer(cs, fcat, fit, 1)
+                    local dn_e = step_offer(cs, fcat, fit, -1)
+                    local can_up = up_e ~= nil and up_d <= cs.eqpet_points
+                    local can_dn = dn_e ~= nil
+                    if can_up or can_dn then
+                        buttons[#buttons + 1] = {
+                            y = y, x0 = math.max(0, (a - 1) - BTN_W - 1),
+                            cat = fcat, idx = fidx, up = can_up, down = can_dn,
+                        }
+                    end
+                end
+            end
+        end
+    end
+end
+
+AutoItems = defclass(AutoItems, overlay.OverlayWidget)
+AutoItems.ATTRS{
+    desc = 'Auto-outfits new adventurers; [+ Metal -] buttons on the Equipment page.',
+    default_enabled = true,
+    viewscreens = 'setupadventure',
+    overlay_onupdate_max_freq_seconds = 0,
+    frame = {w = 1, h = 1},
+}
+
+local PEN_BTN = dfhack.pen.parse{fg = COLOR_LIGHTCYAN, bg = COLOR_BLACK}
+
+-- one auto-run per creation flow: cleared whenever the viewscreen leaves the
+-- character sheet (going back to race/civ selection wipes the character too)
+applied = applied or false
+
+function AutoItems:overlay_onupdate()
+    pcall(function()
+        local vs = dfhack.gui.getCurViewscreen(true)
+        while vs and not df.viewscreen_setupadventurest:is_instance(vs) do vs = vs.parent end
+        if not vs or vs.mode ~= 5 then applied = false return end
+        local cs = equipment_sheet()
+        if cs and not applied then
+            applied = true
+            print('embark/adventurer-default-items: auto-outfitting the new adventurer')
+            apply(cs)
+            buttons_at = 0
+        end
+    end)
+end
+
+function AutoItems:onRenderFrame(dc, rect)
+    pcall(function()
+        local cs = equipment_sheet()
+        if not cs then return end
+        local now = dfhack.getTickCount()
+        if now - buttons_at > BTN_TTL_MS then
+            buttons_at = now
+            build_buttons(cs)
+        end
+        for _, b in ipairs(buttons) do
+            dfhack.screen.paintString(PEN_BTN, b.x0, b.y,
+                '[' .. (b.up and '+' or ' ') .. ' Metal ' .. (b.down and '-' or ' ') .. ']')
+        end
+    end)
+end
+
+function AutoItems:onInput(keys)
+    if not keys._MOUSE_L then return false end
+    local ok, handled = pcall(function()
+        local cs = equipment_sheet()
+        if not cs then return false end
+        local gps = df.global.gps
+        for _, b in ipairs(buttons) do
+            if gps.mouse_y == b.y and gps.mouse_x >= b.x0 and gps.mouse_x < b.x0 + BTN_W then
+                -- left half ('[+ Me') upgrades, right half ('al -]') downgrades
+                local dir = (gps.mouse_x < b.x0 + BTN_W // 2) and 1 or -1
+                if (dir == 1 and b.up) or (dir == -1 and b.down) then
+                    change_metal(cs, b.cat, b.idx, dir)
+                end
+                buttons_at = 0            -- reprice/redraw immediately
+                return true               -- the click was on the button either way
+            end
+        end
+        return false
+    end)
+    return ok and handled
+end
+
+OVERLAY_WIDGETS = {auto = AutoItems}
 
 if dfhack_flags.module then return end
 run()
