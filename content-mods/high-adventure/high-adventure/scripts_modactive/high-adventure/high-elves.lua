@@ -31,7 +31,6 @@ Support script for the self-contained high-elf civilization. Three jobs:
   HA_adventure_hostility mod, which does the same job for drow, dark dwarves and
   vanilla dwarves. Nothing about the behaviour changed except that it now upgrades
   only -- a piece already at or above twinkling is left alone.
-UNTESTED until a high-elf world exists.
 
 Usage: enable high-adventure/high-elves
 ]====]
