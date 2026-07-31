@@ -6,11 +6,12 @@ embark/adventurer-map
 
 Tags: adventure | embark | interface
 
-The map panes of adventurer creation (the Background "Home" region map, the
-final start-location map) show sites but tell you nothing about them.  With
-this overlay loaded, hovering a site pops the same card adv/read-the-map
-draws on the travel map: race-led headline, owner and population, nobles,
-legends, lair dwellers, camp crews.
+The Background tab of adventurer creation shows a world map that names
+nothing.  With this overlay loaded, hovering a site there pops the same card
+adv/read-the-map draws on the travel map: race-led headline, owner and
+population, nobles, legends, lair dwellers, camp crews.  The overlay is
+active ONLY on the Background tab (mode 5, sub_mode 9) -- on other pages the
+map port holds stale data and a tooltip would mislabel the screen.
 
 Unlike the travel map, these panes expose NO anchor for the viewport -- no
 army at a fixed cell, no scroll field found on the viewscreen, and
@@ -146,6 +147,18 @@ end
 
 -- ---- hover ------------------------------------------------------------------
 
+-- only the Background tab shows the world-map pane; everywhere else the map
+-- port holds stale data and a tooltip would mislabel whatever is on screen
+local function on_background_tab()
+    local vs = dfhack.gui.getCurViewscreen(true)
+    while vs and not df.viewscreen_setupadventurest:is_instance(vs) do vs = vs.parent end
+    if not vs or vs.mode ~= 5 then return false end
+    local idx = vs.active_sheet_index
+    if idx < 0 or idx >= #vs.csheet then idx = 0 end
+    local cs = vs.csheet[idx]
+    return cs and cs.sub_mode == 9 or false     -- 9 = the Background page
+end
+
 -- the mid-tile rect under the mouse, or nil
 local function mouse_rect()
     if not view then return end
@@ -199,11 +212,14 @@ local PEN_TEXT = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
 local PEN_EDGE = dfhack.pen.parse{fg = COLOR_LIGHTCYAN, bg = COLOR_BLACK}
 
 function AdventurerMap:overlay_onupdate()
-    pcall(calibrate)
+    pcall(function()
+        if on_background_tab() then calibrate() end
+    end)
 end
 
 function AdventurerMap:onRenderFrame(dc, rect)
     pcall(function()
+        if not on_background_tab() then return end
         local lines = hover_lines()
         if not lines then return end
         local gps = df.global.gps

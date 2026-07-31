@@ -14,7 +14,7 @@ all dwarves share the same starting letter and each name is unique to that wave:
     ...   (wraps back to A after Z)
 
 Names are gender-correct (each dwarf gets a male or female name to match its sex)
-and are drawn from `dfhack-config/auto-name-names.txt` -- a plain, editable text
+and are drawn from `dfhack-config/scripts/data/auto-name-names.txt` -- a plain, editable text
 file: one name per line, the MALE block first, then a single blank line, then the
 FEMALE block. Lines starting with `#` are comments.
 
@@ -47,7 +47,7 @@ Add `enable auto-name` to magnus-scripts / dfhack.init to run it every session.
 ]]
 
 local GLOBAL_KEY = 'auto-name'
-local NAMES_PATH = dfhack.getDFPath() .. '/dfhack-config/auto-name-names.txt'
+local NAMES_PATH = dfhack.getDFPath() .. '/dfhack-config/scripts/data/auto-name-names.txt'
 local SCAN_FRAMES = 500   -- re-check for new migrants roughly once per game-day (migrants arrive
                           -- in occasional waves, so a frequent scan of units.active is wasteful)
 

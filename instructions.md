@@ -2,9 +2,10 @@
 
 This repo holds two kinds of deliverables for **Dwarf Fortress 0.53.x + DFHack**:
 
-- **`dfhack/`** — standalone DFHack command scripts (`.lua`), one tool per file. Deployed
-  into DFHack's script path and invoked as commands. (`adv/` and `fix/` hold a few
-  category-specific command scripts too.)
+- **`dfhack/`** — standalone DFHack command scripts (`.lua`), one tool per file, in
+  category folders that mirror the deployed tree: `fort/` (fortress mode + worldgen),
+  `adv/` (adventure mode), `embark/` (adventurer creation), `fix/`, and `data/` for
+  data files. The folder is the command prefix: `fort/auto-name`, `adv/reveal`.
 - **`content-mods/high-adventure/`** — the *High Adventure* mod suite (raws + per-mod
   active scripts + graphics). Each mod is a folder with `info.txt`, `objects/`,
   `graphics/`, `scripts_modactive/`.
@@ -128,14 +129,14 @@ snapshot.
 
 ## Deploy a DFHack command script
 
-Standalone commands live in `dfhack/`; its subfolders (`dfhack/adv/`, `dfhack/embark/`,
-`dfhack/fix/`) deploy as subdirectories, so the command name keeps its prefix —
-`adv/reveal`, `embark/adventurer-values`. Deploy by copying into DFHack's script path,
-then hot-reload — no game restart:
+Standalone commands live in `dfhack/`; its subfolders (`fort/`, `adv/`, `embark/`,
+`fix/`, plus `data/` for data files) deploy as subdirectories, so the command name
+keeps its prefix — `fort/auto-name`, `adv/reveal`, `embark/adventurer-values`.
+Deploy by copying into DFHack's script path, then hot-reload — no game restart:
 
 ```sh
-cp dfhack/auto-name.lua "$DF/dfhack-config/scripts/"
-"$DFH/dfhack-run" lua 'reqscript("auto-name")'   # reload a reqscript module
+cp dfhack/fort/auto-name.lua "$DF/dfhack-config/scripts/fort/"
+"$DFH/dfhack-run" lua 'reqscript("fort/auto-name")'   # reload a reqscript module
 # for overlay-based tools, rescan overlays:
 "$DFH/dfhack-run" lua 'require("plugins.overlay").rescan()'
 ```
@@ -156,12 +157,12 @@ resolve to `$DFH/hack/scripts`).
 
 ## Generate a world
 
-`dfhack/gen-world.lua` drives world creation from the title screen. It writes
+`dfhack/fort/gen-world.lua` drives world creation from the title screen. It writes
 `viewscreen_new_regionst`'s own fields for anything DF exposes as data (the mod list, the
 five sliders) and only *clicks* the buttons that have no data equivalent.
 
 ```sh
-"$DFH/dfhack-run" gen-world civilizations=max sites=max history=2 mods=ha
+"$DFH/dfhack-run" fort/gen-world civilizations=max sites=max history=2 mods=ha
 ```
 
 `civilizations` / `sites` / `history` / `worldsize` / `beasts` / `savagery` / `minerals`
@@ -180,12 +181,12 @@ mod deployed while the game is running is invisible — worldgen will silently u
 raws. This has produced two full worlds' worth of misleading data.
 
 **DF lists a mod once per copy it can see** — the live one under `mods/` and any older
-snapshot in `installed_mods/` — under the same ID at different versions. `gen-world` takes
+snapshot in `installed_mods/` — under the same ID at different versions. `fort/gen-world` takes
 the highest version, but deleting a mod from `mods/` is not enough to retire it: `rm -rf`
 its `installed_mods/` copies too or it stays selectable forever.
 
 **The first-run "Welcome to Dwarf Fortress" modal reappears after every restart**, swallows
-the Create-world click silently, and leaves the sliders untouched with no error. `gen-world`
+the Create-world click silently, and leaves the sliders untouched with no error. `fort/gen-world`
 detects it and asks you to dismiss it; when driving the screen by hand, search the text grid
 for `Welcome to Dwarf` and click its `Okay` first.
 
@@ -198,10 +199,10 @@ entirely from a farming civ and by putting `[MYTHICAL]` on one.
 ### Take the census
 
 ```sh
-"$DFH/dfhack-run" ha-census
+"$DFH/dfhack-run" fort/ha-census
 ```
 
-`dfhack/ha-census.lua` reports population at years 1/25/50/75/100, final population with
+`dfhack/fort/ha-census.lua` reports population at years 1/25/50/75/100, final population with
 civ counts, sites and castles, site terrain per civ, and the terrain available on the map.
 Run it **straight after generation, before saving**.
 

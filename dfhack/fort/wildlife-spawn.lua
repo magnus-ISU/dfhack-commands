@@ -24,7 +24,7 @@ Usage:
         caste index (default 0). Example: place the cursor, then `wildlife-spawn WOLF 3`.
 
 Module:
-    local spawn = reqscript('wildlife-spawn').spawn
+    local spawn = reqscript('fort/wildlife-spawn').spawn
     spawn(race_index, caste_index, pos)   -> the created unit (or nil)
 ]]
 

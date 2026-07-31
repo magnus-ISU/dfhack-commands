@@ -32,7 +32,7 @@ if not dfhack.world.isFortressMode() then
     qerror('civilian-militia needs a loaded fortress')
 end
 
-local mu = reqscript('military-uniforms')
+local mu = reqscript('fort/military-uniforms')
 local dry = ({...})[1] == 'dry'
 
 mu.civilian_arrange(dry)

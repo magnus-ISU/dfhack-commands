@@ -142,8 +142,8 @@ if not dfhack.world.isFortressMode() then
             -- unit-sheet description + kills + weight/volume panel; registered for
             -- dungeonmode too, so make sure it is loaded and switched on here
             atry('creature-description overlay (unit sheet info panel)', function()
-                dfhack.run_script('creature-description')
-                dfhack.run_command('overlay', 'enable', 'creature-description.desc')
+                dfhack.run_script('fort/creature-description')
+                dfhack.run_command('overlay', 'enable', 'fort/creature-description.desc')
             end)
         end
     end
@@ -164,16 +164,19 @@ end
 local INIT_PATH = dfhack.getDFPath() .. '/dfhack-config/init/onMapLoad.init'
 
 local function set_autostart(variant)
-    -- variant: nil -> remove our line; '' -> `magnus-scripts`; 'lovely' -> `magnus-scripts lovely`
+    -- variant: nil -> remove our line; '' -> `fort/magnus-scripts`; 'lovely' -> `... lovely`.
+    -- The strip also matches the bare pre-fort/ spelling so old installs upgrade cleanly.
     local lines, f = {}, io.open(INIT_PATH, 'r')
     if f then
         for line in f:lines() do
-            if not line:match('^%s*magnus%-scripts') then lines[#lines + 1] = line end
+            if not (line:match('^%s*magnus%-scripts') or line:match('^%s*fort/magnus%-scripts')) then
+                lines[#lines + 1] = line
+            end
         end
         f:close()
     end
     if variant then
-        lines[#lines + 1] = 'magnus-scripts' .. (variant ~= '' and (' ' .. variant) or '')
+        lines[#lines + 1] = 'fort/magnus-scripts' .. (variant ~= '' and (' ' .. variant) or '')
     end
     local w = io.open(INIT_PATH, 'w')
     if not w then return false, 'could not write ' .. INIT_PATH end
@@ -187,19 +190,19 @@ end
 if ({...})[1] == 'disable' then
     print('magnus-scripts: disabling all helpers...')
     -- background services + the one enableable overlays
-    try('disable auto-mandate', function() dfhack.run_command('disable', 'auto-mandate') end)
-    try('disable military-uniforms (gear service)', function() dfhack.run_command('disable', 'military-uniforms') end)
-    try('disable inside-burrow', function() dfhack.run_command('disable', 'inside-burrow') end)
-    try('disable military-labor', function() dfhack.run_command('disable', 'military-labor') end)
-    try('disable auto-elf-chop', function() dfhack.run_command('disable', 'auto-elf-chop') end)
-    try('disable tarrasque', function() dfhack.run_command('disable', 'tarrasque') end)
-    try('disable caravan-unstick', function() dfhack.run_command('disable', 'caravan-unstick') end)
+    try('disable auto-mandate', function() dfhack.run_command('disable', 'fort/auto-mandate') end)
+    try('disable military-uniforms (gear service)', function() dfhack.run_command('disable', 'fort/military-uniforms') end)
+    try('disable inside-burrow', function() dfhack.run_command('disable', 'fort/inside-burrow') end)
+    try('disable military-labor', function() dfhack.run_command('disable', 'fort/military-labor') end)
+    try('disable auto-elf-chop', function() dfhack.run_command('disable', 'fort/auto-elf-chop') end)
+    try('disable tarrasque', function() dfhack.run_command('disable', 'fort/tarrasque') end)
+    try('disable caravan-unstick', function() dfhack.run_command('disable', 'fort/caravan-unstick') end)
     try('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
-    try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'dwarf-rts.clickmove') end)
-    try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'item-description.expand') end)
-    try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'right-click-cancel.cancel') end)
-    try('disable plan-tile overlay', function() dfhack.run_command('overlay', 'disable', 'plan-tile.tile') end)
-    try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'auto-name') end)
+    try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'fort/dwarf-rts.clickmove') end)
+    try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'fort/item-description.expand') end)
+    try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'fort/right-click-cancel.cancel') end)
+    try('disable plan-tile overlay', function() dfhack.run_command('overlay', 'disable', 'fort/plan-tile.tile') end)
+    try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'fort/auto-name') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
@@ -224,43 +227,43 @@ end
 local lovely = ({...})[1] == 'lovely'
 
 print('magnus-scripts: enabling persistent helpers...')
-try('needs-tomb-notification', function() dfhack.run_script('needs-tomb-notification') end)
-try('mandate-notification', function() dfhack.run_script('mandate-notification') end)
-try('raid-notification', function() dfhack.run_script('raid-notification') end)
-try('trader-notification', function() dfhack.run_script('trader-notification') end)
-try('broker-ready (broker squad -> Ready while requested at depot)', function() dfhack.run_script('broker-ready') end)
-try('empty-labor-notification', function() dfhack.run_script('empty-labor-notification') end)
-try('civ-alert-notification', function() dfhack.run_script('civ-alert-notification') end)
-try('enemies-inside-notification', function() dfhack.run_script('enemies-inside-notification') end)
-try('agitated-animals-notification', function() dfhack.run_script('agitated-animals-notification') end)
-try('planner-orders', function() dfhack.run_script('planner-orders') end)
-try('auto-mandate (background)', function() dfhack.run_command('enable', 'auto-mandate') end)
-try('military-uniforms (steel templates)', function() dfhack.run_command('military-uniforms') end)
+try('needs-tomb-notification', function() dfhack.run_script('fort/needs-tomb-notification') end)
+try('mandate-notification', function() dfhack.run_script('fort/mandate-notification') end)
+try('raid-notification', function() dfhack.run_script('fort/raid-notification') end)
+try('trader-notification', function() dfhack.run_script('fort/trader-notification') end)
+try('broker-ready (broker squad -> Ready while requested at depot)', function() dfhack.run_script('fort/broker-ready') end)
+try('empty-labor-notification', function() dfhack.run_script('fort/empty-labor-notification') end)
+try('civ-alert-notification', function() dfhack.run_script('fort/civ-alert-notification') end)
+try('enemies-inside-notification', function() dfhack.run_script('fort/enemies-inside-notification') end)
+try('agitated-animals-notification', function() dfhack.run_script('fort/agitated-animals-notification') end)
+try('planner-orders', function() dfhack.run_script('fort/planner-orders') end)
+try('auto-mandate (background)', function() dfhack.run_command('enable', 'fort/auto-mandate') end)
+try('military-uniforms (steel templates)', function() dfhack.run_command('fort/military-uniforms') end)
 -- once per fort: creates the "even month"/"odd month" training routines (train that month,
 -- Ready the rest) on every squad; skipped if they already exist so schedule edits survive.
 try('military-uniforms altsched (even/odd month training routines, once/fort)',
-    function() dfhack.run_command('military-uniforms', 'altsched', 'once') end)
-try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('dwarf-rts') end)
+    function() dfhack.run_command('fort/military-uniforms', 'altsched', 'once') end)
+try('dwarf-rts (squad RTS overlay)', function() dfhack.run_command('fort/dwarf-rts') end)
 -- embark-nobles intentionally NOT run here: it's unfinished and appears to interfere
 -- with position assignments. Run `embark-nobles` by hand if you want it.
-try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'inside-burrow') end)
+try('inside-burrow (arm auto-seed "inside+" burrow)', function() dfhack.run_command('enable', 'fort/inside-burrow') end)
 -- once per fort: skipped if labor-groups' signature detail ("Weaponsmithing") is already
 -- present, so manual tweaks survive. Run `labor-groups` (no `once`) by hand to force.
-try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('labor-groups', 'once') end)
-try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'military-labor') end)
-try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'auto-tomb') end)
-try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'auto-elf-chop') end)
-try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'caravan-unstick') end)
+try('labor-groups (ordered craft work details, once/fort)', function() dfhack.run_script('fort/labor-groups', 'once') end)
+try('military-labor (daily-sync the Military work detail)', function() dfhack.run_command('enable', 'fort/military-labor') end)
+try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'fort/auto-tomb') end)
+try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'fort/auto-elf-chop') end)
+try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'fort/caravan-unstick') end)
 -- stock DFHack tool, but always-on rather than `lovely`-only: it also covers ADVENTURE
 -- popups (it keys off an ADVENTURE_POPUP_ prefix), so the adventure branch enables it too
 try('hide-tutorials (suppress fort AND adventure tutorial popups)', function() dfhack.run_command('enable', 'hide-tutorials') end)
 -- make sure the Equip-screen overlay is picked up even on a freshly-added script
 try('overlay rescan', function() require('plugins.overlay').rescan() end)
 -- our custom overlays default to OFF when first discovered -- turn them on
-try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'item-description.expand') end)
-try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('right-click-cancel') end)
-try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('dig-shapes') end)
-try('plan-tile (drag to tile many buildings during placement)', function() dfhack.run_script('plan-tile') end)
+try('overlay enable item-description.expand', function() dfhack.run_command('overlay', 'enable', 'fort/item-description.expand') end)
+try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('fort/right-click-cancel') end)
+try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('fort/dig-shapes') end)
+try('plan-tile (drag to tile many buildings during placement)', function() dfhack.run_script('fort/plan-tile') end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if lovely then
@@ -274,11 +277,11 @@ if lovely then
     -- rename each migrant wave to a shared starting letter (A, B, C, ...); enabling
     -- also does the one-time retroactive pass and keeps watching for new waves
     try('auto-name (letter-per-wave migrant renamer)',
-        function() dfhack.run_command('enable', 'auto-name') end)
+        function() dfhack.run_command('enable', 'fort/auto-name') end)
 
     -- selecting a statue jumps straight to the statue item's sheet (its full description)
     try('statue-redirect (auto-open statue details)',
-        function() dfhack.run_command('enable', 'statue-redirect') end)
+        function() dfhack.run_command('enable', 'fort/statue-redirect') end)
 
     -- hide the stock "N thieving or mischievous creature(s)" notify line (kea/rhesus
     -- noise). The other stock lines this pack replaces (agitated_count, hostile_count)
@@ -292,7 +295,7 @@ if lovely then
     -- dead forgotten beasts / titans / bronze colossi roll 1/100 each winter solstice to
     -- revive and later RETURN as a real attack (the megabeast pool never runs dry)
     try('tarrasque (solstice megabeast revival)',
-        function() dfhack.run_command('enable', 'tarrasque') end)
+        function() dfhack.run_command('enable', 'fort/tarrasque') end)
 
     -- render-only smooth interpolation of matching creature sprites between adjacent
     -- tiles (3rd-party C++ plugin by notliad; source vendored as the
