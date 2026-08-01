@@ -34,9 +34,9 @@ Automatically reopen the inventory and scroll to the last position
 ![adv/keep-inventory demo](demos/adv-keep-inventory.gif)
 
 ### **`adv/inventory-display-weight`** 
-Show every item's weight in the inventory list, right-aligned
-  next to its buttons — no more opening View-item sheets to find what is
-  weighing you down. Weights under 1Γ show as `<1Γ`.
+Show every item's weight in the inventory list.
+
+![adv/inventory-display-weight demo](demos/adv-inventory-display-weight.png)
 
 ### **`adv/keep-talking`** 
 Automatically reopen a conversation you are participating in.
