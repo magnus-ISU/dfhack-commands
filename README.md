@@ -133,7 +133,9 @@ Frees a soldier broker to trade, then puts their squad back on duty afterward.
 ## Information
 
 ### **`fort/creature-description`**
-Shows a creature's full description (great for forgotten beasts) with a categorized kill list.
+Shows a creature's full description (great for forgotten beasts) with a categorized kill
+list — each megabeast type by name, and sentient kills split by caste ("27 orcs, 9 orc
+champions, 5 illithids, 2 ulitharids"), with male/female castes grouped together.
 
 ![fort/creature-description demo](demos/fort-creature-description.png)
 
