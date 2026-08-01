@@ -229,23 +229,38 @@ local function blank_span(y, x1, x2)
 end
 
 -- shifts from the panel's left bound, matching DF's own padding (tuned live):
--- the moved location line (text, pill, icon) sits 1 right, the description 2
-local LINE_SHIFT, TEXT_SHIFT = 1, 2
+-- the moved location line lands at the bound itself, the description pads 2
+local LINE_SHIFT, TEXT_SHIFT = 0, 2
 local SHIFT_Y = 1              -- the moved line sits one extra row down
+local ICON_LIFT = 3            -- the icon sprite draws 3 rows above its cell
+-- painting starts one column PAST the left bound: the bound column carries the
+-- panel's border art, and covering it visibly cuts the border
+local BORDER_PAD = 1
 
 -- move the native location line to target row ty (text re-copied every frame --
 -- DF redraws it -- art re-stamped from the geometry capture; sources wiped)
 local function move_in_line(g, ty)
     local gps = df.global.gps
     local dimy = gps.dimy
-    -- text + pens, shifted right; source blanked
-    for x = g.left, g.right do
+    -- text + pens, shifted; source blanked (border column left alone)
+    for x = g.left + BORDER_PAD, g.right do
         local p = dfhack.screen.readTile(x, g.in_row)
         if p and x + LINE_SHIFT < gps.dimx then
             p.tile = 0
             dfhack.screen.paintTile(p, x + LINE_SHIFT, ty)
         end
         dfhack.screen.paintTile(BLANK, x, g.in_row)
+    end
+    -- black out every texture layer on the moved rows so nothing behind the
+    -- line stays visible; the pill and icon are stamped back on top
+    local layers = {gps.screentexpos, gps.screentexpos_lower,
+        gps.screentexpos_top, gps.screentexpos_top_lower, gps.screentexpos_anchored}
+    for y = ty - 1, ty + 1 do
+        if y >= 0 and y < dimy then
+            for x = g.left + BORDER_PAD, g.right do
+                for _, buf in ipairs(layers) do buf[x * dimy + y] = 0 end
+            end
+        end
     end
     -- View-button pill (3 rows): stamp the capture at the target, patch the
     -- source rows back to their plain band
@@ -259,13 +274,16 @@ local function move_in_line(g, ty)
         lower[(g.left + c.dx) * dimy + g.in_row + c.dy] = g.band[c.dy] or 0
     end
     -- anchored icon: every cell renders a full sprite copy, so only the marked
-    -- bottom-center cell is stamped; ALL source cells are zeroed
+    -- bottom-center cell is stamped (lifted ICON_LIFT rows); ALL sources zeroed
     local anch = gps.screentexpos_anchored
     local ax, ay = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
     for _, c in ipairs(g.icon) do
         if c.show then
-            local ti = (g.left + c.dx + LINE_SHIFT) * dimy + ty + c.dy
-            anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
+            local tyy = ty + c.dy - ICON_LIFT
+            if tyy >= 0 then
+                local ti = (g.left + c.dx + LINE_SHIFT) * dimy + tyy
+                anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
+            end
         end
         local si = (g.left + c.dx) * dimy + g.in_row + c.dy
         anch[si], ax[si], ay[si] = 0, 0, 0
@@ -288,22 +306,23 @@ local function render_display_mode(lines, vs)
     end
     if not geo then return end
     local g = geo
+    local paint_l = g.left + BORDER_PAD          -- border column stays untouched
     local span_r = g.left + SPAN_W + TEXT_SHIFT - 1
     local desc_top
 
-    blank_span(g.remove_row, g.left, span_r)
+    blank_span(g.remove_row, paint_l, span_r)
     if g.in_row then
         local in_target = g.remove_row + 1 + SHIFT_Y
         desc_top = in_target + 2
         -- clear the icon-bleed rows around the moved line before the copy lands
         for y = in_target - 1, in_target + 1 do
-            if y ~= g.remove_row then blank_span(y, g.left, span_r) end
+            if y ~= g.remove_row then blank_span(y, paint_l, span_r) end
         end
         move_in_line(g, in_target)
         g.moved_in_row = in_target
     else
         desc_top = g.remove_row + 2
-        blank_span(g.remove_row + 1, g.left, span_r)
+        blank_span(g.remove_row + 1, paint_l, span_r)
         g.moved_in_row = nil
     end
 
@@ -314,17 +333,17 @@ local function render_display_mode(lines, vs)
     local scroll = math.max(0, math.min(vs.scroll_position_item, total - n))
     -- cover at least the native box so stale native rows never peek through
     local cover = math.max(n, DF_VISIBLE_ROWS)
-    local pad = (' '):rep(TEXT_SHIFT)
+    local pad = (' '):rep(TEXT_SHIFT - BORDER_PAD)
     for row = 0, cover - 1 do
         local y = desc_top + row
         if y >= gps.dimy then break end
         local s = pad .. (row < n and lines[scroll + row].value or '')
-        local w = SPAN_W + TEXT_SHIFT
+        local w = SPAN_W + TEXT_SHIFT - BORDER_PAD
         if #s < w then s = s .. (' '):rep(w - #s) else s = s:sub(1, w) end
-        dfhack.screen.paintString(TEXT_PEN, g.left, y, s)
+        dfhack.screen.paintString(TEXT_PEN, paint_l, y, s)
     end
     -- remember the live rects for input handling
-    g.desc_rect = {x1 = g.left, x2 = span_r, y1 = desc_top, y2 = desc_top + n - 1}
+    g.desc_rect = {x1 = paint_l, x2 = span_r, y1 = desc_top, y2 = desc_top + n - 1}
     g.total, g.n = total, n
 end
 
