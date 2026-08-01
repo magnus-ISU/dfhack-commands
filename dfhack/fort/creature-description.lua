@@ -17,22 +17,19 @@ local widgets = require('gui.widgets')
 local gui = require('gui')
 
 -- ---- kill summary -----------------------------------------------------------
--- Expands "Kills: N" into notable categories, in this fixed order:
---   demons, angels, megabeasts, beasts (semi-megabeasts), goblins, dwarves,
---   humans, elves, kobolds, <the largest animal species killed>, other
--- e.g. "66 kills: 1 demon, 2 angels, 3 megabeasts, 4 beasts, 5 goblins,
---       6 dwarves, 7 humans, 8 elves, 9 kobolds, 10 giant elephants, 11 other"
+-- Expands "Kills: N" into notable categories, in this order:
+--   demons, angels, megabeasts, beasts (semi-megabeasts), undead, then EVERY
+--   sentient race killed as its own entry (anything that can learn or speak:
+--   dwarves, goblins, and modded races -- orcs, illithids -- alike), most kills
+--   first, then <the largest animal species killed>, other
+-- e.g. "66 kills: 1 demon, 2 angels, 3 megabeasts, 30 goblins, 9 orcs,
+--       2 illithids, 10 giant elephants, 9 other"
 
--- category key for a race, or nil for the animal/other pool
+-- special category for a race, or nil for the sentient/animal/other pools
 local function classify_race(rid)
     local cr = df.global.world.raws.creatures.all[rid]
     if not cr then return nil end
     local id = tostring(cr.creature_id)
-    if id == 'GOBLIN' then return 'goblin' end
-    if id == 'DWARF' then return 'dwarf' end
-    if id == 'HUMAN' then return 'human' end
-    if id == 'ELF' then return 'elf' end
-    if id == 'KOBOLD' then return 'kobold' end
     -- angels have no caste flag of their own; their generated tokens carry DIVINE/ANGEL
     -- (e.g. "HF133 DIVINE_1", "SHARK_ANGEL"). Check before demons.
     if id:find('DIVINE') or id:find('ANGEL') then return 'angel' end
@@ -54,9 +51,9 @@ local function animal_info(rid)
     return true, c.misc.adult_size or 0
 end
 
-local CAT_ORDER = {'demon', 'angel', 'megabeast', 'beast', 'undead', 'goblin', 'dwarf', 'human', 'elf', 'kobold'}
+local CAT_ORDER = {'demon', 'angel', 'megabeast', 'beast', 'undead'}
 local CAT_PLURAL = {demon = 'demons', angel = 'angels', megabeast = 'megabeasts', beast = 'beasts',
-    undead = 'undead', goblin = 'goblins', dwarf = 'dwarves', human = 'humans', elf = 'elves', kobold = 'kobolds'}
+    undead = 'undead'}
 
 -- any set bit in a kill group's undead_flags (zombie, ghostly, or the unnamed variants)
 -- means the whole group was undead
@@ -74,7 +71,7 @@ function kill_summary(u)
     local hf = u.hist_figure_id and u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
     if not (hf and hf.info and hf.info.kills) then return 'Kills: 0' end
     local k = hf.info.kills
-    local cats, animals, other, total = {}, {}, 0, 0
+    local cats, animals, sentients, other, total = {}, {}, {}, 0, 0
     local function add(rid, n, undead)
         total = total + n
         -- undead trump every other category: a skeletal elf counts as undead, not elf
@@ -87,13 +84,20 @@ function kill_summary(u)
             cats[cat] = (cats[cat] or 0) + n
             return
         end
+        local cr = df.global.world.raws.creatures.all[rid]
+        if not (cr and cr.caste[0]) then
+            other = other + n
+            return
+        end
+        -- sentient (can learn or speak) races each get their OWN entry -- dwarves and
+        -- goblins the same way as modded orcs or illithids; everything else is an animal
         local is_animal, size = animal_info(rid)
         if is_animal then
             local a = animals[rid] or {n = 0, size = size}
             a.n = a.n + n
             animals[rid] = a
         else
-            other = other + n
+            sentients[rid] = (sentients[rid] or 0) + n
         end
     end
     -- named victims: one event per kill; classify by the victim's race
@@ -129,6 +133,20 @@ function kill_summary(u)
         if n and n > 0 then
             parts[#parts + 1] = ('%d %s'):format(n, n == 1 and cat or CAT_PLURAL[cat])
         end
+    end
+    -- sentient races, most kills first (race name breaks ties), named from their raws
+    local sent_list = {}
+    for rid, n in pairs(sentients) do
+        local cr = df.global.world.raws.creatures.all[rid]
+        sent_list[#sent_list + 1] = {n = n,
+            name = tostring(n == 1 and cr.name[0] or cr.name[1])}
+    end
+    table.sort(sent_list, function(a, b)
+        if a.n ~= b.n then return a.n > b.n end
+        return a.name < b.name
+    end)
+    for _, s in ipairs(sent_list) do
+        parts[#parts + 1] = ('%d %s'):format(s.n, s.name)
     end
     if big then
         local cr = df.global.world.raws.creatures.all[big_rid]
