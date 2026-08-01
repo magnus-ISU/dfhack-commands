@@ -1,5 +1,22 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.64 -- brain-burn paralysis halved again: SEV:50, END:50
+- v0.63's drop to vanilla severity (SEV:100) still suffocated victims in play, so the
+  brain-burn `CE_PARALYSIS` is now `SEV:50` with duration `END:100` -> `END:50`, on all
+  three castes that carry the DEVOURBITE (illithid, ulitharid, elder brain). For scale:
+  the wooly spider bite (ha-kobolds) runs SEV:50 and plays as "dangerous but survivable".
+- The separate ulitharid toxic strike venom is untouched.
+
+## v0.63 -- brain-burn paralysis down to vanilla severity
+- `CE_PARALYSIS` on the brain-burn venom `SEV:300` -> `SEV:100`, on all three castes that
+  carry the DEVOURBITE (illithid, ulitharid, elder brain). Duration is unchanged (`END:100`).
+- 300 was three times the strongest paralysis in vanilla DF -- every `CE_PARALYSIS` Toady
+  ships is `SEV:100`, giant cave spider included. Measured in play, a single bite on a dwarf
+  adventurer built a paralysis counter of 3844 and put them into suffocation; the intended
+  feel was a few attacks' worth of being held, not roughly three in-game days flat on your
+  back followed by asphyxiation.
+- Necrosis is untouched (`SEV:1000`, localized) -- the rot was never the complaint.
+
 ## v0.50 -- population caps normalised
 - `MAX_SITE_POP_NUMBER` 1000 -> 120 and `MAX_POP_NUMBER` 500 -> 10000. Measurement showed these
   caps do not bound population anyway; the start-biome experiment is what keeps illithids small.
