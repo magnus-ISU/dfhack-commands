@@ -54,6 +54,16 @@ Pane pixel geometry: cells are 16px, the pane's top-left pixel is
 `main_map_port.top_left_corner_x/y` (the travel map sits at 0,0; the
 Background pane at 752,104 on this window).
 
+CLICK TO COME FROM THERE.  On the Background / Home panel, LEFT-CLICKING a
+site on the map makes your adventurer from there -- when it is a possible
+home.  The Home column's candidates are `csheet.goodsite` (world_site
+pointers) and the choice DF reads at confirm time is `csheet.start_site_id`,
+so the click looks the clicked cell's site up in goodsite; on a match it
+writes start_site_id, scrolls the Home list (`scroll_st`) so the new choice
+is at the top, and flashes "Home: <site>" at the cursor.  A site that is NOT
+a candidate flashes "Not a possible home" instead and changes nothing, and a
+click on empty map falls through to DF untouched.
+
     embark/adventurer-map          status (the overlay is on by default)
 ]]
 
@@ -294,6 +304,61 @@ local function mouse_rect(page)
     return x0, x0 + view.sx - 1, y0, y0 + view.sy - 1
 end
 
+-- ---- click-to-set home ------------------------------------------------------
+-- Home candidates are csheet.goodsite; the field DF reads at confirm time is
+-- csheet.start_site_id.  A click only ever acts when the clicked site is a
+-- candidate, so an impossible home can never be written.
+
+local flash = nil    -- {text=, until_ms=}: transient confirmation at the cursor
+
+local function set_flash(text)
+    flash = {text = text, until_ms = dfhack.getTickCount() + 2500}
+end
+
+local function background_csheet()
+    local vs = dfhack.gui.getCurViewscreen(true)
+    while vs and not df.viewscreen_setupadventurest:is_instance(vs) do vs = vs.parent end
+    if not vs then return end
+    local idx = vs.active_sheet_index
+    if idx < 0 or idx >= #vs.csheet then idx = 0 end
+    return vs.csheet[idx]
+end
+
+local function try_pick_home()
+    local x0, x1, y0, y1 = mouse_rect('background')
+    if not x0 then return false end
+    local cs = background_csheet()
+    if not cs then return false end
+    local wd = df.global.world.world_data
+    local hit_name, picked, picked_idx
+    for i = 0, #wd.sites - 1 do
+        local s = wd.sites[i]
+        if x1 >= s.global_min_x and x0 <= s.global_max_x
+                and y1 >= s.global_min_y and y0 <= s.global_max_y then
+            hit_name = hit_name or dfhack.translation.translateName(s.name, true)
+            for j = 0, #cs.goodsite - 1 do
+                if cs.goodsite[j].id == s.id then
+                    picked, picked_idx = s, j
+                    break
+                end
+            end
+            if picked then break end
+        end
+    end
+    if picked then
+        cs.start_site_id = picked.id
+        cs.scroll_st = picked_idx        -- put the new home at the top of the Home list
+        pcall(function() cs.desc_st_index = picked_idx end)   -- description box follows
+        set_flash('Home: ' .. dfhack.translation.translateName(picked.name, true))
+        return true
+    end
+    if hit_name then
+        set_flash('Not a possible home: ' .. hit_name)
+        return true                      -- a site was clicked; swallow the click anyway
+    end
+    return false                         -- empty map: DF may have it
+end
+
 local cache_key, cache_lines = nil, nil
 
 local function hover_lines(page)
@@ -344,13 +409,29 @@ function AdventurerMap:overlay_onupdate()
     end)
 end
 
+function AdventurerMap:onInput(keys)
+    if keys._MOUSE_L and active_page() == 'background' then
+        local ok, handled = pcall(try_pick_home)
+        if ok and handled then return true end
+    end
+    return false
+end
+
 function AdventurerMap:onRenderFrame(dc, rect)
     pcall(function()
+        local gps = df.global.gps
+        if flash then
+            if dfhack.getTickCount() > flash.until_ms then
+                flash = nil
+            else
+                dfhack.screen.paintString(PEN_EDGE, gps.mouse_x + 2,
+                    math.max(0, gps.mouse_y - 1), ' ' .. flash.text .. ' ')
+            end
+        end
         local page = active_page()
         if not page then return end
         local lines = hover_lines(page)
         if not lines then return end
-        local gps = df.global.gps
         local width = 0
         for _, l in ipairs(lines) do width = math.max(width, #l) end
         width = width + 2
