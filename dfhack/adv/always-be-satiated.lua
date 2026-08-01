@@ -13,6 +13,7 @@ eat or drink, one item is consumed and you carry on.
     disable adv/always-be-satiated    stop
     adv/always-be-satiated            toggle
     adv/always-be-satiated status     thresholds, stomach room, what it can see to consume
+    adv/always-be-satiated forget     wipe the refused/strike lists; everything retries
     Ctrl+E  (in adventure)            toggle on/off in-game
 
 Default is OFF, so nothing happens until you enable it.
@@ -53,9 +54,17 @@ WHAT IT WILL NOT CONSUME:
     puts sapients on the menu; condemnation (MISGUIDED through UNTHINKABLE) keeps the
     screen. OUTSIDERS have no civ and hence no ethics; DF refuses them sapient flesh
     (observed on this save), so no-civ keeps the screen too.
-  * ANYTHING DF ITSELF DECLINED ONCE. An item this script picked that never shows up in
-    DF's list -- or whose row is clicked and clicked and never consumed -- has its item id
-    put on a REFUSED list and is never tried again this session. `status` shows the list.
+  * ANYTHING DF ITSELF DECLINED TWICE. An item this script picked that does not show up
+    in DF's list -- or whose row is clicked and clicked and never consumed -- collects a
+    STRIKE; a second strike on a separate attempt retires its item id to a REFUSED list,
+    never to be tried again this session. TWO strikes, not one, because a single failure
+    can be the player's own doing -- walking keys or an opened menu tear the panel down
+    mid-job, which says nothing about the item (one session's water got blacklisted that
+    way). A job whose panel is torn down under it therefore aborts with NO strike; only a
+    panel that is verifiably up and serving rows can convict, and an item that is later
+    consumed successfully has its old strikes forgiven (stacks keep one item id, so a
+    stack must be able to clear its name). `status` shows both lists;
+    `adv/always-be-satiated forget` wipes them for a fresh start.
   * ROTTEN food, which is itself a way to end up vomiting.
   * LIQUID_MISC that is not water, not creature blood and not raws-edible -- that item
     type also covers lye and ichor. Plain blood IS drunk (a skin of cheetah blood quenches
@@ -72,7 +81,10 @@ only thing that works: the a/b/c hotkey letters shown beside each row are not re
 and feeding them does nothing at all (verified in-game -- adv/fight found the same on the
 attack menu). Rows render at a 3-row pitch under the "...eat or drink?" header, and only ~11
 fit on screen, which is why the row is scrolled up before the click instead of being hunted
-for wherever it happens to be.
+for wherever it happens to be. Consumption is judged by the STOMACH, not the panel:
+counters2.stomach_content rising by about one item is the success signal. The panel merely
+closing proves nothing -- the player's own input also closes it -- so a closed panel over
+an unmoved stomach is an abort, not a meal.
 
 IT ALWAYS HANDS BACK A CLEAN SCREEN. Consuming an item closes the panel by itself, but every
 exit path -- including every giving-up path -- ends by escaping out of whatever is still open
@@ -111,6 +123,15 @@ misses = misses or 0            -- times the row could not be clicked and we bac
 -- panel (sapient flesh slips every static test -- the raws say EDIBLE), or listed but
 -- the clicks never consumed them. Keyed by item id; wanted() skips these forever after.
 refused = refused or {}
+-- ...but conviction takes TWO strikes on separate attempts. A single failure can be the
+-- player's own input tearing the panel down mid-job, which says nothing about the item.
+suspects = suspects or {}
+
+local function strike(id)
+    if not id then return end
+    suspects[id] = (suspects[id] or 0) + 1
+    if suspects[id] >= 2 then refused[id] = true end
+end
 
 -- ---- thresholds -------------------------------------------------------------
 
@@ -148,6 +169,14 @@ local function walking_around()
     return df.global.adventure.menu == df.ui_advmode_menu.Default
 end
 local function now() return dfhack.getTickCount() end
+-- the eat/drink panel is genuinely up and serving rows. Checked at EVERY stage of a job:
+-- the player's own input can close the panel at any moment, and a stage that read stale
+-- state through that would hand out strikes the items never earned
+local function eat_panel_up()
+    local i = inv()
+    return i.open and i.context == df.adventure_interface_inventory_context_type.EAT_DRINK
+        and #i.option_current > 0
+end
 
 -- read one rendered screen row as a plain string (non-ASCII cells become spaces, which is why
 -- every needle we search for is run through ascii_needle first)
@@ -460,10 +489,9 @@ end
 --   'clear'  -> escape out of any leftover menu so we finish on the plain adventure screen
 function AlwaysSatiated:drive()
     local job = self.job
-    local CTX = df.adventure_interface_inventory_context_type
 
     if job.stage == 'open' then
-        if inv().open and inv().context == CTX.EAT_DRINK and #inv().option_current > 0 then
+        if eat_panel_up() then
             job.stage = 'scroll'
             return
         end
@@ -478,6 +506,8 @@ function AlwaysSatiated:drive()
         end
 
     elseif job.stage == 'scroll' then
+        -- torn down under us (the player's walking keys, a menu): abort, no verdicts
+        if not eat_panel_up() then self:begin_clear(); return end
         -- match by item IDENTITY, not by name: the list also holds the ground and our own
         -- gear, and two rows can read alike. Rows with a nil getItem() are the "Eat snow"
         -- style options and can never match, which is exactly what we want.
@@ -498,15 +528,18 @@ function AlwaysSatiated:drive()
                 job.stage, job.at, job.tries = 'click', now() + SETTLE_MS, 0
                 return
             end
-            -- the panel is open and this item is not offered: DF is refusing it (sapient
-            -- flesh we failed to screen, or some other legality) -- never ask again
-            refused[want.id] = true
+            -- the panel is verifiably up and serving rows, and this item is not among
+            -- them: likely DF refusing it (a legality every static test missed). One
+            -- strike; a second failed attempt convicts it onto the refused list
+            strike(want.id)
         end
         misses = misses + 1                       -- nothing we picked is listed: leave quietly
         self:begin_clear()
 
     elseif job.stage == 'click' then
         if now() < job.at then return end          -- let the scrolled list render first
+        -- torn down between scroll and click: abort, no strike
+        if not eat_panel_up() then self:begin_clear(); return end
         if job.needle == '' then self:begin_clear(); return end
         if click_text(job.needle, panel_header_y()) then
             job.stage, job.at = 'verify', now() + SETTLE_MS
@@ -514,22 +547,31 @@ function AlwaysSatiated:drive()
             job.tries = job.tries + 1
             if job.tries > 6 then
                 misses = misses + 1
-                refused[job.target_id] = true      -- its row cannot be clicked: give up on it
+                strike(job.target_id)              -- panel up, row unfindable: strike one
                 self:begin_clear()
             end
         end
 
     elseif job.stage == 'verify' then
-        if not inv().open then                     -- the click took: DF closed the panel
+        -- the STOMACH is the proof of consumption, not the panel: the player's own input
+        -- also closes the panel, and that must be neither counted nor blamed on the item
+        local u = adv_unit()
+        if u and u.counters2.stomach_content >= (job.stomach0 or 0) + UNIT // 2 then
             if job.kind == 'drink' then drank = drank + 1 else ate = ate + 1 end
+            suspects[job.target_id or -1] = nil    -- proved consumable: forgive old strikes
+                                                   -- (stacks keep one id across servings)
             self:begin_clear()
+            return
+        end
+        if not inv().open then                     -- closed over an unmoved stomach: the
+            self:begin_clear()                     -- player tore it down mid-job. No strike.
             return
         end
         if now() < job.at then return end
         job.tries = job.tries + 1
         if job.tries > 6 then
             misses = misses + 1
-            refused[job.target_id] = true          -- clicks land but DF will not consume it
+            strike(job.target_id)                  -- panel up, clicks land, nothing consumed
             self:begin_clear()
         else
             job.stage = 'click'                    -- still open: try the click once more
@@ -585,7 +627,8 @@ function AlwaysSatiated:overlay_onupdate()
     local items = wanted()
     if #items == 0 then self:back_off(); return end   -- nothing to eat: stop looking for a while
     self:mute_keep_inventory()
-    self.job = {stage = 'open', waited = 0, tries = 0, items = items, kind = items[1].kind}
+    self.job = {stage = 'open', waited = 0, tries = 0, items = items, kind = items[1].kind,
+                stomach0 = u.counters2.stomach_content}   -- verify measures against this
     self:drive()
 end
 
@@ -639,14 +682,34 @@ if arg == 'status' then
     local nref = 0
     for _ in pairs(refused) do nref = nref + 1 end
     if nref > 0 then
-        print(('  refused by DF this session (%d) -- will not be tried again:'):format(nref))
+        print(('  refused by DF this session (%d) -- will not be tried again (`forget` resets):'):format(nref))
         for id in pairs(refused) do
             local it = df.item.find(id)
             print('    ' .. (it and describe(it) or ('item #%d (no longer around)'):format(id)))
         end
     end
+    local nsus = 0
+    for id in pairs(suspects) do if not refused[id] then nsus = nsus + 1 end end
+    if nsus > 0 then
+        print(('  one strike (%d) -- a second failed attempt retires them:'):format(nsus))
+        for id in pairs(suspects) do
+            if not refused[id] then
+                local it = df.item.find(id)
+                print('    ' .. (it and describe(it) or ('item #%d (no longer around)'):format(id)))
+            end
+        end
+    end
     print(('  counters: ate=%d drank=%d held(full)=%d held(combat)=%d misses=%d')
         :format(ate, drank, held_full, held_combat, misses))
+    return
+end
+
+if arg == 'forget' then
+    local n = 0
+    for _ in pairs(refused) do n = n + 1 end
+    refused, suspects = {}, {}
+    print(('always-be-satiated: refused/strike lists cleared -- %d retired item(s) get a fresh chance.')
+        :format(n))
     return
 end
 
