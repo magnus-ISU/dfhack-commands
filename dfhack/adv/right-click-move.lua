@@ -4,10 +4,10 @@
 adv/right-click-move
 
 Right-clicking a tile in adventure mode opens a "What do you want to do?" menu offering only
-two things -- "Path to here" and "Path to here (no climbing/jumping)" -- and then, once you
-pick one, up to two more confirmations ("Finish action", and in conflict "In conflict!
-Finish anyway"). That is four clicks to walk somewhere. With this running, a right-click
-just moves you.
+two things -- "Path to here" and "Path to here (no climbing/jumping)" (just the first while
+mounted) -- and then, once you pick one, up to two more confirmations ("Finish action", and
+in conflict "In conflict!  Finish anyway"). That is four clicks to walk somewhere. With this
+running, a right-click just moves you.
 
     adv/right-click-move           start watching (idempotent)
     adv/right-click-move stop      stop
@@ -134,16 +134,19 @@ end
 --   row Y   : a Path to here
 --   row Y+3 : b Path to here (no climbing/jumping)
 --   row Y+6 : (blank => there is no option c)
+-- MOUNTED, the no-climbing variant is not offered, so the same menu is a single
+-- option: row Y as above, row Y+3 blank.
 -- The "a " prefix requirement guarantees plain path IS the first option, so pressing
--- `a` can never hit an Attack/Talk entry in a bigger menu. CALLER MUST have checked
--- menu_on_screen() first -- this scans.
+-- `a` can never hit an Attack/Talk entry in a bigger menu; a bigger menu also fails
+-- the row-Y+3 check (its option b is neither blank nor the no-climbing variant).
+-- CALLER MUST have checked menu_on_screen() first -- this scans.
 local function path_menu_open()
     local x, y = find_text('a Path to here')
     if not x then return false end
-    if not read_row(y + 3, x, 50):find('b Path to here (no climbing/jumping)', 1, true) then
-        return false
-    end
-    return read_row(y + 6, x, 50):match('^%s*$') ~= nil
+    local row3 = read_row(y + 3, x, 50)
+    if row3:match('^%s*$') then return true end   -- mounted: pathing is the only option
+    return row3:find('b Path to here (no climbing/jumping)', 1, true) ~= nil
+        and read_row(y + 6, x, 50):match('^%s*$') ~= nil
 end
 
 -- watcher state (locals, reset on script reload -- counters above persist).
