@@ -1,5 +1,15 @@
 # ha-succubi — fork changelog
 
+## v0.22 -- fix CRASH: clothing-extras tile page declared half its real width
+- `HA_SUCCUBUS_CLOTHING_EXTRAS` said `PAGE_DIM_PIXELS:32:288` (a 1-tile-wide
+  page) while the PNG is 64x288 and six layered-clothing layers (corset,
+  stockings, shortpants `_A` variants) reference column `1:` -- one tile past
+  the declared edge. DF's layered-sprite compositor then copies out of bounds
+  and corrupts the heap: confirmed by valgrind as invalid writes past an SDL
+  surface from `textures::create_texture`, and the cause of a recurring
+  heap-corruption crash burst (~every 10-30 min of adventure play near
+  succubi, 2026-07-31). Declared width corrected to 64.
+
 ## v0.16 -- population caps normalised
 - `MAX_SITE_POP_NUMBER` 1000 -> 120.
 

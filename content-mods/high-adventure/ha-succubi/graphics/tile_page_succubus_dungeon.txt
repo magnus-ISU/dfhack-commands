@@ -55,7 +55,7 @@ tile_page_succubus_dungeon
 [TILE_PAGE:HA_SUCCUBUS_CLOTHING_EXTRAS]
 	[FILE:succubus_dungeon/succubus_clothing.png]
 	[TILE_DIM:32:32]
-	[PAGE_DIM_PIXELS:32:288]
+	[PAGE_DIM_PIXELS:64:288]
 
 [TILE_PAGE:HA_SUCCUBUS_BABY]
 	[FILE:succubus_dungeon/succubus_baby.png]

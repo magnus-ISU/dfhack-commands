@@ -1,5 +1,11 @@
 # ha-drow — fork changelog
 
+## v0.51 -- statues tile page: obsolete PAGE_DIM token -> PAGE_DIM_PIXELS
+- `HA_DROW_STATUES` used `[PAGE_DIM:1:2]` (pre-v50 tiles-based token) instead
+  of `[PAGE_DIM_PIXELS:32:64]`; DF v50 ignores the old token, leaving the page
+  dimensions undeclared. Found in the same graphics audit that caught the
+  ha-succubi crash bug; fixed to the pixel token matching the 32x64 PNG.
+
 ## v0.50 -- drow war gear moved to the shared war-gear engine
 - The iron/steel-by-caste pass added in 0.49 moved to high-adventure/war-gear in
   the HA_adventure_hostility mod, so one engine covers every race. Same rules
