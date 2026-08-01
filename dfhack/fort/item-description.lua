@@ -60,6 +60,14 @@ local overlay = require('plugins.overlay')
 local DF_VISIBLE_ROWS = 8
 local SPAN_W = 57            -- native description/panel column span to clear or fill
 local SCAN_MS = 500          -- geometry rescan cadence in display mode
+-- shifts from the panel's left bound, matching DF's own padding (tuned live):
+-- the moved location line lands at the bound itself, the description pads 2
+local LINE_SHIFT, TEXT_SHIFT = 0, 2
+local SHIFT_Y = 1            -- the moved line sits one extra row down
+local ICON_LIFT = 2          -- the icon sprite stamps this many rows above the line
+-- painting starts one column PAST the left bound: the bound column carries the
+-- panel's border art, and covering it visibly cuts the border
+local BORDER_PAD = 1
 
 ItemDescriptionOverlay = defclass(ItemDescriptionOverlay, overlay.OverlayWidget)
 ItemDescriptionOverlay.ATTRS{
@@ -164,12 +172,16 @@ local function find_geometry(vs)
     end
     if in_row then
         g.in_row = in_row
-        -- capture the pill (3 rows: caps above and below the text row)
+        -- capture the pill (3 rows: caps above and below the text row). One cell
+        -- is EXCLUDED at each side: the band's own end-cap/border tiles also
+        -- differ from the band value, and capturing them moved the panel border
+        -- up with the line (and left the source rows borderless).
+        local cap_l, cap_r = left + 1, left + SPAN_W + TEXT_SHIFT - 1
         for dy = -1, 1 do
             local y = in_row + dy
             if y >= 0 and y < dimy then
                 g.band[dy] = lower[(left + 5) * dimy + y]
-                for x = left, right do
+                for x = cap_l, math.min(cap_r, right) do
                     local v = lower[x * dimy + y]
                     if v ~= 0 and v ~= g.band[dy] then
                         g.pill[#g.pill + 1] = {dx = x - left, dy = dy, val = v}
@@ -228,15 +240,6 @@ local function blank_span(y, x1, x2)
     for x = x1, x2 do dfhack.screen.paintTile(BLANK, x, y) end
 end
 
--- shifts from the panel's left bound, matching DF's own padding (tuned live):
--- the moved location line lands at the bound itself, the description pads 2
-local LINE_SHIFT, TEXT_SHIFT = 0, 2
-local SHIFT_Y = 1              -- the moved line sits one extra row down
-local ICON_LIFT = 2            -- the icon sprite stamps this many rows above the line
--- painting starts one column PAST the left bound: the bound column carries the
--- panel's border art, and covering it visibly cuts the border
-local BORDER_PAD = 1
-
 -- move the native location line to target row ty (text re-copied every frame --
 -- DF redraws it -- art re-stamped from the geometry capture; sources wiped)
 local function move_in_line(g, ty)
@@ -248,12 +251,15 @@ local function move_in_line(g, ty)
     for _, c in ipairs(g.pill) do
         if not pill_min or c.dx < pill_min then pill_min = c.dx end
     end
-    -- text + pens, shifted; source blanked (border column left alone)
-    for x = g.left + BORDER_PAD, g.right do
+    -- text + pens, shifted; source blanked. Bounded to the panel INTERIOR --
+    -- past cap_r sit the band cap and the panel border, which must stay put
+    -- both at the source and at the target.
+    local cap_r = g.left + SPAN_W + TEXT_SHIFT - 1
+    for x = g.left + BORDER_PAD, cap_r do
         local dx = x - g.left
         local shift = (pill_min and dx >= pill_min - 1) and LINE_SHIFT or LINE_SHIFT + 2
         local p = dfhack.screen.readTile(x, g.in_row)
-        if p and x + shift < gps.dimx then
+        if p and x + shift <= cap_r then
             p.tile = 0
             dfhack.screen.paintTile(p, x + shift, ty)
         end
@@ -268,7 +274,7 @@ local function move_in_line(g, ty)
     local gray = lower[(g.left + 5) * dimy + math.max(0, g.remove_row - 1)]
     for y = ty - 1, ty + 1 do
         if y >= 0 and y < dimy then
-            for x = g.left + BORDER_PAD, g.right do
+            for x = g.left + BORDER_PAD, cap_r do
                 local i = x * dimy + y
                 gps.screentexpos[i] = 0
                 gps.screentexpos_top[i] = 0
@@ -296,7 +302,8 @@ local function move_in_line(g, ty)
         if c.show then
             local tyy = ty + c.dy - ICON_LIFT
             if tyy >= 0 then
-                local ti = (g.left + c.dx + LINE_SHIFT) * dimy + tyy
+                -- one column left of the line (tuned live)
+                local ti = math.max(0, g.left + c.dx + LINE_SHIFT - 1) * dimy + tyy
                 anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
             end
         end
@@ -366,7 +373,7 @@ local function render_display_mode(lines, vs)
 end
 
 function ItemDescriptionOverlay:onRenderFrame(dc, rect)
-    local ok = pcall(function()
+    local ok, err = pcall(function()
         local lines, vs = desc_lines()
         if not lines then geo = nil return end
         if has_holder(vs) then
@@ -375,7 +382,10 @@ function ItemDescriptionOverlay:onRenderFrame(dc, rect)
             geo = nil
         end
     end)
-    if not ok then geo = nil end
+    if not ok then
+        geo = nil
+        last_error = err    -- env global: read via reqscript(...).last_error
+    end
 end
 
 -- wheel-scroll our expanded description; teleport clicks on the moved In-line
