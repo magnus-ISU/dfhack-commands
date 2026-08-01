@@ -1,6 +1,9 @@
 -- Adventure mode: save the game the way the player does, automatically.
 --@module = true
---[[
+-- The doc block below uses [====[ ]====] markers so DFHack's helpdb picks it
+-- up straight from this file: both `help adv/auto-save` and `adv/auto-save
+-- help` serve it, no separate docs file needed.
+--[====[
 adv/auto-save
 =============
 
@@ -13,11 +16,13 @@ steps a player takes -- and can repeat it on a timer:
     adv/auto-save enable [min]     also auto-save every N minutes (default 20)
     adv/auto-save disable          stop the timer
     adv/auto-save status           what it's doing
+    adv/auto-save help             print this help
+    adv/auto-save <name>           save once under save/<name>
 
 The interval is counted from the last SUCCESSFUL save, and `enable` arms it
 from that moment -- enabling never fires a save immediately.  TWO clocks
 must both agree before a save runs: the wall clock (the N minutes above) and
-the in-game clock, which must have advanced at least MIN_GAME_HOURS (2)
+the in-game clock, which must have advanced at least MIN_GAME_HOURS (1)
 since the last save.  Adventure mode only advances game time while you act,
 so an idle or AFK game is never saved over and over -- the pending save just
 waits and fires the moment you play again.
@@ -61,7 +66,7 @@ step has a wall-clock timeout and retry, and a cycle only STARTS from the
 plain dungeonmode/Default focus (never mid-travel, mid-conversation or
 inside someone else's menu).  On any timeout it reports, feeds one
 LEAVESCREEN to close what it opened, and gives up rather than wander.
-]]
+]====]
 
 local overlay = require('plugins.overlay')
 local gui = require('gui')
@@ -81,7 +86,7 @@ local SAVER_IDLE = 51        -- options.saver.stage when no save is running
 -- you actually act, so standing still parks it -- exactly the AFK case.
 local TICKS_PER_HOUR = 50
 local TICKS_PER_YEAR = 403200
-local MIN_GAME_HOURS = 2
+local MIN_GAME_HOURS = 1
 
 -- ALL cross-invocation state lives in env GLOBALS, never file locals: every
 -- command invocation re-executes this file in the shared script env, which
@@ -375,6 +380,13 @@ elseif cmd == 'disable' then
     print('adv/auto-save: timer off.')
 elseif cmd == 'status' then
     status()
+elseif cmd == 'help' or cmd == '-h' or cmd == '--help' then
+    -- helpdb serves the [====[ ]====] block at the top of this file. Without
+    -- this branch `help` would fall through to save_now and write a save
+    -- literally named "help".
+    if not pcall(function() require('helpdb').help('adv/auto-save') end) then
+        print('adv/auto-save [enable [min] | disable | status | help | <name>]')
+    end
 else
     -- NB: no overlay.rescan() here -- rescanning from inside a command
     -- execution reloads this very script and orphans the cycle state the

@@ -2,6 +2,12 @@
 
 ## Adventure mode features
 
+### **`adv/auto-save`** 
+Save adventurer mode automatically. `adv/auto-save enable 20` to save every
+  20 minutes, which is default. 1 hour must pass in-game between autosaves.
+
+![adv/auto-save demo](demos/adv-auto-save.png)
+
 ### **`adv/map-travel`** 
 Allow clicking to travel more than 1 tile in fast travel, like in
   non-fast-travel.
@@ -54,16 +60,6 @@ The attack screens show a combat summary under each name — every
 
 ![adv/watch-their-blade demo](demos/adv-watch-their-blade.png)
 
-### **`adv/auto-save`** 
-Save adventure mode automatically: `adv/auto-save` saves right now by
-  driving DF's own escape-menu flow; `enable [min]` repeats it every N minutes
-  (default 20). A save only fires once BOTH clocks agree — N wall-clock minutes
-  AND two in-game hours since the last save — so an idle game is never saved over
-  and over, and only from a quiet screen (no menus, no conversation), so it never
-  fights a menu stack you are in the middle of.
-
-![adv/auto-save demo](demos/adv-auto-save.png)
-
 ### **`smooth-movement`** 
 Smooth camera panning in adventure mode, and smooth movement for
   creatures and the player in adventure mode. (A C++ plugin rather than a script — install it
@@ -94,7 +90,7 @@ Automatically give you a decent starting gear loadout
 ![embark/adventurer-default-items demo](demos/embark-adventurer-default-items.png)
 
 ### **`embark/adventurer-map`**
-The Background tab of adventurer creation shows a world map that names nothing. This hovers
-the same site card `adv/read-the-map` draws on the travel map — race-led headline, owner and
-population, nobles, legends, lair dwellers, camp crews — so you can see what you are starting
-next to before you commit.
+Show information about sites on the world map during adventurer creation. Clicking on a
+site changes your origin to there, if possible.
+
+![embark/adventurer-map demo](demos/embark-adventurer-map.gif)
