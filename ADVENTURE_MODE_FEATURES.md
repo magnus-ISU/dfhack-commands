@@ -34,7 +34,7 @@ Automatically reopen the inventory and scroll to the last position
 ![adv/keep-inventory demo](demos/adv-keep-inventory.gif)
 
 ### **`adv/inventory-display-weight`** 
-Show every item's weight in the inventory list.
+Show every item's weight in the inventory list and the pick-up menu.
 
 ![adv/inventory-display-weight demo](demos/adv-inventory-display-weight.png)
 

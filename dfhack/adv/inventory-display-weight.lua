@@ -15,6 +15,12 @@ weight on its row: right-aligned, on the TOP half of the item's two-row entry,
 just left of the button icons (the magnifying-glass "View this item" column).
 Weights under 1{weight} show as "<1{weight}".
 
+The PICK-UP menu (right-click a tile with items: "What do you want to do?" with
+"Get ..." options) gets the same treatment: any option that resolves to an item
+shows that item's weight, right-aligned two past the longest visible row. That
+menu is the generic adventure option_list (context menus share it), so options
+without an item -- "View yourself", "Path to here" -- simply show nothing.
+
     adv/inventory-display-weight           print status (overlay is on by default)
     adv/inventory-display-weight help      print this help
 
@@ -58,6 +64,16 @@ local HEADER = 'Your inventory'
 local WEIGHT_CH = string.char(226)   -- CP437 gamma, DF's weight symbol
 
 running = running or true
+
+-- item.weight is a lazy cache: carried items have it, GROUND items read 0/0
+-- until DF's own calculateWeight() fills it in (measured: an iron statue read
+-- 0 until the call, 471 after)
+local function weight_of(item)
+    if item.weight.whole == 0 and item.weight.fraction == 0 then
+        pcall(function() item:calculateWeight() end)
+    end
+    return item.weight
+end
 
 local function fmt_weight(w)
     if w.whole >= 1 then return tostring(w.whole) .. WEIGHT_CH end
@@ -141,6 +157,50 @@ local PEN = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
 local cache = nil
 local scan_at, tries, last_key = 0, 0, nil
 
+-- the pick-up / context menu: weight for every option that resolves to an item.
+-- Mapping is verified per row: the cleaned rendered row must CONTAIN the item
+-- description's first alphanumerics ("Get Urist's right arm  iron gauntlet").
+local function rebuild_pickup()
+    local ol = df.global.game.main_interface.adventure.option_list
+    local lines = read_screen()
+    if not lines then return nil end
+    local header_y
+    for y = 1, #lines do
+        if lines[y]:find('What do you want to do?', 1, true) then header_y = y break end
+    end
+    if not header_y then return nil end
+    local rows = find_entries(lines, header_y)
+    if not rows[1] then return nil end
+    -- shared right-align anchor: all weights end 2 + max-weight-width past the
+    -- longest visible row (weights are at most 4 cells wide)
+    local maxlen = 0
+    for _, e in ipairs(rows) do
+        local txt = lines[e.row + 1]:gsub('%s+$', '')
+        if #txt > maxlen then maxlen = #txt end
+    end
+    local end0 = math.min(maxlen + 5, df.global.gps.dimx - 2)   -- 0-based end col
+    local scroll = ol.scroll_position
+    local entries = {}
+    for k, e in ipairs(rows) do
+        local ok, item = pcall(function()
+            return ol.option[scroll + k - 1]:getItem()
+        end)
+        if ok and item then
+            local rowclean = lines[e.row + 1]:gsub('%W', ''):lower()
+            local want = name_key(dfhack.items.getReadableDescription(item)):sub(1, 8)
+            if want ~= '' and rowclean:find(want, 1, true) then
+                local text = fmt_weight(weight_of(item))
+                local x = end0 - #text + 1
+                if lines[e.row + 1]:sub(x, end0 + 1):match('^%s*$') then
+                    entries[#entries+1] = {row = e.row, x = x, text = text}
+                end
+            end
+        end
+    end
+    if #entries == 0 then return nil end
+    return {entries = entries}
+end
+
 local function rebuild()
     local inv = df.global.game.main_interface.adventure.inventory
     local lines = read_screen()
@@ -170,7 +230,7 @@ local function rebuild()
             local shown = name_key(lines[e.row + 1]:sub(e.col + 3))
             local want = name_key(dfhack.items.getReadableDescription(item))
             if shown == want then
-                local text = fmt_weight(item.weight)
+                local text = fmt_weight(weight_of(item))
                 local x = anchor - #text + 1
                 -- never overwrite the name: the target cells must have scanned blank
                 if lines[e.row + 1]:sub(x, anchor + 1):match('^%s*$') then
@@ -185,17 +245,22 @@ end
 
 local function paint()
     if not running then return end
-    local inv = df.global.game.main_interface.adventure.inventory
-    if not inv.open then cache, scan_at, tries, last_key = nil, 0, 0, nil return end
+    local adv = df.global.game.main_interface.adventure
+    local inv, ol = adv.inventory, adv.option_list
+    local mode = inv.open and 'i' or ol.open and 'p' or nil
+    if not mode then cache, scan_at, tries, last_key = nil, 0, 0, nil return end
     local now = dfhack.getTickCount()
-    local key = ('%d:%d:%d'):format(inv.scroll_position, #inv.option_current,
-        df.global.gps.dimx)
+    local key = mode == 'i'
+        and ('i:%d:%d:%d'):format(inv.scroll_position, #inv.option_current,
+            df.global.gps.dimx)
+        or ('p:%d:%d:%d'):format(ol.scroll_position, #ol.option,
+            df.global.gps.dimx)
     -- any scroll/resize forces a prompt rescan EVEN IF the last scan failed --
     -- resetting `tries` here is what keeps the weights snappy while scrolling
     -- (the old cache is dropped too: it maps the previous page's items)
     if key ~= last_key then last_key, tries, scan_at, cache = key, 0, 0, nil end
     if now >= scan_at then
-        cache = rebuild()
+        cache = mode == 'i' and rebuild() or rebuild_pickup()
         if cache then
             tries = 0
             scan_at = now + SCAN_MS
