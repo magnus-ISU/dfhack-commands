@@ -40,21 +40,23 @@ Activates the "always-on" helpers in this pack:
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
     * plan-tile                 (overlay: left-drag during building placement -> tile a grid of it)
+    * smooth-movement           (plugin: smooth creature movement between tiles, plus
+                                 the free camera -- scroll glide, pixel-perfect drag
+                                 pan, sub-tile rest; opted in for fort mode here)
     * hide-tutorials            (stock tool: suppresses the tutorial popups; covers
                                  ADVENTURE popups too, so the adventure-mode branch
                                  enables it as well)
 
 In ADVENTURE mode this script instead enables the adventure helpers, among them
 adv/auto-save (saves as "adventurer-autosave" every 20 minutes, timed from the
-last successful save and deferred until no menu is open).
+last successful save and deferred until no menu is open) and smooth-movement
+(the free camera is auto-on in adventure mode; the glide is set to a slow,
+cinematic catch-up: `smooth-movement camera speed 150`).
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
-full description), load smooth-movement (3rd-party render-only plugin that
-interpolates creature sprites between tiles -- source is the
-other-authors/df-smooth-movement submodule, binary in DFHack's hack/plugins),
-and enable a batch of stock DFHack tools:
+full description), and enable a batch of stock DFHack tools:
     enable: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
             `name+` burrows), prioritize, seedwatch, suspendmanager, timestream
     tweak:  fast-heat, realistic-melting
@@ -120,6 +122,7 @@ if not dfhack.world.isFortressMode() then
             atry('stop adv/reveal', function() dfhack.run_script('adv/reveal', 'stop') end)
             atry('disable adv/keep-inventory', function() dfhack.run_command('disable', 'adv/keep-inventory') end)
             atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
+            atry('disable smooth-movement', function() dfhack.run_command('disable', 'smooth-movement') end)
         else
             -- saves every 20 minutes by driving the escape menu the way a player
             -- does. Counted from the last successful save, and it waits for a
@@ -163,6 +166,16 @@ if not dfhack.world.isFortressMode() then
                                     'embark/adventurer-map.map'}) do
                     dfhack.run_command('overlay', 'enable', w)
                 end
+            end)
+            -- smooth creature movement + the free camera (auto-on in adventure mode: the
+            -- camera follows the player, so every step glides instead of snapping). The
+            -- slow glide tau makes the catch-up leisurely/cinematic (default 35 = ~100ms;
+            -- 150 = ~450ms). Fails gracefully when the plugin binary isn't installed
+            -- (run `make build` in dfhack-commands).
+            atry('smooth-movement (player/creature interpolation + slow camera glide)', function()
+                pcall(dfhack.run_command, 'load', 'smooth-movement')
+                dfhack.run_command('enable', 'smooth-movement')
+                pcall(dfhack.run_command, 'smooth-movement', 'camera', 'speed', '150')
             end)
         end
     end
@@ -217,6 +230,7 @@ if ({...})[1] == 'disable' then
     try('disable tarrasque', function() dfhack.run_command('disable', 'fort/tarrasque') end)
     try('disable caravan-unstick', function() dfhack.run_command('disable', 'fort/caravan-unstick') end)
     try('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
+    try('disable smooth-movement', function() dfhack.run_command('disable', 'smooth-movement') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'fort/dwarf-rts.clickmove') end)
     try('disable item-description overlay', function() dfhack.run_command('overlay', 'disable', 'fort/item-description.expand') end)
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'fort/right-click-cancel.cancel') end)
@@ -284,6 +298,20 @@ try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('
 try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('fort/dig-shapes') end)
 try('plan-tile (drag to tile many buildings during placement)', function() dfhack.run_script('fort/plan-tile') end)
 
+-- render-only smooth interpolation of creature sprites between adjacent tiles, plus the
+-- free camera (scroll glide + pixel-perfect drag pan + sub-tile rest). 3rd-party C++
+-- plugin by notliad; source vendored as the other-authors/df-smooth-movement submodule,
+-- binary installed in DFHack's hack/plugins/. It auto-loads at DFHack startup when the
+-- .plug.so is present; `load` here is a harmless fallback for a mid-session install. If
+-- the binary isn't installed this just fails gracefully -- run `make build` to build it
+-- (SDL 2D renderer only). Part of the BASE set (not just lovely): the camera is opted in
+-- here for fort mode too (adventure mode turns it on by itself).
+try('smooth-movement (smooth creature movement + free camera)', function()
+    pcall(dfhack.run_command, 'load', 'smooth-movement')
+    dfhack.run_command('enable', 'smooth-movement')
+    pcall(dfhack.run_command, 'smooth-movement', 'camera', 'on')
+end)
+
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
 if lovely then
     -- standing orders (1 = on/auto, 0 = off): enforce off every session
@@ -315,21 +343,6 @@ if lovely then
     -- revive and later RETURN as a real attack (the megabeast pool never runs dry)
     try('tarrasque (solstice megabeast revival)',
         function() dfhack.run_command('enable', 'fort/tarrasque') end)
-
-    -- render-only smooth interpolation of matching creature sprites between adjacent
-    -- tiles (3rd-party C++ plugin by notliad; source vendored as the
-    -- other-authors/df-smooth-movement submodule, prebuilt binary installed in DFHack's
-    -- hack/plugins/). It auto-loads at DFHack startup when the .plug.so is present; `load`
-    -- here is a harmless fallback for a mid-session install, then enable turns it on. If the
-    -- binary isn't installed this just fails gracefully -- run `make install` to fetch it
-    -- (SDL 2D renderer only).
-    try('smooth-movement (render-only smooth creature movement)', function()
-        pcall(dfhack.run_command, 'load', 'smooth-movement')
-        dfhack.run_command('enable', 'smooth-movement')
-        -- the free camera (scroll glide + pixel-perfect drag pan + sub-tile rest) is opt-in
-        -- per session in the plugin; opt in here. Harmless no-op on builds without it.
-        pcall(dfhack.run_command, 'smooth-movement', 'camera', 'on')
-    end)
 
     local function enable_tool(c) try('enable ' .. c, function() dfhack.run_command('enable', c) end) end
     local function tweak_tool(c) try('tweak ' .. c, function() dfhack.run_command('tweak', c) end) end
