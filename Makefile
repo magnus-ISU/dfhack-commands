@@ -1,21 +1,30 @@
-# Makefile — install the df-smooth-movement DFHack plugin.
+# Makefile — deploy this repo into Dwarf Fortress + DFHack.
 #
-# The submodule under other-authors/df-smooth-movement ships SOURCE ONLY, and that source only
-# builds inside a full DFHack source tree (its CMakeLists uses DFHack's dfhack_plugin() macro —
-# see the submodule README "Build" section). So there is no standalone source build here.
+# `make install` ships EVERYTHING this repo produces, in this order:
 #
-# `make install` downloads the prebuilt plugin binary matching your platform and DFHack version
-# from the upstream GitHub release, verifies its SHA-256, and extracts it into DFHack's plugin
-# directory. The plugin is auto-enabled by `magnus-scripts lovely`; `make enable` turns it on now.
+#   1. install-scripts  dfhack/ -> $DF/dfhack-config/scripts/   (hot-reloads a running DF)
+#   2. install-mods     content-mods/high-adventure/* -> $DF/mods/, then prune-snapshots
+#   3. install-plugin   download + verify the df-smooth-movement binary into DFHack
 #
-# Common use:
-#     make install                              # auto-detect everything
-#     make install DFHACK_DIR=/path/to/DFHack   # if your DFHack lives elsewhere
-#     make install DFHACK_VERSION=53.15-r2      # pin the release asset explicitly
-#     make build                                # compile from the submodule SOURCE instead
-#                                               # (clones the DFHack source tree into build/ on
-#                                               # first run; use when the source has unreleased
-#                                               # fixes). Restart DF after installing.
+# The local steps run FIRST so a network failure in step 3 cannot cost you a mod deploy.
+#
+#   make install                              # everything, auto-detect paths
+#   make install-mods                         # mods + snapshot prune only
+#   make mods-status                          # repo vs deployed vs snapshot, no changes
+#   make install DFHACK_DIR=/path/to/DFHack   # if your DFHack lives elsewhere
+#   make build                                # compile the plugin from submodule SOURCE instead
+#
+# THINGS THAT WILL BITE YOU (see instructions.md for the long version):
+#
+# * DELETING OLD VERSIONS IS THE POINT. `prune-snapshots` runs `rm -rf` on every snapshot under
+#   $B12/data/installed_mods whose version is below the one now in $DF/mods. This repo keeps
+#   exactly ONE version of each mod alive, and that BREAKS ANY SAVE generated against an older
+#   one. Old worlds are expendable here; a picker full of stale versions is not worth them.
+# * DF scans $DF/mods exactly ONCE, at startup. Deploying while the game runs is invisible to it
+#   — RESTART DF before generating a world, or worldgen silently uses the old raws.
+# * The `high-adventure` bundle is GENERATED from the sibling ha-* mods and never updates itself.
+#   install-mods refuses to deploy a bundle that has drifted from its members, and tells you to
+#   bump the version in build-high-adventure.py and re-run it.
 #
 # Re-run after every DFHack update (plugins are ABI-specific to a DFHack version).
 
@@ -68,12 +77,38 @@ README_SECTIONS := FORTRESS_MODE_FEATURES.md \
                    HIGH_ADVENTURE_FEATURES.md
 README_PARTS    := $(README_HEADER) $(README_SECTIONS)
 
+# --- repo deploy (make install-scripts / install-mods / prune-snapshots) ---
+# DF_DIR is the game install (contains mods/ and dfhack-config/). B12_DIR is DF's USER data, a
+# different tree entirely: saves live there, and so do the per-world baked mod snapshots that
+# prune-snapshots cleans out. Both paths contain a space — every use must stay quoted.
+DF_DIR      ?= $(HOME)/.local/share/Steam/steamapps/common/Dwarf Fortress
+B12_DIR     ?= $(HOME)/.local/share/Bay 12 Games/Dwarf Fortress
+MODS_SRC    := $(ROOT)/content-mods/high-adventure
+SCRIPTS_SRC := $(ROOT)/dfhack
+BUNDLE      := high-adventure
+# subtrees the bundle build merges verbatim from each member; used to detect a drifted bundle
+MERGED_SUBDIRS := objects graphics scripts_modactive
+
 .DEFAULT_GOAL := help
-.PHONY: help install build enable disable status uninstall readme
+# Deploy order matters (mods before the network step; prune after the deploy that defines
+# "current"), so never let -j interleave these.
+.NOTPARALLEL:
+.PHONY: help install install-scripts install-mods check-bundle prune-snapshots mods-status \
+        install-plugin build enable disable status uninstall readme
 
 help:
-	@echo "df-smooth-movement plugin — make targets:"
-	echo "  make install    download + checksum-verify the prebuilt plugin, install into DFHack"
+	@echo "dfhack-commands — make targets:"
+	echo
+	echo "Deploy the repo into the game:"
+	echo "  make install          EVERYTHING: scripts, then mods (+ prune), then the plugin"
+	echo "  make install-scripts  dfhack/ -> DF's script path; hot-reloads a running DF"
+	echo "  make install-mods     content mods -> \$$DF/mods, then prune-snapshots"
+	echo "  make prune-snapshots  rm -rf per-world snapshots older than what is deployed."
+	echo "                        THIS BREAKS SAVES made against those versions, by design."
+	echo "  make mods-status      repo vs deployed vs snapshot versions; changes nothing"
+	echo
+	echo "df-smooth-movement plugin:"
+	echo "  make install-plugin  download + checksum-verify the prebuilt plugin, install into DFHack"
 	echo "  make build      compile the plugin from the submodule source (clones the DFHack"
 	echo "                  source tree into build/ on first run) and install it. Restart DF after."
 	echo "  make enable     load + enable it now (Dwarf Fortress must be running)"
@@ -85,12 +120,189 @@ help:
 	echo "  make readme     compose README.md from $(words $(README_PARTS)) part files (edit those, not README.md)"
 	echo
 	echo "Variables (override on the command line, e.g. make install DFHACK_DIR=...):"
+	echo "  DF_DIR          = $(DF_DIR)"
+	echo "  B12_DIR         = $(B12_DIR)"
 	echo "  DFHACK_DIR      = $(DFHACK_DIR)"
 	echo "  RELEASE         = $(RELEASE)"
 	echo "  DFHACK_VERSION  = $(if $(DFHACK_VERSION),$(DFHACK_VERSION),(auto-detect))"
 	echo "  REPO            = $(REPO)"
 
-install:
+# Local deploys first: if the network step fails, the mods are already in place.
+install: install-scripts install-mods install-plugin
+	@echo
+	echo "All deployed. RESTART Dwarf Fortress before generating a world — DF scans mods/ once,"
+	echo "at startup, so raws deployed into a running game are invisible to worldgen."
+
+# ---------------------------------------------------------------------------
+# dfhack/ mirrors the deployed layout exactly, so a plain recursive copy keeps every command's
+# folder prefix (fort/auto-name, adv/reveal, ...). Overlay widgets need a rescan to pick up new
+# code; plain commands are re-read per invocation, so they need nothing.
+install-scripts:
+	@dst="$(DF_DIR)/dfhack-config/scripts"
+	if [ ! -d "$(DF_DIR)" ]; then
+	  echo "Dwarf Fortress not found at: $(DF_DIR)"
+	  echo "Point DF_DIR at your install:  make install-scripts DF_DIR=/path/to/Dwarf Fortress"
+	  exit 1
+	fi
+	mkdir -p "$$dst"
+	cp -r "$(SCRIPTS_SRC)/." "$$dst/"
+	echo "scripts -> $$dst ($$(find "$(SCRIPTS_SRC)" -name '*.lua' | wc -l) lua files)"
+	if [ -x "$(DFRUN)" ] && "$(DFRUN)" lua 'print(1)' >/dev/null 2>&1; then
+	  "$(DFRUN)" lua 'require("plugins.overlay").rescan()' >/dev/null 2>&1 \
+	    && echo "  hot-reloaded overlays in the running game" \
+	    || echo "  warning: overlay rescan failed — check the DFHack console for a load error"
+	else
+	  echo "  (DF not running; scripts load on next launch)"
+	fi
+
+# ---------------------------------------------------------------------------
+# Deploy every mod that has an info.txt (art/ and the build script are skipped), each via an
+# atomic copy-then-swap so a half-written mod is never visible to a running game.
+install-mods: check-bundle
+	@if [ ! -d "$(DF_DIR)/mods" ]; then
+	  echo "No mods/ dir under: $(DF_DIR)"
+	  echo "Point DF_DIR at your Dwarf Fortress install."
+	  exit 1
+	fi
+	cd "$(MODS_SRC)"
+	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
+	for m in */; do
+	  m="$${m%/}"
+	  [ -f "$$m/info.txt" ] || continue
+	  new="$$(field "$$m" DISPLAYED_VERSION)"
+	  dst="$(DF_DIR)/mods/$$m"
+	  old="(new)"
+	  [ -f "$$dst/info.txt" ] && old="$$(field "$$dst" DISPLAYED_VERSION)"
+	  # Same version, different bytes = the trap DF cannot see: it keys snapshots by version, so
+	  # it will keep serving the old snapshot forever. Loud warning, not an error — you may simply
+	  # be re-deploying after an edit you have not versioned yet.
+	  same_ver_drift=""
+	  if [ "$$old" = "$$new" ] && [ -d "$$dst" ]; then
+	    diff -rq "$$m" "$$dst" >/dev/null 2>&1 || same_ver_drift=" <- CONTENT CHANGED WITHOUT A VERSION BUMP"
+	  fi
+	  tmp="$$dst.tmp.$$$$"
+	  rm -rf "$$tmp"
+	  cp -a "$$m" "$$tmp"
+	  rm -rf "$$dst"
+	  mv "$$tmp" "$$dst"
+	  if [ "$$old" = "$$new" ]; then
+	    printf '  %-26s %s%s\n' "$$m" "$$new" "$$same_ver_drift"
+	    [ -n "$$same_ver_drift" ] && drifted="$$drifted $$m"
+	  else printf '  %-26s %s -> %s\n' "$$m" "$$old" "$$new"; fi
+	done
+	if [ -n "$${drifted:-}" ]; then
+	  echo
+	  echo "  NOTE:$$drifted changed content but kept the same version number."
+	  echo "  \$$DF/mods now has the new files, but every ALREADY-GENERATED world keeps loading"
+	  echo "  its baked snapshot, which DF keys by version and will therefore never refresh."
+	  echo "  Bump those mods (and rebuild the bundle) if the change must reach existing worlds."
+	fi
+	# -C: this recipe has cd'd into the mod source dir, and the Makefile is not there.
+	$(MAKE) -C "$(ROOT)" --no-print-directory prune-snapshots
+
+# The bundle is generated, so it silently rots whenever a member changes. Two independent ways it
+# rots, both fatal here: its merged files no longer match the members (never rebuilt), or its
+# description advertises member versions that have moved on (rebuilt before the members bumped).
+check-bundle:
+	@cd "$(MODS_SRC)"
+	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
+	if [ ! -f "$(BUNDLE)/info.txt" ]; then
+	  echo "No generated bundle at $(MODS_SRC)/$(BUNDLE) — run: python3 build-high-adventure.py"
+	  exit 1
+	fi
+	desc="$$(field "$(BUNDLE)" DESCRIPTION)"
+	stale=""
+	for m in */; do
+	  m="$${m%/}"
+	  [ -f "$$m/info.txt" ] || continue
+	  [ "$$m" = "$(BUNDLE)" ] && continue
+	  nm="$$(field "$$m" NAME)"; vr="$$(field "$$m" DISPLAYED_VERSION)"
+	  case "$$desc" in *"$$nm $$vr"*) ;; *) stale="$$stale $$m($$vr:not-in-bundle-description)" ;; esac
+	  for sub in $(MERGED_SUBDIRS); do
+	    [ -d "$$m/$$sub" ] || continue
+	    # every member file must appear byte-identical in the bundle; bundle-only files are the
+	    # other members' contributions and are expected
+	    d="$$(diff -rq "$$m/$$sub" "$(BUNDLE)/$$sub" 2>/dev/null | grep -v "^Only in $(BUNDLE)/" || true)"
+	    [ -n "$$d" ] && stale="$$stale $$m/$$sub"
+	  done
+	done
+	if [ -n "$$stale" ]; then
+	  echo "The generated $(BUNDLE) bundle has drifted from its members:"
+	  for s in $$stale; do echo "    $$s"; done
+	  echo
+	  echo "Bump NUMERIC_VERSION/DISPLAYED_VERSION at the top of build-high-adventure.py, then:"
+	  echo "    (cd $(MODS_SRC) && python3 build-high-adventure.py)"
+	  echo "Deploying a stale bundle ships old raws under a version DF thinks it already has."
+	  exit 1
+	fi
+	echo "bundle $$(field "$(BUNDLE)" DISPLAYED_VERSION) is in sync with its members"
+
+# ---------------------------------------------------------------------------
+# DF bakes a per-world snapshot named "<MOD_ID> (numeric_version)" and loads that world's scripts
+# and graphics from it forever. Anything below the deployed version is dead weight that still
+# shows up in the mod picker, so it goes. Snapshots for IDs this repo does not ship are left
+# alone. A snapshot AT the deployed version is current — keep it, a live world is using it.
+prune-snapshots:
+	@snap="$(B12_DIR)/data/installed_mods"
+	if [ ! -d "$$snap" ]; then echo "no snapshot dir at $$snap — nothing to prune"; exit 0; fi
+	cd "$(MODS_SRC)"
+	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
+	declare -A cur
+	for m in */; do
+	  m="$${m%/}"
+	  [ -f "$$m/info.txt" ] || continue
+	  cur["$$(field "$$m" ID)"]="$$(field "$$m" NUMERIC_VERSION)"
+	done
+	shopt -s nullglob
+	deleted=0
+	for d in "$$snap"/*/; do
+	  b="$$(basename "$$d")"
+	  id="$${b%% (*}"
+	  n="$${b##*\(}"; n="$${n%\)}"
+	  want="$${cur[$$id]:-}"
+	  if [ -z "$$want" ]; then printf '  keep    %-34s (not a mod this repo ships)\n' "$$b"; continue; fi
+	  case "$$n" in ''|*[!0-9]*) printf '  keep    %-34s (unparsable version)\n' "$$b"; continue ;; esac
+	  if [ "$$n" -lt "$$want" ]; then
+	    rm -rf "$$d"
+	    printf '  DELETED %-34s (superseded by %s)\n' "$$b" "$$want"
+	    deleted=$$((deleted + 1))
+	  else
+	    printf '  keep    %-34s (current)\n' "$$b"
+	  fi
+	done
+	if [ "$$deleted" -gt 0 ]; then
+	  echo "  -> $$deleted stale snapshot(s) removed. Saves made against them will no longer load."
+	  if pgrep -x dwarfort >/dev/null 2>&1; then
+	    echo "  -> Dwarf Fortress is RUNNING. If the world you have loaded used one of these,"
+	    echo "     do not count on reloading that save."
+	  fi
+	fi
+
+# Read-only three-way comparison: what the repo builds, what the game will load at next startup,
+# and which baked snapshots survive. Run it after an install to confirm the deploy landed.
+mods-status:
+	@cd "$(MODS_SRC)"
+	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
+	snap="$(B12_DIR)/data/installed_mods"
+	printf '%-26s %-8s %-10s %s\n' MOD REPO DEPLOYED SNAPSHOTS
+	for m in */; do
+	  m="$${m%/}"
+	  [ -f "$$m/info.txt" ] || continue
+	  r="$$(field "$$m" DISPLAYED_VERSION)"
+	  id="$$(field "$$m" ID)"
+	  p="MISSING"
+	  [ -f "$(DF_DIR)/mods/$$m/info.txt" ] && p="$$(field "$(DF_DIR)/mods/$$m" DISPLAYED_VERSION)"
+	  shopt -s nullglob
+	  s=""
+	  for d in "$$snap/$$id ("*")"/; do
+	    b="$$(basename "$$d")"; v="$${b##*\(}"; s="$$s $${v%\)}"
+	  done
+	  [ -z "$$s" ] && s=" (none)"
+	  mark=""; [ "$$r" = "$$p" ] || mark="   <<< STALE, run make install-mods"
+	  printf '%-26s %-8s %-10s%s%s\n' "$$m" "$$r" "$$p" "$$s" "$$mark"
+	done
+
+install-plugin:
 	@platform=""
 	case "$(UNAME_S)/$(UNAME_M)" in
 	  Linux/x86_64) platform="linux-x86_64" ;;

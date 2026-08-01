@@ -80,6 +80,27 @@ ls -d "$B12/data/installed_mods/"*/          # inspect first, then rm -rf the ol
 Snapshots that MATCH the current `$DF/mods` version are not "old" — leave those; they are
 what the live world loads scripts and graphics from.
 
+## Deploy everything: `make install`
+
+`make install` does the whole deploy — scripts, then mods, then the plugin — and is the normal
+way to ship. The rest of this section explains what it does and how to do it by hand.
+
+```sh
+make install          # scripts + mods (+ snapshot prune) + plugin
+make install-mods     # mods only, then prune superseded snapshots
+make install-scripts  # dfhack/ only; hot-reloads a running DF
+make mods-status      # repo vs deployed vs snapshot versions; changes nothing
+```
+
+Two things it does that are easy to forget by hand: it **refuses to deploy a `high-adventure`
+bundle that has drifted from its members** (either the merged files no longer match, or the
+bundle description advertises member versions that have moved on), and it **`rm -rf`s every
+snapshot below the version now deployed** — which is the policy below, applied automatically.
+It also warns when a mod's content changed but its version did not, since DF keys snapshots by
+version and will never refresh one.
+
+It does NOT bump versions or regenerate the bundle for you — those stay deliberate.
+
 ## Deploy a content mod
 
 Source of truth is `content-mods/high-adventure/<mod>/`. To ship a change:
@@ -143,7 +164,7 @@ cp dfhack/fort/auto-name.lua "$DF/dfhack-config/scripts/fort/"
 
 Deploy the whole set at once — `dfhack/` mirrors the deployed layout exactly:
 ```sh
-cp -r dfhack/. "$DF/dfhack-config/scripts/"
+cp -r dfhack/. "$DF/dfhack-config/scripts/"   # or: make install-scripts (also rescans overlays)
 ```
 
 ## Run a DFHack command
