@@ -43,6 +43,21 @@ Armies get cards too: member count, race breakdown and the leading names
 (`army.members` -> nemesis -> histfig); a lone wanderer -- often a roaming
 megabeast, sometimes a hidden one -- reads "Roaming: <name> (<species>)".
 
+OPEN WILDERNESS gets a card of its own -- the region and what lives there,
+biggest species first:
+
+    Desert: The Noiseless Dune
+      Wildlife: ravens, peregrine falcons
+
+A world region stores its fauna as `world_population` records (up to ~14
+Animal entries per region) in the same vector as its grasses, bushes and
+vermin; only the Animal records are wildlife, and populations hunted to zero
+are dropped.  Sorting is by the species' `adult_size`, so the order itself
+tells you what is dinner and what considers YOU dinner.  The card shows ONLY
+outside of sites: hovering a town keeps the town's card uncluttered.  The
+region under a mid tile comes from `region_map` -- world-tile indexed, and a
+row is a POINTER, so it is read with `_displace`, never `[y]`.
+
 How the lesser map is decoded (all verified live against drawn markers):
 
 - The map renders through `gps.main_map_port`, a `dim_x x dim_y` grid of
@@ -438,6 +453,73 @@ local function army_lines(a, lines)
     end
 end
 
+-- ---- region wildlife --------------------------------------------------------
+-- what lives in the hovered region, biggest first. Shown only when no site
+-- covers the tile: wilderness tells you what roams it, towns keep their card.
+
+local function adult_size(race)
+    local ok, sz = pcall(function()
+        return df.global.world.raws.creatures.all[race].caste[0].misc.adult_size
+    end)
+    return ok and sz or 0
+end
+
+local function region_at(mx, my)
+    local wd = df.global.world.world_data
+    local wx, wy = mx // 16, my // 16
+    if wx < 0 or wy < 0 or wx >= wd.world_width or wy >= wd.world_height then return end
+    local ok, region = pcall(function()
+        return wd.regions[wd.region_map[wx]:_displace(wy).region_id]
+    end)
+    return ok and region or nil
+end
+
+-- append `text` word-wrapped to MAX_WIDTH; continuation lines get a deeper indent
+local function wrap_lines(lines, text, indent)
+    local cur = nil
+    for word in text:gmatch('%S+') do
+        if not cur then
+            cur = indent .. word
+        elseif #cur + 1 + #word <= MAX_WIDTH then
+            cur = cur .. ' ' .. word
+        else
+            lines[#lines + 1] = cur
+            cur = indent .. '  ' .. word
+        end
+    end
+    if cur then lines[#lines + 1] = cur end
+end
+
+local function region_lines(region, lines)
+    -- Animal records only -- the same vector holds the region's grasses, bushes,
+    -- trees and vermin. count_max == 0 is a population hunted to extinction.
+    local fauna = {}
+    pcall(function()
+        for i = 0, #region.population - 1 do
+            local p = region.population[i]
+            if df.world_population_type[p.type] == 'Animal' and p.count_max > 0 then
+                local nm = race_name(p.race, true)
+                if nm then fauna[#fauna + 1] = {name = nm, size = adult_size(p.race)} end
+            end
+        end
+    end)
+    local rname = dfhack.translation.translateName(region.name, true)
+    local rtype = (df.world_region_type[region.type] or 'Region'):gsub('(%l)(%u)', '%1 %2')
+    lines[#lines + 1] = rtype .. (rname ~= '' and (': ' .. rname) or '')
+    if #fauna == 0 then
+        lines[#lines + 1] = '  No wild animals'
+        return
+    end
+    -- biggest first; the order itself is the size information
+    table.sort(fauna, function(a, b)
+        if a.size ~= b.size then return a.size > b.size end
+        return a.name < b.name
+    end)
+    local names = {}
+    for _, f in ipairs(fauna) do names[#names + 1] = f.name end
+    wrap_lines(lines, 'Wildlife: ' .. table.concat(names, ', '), '  ')
+end
+
 -- ---- hover lookup -----------------------------------------------------------
 
 -- Where the travel map is centred, in army-units.
@@ -467,6 +549,7 @@ local function tile_info(mx, my)
             site_lines(s, lines)
         end
     end
+    local in_site = #lines > 0
     local player_army = df.global.adventure.player_army_id
     local armies = df.global.world.armies.all
     for i = 0, #armies - 1 do
@@ -474,6 +557,11 @@ local function tile_info(mx, my)
         if a.id ~= player_army and a.pos.x // 3 == mx and a.pos.y // 3 == my then
             army_lines(a, lines)
         end
+    end
+    -- wilderness only: a hovered site keeps its card free of the region blurb
+    if not in_site then
+        local region = region_at(mx, my)
+        if region then pcall(region_lines, region, lines) end
     end
     for i, l in ipairs(lines) do
         if #l > MAX_WIDTH then lines[i] = l:sub(1, MAX_WIDTH - 1) .. '~' end
@@ -499,6 +587,10 @@ function lines_for_army(id)
     local lines = {}
     army_lines(a, lines)
     return lines
+end
+
+function lines_for_tile(mx, my)
+    return tile_info(mx, my)
 end
 
 -- ---- overlay ----------------------------------------------------------------
