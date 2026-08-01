@@ -1,0 +1,19 @@
+creature_crash_repro
+
+A dwarf in all but name, so that the repro civ is playable without this file
+mattering. [COPY_TAGS_FROM:DWARF] pulls in the body, tissues, castes and
+everything else; only the names and the ASCII tile are overridden, and those
+only so the creature is recognisable on screen.
+
+Nothing here is part of the bug. The bug is in
+graphics/graphics_crash_repro.txt.
+
+[OBJECT:CREATURE]
+
+[CREATURE:CRASH_REPRO]
+	[COPY_TAGS_FROM:DWARF]
+	[NAME:crash test subject:crash test subjects:crash test subject]
+	[CASTE_NAME:crash test subject:crash test subjects:crash test subject]
+	[DESCRIPTION:A short, sturdy creature that exists only to be drawn. Its graphics deliberately reference a sprite outside the bounds its tile page declares.]
+	[CREATURE_TILE:'C']
+	[COLOR:5:0:1]

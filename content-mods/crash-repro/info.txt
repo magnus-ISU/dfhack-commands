@@ -1,0 +1,8 @@
+[ID:crash_repro]
+[NUMERIC_VERSION:1]
+[DISPLAYED_VERSION:0.1]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:magnus]
+[NAME:Crash repro - out-of-bounds layered graphics]
+[DESCRIPTION:DELIBERATELY CRASHES THE GAME. A minimal reproduction of a Dwarf Fortress 53.15 memory-safety bug: a tile page that declares fewer tiles than its PNG contains, plus a layered creature graphic referencing one of the hidden tiles, makes the sprite compositor write outside its allocation and corrupt the heap. Adds one playable civilization of "crash test subjects" so the creature is on screen the moment you embark. Install this only to reproduce the bug; never play with it.]

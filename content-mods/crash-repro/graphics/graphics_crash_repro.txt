@@ -1,0 +1,30 @@
+graphics_crash_repro
+
+THIS FILE IS THE BUG. Everything else in this mod is scaffolding to get the
+creature on screen.
+
+body.png is 64x32 pixels: two 32x32 tiles side by side, magenta then cyan. The
+tile page below declares the page to be 32x32 -- ONE tile, the magenta one. The
+cyan tile is real image data that the declaration does not admit exists.
+
+The layer then asks for tile 1:0 -- the cyan one. It is inside the file and
+outside the declared grid. DF neither rejects the reference at load nor clamps
+it at draw time: the layered-sprite compositor indexes past the end of the
+surface it allocated from the declared dimensions and writes out of bounds,
+corrupting the heap. The game then aborts or segfaults seconds to minutes
+later, wherever the next allocation happens to land.
+
+Change PAGE_DIM_PIXELS to 64:32 and the crashes stop.
+
+[OBJECT:GRAPHICS]
+
+[TILE_PAGE:CRASH_REPRO_PAGE]
+	[FILE:crash_repro/body.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[CREATURE_GRAPHICS:CRASH_REPRO]
+	[LAYER_SET:DEFAULT]
+	[LAYER_GROUP]
+	[LAYER:BODY_OUT_OF_BOUNDS:CRASH_REPRO_PAGE:1:0]
+	[END_LAYER_GROUP]
