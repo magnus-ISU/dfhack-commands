@@ -8,11 +8,26 @@ the adventurer isn't evil). Units of the adventurer's OWN civilization are alway
 left alone regardless of race: a dwarf snatched and raised in a drow civ is one of
 theirs (only the dragon challenge ignores this -- rival dragons duel even in-civ).
 
-Hostility is also SITE-SCOPED: while the adventurer stands inside a settlement,
-only that settlement's own people can be made hostile. Everyone else there is a
-guest -- the drow merchant visiting a high elf town no longer jumps you -- unless
-they are actually invading. Out in the wilderness the faction rules apply as
-before, so travel stays dangerous. It works by putting the unit into a Conflict activity
+DOCTRINE IS TERRITORIAL, TEMPERAMENT IS RACIAL. Standing inside a settlement, a unit
+follows the ETHICS OF THE TOWN rather than of its own race: everyone in an orc town
+behaves like an orc, so a kobold farmer or an elf living among orcs comes at you with
+them, while an orc in a human town is used to being around people and leaves you be.
+Out in the wilderness -- and in a site nobody owns, like a ruin or a lair -- there is
+no local law and every unit falls back on its own race's rule, so travel stays
+dangerous. Same fallback if the owning race has no rule of its own: an unruled town is
+just wilderness with buildings.
+
+What the town does NOT decide is what a creature IS. Whether it breaks (NOFEAR) and how
+hard it is to talk down (Pacify) stay keyed to its actual race -- a kobold conscripted
+into orc doctrine is still a kobold. NOFEAR could not be territorial even if we wanted
+it to be: it is a caste-level RAW flag, written per race for the whole world at once.
+
+Two things override the local doctrine. INVADERS keep their own -- a besieging army
+inside someone's walls is not adopting the ethics of the people it came to kill -- and
+members of the ADVENTURER'S OWN CIVILIZATION are never made hostile at all, so your own
+kin do not turn on you in their own streets. Only PEOPLE are subject to any of this:
+the doctrine is looked up from the ground, not from the unit, so livestock and pets
+would otherwise be swept in with their owners. It works by putting the unit into a Conflict activity
 opposing the adventurer (creating one if needed) -- the same state the game builds
 when you attack someone -- so it targets the player specifically rather than using
 a blunt [CRAZED] that would also make them gut their own immigrants.
@@ -23,7 +38,9 @@ hostile at all. You do not have to fight anyone first -- walk in sheathed and a 
 enough talker simply is not attacked. Draw steel and the exemption lapses on that same
 turn. Second, for anyone who HAS yielded, the same threshold decides whether the
 surrender sticks: below it, flags3.adv_yield is cleared each turn and the fight goes
-on. Optionally sets [NOFEAR] on a faction's castes (session-only) so they never break.
+on. Optionally sets [NOFEAR] on a faction's castes (session-only) so they never break;
+a faction may instead take NOFEAR conditionally (see the kobolds below), in which case
+the flag is written and withdrawn again as the condition changes.
 
 GOOD races split into two: the weaker "good civs" (HUMAN, ELF) attack any EVIL
 adventurer but can surrender/flee, while "militant good" (HA_HIGH_ELF, DWARF) attack
@@ -31,15 +48,20 @@ the same EVIL set and NEVER break (NOFEAR) -- but, like everyone else, they leav
 sheathed Pacify-6 adventurer alone. The EVIL target set is orc, kobold, goblin,
 succubus, dark dwarf, drow and mind flayer.
 
-KOBOLDS are a special case (see pacify_threshold): the kobold civ AND its dragon
-overlords (the HA_KOBOLD ANCIENT_DRAGON caste, the same creature) are hostile to any
-non-kobold. A plain kobold's surrender sticks at Pacify 1, but rises to 12 while one
-of their ancient-dragon overlords is on screen; a dragon overlord itself always needs
-Pacify 12.
+KOBOLDS are a special case, and everything about them keys off ONE signal: whether one
+of their ancient-dragon overlords (a HA_KOBOLD caste carrying CREATURE_CLASS
+HA_DRAGON_RULER -- the same creature) is on screen. The kobold civ and its dragons are
+hostile to any non-kobold, but a kobold alone is a coward: the race is [BENIGN] in the
+raws, so it flees anything unfriendly and only fights when cornered. With an overlord
+watching it is emboldened -- NOFEAR goes on for the whole race while a dragon is on
+screen and comes back off the moment none is, so kobolds stand and fight under their
+dragon and break without one. The Pacify bar moves with the same signal: a plain
+kobold's surrender sticks at Pacify 1, rising to 12 while an overlord is on screen; a
+dragon overlord itself always needs Pacify 12.
 
 DRAGON CHALLENGE: two ancient dragons meeting is read as a challenge. When the
-ADVENTURER is an ancient dragon -- either the HA_KOBOLD ANCIENT_DRAGON caste or the
-standalone HA_ANCIENT_DRAGON megabeast -- every other ancient dragon turns on them,
+ADVENTURER is an ancient dragon -- either a HA_KOBOLD dragon caste or the standalone
+HA_ANCIENT_DRAGON megabeast -- every other ancient dragon turns on them,
 and so do the kobolds standing with that rival dragon, even though the kobold civ
 would otherwise greet a dragon as an overlord. Kobolds nowhere near a rival dragon
 still treat a dragon adventurer as one of their own. A challenger that has already
@@ -81,6 +103,12 @@ local PACIFY_THRESHOLD = {
 }
 local DEFAULT_PACIFY = 3
 
+-- `nofear` on a rule takes three values: true (always -- the faction never breaks),
+-- false (never -- they flee like anyone else), or NOFEAR_WITH_DRAGON, which applies it
+-- only while one of the kobolds' ancient-dragon overlords is on screen and withdraws it
+-- again as soon as none is.
+local NOFEAR_WITH_DRAGON = 'dragon'
+
 -- one entry per hostile faction. friendly(adv_race_id) => true when the
 -- adventurer is NOT a target of this faction.
 local RULES = {
@@ -100,12 +128,13 @@ local RULES = {
     -- can flee. A sheathed Pacify-6 adventurer is still left alone, same as any other faction.
     {name = 'militant_good', races = {'HA_HIGH_ELF', 'DWARF'}, nofear = true,
      friendly = function(adv) return not EVIL[adv] end},
-    -- kobold civ: hostile to any adventurer who is NOT a kobold. Their dragon overlords are the
-    -- HA_KOBOLD ANCIENT_DRAGON caste -- the SAME creature -- so this one rule covers kobolds AND
-    -- their dragons. The standalone HA_ANCIENT_DRAGON MEGABEAST is a different creature and is left
-    -- out entirely. Pacify thresholds are special-cased (see pacify_threshold): a plain kobold yields
-    -- at Pacify 1, but 12 while a dragon overlord is on screen; a dragon overlord always needs 12.
-    {name = 'kobolds', races = {'HA_KOBOLD'}, nofear = false,
+    -- kobold civ: hostile to any adventurer who is NOT a kobold. Their dragon overlords are
+    -- HA_KOBOLD castes -- the SAME creature -- so this one rule covers kobolds AND their dragons.
+    -- The standalone HA_ANCIENT_DRAGON MEGABEAST is a different creature and is left out entirely.
+    -- NOFEAR is conditional: kobolds are [BENIGN] cowards on their own and only hold the line while
+    -- an overlord is on screen. Pacify thresholds move with the same signal (see pacify_threshold):
+    -- a plain kobold yields at Pacify 1, but 12 with a dragon watching; a dragon always needs 12.
+    {name = 'kobolds', races = {'HA_KOBOLD'}, nofear = NOFEAR_WITH_DRAGON,
      friendly = function(adv) return adv == 'HA_KOBOLD' end},
 }
 
@@ -137,9 +166,9 @@ local function dist(u, adv)
         + math.abs(u.pos.z - adv.pos.z) * 4
 end
 
--- ---- "am I in someone's town?" ------------------------------------------------
--- Visitors in a settlement someone else owns are guests, not enemies: a drow
--- merchant standing in a high elf town has no business drawing steel on you.
+-- ---- "whose law applies where I am standing?" ---------------------------------
+-- Inside a settlement the LOCAL doctrine replaces each unit's racial one, so what we
+-- need from the ground is a single race id to look rules up by.
 -- Same world-tile arithmetic adv/fear-no-goblin uses to find the site underfoot.
 
 local function player_world_tile(adv)
@@ -149,43 +178,71 @@ local function player_world_tile(adv)
            (map.region_y + adv.pos.y // 48) // 16
 end
 
--- Set of civ ids that own the site the adventurer is standing in, or nil out in
--- the wilderness. BOTH ids count: residents carry the site government id
--- (`cur_owner_id`), while the parent civ id (`civ_id`) is what citizens and
--- adventurers of that civ carry -- measured live in a high elf town, whose
--- locals were civ 32 while the adventurer of the owning civ was civ 31.
-local function site_owner_civs(adv)
+-- The race whose doctrine governs the ground the adventurer is standing on, or nil in
+-- the wilderness / on ground nobody owns.
+--
+-- `cur_owner_id` (the site government) is asked FIRST and `civ_id` (the founding civ)
+-- only as a fallback, because on a CONQUERED site the two disagree and it is the
+-- current holder who writes the law -- 27 of the 251 owned sites in the test world have
+-- a current owner of a different race from their founder, so this is not a corner case.
+--
+-- Returning nil means "no local law here": an unowned site (ruin, lair, bandit camp)
+-- reads exactly like open wilderness, and every unit falls back on its racial rule.
+local function site_doctrine_race(adv)
     local wx, wy = player_world_tile(adv)
     if not wx then return end
     for _, s in ipairs(df.global.world.world_data.sites) do
         local x0, y0 = s.global_min_x // 16, s.global_min_y // 16
         local x1, y1 = (s.global_max_x - 1) // 16, (s.global_max_y - 1) // 16
         if wx >= x0 and wx <= x1 and wy >= y0 and wy <= y1 then
-            local owners = {}
-            if s.civ_id >= 0 then owners[s.civ_id] = true end
-            if s.cur_owner_id >= 0 then owners[s.cur_owner_id] = true end
-            return owners
+            for _, civ_id in ipairs{s.cur_owner_id, s.civ_id} do
+                local e = civ_id >= 0 and df.historical_entity.find(civ_id)
+                if e and e.race >= 0 then return creature_id(e.race) end
+            end
+            return
         end
     end
 end
 
--- A siege is not a social visit: invaders stay hostile inside anyone's walls.
--- (Visiting NPCs carry NO merchant/diplomat/visitor flag at all -- the drow
--- merchant that prompted this had every one of them clear -- so ownership, not
--- flags, is what separates guest from local.)
+-- A siege is not a social visit: an army that came to sack the place does not pick up
+-- the ethics of the people inside it, so invaders keep their own racial doctrine.
 local function is_invader(u)
     return u.flags1.active_invader or u.flags1.invader_origin or u.flags1.marauder
 end
 
--- a kobold-civ dragon OVERLORD: the HA_KOBOLD ANCIENT_DRAGON caste (NOT the HA_ANCIENT_DRAGON
--- MEGABEAST, which is a separate creature). Only ever called on HA_KOBOLD units.
+-- Local doctrine is read off the GROUND, not off the unit, so the race lists stop
+-- doubling as a "is this even a person" filter the way they did when a rule only ever
+-- matched its own races. Without this gate every horse, pet and pack animal belonging
+-- to a hostile town would be conscripted into its war -- the site government owns the
+-- livestock too (measured live: the horse beside the adventurer carried the site
+-- government's own civ id).
+local function is_person(u)
+    local cr = df.global.world.raws.creatures.all[u.race]
+    local caste = cr and cr.caste[u.caste]
+    if not caste then return false end
+    return caste.flags.CAN_SPEAK or caste.flags.CAN_LEARN
+end
+
+-- a kobold-civ dragon OVERLORD (NOT the HA_ANCIENT_DRAGON MEGABEAST, which is a separate
+-- creature). Only ever called on HA_KOBOLD units.
+--
+-- Matched on CREATURE_CLASS:HA_DRAGON_RULER -- the very token the raws use to gate the civ's
+-- Dread Wyrm throne -- rather than on a caste id, because the caste ids move: ha-kobolds 0.17
+-- replaced the single ANCIENT_DRAGON caste with six (DRAGON_H1_SPIKE ... DRAGON_H3_CLUB) and
+-- the old exact-name test silently stopped matching anything, which killed the dragon rules
+-- outright. The legacy name is still accepted so a world baked before 0.17 keeps working.
+local DRAGON_RULER_CLASS = 'HA_DRAGON_RULER'
 local function is_dragon_caste(u)
     local cr = df.global.world.raws.creatures.all[u.race]
     local caste = cr and cr.caste[u.caste]
-    return caste ~= nil and tostring(caste.caste_id) == 'ANCIENT_DRAGON'
+    if not caste then return false end
+    for _, cc in ipairs(caste.creature_class) do
+        if tostring(cc.value) == DRAGON_RULER_CLASS then return true end
+    end
+    return tostring(caste.caste_id) == 'ANCIENT_DRAGON'
 end
 
--- an ancient dragon of EITHER kind: the kobold civ's ANCIENT_DRAGON caste or the
+-- an ancient dragon of EITHER kind: one of the kobold civ's dragon castes or the
 -- standalone HA_ANCIENT_DRAGON megabeast. Used only by the dragon-challenge rule,
 -- which does not care which of the two a dragon is.
 local function is_ancient_dragon(u, cid)
@@ -325,15 +382,40 @@ local function make_hostile(u, adv)
     end
 end
 
-local nofear_done = {}
-local function set_nofear(race_id_set)
+-- NOFEAR is a CASTE-LEVEL RAW flag, so it is written for a whole race at once and has to be
+-- withdrawn the same way -- there is no per-unit version of it.
+--
+-- Turning it off restores what the RAWS said rather than writing false, which matters here:
+-- HA_KOBOLD's ancient-dragon castes carry [NOFEAR] of their own, so clearing the flag blindly
+-- when the dragons stop being visible would leave the dragons themselves permanently breakable
+-- for the rest of the session. `nofear_base` snapshots each caste the first time we touch it.
+--
+-- `nofear_on` records the last state written per race so a sweep that changes nothing costs
+-- nothing -- including for races absent from this world, which are marked resolved too so the
+-- creature list is not walked again on their account.
+local nofear_base = {}
+local nofear_on = {}
+local function set_nofear(race_id_set, on)
+    local pending = false
+    for cid in pairs(race_id_set) do
+        if nofear_on[cid] ~= on then pending = true break end
+    end
+    if not pending then return end
     for _, cr in ipairs(df.global.world.raws.creatures.all) do
         local cid = tostring(cr.creature_id)
-        if race_id_set[cid] and not nofear_done[cid] then
-            for c = 0, #cr.caste - 1 do cr.caste[c].flags.NOFEAR = true end
-            nofear_done[cid] = true
+        if race_id_set[cid] and nofear_on[cid] ~= on then
+            local base = nofear_base[cid]
+            if not base then
+                base = {}
+                for c = 0, #cr.caste - 1 do base[c] = cr.caste[c].flags.NOFEAR end
+                nofear_base[cid] = base
+            end
+            for c = 0, #cr.caste - 1 do
+                cr.caste[c].flags.NOFEAR = on or base[c] or false
+            end
         end
     end
+    for cid in pairs(race_id_set) do nofear_on[cid] = on end
 end
 
 -- ===========================================================================
@@ -350,12 +432,22 @@ local function process()
 
     local active = {}
     local kobolds_active = false
+    -- Rules whose NOFEAR depends on a dragon being on screen. Gathered from EVERY rule, not just
+    -- the ones hostile to this adventurer: "a dragon is watching, so the kobolds hold" is a fact
+    -- about the kobolds, not about who they are angry at. It has to hold for the dragon challenge
+    -- too, where the kobold rule itself is skipped as friendly (a dragon adventurer is one of
+    -- their own) yet the rival dragon's retinue still ends up fighting. Applied after the
+    -- pre-pass below, which is what actually looks for the dragon.
+    local conditional_nofear = {}
     for _, rule in ipairs(RULES) do
+        local rs = race_set(rule.races)
+        if rule.nofear == NOFEAR_WITH_DRAGON then
+            conditional_nofear[#conditional_nofear + 1] = rs
+        end
         if not rule.friendly(adv_race) then
-            local rs = race_set(rule.races)
             active[#active + 1] = rs
             if rs['HA_KOBOLD'] then kobolds_active = true end
-            if rule.nofear then set_nofear(rs) end
+            if rule.nofear == true then set_nofear(rs, true) end
         end
     end
     -- A dragon adventurer is challenged by every other ancient dragon, so collect the rivals up
@@ -363,9 +455,9 @@ local function process()
     -- retainer may be swept before its dragon. This is the one rule that can fire with no faction
     -- rule active at all (the kobold civ greets a dragon as an overlord), so it is gathered before
     -- the early-out below.
-    -- who owns the ground we are standing on (nil in the wilderness, where the
-    -- faction rules apply unchanged -- travel is supposed to be dangerous)
-    local owners = site_owner_civs(adv)
+    -- whose doctrine governs the ground we are standing on (nil in the wilderness and on
+    -- unowned ground, where every unit falls back on its own race -- travel stays dangerous)
+    local local_doctrine = site_doctrine_race(adv)
 
     local adv_is_dragon = is_ancient_dragon(adv, adv_race)
     local rival_dragons = {}
@@ -377,12 +469,13 @@ local function process()
         end
     end
 
-    if #active == 0 and #rival_dragons == 0 then return end
-
-    -- kobolds are harder to pacify while one of their ANCIENT_DRAGON overlords is on screen: note it
-    -- up front (a pre-pass, since a plain kobold may be visited before the dragon in the sweep below).
+    -- Is one of the kobolds' dragon overlords on screen? This single fact drives BOTH kobold
+    -- rules -- whether they hold the line (NOFEAR, just below) and how hard they are to pacify
+    -- -- so it is settled up front, as a pre-pass: a plain kobold may well be visited before its
+    -- dragon in the main sweep. It runs ahead of the early-out below so that the conditional
+    -- NOFEAR is reconciled -- switched OFF as well as ON -- on every single sweep.
     local dragon_on_screen = false
-    if kobolds_active or adv_is_dragon then
+    if kobolds_active or adv_is_dragon or #conditional_nofear > 0 then
         for _, u in ipairs(df.global.world.units.active) do
             if u.id ~= adv.id and dfhack.units.isAlive(u)
                 and creature_id(u.race) == 'HA_KOBOLD' and is_dragon_caste(u) and on_screen(u) then
@@ -391,6 +484,12 @@ local function process()
             end
         end
     end
+
+    -- Emboldened by their overlord, cowed without one. A [BENIGN] race flees anything unfriendly
+    -- unless it is fearless, so this is what decides whether kobolds fight back at all.
+    for _, rs in ipairs(conditional_nofear) do set_nofear(rs, dragon_on_screen) end
+
+    if #active == 0 and #rival_dragons == 0 then return end
 
     for _, u in ipairs(df.global.world.units.active) do
         if u.id ~= adv.id and dfhack.units.isAlive(u) and dist(u, adv) <= RANGE then
@@ -401,13 +500,16 @@ local function process()
             -- civs still attack). The dragon challenge below is deliberately
             -- exempt -- rival ancient dragons duel even within one civ.
             local same_civ = adv.civ_id >= 0 and u.civ_id == adv.civ_id
-            -- inside a settlement, only its OWN people pick fights; anyone else
-            -- there is a guest (merchant, diplomat, traveller) and is left alone
-            -- unless they are invading
-            local guest = owners ~= nil and not owners[u.civ_id] and not is_invader(u)
+            -- WHOSE ETHICS THIS UNIT IS ACTING ON. In a settlement it is the town's, so a
+            -- kobold or an elf among orcs fights like an orc and an orc among humans keeps
+            -- the peace like a human. Out in the open, and for an invading army anywhere,
+            -- it is the unit's own race. This is the only lookup that moves -- pacify and
+            -- NOFEAR below stay keyed to `cid`, what the creature actually is.
+            local doctrine = cid
+            if local_doctrine and not is_invader(u) then doctrine = local_doctrine end
             local targeted = false
-            if not same_civ and not guest then
-                for _, races in ipairs(active) do if races[cid] then targeted = true break end end
+            if not same_civ and is_person(u) then
+                for _, races in ipairs(active) do if races[doctrine] then targeted = true break end end
             end
 
             -- dragon challenge: a rival ancient dragon, or a kobold standing with one

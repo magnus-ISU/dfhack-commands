@@ -5,6 +5,63 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.18 -- town ethics decide who fights; illithid thralls get a kit
+
+- **Doctrine is territorial now, not racial.** Standing in a settlement, a creature follows
+  the ethics of the TOWN rather than of its own race. A kobold farmer or an elf living
+  among orcs comes at you alongside them; an orc in a human town is used to being around
+  people and leaves you be. This replaces the old "guest" exemption, which asked whether
+  your *citizenship* matched the site and so exempted permanent residents whose birth civ
+  differs -- the kobold that prompted this lives in the orc town it was being spared in
+  (`HOME_SITE_REALIZATION_BUILDING` -> the same site as the orcs beside it).
+- Wilderness, ground nobody owns (ruins, lairs, bandit camps) and towns whose owning race
+  has no rule of its own all read the same way: no local law, everyone falls back on their
+  racial rule. An unruled town is just wilderness with buildings.
+- **Temperament stays racial.** NOFEAR and the Pacify threshold are still keyed to what a
+  creature actually is -- a kobold conscripted into orc doctrine is still a kobold. NOFEAR
+  could not be territorial in any case: it is a caste-level raw flag written per race for
+  the whole world at once.
+- Conquered sites resolve to the CURRENT holder, not the founding civ -- 27 of 251 owned
+  sites in the test world have a current owner of a different race from their founder.
+- Invading armies keep their own doctrine anywhere, and members of the adventurer's own
+  civilization are still never made hostile.
+- **Added a sapience gate.** The race lists used to double as an "is this a person" filter,
+  since a rule only ever matched its own races. Reading doctrine off the ground removes
+  that, and the site government owns the livestock -- without the gate every horse and pack
+  animal in a hostile town would have been conscripted into its war.
+- **war-gear: illithid THRALLS are now equipped** (20% bronze weapon and no armor, 30%
+  copper armor and weapon, 20% copper armor with a bronze weapon, 20% bronze armor and
+  weapon, 10% steel). The mind flayer castes are listed but skipped -- they forge armor for
+  their thralls and for trade but never wear it, and the ha-illithids stripping pass
+  already exempts thralls.
+
+## v0.17 -- kobolds are brave only under a dragon
+
+- **Kobolds now get NOFEAR, but only while one of their ancient-dragon overlords is on
+  screen.** `[CREATURE:HA_KOBOLD]` is `[BENIGN]` in the raws (inherited from Cute Kobold
+  Caverns; vanilla kobolds are not), which per the token means it "will run away from any
+  creature that is not friendly to it, and will only defend itself if it becomes enraged".
+  Every other BENIGN race in the suite -- drow, dark dwarves, high elves -- was handed a
+  flat NOFEAR that cancels the fleeing half, so kobolds were the one faction the mod made
+  hostile and then left unable to fight back. They now hold the line under an overlord's
+  eye and break without one, which is the intended flavour rather than a flat fix.
+- The dragon's presence was already the signal that raises their Pacify bar from 1 to 12,
+  so the two behaviours are one rule now: dragon on screen means fearless and hard to talk
+  down; no dragon means cowardly and trivially pacified.
+- **Fixed: no dragon had counted as a dragon since ha-kobolds 0.17.** `is_dragon_caste`
+  tested for a caste literally named `ANCIENT_DRAGON`, but that caste was split into six
+  (`DRAGON_H1_SPIKE` ... `DRAGON_H3_CLUB`), so it matched nothing and every dragon-gated
+  rule -- the Pacify escalation and the kobold half of the dragon challenge -- was dead.
+  Detection now matches `CREATURE_CLASS:HA_DRAGON_RULER`, the same token the raws use to
+  gate the Dread Wyrm throne, so it survives further caste renames; the old caste name is
+  still accepted for worlds baked before the split.
+- `set_nofear` can now withdraw the flag as well as set it, and restores what the RAWS said
+  instead of writing false -- the kobolds' own dragon castes carry `[NOFEAR]`, and clearing
+  it blindly would have left the dragons themselves breakable for the rest of the session.
+- The embolden signal is read for every rule, not just rules hostile to this adventurer, so
+  it still applies during a dragon challenge -- where the kobold rule is skipped as friendly
+  (a dragon adventurer is one of their own) yet the rival dragon's retinue still fights.
+
 ## v0.16 -- sheathe your weapon and talk your way past
 
 - **A skilled Pacifier who has not drawn a weapon is no longer attacked at all.** Previously

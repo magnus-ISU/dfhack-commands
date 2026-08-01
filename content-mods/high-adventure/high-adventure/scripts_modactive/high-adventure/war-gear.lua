@@ -38,9 +38,17 @@ Who gets what -- OUTFITS below is a weighted roll, made ONCE per unit and rememb
              DRIDER         always steel
              FEMALE         giant cave spider silk clothing, no armor, no weapon
     HA_HIGH_ELF             twinkling metal armor; clothing rewoven in twinkling fabric
+    HA_ILLITHID  THRALL_M   20% bronze weapon, no armor
+                 THRALL_F   30% copper armor + copper weapon
+                            20% copper armor + bronze weapon
+                            20% bronze armor + bronze weapon
+                            10% steel armor + weapon
+             every other caste (illithid, ulitharid, elder brain) left alone
 
-UNTOUCHED, deliberately absent from the table: illithids, succubi, kobolds, vanilla
-elves. A race not listed is never processed.
+UNTOUCHED, deliberately absent from the table: succubi, kobolds, vanilla elves. A race
+not listed is never processed. Mind flayers themselves are listed but skipped: only
+their THRALLS carry gear -- illithids forge armor for them and for trade but never wear
+it, and ha-illithids strips any that reaches one (that pass already exempts thralls).
 
 WEAPONS come from the unit's OWN CIV list unless the outfit names one. That list has
 REPEATS and the repeats are the civ's preference ratio -- the drow entity lists
@@ -173,8 +181,20 @@ local HELM_CHANCE = 0.40
 --   pair    mint two (only used when the roll lands on a scimitar; see mint_arms)
 --   fabric  re-make CLOTHING in this material and do NOT promote it to armor
 --   skip    true = this unit is left completely alone
--- A race absent from this table is untouched: illithids, succubi, kobolds and
--- vanilla elves are deliberately not listed.
+-- A race absent from this table is untouched: succubi, kobolds and vanilla elves are
+-- deliberately not listed.
+
+-- The illithids' human-bodied THRALL castes are the civ's soldiery and the only members
+-- of that civ who carry gear -- their masters forge armor but never wear it. Shared by
+-- both thrall castes; the mind flayer castes fall through to the skip entry below.
+local THRALL_KIT = {
+    {w=20, weapon=BRONZE},                        -- weapon only, no armor
+    {w=30, weapon=COPPER, armor=COPPER},
+    {w=20, weapon=BRONZE, armor=COPPER},
+    {w=20, weapon=BRONZE, armor=BRONZE},
+    {w=10, weapon=STEEL,  armor=STEEL},
+}
+
 local OUTFITS = {
     DWARF = {
         {w=40, weapon=COPPER, arms=PICK_AXE_SPEAR},   -- weapon only, no armor
@@ -211,6 +231,12 @@ local OUTFITS = {
         },
         {w=80, weapon=IRON,  armor=IRON},             -- MALE
         {w=20, weapon=STEEL, armor=STEEL},
+    },
+    HA_ILLITHID = {
+        by_caste = {THRALL_M = THRALL_KIT, THRALL_F = THRALL_KIT},
+        -- illithid, ulitharid and elder brain castes fall through to this and are
+        -- left exactly as they are
+        {w=100, skip=true},
     },
 }
 OUTFITS.HA_DARK_DWARF = OUTFITS.DWARF                 -- same treatment as vanilla dwarves
