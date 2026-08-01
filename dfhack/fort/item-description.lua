@@ -9,16 +9,22 @@ engraved slabs -- get truncated to a handful of lines while the rest of the pane
 empty. This overlay redraws the full description in place, using up to HALF the screen
 height before it needs to scroll.
 
-ITEMS ON DISPLAY (pedestal / display case) get a bigger rework, because the native sheet is
-a mess for them: fort/statue-redirect's [Remove] button lands ON the first description row,
-and the native "In <icon> <building>  [View]" line floats far below the description. For
-those items this overlay rebuilds the block:
+HELD ITEMS (pedestal, display case, workshop, container, worn -- anything with a location
+line) get a bigger rework, because the native sheet is a mess for them: fort/statue-
+redirect's [Remove] button lands ON the first description row, and the native
+"In <icon> <building>  [View]" line floats far below the description. For those items
+this overlay rebuilds the block:
 
     row D     [Remove]              <- statue-redirect's button, line cleared of text
     row D+2   In {icon} green Glass Pedestal   [View]   <- moved up from its native row
     row D+4+  the full description, scrollable (mouse wheel)
-(the moved block sits 3 columns right of the panel band edge and one extra row down --
-tuned live against DF's own padding)
+
+The location line is found GENERICALLY: any holder makes DF render the line with a
+View-button pill in the lower texture layer, and the detector looks for that pill run --
+no wording or holder-type enumeration, so new holder cases work unseen. If an item has a
+holder but no line renders, the line step is skipped and the description starts under the
+cleared Remove row. Offsets, tuned live against DF's padding: the moved line sits 1
+column right of the panel bound and one row lower; description text pads 2 columns.
 
 The native In-line is erased in place (text blanked, View-button pill patched out of the
 lower texture layer, the 5x3 anchored icon sprite zeroed) and re-drawn under the Remove
@@ -71,16 +77,22 @@ local function desc_lines()
     return vs.description.text, vs
 end
 
--- the display furniture (pedestal / case) holding the viewed item, or nil
-local function display_building(vs)
+-- true if anything HOLDS the viewed item -- building (pedestal, case, workshop),
+-- container item, or unit. Any of these makes DF render a location line, and the
+-- rebuilt block applies; where exactly that line is comes from the generic
+-- View-pill detector in find_geometry, not from the ref type.
+local function has_holder(vs)
     local item = df.item.find(vs.active_id)
-    if not item then return nil end
+    if not item then return false end
     for _, ref in ipairs(item.general_refs) do
-        if ref:getType() == df.general_ref_type.BUILDING_HOLDER then
-            local b = df.building.find(ref.building_id)
-            if b and df.building_display_furniturest:is_instance(b) then return b end
+        local t = ref:getType()
+        if t == df.general_ref_type.BUILDING_HOLDER
+                or t == df.general_ref_type.CONTAINED_IN_ITEM
+                or t == df.general_ref_type.UNIT_HOLDER then
+            return true
         end
     end
+    return false
 end
 
 local function read_row_text(y)
@@ -114,69 +126,96 @@ local function find_geometry(vs)
     local gps = df.global.gps
     local dimy = gps.dimy
     -- anchor: the "Weight:" row (always present); description starts 3 below it
-    local weight_row
+    -- and the panel's left bound sits a fixed 7 columns left of the "W"
+    local weight_row, wcol
     for y = 0, math.min(dimy - 1, 20) do
-        if read_row_text(y):find('Weight:', 1, true) then weight_row = y break end
+        local c = read_row_text(y):find('Weight:', 1, true)
+        if c then weight_row, wcol = y, c - 1 break end
     end
     if not weight_row then return nil end
     local remove_row = weight_row + 3
-    -- the native In-line: first row below the native box that starts with "In "
-    local in_row
-    for y = remove_row + DF_VISIBLE_ROWS, remove_row + DF_VISIBLE_ROWS + 6 do
-        if read_row_text(y):find('^%s*In%s') then in_row = y break end
-    end
-    if not in_row then return nil end
-    -- the In-row's lower-layer band gives the panel's left bound
-    local left, right
-    for x = 0, gps.dimx - 1 do
-        local v = gps.screentexpos_lower[x * dimy + in_row]
-        if v ~= 0 then
-            left = left or x
-            right = x
-        elseif left then
-            break
-        end
-    end
-    if not left then return nil end
+    local left = math.max(0, wcol - 7)
+    local right = math.min(gps.dimx - 1, left + SPAN_W + 8)
     local g = {
         key = ('%d:%d:%d'):format(vs.active_id, gps.dimx, dimy),
-        remove_row = remove_row, in_row = in_row,
-        left = left, right = right, band = {}, pill = {}, icon = {},
+        remove_row = remove_row, left = left, right = right,
+        band = {}, pill = {}, icon = {},
     }
-    -- capture the 2-row View pill: cells differing from each row's dominant band value
-    -- (sampled mid-band, where the button never reaches)
-    for dy = 0, 1 do
-        local y = in_row + dy
-        g.band[dy] = gps.screentexpos_lower[(left + 20) * dimy + y]
+    -- GENERIC location-line detector: whatever holds the item (pedestal, workshop,
+    -- container...), DF renders its line with a View-button pill in the lower
+    -- texture layer -- a run of cells differing from that row's background band.
+    -- No wording assumptions ("In ...", "Worn by ..." -- all the same to this).
+    local lower = gps.screentexpos_lower
+    local pill_rows = {}
+    for y = remove_row + 6, math.min(remove_row + 16, dimy - 1) do
+        local band = lower[(left + 5) * dimy + y]
+        local run, best = 0, 0
         for x = left, right do
-            local v = gps.screentexpos_lower[x * dimy + y]
-            if v ~= 0 and v ~= g.band[dy] then
-                g.pill[#g.pill + 1] = {dx = x - left, dy = dy, val = v}
-            end
+            local v = lower[x * dimy + y]
+            if v ~= 0 and v ~= band then run = run + 1 else run = 0 end
+            if run > best then best = run end
         end
+        if best >= 6 then pill_rows[#pill_rows + 1] = y end
     end
-    -- capture the 3-row anchored icon sprite (offsets travel with each cell)
-    local anch = gps.screentexpos_anchored
-    local axb, ayb = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
-    for dy = -1, 1 do
-        local y = in_row + dy
-        if y >= 0 and y < dimy then
-            for x = left, right do
-                local i = x * dimy + y
-                if anch[i] ~= 0 then
-                    g.icon[#g.icon + 1] =
-                        {dx = x - left, dy = dy, val = anch[i], ax = axb[i], ay = ayb[i]}
+    -- the line row is the pill row that carries the text (its caps rows don't)
+    local in_row
+    for _, y in ipairs(pill_rows) do
+        if read_row_text(y):sub(left + 1, left + SPAN_W):match('%S') then in_row = y break end
+    end
+    if in_row then
+        g.in_row = in_row
+        -- capture the pill (3 rows: caps above and below the text row)
+        for dy = -1, 1 do
+            local y = in_row + dy
+            if y >= 0 and y < dimy then
+                g.band[dy] = lower[(left + 5) * dimy + y]
+                for x = left, right do
+                    local v = lower[x * dimy + y]
+                    if v ~= 0 and v ~= g.band[dy] then
+                        g.pill[#g.pill + 1] = {dx = x - left, dy = dy, val = v}
+                    end
                 end
             end
         end
+        -- capture the anchored icon cells. Every cell renders a FULL copy of the
+        -- sprite (six visible copies when naively restamped), so only one -- the
+        -- bottom-center cell -- is marked for display; the rest are only zeroed.
+        local anch = gps.screentexpos_anchored
+        local axb, ayb = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
+        for dy = -1, 1 do
+            local y = in_row + dy
+            if y >= 0 and y < dimy then
+                for x = left, right do
+                    local i = x * dimy + y
+                    if anch[i] ~= 0 then
+                        g.icon[#g.icon + 1] =
+                            {dx = x - left, dy = dy, val = anch[i], ax = axb[i], ay = ayb[i]}
+                    end
+                end
+            end
+        end
+        if #g.icon > 0 then
+            local maxdy = -2
+            for _, c in ipairs(g.icon) do maxdy = math.max(maxdy, c.dy) end
+            local bottom = {}
+            for _, c in ipairs(g.icon) do
+                if c.dy == maxdy then bottom[#bottom + 1] = c end
+            end
+            table.sort(bottom, function(a, b) return a.dx < b.dx end)
+            bottom[(#bottom + 1) // 2].show = true
+        end
     end
-    -- the art may already be patched out of the live buffers by our own painting --
-    -- in that case inherit the capture from the previous geometry
+    -- the art may already be patched out of the live buffers by our own painting
+    -- (and DF never redraws the anchored layer) -- inherit the previous capture
     if geo and geo.key == g.key then
-        if #g.pill == 0 then g.pill = geo.pill end
-        if #g.icon == 0 then g.icon = geo.icon end
-        for dy = 0, 1 do
-            if not g.band[dy] or g.band[dy] == 0 then g.band[dy] = geo.band[dy] end
+        if not g.in_row then
+            g.in_row, g.pill, g.icon, g.band = geo.in_row, geo.pill, geo.icon, geo.band
+        else
+            if #g.pill == 0 then g.pill = geo.pill end
+            if #g.icon == 0 then g.icon = geo.icon end
+            for dy = -1, 1 do
+                if not g.band[dy] or g.band[dy] == 0 then g.band[dy] = geo.band[dy] end
+            end
         end
     end
     return g
@@ -189,44 +228,53 @@ local function blank_span(y, x1, x2)
     for x = x1, x2 do dfhack.screen.paintTile(BLANK, x, y) end
 end
 
--- the moved block sits shifted right and down from the panel band edge, matching
--- DF's own padding (tuned live)
-local SHIFT_X, SHIFT_Y = 3, 1
+-- shifts from the panel's left bound, matching DF's own padding (tuned live):
+-- the moved location line (text, pill, icon) sits 1 right, the description 2
+local LINE_SHIFT, TEXT_SHIFT = 1, 2
+local SHIFT_Y = 1              -- the moved line sits one extra row down
 
--- move the native In-line to target row ty (text re-copied every frame -- DF
--- redraws it -- art re-stamped from the geometry capture; sources wiped in place)
+-- move the native location line to target row ty (text re-copied every frame --
+-- DF redraws it -- art re-stamped from the geometry capture; sources wiped)
 local function move_in_line(g, ty)
     local gps = df.global.gps
     local dimy = gps.dimy
     -- text + pens, shifted right; source blanked
     for x = g.left, g.right do
         local p = dfhack.screen.readTile(x, g.in_row)
-        if p and x + SHIFT_X < gps.dimx then
+        if p and x + LINE_SHIFT < gps.dimx then
             p.tile = 0
-            dfhack.screen.paintTile(p, x + SHIFT_X, ty)
+            dfhack.screen.paintTile(p, x + LINE_SHIFT, ty)
         end
         dfhack.screen.paintTile(BLANK, x, g.in_row)
     end
-    -- View-button pill (2 rows): stamp the capture at the target, patch both
+    -- View-button pill (3 rows): stamp the capture at the target, patch the
     -- source rows back to their plain band
     local lower = gps.screentexpos_lower
     for _, c in ipairs(g.pill) do
-        local tx = g.left + c.dx + SHIFT_X
-        if tx < gps.dimx then lower[tx * dimy + ty + c.dy] = c.val end
+        local tx = g.left + c.dx + LINE_SHIFT
+        local tyy = ty + c.dy
+        if tx < gps.dimx and tyy >= 0 and tyy < dimy then
+            lower[tx * dimy + tyy] = c.val
+        end
         lower[(g.left + c.dx) * dimy + g.in_row + c.dy] = g.band[c.dy] or 0
     end
-    -- anchored icon sprite (3 rows centered on the line): stamp capture, zero sources
+    -- anchored icon: every cell renders a full sprite copy, so only the marked
+    -- bottom-center cell is stamped; ALL source cells are zeroed
     local anch = gps.screentexpos_anchored
     local ax, ay = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
     for _, c in ipairs(g.icon) do
-        local ti = (g.left + c.dx + SHIFT_X) * dimy + ty + c.dy
-        anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
+        if c.show then
+            local ti = (g.left + c.dx + LINE_SHIFT) * dimy + ty + c.dy
+            anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
+        end
         local si = (g.left + c.dx) * dimy + g.in_row + c.dy
         anch[si], ax[si], ay[si] = 0, 0, 0
     end
 end
 
--- rebuilt block: cleared Remove row, moved In-line, full description below
+-- rebuilt block: cleared Remove row, moved location line, full description below.
+-- Without a location line (nothing held/no pill found) the line step is skipped
+-- and the description starts right under the cleared Remove row.
 local function render_display_mode(lines, vs)
     local now = dfhack.getTickCount()
     local gps = df.global.gps
@@ -240,18 +288,24 @@ local function render_display_mode(lines, vs)
     end
     if not geo then return end
     local g = geo
-    local in_target = g.remove_row + 1 + SHIFT_Y
-    local desc_top = in_target + 2
-    local span_r = g.left + SPAN_W + SHIFT_X - 1
+    local span_r = g.left + SPAN_W + TEXT_SHIFT - 1
+    local desc_top
 
-    -- clear the Remove row (statue-redirect repaints its button after us) and the
-    -- icon-bleed rows above and below the moved line; the line row itself is
-    -- cleared before the copy lands on it
     blank_span(g.remove_row, g.left, span_r)
-    for y = in_target - 1, in_target + 1 do
-        if y ~= g.remove_row then blank_span(y, g.left, span_r) end
+    if g.in_row then
+        local in_target = g.remove_row + 1 + SHIFT_Y
+        desc_top = in_target + 2
+        -- clear the icon-bleed rows around the moved line before the copy lands
+        for y = in_target - 1, in_target + 1 do
+            if y ~= g.remove_row then blank_span(y, g.left, span_r) end
+        end
+        move_in_line(g, in_target)
+        g.moved_in_row = in_target
+    else
+        desc_top = g.remove_row + 2
+        blank_span(g.remove_row + 1, g.left, span_r)
+        g.moved_in_row = nil
     end
-    move_in_line(g, in_target)
 
     -- description below, scrollable, up to half the screen
     local total = #lines
@@ -260,18 +314,17 @@ local function render_display_mode(lines, vs)
     local scroll = math.max(0, math.min(vs.scroll_position_item, total - n))
     -- cover at least the native box so stale native rows never peek through
     local cover = math.max(n, DF_VISIBLE_ROWS)
-    local pad = (' '):rep(SHIFT_X)
+    local pad = (' '):rep(TEXT_SHIFT)
     for row = 0, cover - 1 do
         local y = desc_top + row
         if y >= gps.dimy then break end
         local s = pad .. (row < n and lines[scroll + row].value or '')
-        local w = SPAN_W + SHIFT_X
+        local w = SPAN_W + TEXT_SHIFT
         if #s < w then s = s .. (' '):rep(w - #s) else s = s:sub(1, w) end
         dfhack.screen.paintString(TEXT_PEN, g.left, y, s)
     end
     -- remember the live rects for input handling
     g.desc_rect = {x1 = g.left, x2 = span_r, y1 = desc_top, y2 = desc_top + n - 1}
-    g.moved_in_row = in_target
     g.total, g.n = total, n
 end
 
@@ -279,7 +332,7 @@ function ItemDescriptionOverlay:onRenderFrame(dc, rect)
     local ok = pcall(function()
         local lines, vs = desc_lines()
         if not lines then geo = nil return end
-        if display_building(vs) then
+        if has_holder(vs) then
             render_display_mode(lines, vs)
         else
             geo = nil
@@ -295,12 +348,13 @@ function ItemDescriptionOverlay:onInput(keys)
     local g = geo
     local x, y = dfhack.screen.getMousePos()
     if not x then return false end
-    -- the moved line (and the pill's second row): teleport the click back to the
+    -- the moved line (all three pill rows): teleport the click back to the
     -- native row/column so DF's own View button handles it
-    if keys._MOUSE_L and (y == g.moved_in_row or y == g.moved_in_row + 1)
-            and x >= g.left + SHIFT_X and x <= g.right + SHIFT_X then
+    if keys._MOUSE_L and g.moved_in_row and g.in_row
+            and y >= g.moved_in_row - 1 and y <= g.moved_in_row + 1
+            and x >= g.left + LINE_SHIFT and x <= g.right + LINE_SHIFT then
         local gps = df.global.gps
-        local nx = x - SHIFT_X
+        local nx = x - LINE_SHIFT
         local ny = g.in_row + (y - g.moved_in_row)
         gps.mouse_x, gps.mouse_y = nx, ny
         gps.precise_mouse_x = nx * gps.tile_pixel_x + gps.tile_pixel_x // 2
@@ -326,7 +380,7 @@ end
 function ItemDescriptionOverlay:onRenderBody(dc)
     local lines, vs = desc_lines()
     if not lines then return end
-    if display_building(vs) then return end        -- handled by onRenderFrame
+    if has_holder(vs) then return end              -- handled by onRenderFrame
     local total = #lines
     -- leave short descriptions to DF (it renders those fully already)
     if total <= DF_VISIBLE_ROWS then return end
