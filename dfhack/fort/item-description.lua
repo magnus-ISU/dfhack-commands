@@ -7,7 +7,40 @@ DF's item view sheet (dwarfmode/ViewSheets/ITEM) renders an item's description i
 fixed ~8-row box. Long descriptions -- artifacts, finely-decorated items, figurines, books,
 engraved slabs -- get truncated to a handful of lines while the rest of the panel sits
 empty. This overlay redraws the full description in place, using up to HALF the screen
-height before it needs to scroll, so you can read it without scrolling.
+height before it needs to scroll.
+
+ITEMS ON DISPLAY (pedestal / display case) get a bigger rework, because the native sheet is
+a mess for them: fort/statue-redirect's [Remove] button lands ON the first description row,
+and the native "In <icon> <building>  [View]" line floats far below the description. For
+those items this overlay rebuilds the block:
+
+    row D     [Remove]              <- statue-redirect's button, line cleared of text
+    row D+2   In {icon} green Glass Pedestal   [View]   <- moved up from its native row
+    row D+4+  the full description, scrollable (mouse wheel)
+(the moved block sits 3 columns right of the panel band edge and one extra row down --
+tuned live against DF's own padding)
+
+The native In-line is erased in place (text blanked, View-button pill patched out of the
+lower texture layer, the 5x3 anchored icon sprite zeroed) and re-drawn under the Remove
+row; clicking the moved [View] teleports the click to the native button so DF handles it.
+Items NOT on display (on the ground, built, worn...) keep the plain behavior: expand only
+when the description is longer than DF's box, drawn by the widget frame as before.
+
+Layer map, measured live on a pedestal'd artifact bed (2026-08):
+  * View button = screentexpos_lower pill, TWO rows tall (the In-line row and the row
+    below); the rest of those rows' lower layer is a uniform background band -- the
+    band's first column is also the panel's left bound.
+  * Pedestal icon = screentexpos_anchored 5-wide x 3-tall block centered on the In-line
+    row, with per-tile offsets in screentexpos_anchored_x/_y (move all three arrays or
+    the sprite shreds).
+  * Text = the plain text grid (readTile/paintTile), pens copied so colors survive. TEXT
+    and the lower layer are redrawn by DF every frame; the ANCHORED layer is NOT (it is
+    stamped on open/interaction). So the pill and icon cells are CAPTURED into the
+    geometry cache the first time they are seen and re-stamped from that cache every
+    frame -- re-reading the live buffers finds them already zeroed/patched and the art
+    would evaporate after the first rescan.
+Widget render order is alphabetical: fort/item-description.expand draws BEFORE
+fort/statue-redirect.remove, so clearing the Remove row here cannot erase that button.
 
 It is a standard DFHack overlay (name: "item-description.expand"): toggle or reposition it
 with `gui/overlay` if it doesn't line up with your UI scale. magnus-scripts loads it (via
@@ -16,13 +49,14 @@ overlay rescan) so it's on every session.
 
 local overlay = require('plugins.overlay')
 
--- DF shows roughly this many rows in its own box; only step in past that, so short
--- descriptions (which DF already renders fully) are left untouched.
+-- DF shows roughly this many rows in its own box; the plain path only steps in past
+-- that, and the display path uses it as the count of native rows to cover.
 local DF_VISIBLE_ROWS = 8
+local SPAN_W = 57            -- native description/panel column span to clear or fill
+local SCAN_MS = 500          -- geometry rescan cadence in display mode
 
 ItemDescriptionOverlay = defclass(ItemDescriptionOverlay, overlay.OverlayWidget)
 ItemDescriptionOverlay.ATTRS{
-    desc = 'Expands a long item description to use the available vertical space.',
     -- x is a RIGHT-edge inset (negative pos anchors frame.r), so narrowing w
     -- moves only the LEFT edge; the right edge stays put
     default_pos = {x = -40, y = 12},
@@ -37,9 +71,262 @@ local function desc_lines()
     return vs.description.text, vs
 end
 
+-- the display furniture (pedestal / case) holding the viewed item, or nil
+local function display_building(vs)
+    local item = df.item.find(vs.active_id)
+    if not item then return nil end
+    for _, ref in ipairs(item.general_refs) do
+        if ref:getType() == df.general_ref_type.BUILDING_HOLDER then
+            local b = df.building.find(ref.building_id)
+            if b and df.building_display_furniturest:is_instance(b) then return b end
+        end
+    end
+end
+
+local function read_row_text(y)
+    local gps = df.global.gps
+    if y < 0 or y >= gps.dimy then return '' end
+    local row = {}
+    for x = 0, gps.dimx - 1 do
+        local t = dfhack.screen.readTile(x, y)
+        local ch = t and t.ch or 0
+        row[x + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    end
+    return table.concat(row)
+end
+
+-- ---- display (pedestal) mode ------------------------------------------------
+
+-- geometry cache; rebuilt on item / window change and every SCAN_MS.
+-- {key, remove_row, in_row, left, right, band, pill, icon}
+--   remove_row = first native description row (statue-redirect's Remove sits there)
+--   in_row     = native "In <building>" row, left/right = its lower-layer band extent
+--   band[dy]   = per-row background texpos of the pill rows (dy = 0, 1)
+--   pill       = {{dx, dy, val}, ...} lower-layer button cells (both rows)
+--   icon       = {{dx, dy, val, ax, ay}, ...} anchored sprite cells (3 rows)
+-- pill/icon are CAPTURED once (DF does not refresh the anchored layer, and we patch
+-- the pill out of the live buffer) and re-stamped from here every frame. A rescan
+-- keeps the previous capture when the live buffers no longer hold the art.
+local geo = nil
+local scan_at = 0
+
+local function find_geometry(vs)
+    local gps = df.global.gps
+    local dimy = gps.dimy
+    -- anchor: the "Weight:" row (always present); description starts 3 below it
+    local weight_row
+    for y = 0, math.min(dimy - 1, 20) do
+        if read_row_text(y):find('Weight:', 1, true) then weight_row = y break end
+    end
+    if not weight_row then return nil end
+    local remove_row = weight_row + 3
+    -- the native In-line: first row below the native box that starts with "In "
+    local in_row
+    for y = remove_row + DF_VISIBLE_ROWS, remove_row + DF_VISIBLE_ROWS + 6 do
+        if read_row_text(y):find('^%s*In%s') then in_row = y break end
+    end
+    if not in_row then return nil end
+    -- the In-row's lower-layer band gives the panel's left bound
+    local left, right
+    for x = 0, gps.dimx - 1 do
+        local v = gps.screentexpos_lower[x * dimy + in_row]
+        if v ~= 0 then
+            left = left or x
+            right = x
+        elseif left then
+            break
+        end
+    end
+    if not left then return nil end
+    local g = {
+        key = ('%d:%d:%d'):format(vs.active_id, gps.dimx, dimy),
+        remove_row = remove_row, in_row = in_row,
+        left = left, right = right, band = {}, pill = {}, icon = {},
+    }
+    -- capture the 2-row View pill: cells differing from each row's dominant band value
+    -- (sampled mid-band, where the button never reaches)
+    for dy = 0, 1 do
+        local y = in_row + dy
+        g.band[dy] = gps.screentexpos_lower[(left + 20) * dimy + y]
+        for x = left, right do
+            local v = gps.screentexpos_lower[x * dimy + y]
+            if v ~= 0 and v ~= g.band[dy] then
+                g.pill[#g.pill + 1] = {dx = x - left, dy = dy, val = v}
+            end
+        end
+    end
+    -- capture the 3-row anchored icon sprite (offsets travel with each cell)
+    local anch = gps.screentexpos_anchored
+    local axb, ayb = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
+    for dy = -1, 1 do
+        local y = in_row + dy
+        if y >= 0 and y < dimy then
+            for x = left, right do
+                local i = x * dimy + y
+                if anch[i] ~= 0 then
+                    g.icon[#g.icon + 1] =
+                        {dx = x - left, dy = dy, val = anch[i], ax = axb[i], ay = ayb[i]}
+                end
+            end
+        end
+    end
+    -- the art may already be patched out of the live buffers by our own painting --
+    -- in that case inherit the capture from the previous geometry
+    if geo and geo.key == g.key then
+        if #g.pill == 0 then g.pill = geo.pill end
+        if #g.icon == 0 then g.icon = geo.icon end
+        for dy = 0, 1 do
+            if not g.band[dy] or g.band[dy] == 0 then g.band[dy] = geo.band[dy] end
+        end
+    end
+    return g
+end
+
+local BLANK = dfhack.pen.parse{ch = 32, fg = COLOR_WHITE, bg = COLOR_BLACK}
+local TEXT_PEN = {fg = COLOR_WHITE, bg = COLOR_BLACK}
+
+local function blank_span(y, x1, x2)
+    for x = x1, x2 do dfhack.screen.paintTile(BLANK, x, y) end
+end
+
+-- the moved block sits shifted right and down from the panel band edge, matching
+-- DF's own padding (tuned live)
+local SHIFT_X, SHIFT_Y = 3, 1
+
+-- move the native In-line to target row ty (text re-copied every frame -- DF
+-- redraws it -- art re-stamped from the geometry capture; sources wiped in place)
+local function move_in_line(g, ty)
+    local gps = df.global.gps
+    local dimy = gps.dimy
+    -- text + pens, shifted right; source blanked
+    for x = g.left, g.right do
+        local p = dfhack.screen.readTile(x, g.in_row)
+        if p and x + SHIFT_X < gps.dimx then
+            p.tile = 0
+            dfhack.screen.paintTile(p, x + SHIFT_X, ty)
+        end
+        dfhack.screen.paintTile(BLANK, x, g.in_row)
+    end
+    -- View-button pill (2 rows): stamp the capture at the target, patch both
+    -- source rows back to their plain band
+    local lower = gps.screentexpos_lower
+    for _, c in ipairs(g.pill) do
+        local tx = g.left + c.dx + SHIFT_X
+        if tx < gps.dimx then lower[tx * dimy + ty + c.dy] = c.val end
+        lower[(g.left + c.dx) * dimy + g.in_row + c.dy] = g.band[c.dy] or 0
+    end
+    -- anchored icon sprite (3 rows centered on the line): stamp capture, zero sources
+    local anch = gps.screentexpos_anchored
+    local ax, ay = gps.screentexpos_anchored_x, gps.screentexpos_anchored_y
+    for _, c in ipairs(g.icon) do
+        local ti = (g.left + c.dx + SHIFT_X) * dimy + ty + c.dy
+        anch[ti], ax[ti], ay[ti] = c.val, c.ax, c.ay
+        local si = (g.left + c.dx) * dimy + g.in_row + c.dy
+        anch[si], ax[si], ay[si] = 0, 0, 0
+    end
+end
+
+-- rebuilt block: cleared Remove row, moved In-line, full description below
+local function render_display_mode(lines, vs)
+    local now = dfhack.getTickCount()
+    local gps = df.global.gps
+    if geo then
+        local key = ('%d:%d:%d'):format(vs.active_id, gps.dimx, gps.dimy)
+        if geo.key ~= key then geo, scan_at = nil, 0 end
+    end
+    if now >= scan_at then
+        geo = find_geometry(vs) or geo
+        scan_at = now + SCAN_MS
+    end
+    if not geo then return end
+    local g = geo
+    local in_target = g.remove_row + 1 + SHIFT_Y
+    local desc_top = in_target + 2
+    local span_r = g.left + SPAN_W + SHIFT_X - 1
+
+    -- clear the Remove row (statue-redirect repaints its button after us) and the
+    -- icon-bleed rows above and below the moved line; the line row itself is
+    -- cleared before the copy lands on it
+    blank_span(g.remove_row, g.left, span_r)
+    for y = in_target - 1, in_target + 1 do
+        if y ~= g.remove_row then blank_span(y, g.left, span_r) end
+    end
+    move_in_line(g, in_target)
+
+    -- description below, scrollable, up to half the screen
+    local total = #lines
+    local maxrows = math.max(1, math.floor(gps.dimy / 2))
+    local n = math.min(total, maxrows)
+    local scroll = math.max(0, math.min(vs.scroll_position_item, total - n))
+    -- cover at least the native box so stale native rows never peek through
+    local cover = math.max(n, DF_VISIBLE_ROWS)
+    local pad = (' '):rep(SHIFT_X)
+    for row = 0, cover - 1 do
+        local y = desc_top + row
+        if y >= gps.dimy then break end
+        local s = pad .. (row < n and lines[scroll + row].value or '')
+        local w = SPAN_W + SHIFT_X
+        if #s < w then s = s .. (' '):rep(w - #s) else s = s:sub(1, w) end
+        dfhack.screen.paintString(TEXT_PEN, g.left, y, s)
+    end
+    -- remember the live rects for input handling
+    g.desc_rect = {x1 = g.left, x2 = span_r, y1 = desc_top, y2 = desc_top + n - 1}
+    g.moved_in_row = in_target
+    g.total, g.n = total, n
+end
+
+function ItemDescriptionOverlay:onRenderFrame(dc, rect)
+    local ok = pcall(function()
+        local lines, vs = desc_lines()
+        if not lines then geo = nil return end
+        if display_building(vs) then
+            render_display_mode(lines, vs)
+        else
+            geo = nil
+        end
+    end)
+    if not ok then geo = nil end
+end
+
+-- wheel-scroll our expanded description; teleport clicks on the moved In-line
+-- back to the native row so DF's own View button handles them
+function ItemDescriptionOverlay:onInput(keys)
+    if not geo or not geo.desc_rect then return false end
+    local g = geo
+    local x, y = dfhack.screen.getMousePos()
+    if not x then return false end
+    -- the moved line (and the pill's second row): teleport the click back to the
+    -- native row/column so DF's own View button handles it
+    if keys._MOUSE_L and (y == g.moved_in_row or y == g.moved_in_row + 1)
+            and x >= g.left + SHIFT_X and x <= g.right + SHIFT_X then
+        local gps = df.global.gps
+        local nx = x - SHIFT_X
+        local ny = g.in_row + (y - g.moved_in_row)
+        gps.mouse_x, gps.mouse_y = nx, ny
+        gps.precise_mouse_x = nx * gps.tile_pixel_x + gps.tile_pixel_x // 2
+        gps.precise_mouse_y = ny * gps.tile_pixel_y + gps.tile_pixel_y // 2
+        return false    -- let DF process the click at the native button
+    end
+    local r = g.desc_rect
+    if x >= r.x1 and x <= r.x2 and y >= r.y1 and y <= r.y2 then
+        local vs = df.global.game.main_interface.view_sheets
+        local step = keys.CONTEXT_SCROLL_PAGEUP and -g.n or keys.CONTEXT_SCROLL_PAGEDOWN and g.n
+            or keys.CONTEXT_SCROLL_UP and -3 or keys.CONTEXT_SCROLL_DOWN and 3
+        if step then
+            vs.scroll_position_item = math.max(0,
+                math.min(vs.scroll_position_item + step, g.total - g.n))
+            return true
+        end
+    end
+    return false
+end
+
+-- plain path: items not on display keep the old behavior -- only long
+-- descriptions are redrawn, inside the widget frame
 function ItemDescriptionOverlay:onRenderBody(dc)
     local lines, vs = desc_lines()
     if not lines then return end
+    if display_building(vs) then return end        -- handled by onRenderFrame
     local total = #lines
     -- leave short descriptions to DF (it renders those fully already)
     if total <= DF_VISIBLE_ROWS then return end
@@ -66,5 +353,6 @@ OVERLAY_WIDGETS = {expand = ItemDescriptionOverlay}
 -- running it directly just prints what it is (the overlay is registered via rescan)
 if not dfhack_flags.module then
     print('item-description: overlay "item-description.expand" -- expands the item view-sheet')
-    print('description to use up to half the screen height. Manage it with gui/overlay.')
+    print('description; items on pedestals get the In-line moved up and a scrollable full text.')
+    print('Manage it with gui/overlay.')
 end
