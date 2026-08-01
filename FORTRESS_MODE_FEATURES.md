@@ -106,6 +106,8 @@ Shows an item's full description instead of DF's truncated box.
 ### **`fort/statue-redirect`**
 Opens a statue's full item description, and adds a Remove button to built items.
 
+![fort/statue-redirect demo](demos/fort-statue-redirect.gif)
+
 ## Searchable Lists
 
 ### **`fort/noble-symbol-search`**
