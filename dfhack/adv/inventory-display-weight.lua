@@ -27,10 +27,13 @@ Implementation notes, all measured live (2026-08):
   in the same {weight}-units the Burden header uses (fraction is millionths).
   The weight glyph is CP437 char 226.
 * Rows: the list renders at a 3-row pitch under the "Your inventory" header --
-  name row ("a +steel long sword+", hotkey letter at a fixed column), body-part
-  row, blank row. Visible row k maps to option_current[scroll_position + k - 1]
-  (0-based df vector). The mapping is VERIFIED per row by comparing the rendered
-  name against the item description (first 10 alphanumerics); a mismatched row
+  name row ("a +steel long sword+"), body-part row (absent for container
+  contents), blank row. The hotkey letter is the row's first non-space char and
+  its column VARIES: container contents (backpack, quiver) indent one column
+  deeper than top-level items. Letters restart at 'a' on every scroll page;
+  visible row k maps to option_current[scroll_position + k - 1] (0-based df
+  vector). The mapping is VERIFIED per row by comparing the rendered name
+  against the item description (first 10 alphanumerics); a mismatched row
   paints nothing rather than a wrong number.
 * The button icons are pure graphics -- absent from the text layer. They ARE in
   gps.screentexpos (column-major: [x*dimy + y]); every item block's icons start
@@ -86,27 +89,23 @@ local function read_screen()
 end
 
 -- name rows below the header: the k-th entry starts with its hotkey letter
--- ('a', 'b', ...) at one fixed column. Item names can BEGIN with a decoration
--- glyph (the ascii filter blanks it), so unlike watch-their-blade nothing is
--- required after the "letter space" -- the letter+column+sequence is the match.
+-- ('a', 'b', ...; they restart at 'a' on every scroll page) as the row's first
+-- non-space character. The column is NOT fixed: container contents (backpack,
+-- quiver) indent their letter one column right of top-level items, which is
+-- exactly what broke the first version mid-list. Only the letter sequence
+-- anchors a row; body-part rows start uppercase and can never match.
 local function find_entries(lines, header_y)
-    local rows, col = {}, nil
+    local rows = {}      -- rows[k] = {row=<0-based y>, col=<0-based letter col>}
     local want = 1
     for y = header_y + 1, #lines do
         local letter = string.char(96 + want)
-        if col == nil then
-            if lines[y]:find('^%s*' .. letter .. ' ') then
-                col = lines[y]:find(letter, 1, true) - 1
-                rows[want] = y - 1               -- back to 0-based screen rows
-                want = want + 1
-            end
-        elseif lines[y]:sub(col + 1, col + 2) == letter .. ' ' then
-            rows[want] = y - 1
+        if lines[y]:find('^%s*' .. letter .. ' ') then
+            rows[want] = {row = y - 1, col = lines[y]:find('%S') - 1}
             want = want + 1
+            if want > 26 then break end
         end
-        if want > 26 then break end
     end
-    return rows, col
+    return rows
 end
 
 -- first 10 alphanumerics, lowercased -- enough to tell items apart and immune
@@ -138,9 +137,9 @@ InventoryWeight.ATTRS{
 
 local PEN = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
 
--- cache = {key, entries={{row=<0-based y>, x=<paint col>, text}, ...}}
+-- cache = {entries={{row=<0-based y>, x=<paint col>, text}, ...}}
 local cache = nil
-local scan_at, tries = 0, 0
+local scan_at, tries, last_key = 0, 0, nil
 
 local function rebuild()
     local inv = df.global.game.main_interface.adventure.inventory
@@ -151,31 +150,31 @@ local function rebuild()
         if lines[y]:find(HEADER, 1, true) then header_y = y break end
     end
     if not header_y then return nil end          -- open but not drawn yet: retry
-    local rows, col = find_entries(lines, header_y)
-    if not col then return nil end
+    local rows = find_entries(lines, header_y)
+    if not rows[1] then return nil end
     -- one shared right-align anchor: the leftmost icon column of any visible row
     local left
-    for _, row in pairs(rows) do
-        local b = button_left(row, col + 2)
+    for _, e in ipairs(rows) do
+        local b = button_left(e.row, e.col + 2)
         if b and (not left or b < left) then left = b end
     end
     if not left then return nil end
     local anchor = left - 2                      -- text ends here, one blank gap
     local scroll = inv.scroll_position
     local entries = {}
-    for k, row in pairs(rows) do
+    for k, e in ipairs(rows) do
         local ok, item = pcall(function()
             return inv.option_current[scroll + k - 1]:getItem()
         end)
         if ok and item then
-            local shown = name_key(lines[row + 1]:sub(col + 3))
+            local shown = name_key(lines[e.row + 1]:sub(e.col + 3))
             local want = name_key(dfhack.items.getReadableDescription(item))
             if shown == want then
                 local text = fmt_weight(item.weight)
                 local x = anchor - #text + 1
                 -- never overwrite the name: the target cells must have scanned blank
-                if lines[row + 1]:sub(x, anchor + 1):match('^%s*$') then
-                    entries[#entries+1] = {row = row, x = x, text = text}
+                if lines[e.row + 1]:sub(x, anchor + 1):match('^%s*$') then
+                    entries[#entries+1] = {row = e.row, x = x, text = text}
                 end
             end
         end
@@ -187,17 +186,22 @@ end
 local function paint()
     if not running then return end
     local inv = df.global.game.main_interface.adventure.inventory
-    if not inv.open then cache, scan_at, tries = nil, 0, 0 return end
+    if not inv.open then cache, scan_at, tries, last_key = nil, 0, 0, nil return end
     local now = dfhack.getTickCount()
     local key = ('%d:%d:%d'):format(inv.scroll_position, #inv.option_current,
         df.global.gps.dimx)
-    if now >= scan_at or (cache and cache.key ~= key) then
+    -- any scroll/resize forces a prompt rescan EVEN IF the last scan failed --
+    -- resetting `tries` here is what keeps the weights snappy while scrolling
+    -- (the old cache is dropped too: it maps the previous page's items)
+    if key ~= last_key then last_key, tries, scan_at, cache = key, 0, 0, nil end
+    if now >= scan_at then
         cache = rebuild()
         if cache then
-            cache.key = key
             tries = 0
             scan_at = now + SCAN_MS
         else
+            -- the scan reads the last RENDERED frame, which lags a fresh scroll
+            -- by a frame or two -- retry fast, briefly, then settle to SCAN_MS
             tries = tries + 1
             scan_at = now + (tries <= 10 and RETRY_MS or SCAN_MS)
         end
