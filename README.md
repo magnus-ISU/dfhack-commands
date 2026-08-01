@@ -135,6 +135,8 @@ Frees a soldier broker to trade, then puts their squad back on duty afterward.
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill list.
 
+![fort/creature-description demo](demos/fort-creature-description.png)
+
 ### **`fort/item-description`**
 Shows an item's full description instead of DF's truncated box.
 
