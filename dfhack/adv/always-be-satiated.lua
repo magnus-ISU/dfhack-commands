@@ -45,9 +45,22 @@ WHAT IT WILL NOT CONSUME:
     "peculiar broth", "unusual liquid"), so the names are checked -- but the reliable tell is
     that ALL of them carry an ingestion syndrome, and ordinary water/berries/booze carry none.
     Both tests are applied. You do not want your one limb-regrowing jug drunk off as a snack.
+  * FLESH OF THE SAPIENT -- anything whose source creature can learn or speak: an illithid
+    brain, elf meat, dwarf blood -- UNLESS your ethics allow it. Whether DF offers these
+    is decided by the EATER's civ ethics, not the meat: a kobold (EAT_SAPIENT_*:
+    ACCEPTABLE) is served the same brain a dwarf is refused. Both EAT_SAPIENT ethics are
+    consulted and either permitting (ACCEPTABLE through ONLY_IF_SANCTIONED, or REQUIRED)
+    puts sapients on the menu; condemnation (MISGUIDED through UNTHINKABLE) keeps the
+    screen. OUTSIDERS have no civ and hence no ethics; DF refuses them sapient flesh
+    (observed on this save), so no-civ keeps the screen too.
+  * ANYTHING DF ITSELF DECLINED ONCE. An item this script picked that never shows up in
+    DF's list -- or whose row is clicked and clicked and never consumed -- has its item id
+    put on a REFUSED list and is never tried again this session. `status` shows the list.
   * ROTTEN food, which is itself a way to end up vomiting.
-  * LIQUID_MISC that is not water and not raws-edible -- that item type also covers lye,
-    blood and ichor.
+  * LIQUID_MISC that is not water, not creature blood and not raws-edible -- that item
+    type also covers lye and ichor. Plain blood IS drunk (a skin of cheetah blood quenches
+    thirst like water); NIGHT-CREATURE blood is not, because it carries a syndrome and the
+    syndrome gate refuses it before the type is even looked at.
   * Anything not in the pack: DF's eat/drink list also offers the ground and your own gear
     ("Eat snow (NW)", "Eat snow coating (bronze helm)"). Those rows are the ones with a NIL
     getItem(), and they are skipped -- this feeds you from your inventory, nothing else.
@@ -93,6 +106,11 @@ drank = drank or 0              -- drink consumed
 held_full = held_full or 0      -- times the stomach ceiling blocked an action
 held_combat = held_combat or 0  -- times a nearby hostile blocked an action
 misses = misses or 0            -- times the row could not be clicked and we backed out
+
+-- Items DF itself declined: picked by this script but never listed in the eat/drink
+-- panel (sapient flesh slips every static test -- the raws say EDIBLE), or listed but
+-- the clicks never consumed them. Keyed by item id; wanted() skips these forever after.
+refused = refused or {}
 
 -- ---- thresholds -------------------------------------------------------------
 
@@ -254,6 +272,44 @@ local function option_name(opt)
     return name
 end
 
+-- true when the material comes from a creature that can learn or speak (an illithid, an
+-- elf). DF's eat/drink list refuses their flesh, brains and blood on your civ's ethics --
+-- even though the raws happily mark them EDIBLE_COOKED -- so they must be screened here.
+local function sapient_source(mi)
+    local cr = mi and mi.creature
+    if not cr then return false end
+    for _, c in ipairs(cr.caste) do
+        if c.flags.CAN_LEARN or c.flags.CAN_SPEAK then return true end
+    end
+    return false
+end
+
+-- may the ADVENTURER eat sapients? Their civ's ethics decide -- the meat has no say.
+-- Either EAT_SAPIENT ethic permitting is enough: we cannot know whether the player or
+-- somebody else killed the source creature, and leaning permissive is safe because a
+-- wrong guess costs one panel flap before the refused list retires the item, while a
+-- wrong refusal would starve a legitimate kobold forever. NOT_APPLICABLE (the token is
+-- absent) counts as forbidding, as does having no civ at all: DF refuses outsiders
+-- sapient flesh (observed on this save -- outsider dwarf, illithid brain never listed).
+local ER = df.ethic_response
+local function ethic_permits(v)
+    return (v >= ER.ACCEPTABLE and v <= ER.ONLY_IF_SANCTIONED) or v == ER.REQUIRED
+end
+local function may_eat_sapients()
+    local u = adv_unit()
+    local civ_id = u and u.civ_id or -1
+    if civ_id < 0 then
+        -- the unit is off-map during fast travel; the historical figure still knows
+        local nem = df.nemesis_record.find(df.global.adventure.player_id)
+        civ_id = nem and nem.figure and nem.figure.civ_id or -1
+    end
+    local civ = civ_id >= 0 and df.historical_entity.find(civ_id) or nil
+    local raw = civ and civ.entity_raw
+    if not raw then return false end
+    return ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_OTHER])
+        or ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_KILL])
+end
+
 -- 'food', 'drink', or nil for anything we will not put in our mouth
 local function classify(it)
     local ty = it:getType()
@@ -261,13 +317,22 @@ local function classify(it)
     if it.flags.rotten then return nil end          -- rotten food is its own vomit trigger
     if looks_mythical(describe(it)) or has_syndrome(it) then return nil end   -- healing loot
     local mi = dfhack.matinfo.decode(it)
+    -- illithid brain, elf meat: refused for most eaters -- but a civ whose ethics
+    -- permit devouring sapients (kobolds, illithids) gets them as ordinary food
+    if sapient_source(mi) and not may_eat_sapients() then return nil end
     local flags = mi and mi.material and mi.material.flags
     local edible_raws = flags and (flags.EDIBLE_RAW or flags.EDIBLE_COOKED)
     if DRINKABLE[ty] then
         if ty == T.DRINK then return 'drink' end    -- booze: always a drink
         -- LIQUID_MISC is water and milk, but ALSO lye, blood and ichor. Water carries no
-        -- edible flag at all (checked in game), so it is named explicitly.
+        -- edible flag at all (checked in game), so it is named explicitly. Creature BLOOD
+        -- is named too: DF's own list offers it and it quenches thirst like water. Blood
+        -- with a syndrome (a night creature's) never reaches here -- has_syndrome above
+        -- already refused it.
         if (mi and mi:getToken()) == 'WATER' or edible_raws then return 'drink' end
+        if mi and mi.mode == 'creature' and mi.material and mi.material.id == 'BLOOD' then
+            return 'drink'
+        end
         return nil
     end
     if ty == T.FOOD then return 'food' end          -- a prepared meal
@@ -331,10 +396,14 @@ local function wanted()
     local pack = pack_contents()
     local list = {}
     if thirsty then
-        for _, it in ipairs(pack.drink) do table.insert(list, {id = it.id, kind = 'drink'}) end
+        for _, it in ipairs(pack.drink) do
+            if not refused[it.id] then table.insert(list, {id = it.id, kind = 'drink'}) end
+        end
     end
     if hungry then
-        for _, it in ipairs(pack.food) do table.insert(list, {id = it.id, kind = 'food'}) end
+        for _, it in ipairs(pack.food) do
+            if not refused[it.id] then table.insert(list, {id = it.id, kind = 'food'}) end
+        end
     end
     return list
 end
@@ -413,18 +482,25 @@ function AlwaysSatiated:drive()
         -- gear, and two rows can read alike. Rows with a nil getItem() are the "Eat snow"
         -- style options and can never match, which is exactly what we want.
         local rows = inv().option_current
+        local listed = {}                         -- item id -> its row, for every real row
+        for idx, opt in ipairs(rows) do
+            local ok, it = pcall(function() return opt:getItem() end)
+            if ok and it then listed[it.id] = {idx = idx, opt = opt} end
+        end
         for _, want in ipairs(job.items) do
-            for idx, opt in ipairs(rows) do
-                local ok, it = pcall(function() return opt:getItem() end)
-                if ok and it and it.id == want.id then
-                    inv().scroll_position = idx   -- bring it to the top; only ~11 rows fit
-                    job.needle = ascii_needle(option_name(opt))
-                    job.kind = want.kind          -- credit the row we actually matched, which
+            local hit = listed[want.id]
+            if hit then
+                inv().scroll_position = hit.idx   -- bring it to the top; only ~11 rows fit
+                job.needle = ascii_needle(option_name(hit.opt))
+                job.kind = want.kind              -- credit the row we actually matched, which
                                                   -- need not be the first one we asked for
-                    job.stage, job.at, job.tries = 'click', now() + SETTLE_MS, 0
-                    return
-                end
+                job.target_id = want.id
+                job.stage, job.at, job.tries = 'click', now() + SETTLE_MS, 0
+                return
             end
+            -- the panel is open and this item is not offered: DF is refusing it (sapient
+            -- flesh we failed to screen, or some other legality) -- never ask again
+            refused[want.id] = true
         end
         misses = misses + 1                       -- nothing we picked is listed: leave quietly
         self:begin_clear()
@@ -438,6 +514,7 @@ function AlwaysSatiated:drive()
             job.tries = job.tries + 1
             if job.tries > 6 then
                 misses = misses + 1
+                refused[job.target_id] = true      -- its row cannot be clicked: give up on it
                 self:begin_clear()
             end
         end
@@ -452,6 +529,7 @@ function AlwaysSatiated:drive()
         job.tries = job.tries + 1
         if job.tries > 6 then
             misses = misses + 1
+            refused[job.target_id] = true          -- clicks land but DF will not consume it
             self:begin_clear()
         else
             job.stage = 'click'                    -- still open: try the click once more
@@ -550,11 +628,23 @@ if arg == 'status' then
         tostring(df.ui_advmode_menu[df.global.adventure.menu]),
         walking_around() and '' or '  (FAST TRAVEL -- will not act)'))
     print(('  in combat: %s'):format(tostring(in_combat(u))))
+    print(('  sapient flesh: %s'):format(may_eat_sapients()
+        and 'ON THE MENU (civ ethics permit devouring sapients)'
+        or 'refused (civ ethics forbid it, or no civ)'))
     local pack = pack_contents()
     print(('  drinkable (%d):'):format(#pack.drink))
     for _, it in ipairs(pack.drink) do print('    ' .. describe(it)) end
     print(('  edible (%d):'):format(#pack.food))
     for _, it in ipairs(pack.food) do print('    ' .. describe(it)) end
+    local nref = 0
+    for _ in pairs(refused) do nref = nref + 1 end
+    if nref > 0 then
+        print(('  refused by DF this session (%d) -- will not be tried again:'):format(nref))
+        for id in pairs(refused) do
+            local it = df.item.find(id)
+            print('    ' .. (it and describe(it) or ('item #%d (no longer around)'):format(id)))
+        end
+    end
     print(('  counters: ate=%d drank=%d held(full)=%d held(combat)=%d misses=%d')
         :format(ate, drank, held_full, held_combat, misses))
     return

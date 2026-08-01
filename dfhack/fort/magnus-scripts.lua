@@ -121,6 +121,7 @@ if not dfhack.world.isFortressMode() then
             atry('stop adv/right-click-move', function() dfhack.run_script('adv/right-click-move', 'stop') end)
             atry('stop adv/reveal', function() dfhack.run_script('adv/reveal', 'stop') end)
             atry('disable adv/keep-inventory', function() dfhack.run_command('disable', 'adv/keep-inventory') end)
+            atry('disable adv/always-be-satiated', function() dfhack.run_command('disable', 'adv/always-be-satiated') end)
             atry('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
             atry('disable smooth-movement', function() dfhack.run_command('disable', 'smooth-movement') end)
         else
@@ -146,6 +147,10 @@ if not dfhack.world.isFortressMode() then
             -- same scroll offset; Escape/right-click still close it
             atry('adv/keep-inventory (inventory stays open after actions)',
                 function() dfhack.run_command('enable', 'adv/keep-inventory') end)
+            -- eats/drinks from the pack when hungry/thirsty, out of combat, vomit-safe;
+            -- it mutes keep-inventory for the moment each consumption takes
+            atry('adv/always-be-satiated (auto eat/drink from pack)',
+                function() dfhack.run_command('enable', 'adv/always-be-satiated') end)
             -- adv/fear-no-goblin is deliberately NOT armed here: it patches world_site
             -- types, so it stays a manual toggle -- run `adv/fear-no-goblin` when you
             -- actually want to fast-travel a goblin pit, `stop` when done.
