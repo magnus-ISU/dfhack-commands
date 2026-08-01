@@ -232,7 +232,7 @@ end
 -- the moved location line lands at the bound itself, the description pads 2
 local LINE_SHIFT, TEXT_SHIFT = 0, 2
 local SHIFT_Y = 1              -- the moved line sits one extra row down
-local ICON_LIFT = 3            -- the icon sprite draws 3 rows above its cell
+local ICON_LIFT = 2            -- the icon sprite stamps this many rows above the line
 -- painting starts one column PAST the left bound: the bound column carries the
 -- panel's border art, and covering it visibly cuts the border
 local BORDER_PAD = 1
@@ -242,23 +242,38 @@ local BORDER_PAD = 1
 local function move_in_line(g, ty)
     local gps = df.global.gps
     local dimy = gps.dimy
+    -- the "In <building>" text sits 2 further right than the pill; the pill zone
+    -- (and its "View" label) keeps LINE_SHIFT so the label stays on its button
+    local pill_min
+    for _, c in ipairs(g.pill) do
+        if not pill_min or c.dx < pill_min then pill_min = c.dx end
+    end
     -- text + pens, shifted; source blanked (border column left alone)
     for x = g.left + BORDER_PAD, g.right do
+        local dx = x - g.left
+        local shift = (pill_min and dx >= pill_min - 1) and LINE_SHIFT or LINE_SHIFT + 2
         local p = dfhack.screen.readTile(x, g.in_row)
-        if p and x + LINE_SHIFT < gps.dimx then
+        if p and x + shift < gps.dimx then
             p.tile = 0
-            dfhack.screen.paintTile(p, x + LINE_SHIFT, ty)
+            dfhack.screen.paintTile(p, x + shift, ty)
         end
         dfhack.screen.paintTile(BLANK, x, g.in_row)
     end
-    -- black out every texture layer on the moved rows so nothing behind the
-    -- line stays visible; the pill and icon are stamped back on top
-    local layers = {gps.screentexpos, gps.screentexpos_lower,
-        gps.screentexpos_top, gps.screentexpos_top_lower, gps.screentexpos_anchored}
+    -- flatten the moved rows to the panel's own gray: art layers cleared, the
+    -- lower layer filled with the panel band. The gray is sampled from the row
+    -- ABOVE the Remove row -- a row this overlay never paints -- because
+    -- sampling a row we write to picks up our own leftovers (a zero sampled
+    -- once perpetuates itself as a black stripe; measured live).
+    local lower = gps.screentexpos_lower
+    local gray = lower[(g.left + 5) * dimy + math.max(0, g.remove_row - 1)]
     for y = ty - 1, ty + 1 do
         if y >= 0 and y < dimy then
             for x = g.left + BORDER_PAD, g.right do
-                for _, buf in ipairs(layers) do buf[x * dimy + y] = 0 end
+                local i = x * dimy + y
+                gps.screentexpos[i] = 0
+                gps.screentexpos_top[i] = 0
+                gps.screentexpos_anchored[i] = 0
+                lower[i] = gray
             end
         end
     end
@@ -313,16 +328,19 @@ local function render_display_mode(lines, vs)
     blank_span(g.remove_row, paint_l, span_r)
     if g.in_row then
         local in_target = g.remove_row + 1 + SHIFT_Y
-        desc_top = in_target + 2
-        -- clear the icon-bleed rows around the moved line before the copy lands
-        for y = in_target - 1, in_target + 1 do
+        desc_top = in_target + 3
+        -- clear the rows around the moved line (icon bleed + the gap row above
+        -- the description) before the copy lands
+        for y = in_target - 1, desc_top - 1 do
             if y ~= g.remove_row then blank_span(y, paint_l, span_r) end
         end
         move_in_line(g, in_target)
         g.moved_in_row = in_target
     else
-        desc_top = g.remove_row + 2
-        blank_span(g.remove_row + 1, paint_l, span_r)
+        desc_top = g.remove_row + 3
+        for y = g.remove_row + 1, desc_top - 1 do
+            blank_span(y, paint_l, span_r)
+        end
         g.moved_in_row = nil
     end
 
