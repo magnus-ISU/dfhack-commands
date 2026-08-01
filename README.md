@@ -140,6 +140,8 @@ Shows a creature's full description (great for forgotten beasts) with a categori
 ### **`fort/item-description`**
 Shows an item's full description instead of DF's truncated box.
 
+![fort/item-description demo](demos/fort-item-description.png)
+
 ### **`fort/statue-redirect`**
 Opens a statue's full item description, and adds a Remove button to built items.
 
