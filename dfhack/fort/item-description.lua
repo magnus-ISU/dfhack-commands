@@ -23,9 +23,11 @@ local DF_VISIBLE_ROWS = 8
 ItemDescriptionOverlay = defclass(ItemDescriptionOverlay, overlay.OverlayWidget)
 ItemDescriptionOverlay.ATTRS{
     desc = 'Expands a long item description to use the available vertical space.',
-    default_pos = {x = -40, y = 11},
+    -- x is a RIGHT-edge inset (negative pos anchors frame.r), so narrowing w
+    -- moves only the LEFT edge; the right edge stays put
+    default_pos = {x = -40, y = 12},
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
-    frame = {w = 57, h = 34},
+    frame = {w = 55, h = 34},
 }
 
 -- the wrapped description lines DF computed for the current item, or nil if not applicable
