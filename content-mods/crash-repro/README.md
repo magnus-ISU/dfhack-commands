@@ -72,6 +72,13 @@ bug.
 
 ## Reproducing
 
+**Bump `NUMERIC_VERSION` in `info.txt` every time you change anything here.** DF
+keys its baked copy of a mod by `<MOD_ID> (numeric_version)` under
+`<user data>/data/installed_mods/`, and it never refreshes a version it has
+already seen — so an edited mod at an unchanged version is silently ignored,
+and a new world quietly loads the old contents. Delete the superseded snapshot
+too. This has already cost one wasted test round.
+
 1. Copy this folder into `<DF>/mods/crash_repro` and restart DF (mods are
    scanned once, at startup).
 2. Generate a world with the mod enabled — worldgen itself is unaffected.
