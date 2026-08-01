@@ -8,7 +8,8 @@ While nothing dangerous is going on, keeps the whole loaded map revealed by cycl
 reveal plugin's hidden-map backup fresh as new terrain scrolls into the loaded window.
 The moment any of these starts, it runs `unreveal`:
 
-    - combat        (the adventurer appears in a Conflict activity's sides)
+    - combat        (the adventurer shares a Conflict activity with a foe that
+                     matters -- see foe_matters for why not just "is listed")
     - travel        (the travel screen opens -- BEFORE the local map unloads)
     - sleep         (the sleep dialog opens, and while actually asleep)
 
@@ -49,8 +50,33 @@ local function run(cmd)
     return dfhack.run_command_silent(cmd) or ''
 end
 
--- true while the adventurer is a listed participant in any Conflict activity.
--- world.activities is small (tens); sides/unit_ids are a handful each.
+-- Does this conflict participant make the fight real?  Conflict activities
+-- LINGER and list bystanders on both ends: measured live (2026-07-31), a tame
+-- guinea hen and gander 26-53 tiles away each pinned the map hidden through a
+-- bare "adventurer is listed" check, and an AGITATED wild animal fighting the
+-- town (not the player) does the same -- DF lists the player on the town's
+-- side.  So every foe is proximity-gated: dead/unloaded never count; tame
+-- animals only when actually on top of us (a war beast pressing the attack
+-- closes in; spooked livestock does not); wild/hostile ones only when nearby
+-- (an agitated buzzard brawling with guards across the market is their fight
+-- -- if it comes for us, it crosses the gate and the map hides).  Accepted
+-- tradeoff: a ranged attacker beyond ~20 tiles won't hide the map until it
+-- closes or we engage.
+local TAME_RANGE, HOSTILE_RANGE, HOSTILE_ZRANGE = 12, 20, 5
+local function foe_matters(uid, me)
+    local u = df.unit.find(uid)
+    if not u or u.flags2.killed or u.flags1.inactive then return false end
+    local dx = math.abs(u.pos.x - me.pos.x)
+    local dy = math.abs(u.pos.y - me.pos.y)
+    local dz = math.abs(u.pos.z - me.pos.z)
+    if dfhack.units.isTame(u) then
+        return dz == 0 and math.max(dx, dy) <= TAME_RANGE
+    end
+    return dz <= HOSTILE_ZRANGE and math.max(dx, dy) <= HOSTILE_RANGE
+end
+
+-- true while the adventurer shares a Conflict activity with a foe that
+-- matters.  world.activities is small (tens); sides/unit_ids a handful each.
 local function in_combat()
     local me = dfhack.world.getAdventurer()
     if not me then return false end
@@ -59,11 +85,17 @@ local function in_combat()
         if act.type == df.activity_entry_type.Conflict then
             for _, ev in ipairs(act.events) do
                 if df.activity_event_conflictst:is_instance(ev) then
+                    local mine, real = false, false
                     for _, side in ipairs(ev.sides) do
                         for _, uid in ipairs(side.unit_ids) do
-                            if uid == id then return true end
+                            if uid == id then
+                                mine = true
+                            elseif foe_matters(uid, me) then
+                                real = true
+                            end
                         end
                     end
+                    if mine and real then return true end
                 end
             end
         end
