@@ -3,18 +3,23 @@ graphics_crash_repro
 THIS FILE IS THE BUG. Everything else in this mod is scaffolding to get the
 creature on screen.
 
-body.png is 64x32 pixels: two 32x32 tiles side by side, magenta then cyan. The
-tile page below declares the page to be 32x32 -- ONE tile, the magenta one. The
-cyan tile is real image data that the declaration does not admit exists.
+body.png is 256x32 pixels: EIGHT 32x32 tiles in a row. The tile page below
+declares the page to be 32x32 -- ONE tile, tile 0. Tiles 1..7 are real image
+data that the declaration does not admit exists.
 
-The layer then asks for tile 1:0 -- the cyan one. It is inside the file and
-outside the declared grid. DF neither rejects the reference at load nor clamps
-it at draw time: the layered-sprite compositor indexes past the end of the
-surface it allocated from the declared dimensions and writes out of bounds,
-corrupting the heap. The game then aborts or segfaults seconds to minutes
-later, wherever the next allocation happens to land.
+The layers below then ask for tiles 1:0 and 7:0 -- inside the file, outside the
+declared grid -- and each one is recoloured through a palette. The palette is
+the part that matters: a plain layer just blits an existing page texture and
+SDL clips the read harmlessly (measured: a no-palette version of this mod did
+NOT crash). A palette layer makes DF build a NEW recoloured copy of the tile --
+that is the textures::create_texture / SDL_CreateRGBSurface allocation valgrind
+catches being written past. Every one of the six layers in the mod that first
+exposed this bug (ha-succubi) was a palette layer.
 
-Change PAGE_DIM_PIXELS to 64:32 and the crashes stop.
+Three USE_PALETTE indices mean three separate recoloured copies, so the fault
+is hit three times per creature rather than once.
+
+Change PAGE_DIM_PIXELS to 256:32 and the crashes stop.
 
 [OBJECT:GRAPHICS]
 
@@ -25,6 +30,29 @@ Change PAGE_DIM_PIXELS to 64:32 and the crashes stop.
 
 [CREATURE_GRAPHICS:CRASH_REPRO]
 	[LAYER_SET:DEFAULT]
-	[LAYER_GROUP]
-	[LAYER:BODY_OUT_OF_BOUNDS:CRASH_REPRO_PAGE:1:0]
-	[END_LAYER_GROUP]
+
+	[LS_PALETTE:BODY]
+		[LS_PALETTE_FILE:crash_repro/palettes.png]
+		[LS_PALETTE_DEFAULT:0]
+
+	body
+
+		[LAYER_GROUP]
+		[LAYER:BODY_IN_BOUNDS:CRASH_REPRO_PAGE:0:0]
+			[USE_PALETTE:BODY:1]
+		[END_LAYER_GROUP]
+
+	one tile past the declared edge -- the exact shape of the ha-succubi bug
+
+		[LAYER_GROUP]
+		[LAYER:BODY_OUT_OF_BOUNDS_NEAR:CRASH_REPRO_PAGE:1:0]
+			[USE_PALETTE:BODY:2]
+		[END_LAYER_GROUP]
+
+	seven tiles past it -- a bigger overrun, in case one tile lands inside
+	whatever slack the allocator happened to leave
+
+		[LAYER_GROUP]
+		[LAYER:BODY_OUT_OF_BOUNDS_FAR:CRASH_REPRO_PAGE:7:0]
+			[USE_PALETTE:BODY:3]
+		[END_LAYER_GROUP]

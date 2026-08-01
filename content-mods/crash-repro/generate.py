@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the two bulky, uninteresting parts of the crash-repro mod:
+"""Generate the bulky, uninteresting parts of the crash-repro mod:
 
-  objects/entity_crash_repro.txt   vanilla MOUNTAIN, renamed, pointed at our creature
-  graphics/crash_repro/body.png    a 2x1-tile sheet (the page declares 1x1)
+  objects/entity_crash_repro.txt    vanilla MOUNTAIN, renamed, pointed at our creature
+  graphics/crash_repro/body.png     8x1 tiles of flat colour (the page declares 1x1)
+  graphics/crash_repro/palettes.png 4 palette rows; row 0 is the sheet's own colours
 
 Everything that actually demonstrates the bug is hand-written and tiny -- see
 graphics/graphics_crash_repro.txt and README.md.
@@ -61,39 +62,70 @@ def build_entity():
     print(f'wrote {dest} ({len(out)} lines)')
 
 
-# ---- sprite sheet: two 32x32 tiles side by side ----------------------------
-# Tile 0 (magenta) is the only one the tile page admits exists.
-# Tile 1 (cyan) is real image data that the page declaration hides -- the layer
-# in graphics_crash_repro.txt asks for it anyway.
+# ---- images -----------------------------------------------------------------
+# body.png is EIGHT 32x32 tiles in a row. The tile page declares one. Tile 0 is
+# the only tile that officially exists; tiles 1..7 are real pixels the
+# declaration hides, and the layers ask for some of them anyway.
 
 TILE = 32
-LEFT = (200, 40, 160, 255)     # magenta: in-bounds tile
-RIGHT = (40, 200, 200, 255)    # cyan: the out-of-bounds tile
+TILES = 8
+COLOURS = [
+    (200, 40, 160, 255),   # 0 magenta  -- the declared tile
+    (40, 200, 200, 255),   # 1 cyan     -- one tile past the declared edge
+    (240, 160, 40, 255),   # 2 orange
+    (80, 220, 90, 255),    # 3 green
+    (220, 220, 60, 255),   # 4 yellow
+    (150, 90, 230, 255),   # 5 violet
+    (230, 70, 70, 255),    # 6 red
+    (60, 110, 240, 255),   # 7 blue     -- seven tiles past the declared edge
+]
 
 
-def build_png():
-    width, height = TILE * 2, TILE
+def png_bytes(width, height, pixel):
+    """pixel(x, y) -> RGBA tuple"""
     raw = bytearray()
-    for _ in range(height):
-        raw.append(0)                                   # filter type 0 per scanline
+    for y in range(height):
+        raw.append(0)                     # filter type 0 for this scanline
         for x in range(width):
-            raw.extend(LEFT if x < TILE else RIGHT)
+            raw.extend(pixel(x, y))
 
     def chunk(tag, data):
         return (struct.pack('>I', len(data)) + tag + data
                 + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
 
-    png = (b'\x89PNG\r\n\x1a\n'
-           + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
-           + chunk(b'IDAT', zlib.compress(bytes(raw), 9))
-           + chunk(b'IEND', b''))
-    dest = os.path.join(HERE, 'graphics/crash_repro/body.png')
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(bytes(raw), 9))
+            + chunk(b'IEND', b''))
+
+
+def write_png(relpath, width, height, pixel):
+    dest = os.path.join(HERE, relpath)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, 'wb') as f:
-        f.write(png)
+        f.write(png_bytes(width, height, pixel))
     print(f'wrote {dest} ({width}x{height})')
+
+
+def build_images():
+    # the sprite sheet: one flat colour per tile
+    write_png('graphics/crash_repro/body.png', TILE * TILES, TILE,
+              lambda x, y: COLOURS[x // TILE])
+
+    # the palette sheet: row 0 must hold the sheet's own colours (that is what
+    # LS_PALETTE_DEFAULT:0 means -- the colours to swap FROM). Rows 1..3 are
+    # progressively darker versions, so each USE_PALETTE index forces DF to
+    # build a separate recoloured copy of the sprite.
+    def palette_pixel(x, y):
+        r, g, b, a = COLOURS[x]
+        if y == 0:
+            return (r, g, b, a)
+        f = 1.0 - 0.25 * y
+        return (int(r * f), int(g * f), int(b * f), a)
+
+    write_png('graphics/crash_repro/palettes.png', TILES, 4, palette_pixel)
 
 
 if __name__ == '__main__':
     build_entity()
-    build_png()
+    build_images()
