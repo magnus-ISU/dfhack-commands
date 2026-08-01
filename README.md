@@ -267,6 +267,26 @@ Right clicking (if it gives no other options) automatically
 
 ![adv/right-click-move demo](demos/adv-right-click-move.gif)
 
+### **`adv/watch-their-blade`** 
+The attack screens show a combat summary under each name — every
+  candidate on the "Who will you attack?" chooser, and your target on the attack
+  screens after you pick: their wounds ("Faint, Heavy Bleeding"), worn armor
+  ("iron greaves, iron breastplate") and what they are holding, by hand ("Left
+  hand silver carving knife, right hand copper whip") — including sheathed
+  weapons. Pick your target, and your fight, with open eyes.
+
+![adv/watch-their-blade demo](demos/adv-watch-their-blade.png)
+
+### **`adv/auto-save`** 
+Save adventure mode automatically: `adv/auto-save` saves right now by
+  driving DF's own escape-menu flow; `enable [min]` repeats it every N minutes
+  (default 20). A save only fires once BOTH clocks agree — N wall-clock minutes
+  AND two in-game hours since the last save — so an idle game is never saved over
+  and over, and only from a quiet screen (no menus, no conversation), so it never
+  fights a menu stack you are in the middle of.
+
+![adv/auto-save demo](demos/adv-auto-save.png)
+
 ### **`smooth-movement`** 
 Smooth camera panning in adventure mode, and smooth movement for
   creatures and the player in adventure mode. (A C++ plugin rather than a script — install it
