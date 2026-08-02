@@ -56,8 +56,10 @@ cinematic catch-up: `smooth-movement camera speed 150`).
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
-full description), and enable a batch of stock DFHack tools:
-    enable: autobutcher, autoclothing, autonestbox, autotraining, burrow (auto-grow
+full description), enable rusty-adventurers (yearly sweep that keeps skill rust off
+retired adventurers; a no-op in forts without one), and enable a batch of stock
+DFHack tools:
+    enable: autobutcher, autoclothing, autonestbox, burrow (auto-grow
             `name+` burrows), prioritize, seedwatch, suspendmanager, timestream
     tweak:  fast-heat, realistic-melting
 It also applies autobutcher EMBARK PROTECTION once per fort: any animal you
@@ -241,6 +243,8 @@ if ({...})[1] == 'disable' then
     try('disable right-click-cancel overlay', function() dfhack.run_command('overlay', 'disable', 'fort/right-click-cancel.cancel') end)
     try('disable plan-tile overlay', function() dfhack.run_command('overlay', 'disable', 'fort/plan-tile.tile') end)
     try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'fort/auto-name') end)
+    try('disable statue-redirect (auto-open statue details)', function() dfhack.run_command('disable', 'fort/statue-redirect') end)
+    try('disable rusty-adventurers', function() dfhack.run_command('disable', 'fort/rusty-adventurers') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
@@ -342,6 +346,12 @@ if lovely then
     try('statue-redirect (auto-open statue details)',
         function() dfhack.run_command('enable', 'fort/statue-redirect') end)
 
+    -- a retired adventurer arrives with a lifetime of skills and then rusts them away
+    -- sitting in a dining room; this scrubs rust off those units only (matched on the
+    -- nemesis ADVENTURER flag). A no-op in forts that have no adventurer.
+    try('rusty-adventurers (no skill rust on retired adventurers)',
+        function() dfhack.run_command('enable', 'fort/rusty-adventurers') end)
+
     -- hide the stock "N thieving or mischievous creature(s)" notify line (kea/rhesus
     -- noise). The other stock lines this pack replaces (agitated_count, hostile_count)
     -- are hidden by agitated-animals-notification, which plain magnus-scripts loads.
@@ -426,7 +436,7 @@ if lovely then
     -- `name+` burrows grow too.
     -- hide-tutorials is NOT in this list: it moved to the always-on set above, so
     -- plain `magnus-scripts` gets it (and so does the adventure branch).
-    for _, c in ipairs({'autoclothing', 'autonestbox', 'autotraining', 'burrow',
+    for _, c in ipairs({'autoclothing', 'autonestbox', 'burrow',
                         'prioritize', 'seedwatch', 'suspendmanager',
                         'timestream'}) do enable_tool(c) end
     for _, c in ipairs({'fast-heat', 'realistic-melting'}) do tweak_tool(c) end

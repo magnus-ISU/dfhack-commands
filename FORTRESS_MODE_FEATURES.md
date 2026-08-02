@@ -31,6 +31,10 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ## Fortress Management
 
+### **`fort/workshop-tools`**
+Puts a `+` on every queued workshop task that queues another one just like it, and sorts
+a shop's "Add new task" list so the jobs you can actually do come before the ones you can't.
+
 ### **`fort/quick-order`**
 Type plain text on the Work Orders screen to create a legal manager order, with "keep N in
 stock" repeats.
@@ -90,6 +94,12 @@ Keeps tree-cutting under the elves' yearly limit by designating the nearest tree
 
 ### **`fort/broker-ready`**
 Frees a soldier broker to trade, then puts their squad back on duty afterward.
+
+### **`fort/rusty-adventurers`**
+Keeps skill rust off retired adventurers — and only them, matched on the nemesis
+`ADVENTURER` flag, never a name or a skill count — so a hero you played doesn't decay
+into a rusty militia commander. Swept once a game year. There is no stock DFHack tool
+for this.
 
 ## Information
 
