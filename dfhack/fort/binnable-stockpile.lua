@@ -475,7 +475,7 @@ CategoryToggle.ATTRS{
 -- would be misread as a re-click on the selected category and toggle it. Both overlays live on the
 -- same screen, so the button overlay's frame_rect is valid here.
 local function over_buttons(mx, my)
-    local e = overlay.get_state().db['binnable-stockpile.button']
+    local e = overlay.get_state().db['fort/binnable-stockpile.button']
     local r = e and e.widget and e.widget.frame_rect
     return (r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2) and true or false
 end

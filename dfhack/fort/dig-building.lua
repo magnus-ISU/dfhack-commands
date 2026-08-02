@@ -63,7 +63,7 @@ local function overlapping_overlays(frect)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(db) do
-        if name ~= 'dig-building.picker' and e.widget then
+        if name ~= 'fort/dig-building.picker' and e.widget then
             local w = e.widget
             local r = w.frame_rect
             local vis = w.visible

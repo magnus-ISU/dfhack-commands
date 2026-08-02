@@ -73,7 +73,7 @@ local function over_other_overlay(mx, my)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'plan-tile.tile' then
+        if name ~= 'fort/plan-tile.tile' then
             local w = e.widget
             local r = w.frame_rect
             if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2

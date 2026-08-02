@@ -71,7 +71,7 @@ local function over_other_overlay(mx, my, hit)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'dig-shapes.watcher' then
+        if name ~= 'fort/dig-shapes.watcher' then
             local w = e.widget
             local r = w.frame_rect
             if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2
@@ -361,7 +361,7 @@ function convert_dig_box(a, b)
     -- designating more is plainly deliberate and is not blocked).
     if #trees > 0 then
         local budget
-        local okr, aec = pcall(reqscript, 'auto-elf-chop')
+        local okr, aec = pcall(reqscript, 'fort/auto-elf-chop')
         if okr and aec and aec.manual_chop_budget then
             local okb, b = pcall(aec.manual_chop_budget)
             if okb then budget = b end

@@ -83,7 +83,7 @@ viewscreen, or the "assign uniform" picker -- so those work normally. This matte
 for assign_uniform, which is drawn over the map but keeps the squads focus: without the
 guard its clicks were swallowed (no uniform assigned) and the mouse-up poller fired
 stray station orders, which is why a new squad couldn't be equipped. See
-`squad_subscreen_open`. Registered automatically as overlay `dwarf-rts.clickmove`.
+`squad_subscreen_open`. Registered automatically as overlay `fort/dwarf-rts.clickmove`.
 
 The drag/refresh/select/disband cycle is verified end-to-end via the remote API;
 the in-game drag path still wants a live test.
@@ -216,7 +216,7 @@ local function over_other_overlay(mx, my)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'dwarf-rts.clickmove' then
+        if name ~= 'fort/dwarf-rts.clickmove' then
             local w = e.widget
             local r = w.frame_rect
             -- skip whole-screen interaction layers (confirm/spectate/design): they
@@ -1469,7 +1469,7 @@ require('plugins.overlay').rescan()
 -- explicitly turn the overlay ON. default_enabled only applies on first discovery; once an
 -- `overlay disable` (e.g. `magnus-scripts disable`) has persisted an off state, rescan alone
 -- won't bring it back -- so running `dwarf-rts` must re-enable it to be reliable.
-dfhack.run_command('overlay', 'enable', 'dwarf-rts.clickmove')
+dfhack.run_command('overlay', 'enable', 'fort/dwarf-rts.clickmove')
 
 -- hook the vanilla group notifications for shift-click group-kill, and re-hook whenever the
 -- notify module may have been reloaded (new world / map load)

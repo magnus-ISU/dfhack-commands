@@ -102,7 +102,7 @@ local function mandates_message()
     end
     -- does a manager work order already exist for this Make mandate?
     local function handled(m)
-        local ok, am = pcall(reqscript, 'auto-mandate')
+        local ok, am = pcall(reqscript, 'fort/auto-mandate')
         return ok and am and am.has_order_for and am.has_order_for(m) or false
     end
 

@@ -528,7 +528,7 @@ local function build_figure_info(fig, pos_by_unit)
     if unit then
         local sk = top_skills(unit, 6)
         if #sk > 0 then line({L('Skills: '), V(table.concat(sk, ', '))}) end
-        local ok, cd = pcall(reqscript, 'creature-description')
+        local ok, cd = pcall(reqscript, 'fort/creature-description')
         if ok and cd and cd.kill_summary then
             local okk, ks = pcall(cd.kill_summary, unit)
             if okk and ks and #ks > 0 then line({L('Kills: '), V(ks)}) end
