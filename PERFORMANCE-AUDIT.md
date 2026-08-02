@@ -85,7 +85,7 @@ interval is the right trade.
   `statue-redirect` (per-frame tick but only a few view-sheet field reads), `inside-burrow`
   (per-frame but only walks the small `jobs.list`, and self-disarms after the first burrow).
   Negligible. Left.
-- **Screen-scoped overlays** — `squad-buttons`, `dfhack-stocks`, `creature-description`,
+- **Screen-scoped overlays** — `squad-buttons`, `creature-description`,
   `item-description`, `military-uniforms`, `binnable-stockpile`, `embark-prep`, `quick-order`,
   `statue-redirect`'s Remove button. Each is scoped to a specific viewscreen and only ticks while
   that screen is open — not during normal play. Left.

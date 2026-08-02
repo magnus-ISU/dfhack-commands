@@ -377,98 +377,6 @@ Map tile under the cursor: `dfhack.gui.getMousePos()`; the unit on a tile:
 - #4 needs to detect a portrait/camera-icon click in the squads panel (find the
   clickable rects / the selected leader histfig) and set `plotinfo.follow_unit`.
 
-### 🟡 dfhack-stocks — melt-focused stocks menu (ON HOLD)
-
-**Currently disabled and NOT deployed** — the `dfhack-stocks.redirect` overlay was
-disabled (`overlay disable dfhack-stocks.redirect`) and the copy in
-`dfhack-config/scripts/` was deleted, so it no longer loads or intercepts the
-vanilla Stocks screen. Source is kept here pending a rework of the implementation.
-To bring it back: copy `dfhack-stocks.lua` to `dfhack-config/scripts/` and
-`overlay enable dfhack-stocks.redirect`.
-
-Core is functional; further polish/features (and a revisit of the redirect
-approach) ongoing.
-
-`dfhack-stocks` (or the toolbar overlay button `dfhack-stocks.button`) opens a
-`gui.ZScreen` item designation menu. **Implemented:**
-- Lists **all** items (`world.items.all`, skipping `garbage_collect`), built once
-  per open with a per-item `pcall` guard. When **Action = melt** the list is
-  restricted to metal-meltable items (`dfhack.items.canMelt`); the other actions
-  list everything. **Action defaults to `view`** (view/melt/forbid/dump; view
-  opens the item's sheet) — artifacts can never be melted (`canMelt` excludes
-  them), so a melt-default list could never lead with the most-recent artifact.
-- Rows show `M/F/D` flag tags, a quality tag, the value, `F`(foreign)/`X`(exotic)
-  markers, and the **decorated description** (`getDescription(item,0,true)`).
-- **Sort:** origin (foreign first) → quality (artifact→ordinary) → item type
-  (alphabetical, so masterwork axes before swords) → value → newest.
-- **Search** `EditField` (top-left, focused on open) drives the `FilteredList`
-  text filter; **Action** cycle sits to its right; a totals label shows the count
-  + summed value of the shown items.
-- **Filters:** origin all/foreign/local (`item.flags.foreign`); exotic all/only/not
-  (= the fort civ **cannot produce** it — subtype not in `resources.*_type`,
-  diggers counted; material can't be forged into that class; or an unused metal);
-  and a **rarity range slider** (Ordinary..Artifact) mirroring buildingplan's
-  `RangeSlider` + min/max `CycleHotkeyLabel`s.
-- **Interaction (mouse only — the search field captures the keyboard, so there
-  are no hotkeys):** click a row once to select it (full description + value at
-  the bottom); click it again / double-click / shift-click to apply the current
-  action. Shift-click applies to the range from the anchor; **Apply to all
-  visible** applies to everything shown. melt toggles via
-  `markForMelting`/`cancelMelting`; forbid/dump toggle the flag; view opens the
-  item sheet and dismisses the menu. After each apply the row's flags re-render
-  and selection is preserved by item id.
-- A three-line `Melt / Forbid / Dump` header is staggered to line up under the
-  `M`/`F`/`D` flag columns. The right panel shows the expected **metal-bar yield**
-  of the items currently marked for melting, grouped by metal/bar type (sorted by
-  yield), using the realistic-melt formula (0.95 × forging cost − 0.10/wear; ammo
-  → vanilla 30%).
-- On open the **most recent artifact** (last entry of `world.artifacts.all` that
-  has a movable `item`) is selected and scrolled to the top of the list; falls
-  back to the newest item if no artifact is in view. Artifact rows are detected
-  from that same id set (so they rank above Masterful in the sort).
-- No custom toolbar button. Instead an invisible overlay (`dfhack-stocks.redirect`,
-  `viewscreens='dwarfmode/Stocks'`, `overlay_onupdate_max_freq_seconds=0`) fires
-  the instant the player opens the **vanilla Stocks screen**: it sets
-  `main_interface.stocks.open=false` (the safe close idiom DFHack itself uses) and
-  pops our window on the next frame via `dfhack.timeout`. Esc dismisses our window
-  back to normal play — it does not reopen the vanilla screen.
-  - NB: never force `stocks.open=true` from a script to *open* it — that bypasses
-    DF's initialization of the stocks lists and crashes the game. The redirect
-    only ever closes it, in response to DF legitimately opening it.
-
-Original spec (for reference):
-
-A "DFHack stocks" overlay button rendered **above the vanilla Stocks button**;
-clicking it opens a searchable/filterable menu (styled like `gui/trade` /
-`gui/sitemap`) for picking items — primarily to melt.
-
-Menu behavior:
-- **On open:** the search field is immediately focused, and the **most recent
-  artifact is selected with its description shown**.
-- **Click an item row** → show its description
-  (`dfhack.items.getReadableDescription` / `getDescription`).
-- **Foreign / locally-produced** filter — `item.flags.foreign` (true = foreign;
-  false = made locally). Cycles all / foreign-only / local-only.
-- **Exotic toggle (3-state):** include (all) → **only** exotic → **not** exotic.
-  "Exotic" = weapons/armor dwarves can't normally use. *Detection TBD* (item
-  subtype not usable by the fort race / wrong size) — verify live.
-- **Action cycle toggle:** focus → melt → forbid → dump.
-  - **focus** = "Focus on Item's Sheet": `main_interface.view_sheets` —
-    set `active_sheet` to the ITEM type + `viewing_itid = item.id`
-    (`df.view_sheet_type`, -1..7; confirm exact open call live).
-  - **melt** = `dfhack.items.markForMelting(item)` (`cancelMelting`, `canMelt`).
-  - **forbid** = set `item.flags.forbid`. **dump** = set `item.flags.dump`.
-  - melt/forbid/dump support multi-select (apply to all selected; the latest
-    click wins). focus acts on the focused row only.
-
-Verified mechanics: `flags.melt/forbid/dump/foreign/artifact`;
-`dfhack.items.markForMelting/cancelMelting/canMelt`; `world.artifacts.all`
-(most-recent = last entry, id 472 now); `view_sheets.viewing_itid`;
-`items.getDescription/getReadableDescription`.
-
-**Needs live UI:** the bottom toolbar viewscreen + Stocks-button position (for
-the overlay button); exotic-detection method; the exact focus-on-sheet call.
-
 ### 🔴 embark-nobles (UNFINISHED — removed from the pack)
 
 `embark-nobles` assigns the six key fort positions in one shot (handy right after
@@ -754,9 +662,9 @@ force `breakdown_level`/dismiss on a lua viewscreen (that crashes DF). Direct
 struct-building (below, proven by auto-mandate) stays the simple path for
 one-time orders where conditions aren't needed; pick per case.
 
-**Reuse:** `auto-mandate.lua` (order construction + job/material `MAP`),
-`dfhack-stocks.lua` (`material_can_make`, civ metals), DFHack `orders.lua`
-(item_conditions construction in its JSON import = the model for conditions).
+**Reuse:** `auto-mandate.lua` (order construction + job/material `MAP`), DFHack
+`orders.lua` (item_conditions construction in its JSON import = the model for
+conditions).
 
 **Verified data:** `df.manager_order` fields = `job_type, item_type,
 item_subtype, mat_type, mat_index, material_category, amount_total, amount_left,
@@ -767,7 +675,7 @@ orders; this extends it with parsing + conditions.)
 **Phase 0 — UI (needs fort loaded to confirm).** Overlay on the Work Orders
 screen (focus `dwarfmode/Info/WORK_ORDERS`, verify `/Default`): an `EditField`
 for the text + a status line for the parse result / error. Enter = parse →
-resolve → create or report. Register like dfhack-stocks/squad-buttons.
+resolve → create or report. Register like squad-buttons.
 
 **Phase 1 — parse.** Trim; leading `r`/`R` → repeating; amount = first integer
 **or spelled-out number** (`one`..`twenty`, `a`/`an`→1, default 1); rest =

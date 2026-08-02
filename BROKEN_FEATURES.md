@@ -43,10 +43,6 @@ in practice and likely to be **removed** rather than repaired.
 
 Broken and switched off, with a plan to fix them.
 
-### **`fort/dfhack-stocks`**
-A searchable stocks menu for quickly marking gear to melt, forbid or dump. **On hold**
-mid-build (`DEVNOTES.md`). Not referenced by `magnus-scripts`.
-
 ### **`fort/mood-burrow`**
 Confines a moody dwarf to a chosen burrow until it grabs its first material. Not referenced by
 `magnus-scripts`.

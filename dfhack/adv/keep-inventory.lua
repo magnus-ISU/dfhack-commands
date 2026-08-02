@@ -63,7 +63,9 @@ Get, right-click, Get. With keep-inventory enabled, when that menu closes and so
 LANDED IN YOUR INVENTORY, the menu is reopened (scrolled back to where it was). The gate matters:
 the same list carries "Path to here" / "View yourself" style options, and those must not summon
 it back -- so the reopen fires only when the adventurer's inventory count grew since the list
-opened. Esc / right-click dismiss it for good, as with the panel.
+opened. And only when there is still something left to take: grabbing the LAST listed item does
+not resurrect a menu with nothing to pick up in it. Esc / right-click dismiss it for good, as
+with the panel.
 
 The reopen is fed as `A_GROUND` (the `g` ground list): a fed right-click never reaches DF
 (hardware-only), so the exact right-click menu cannot be resurrected -- but both are the same
@@ -268,6 +270,20 @@ function KeepInventory:drive()
             if not taken then
                 g_gate = g_gate + 1
                 g_note = ('nothing taken (%d listed items)'):format(#(self.ol_items or {}))
+                self.job = nil
+                return
+            end
+            -- ...but do NOT bring the list back when that Get emptied it: if none of
+            -- the items it showed is still on the ground, there is nothing left to
+            -- pick up here and the reopened menu would just be in the way.
+            local left = 0
+            for _, id in ipairs(self.ol_items or {}) do
+                local it = df.item.find(id)
+                if it and it.flags.on_ground then left = left + 1 end
+            end
+            if left == 0 then
+                g_gate = g_gate + 1
+                g_note = 'took the last item'
                 self.job = nil
                 return
             end

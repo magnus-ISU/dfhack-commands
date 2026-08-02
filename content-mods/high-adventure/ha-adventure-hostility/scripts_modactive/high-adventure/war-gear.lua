@@ -65,6 +65,14 @@ SCIMITAR ten times against one each of bow, pike, whip and the rest, so scimitar
 dominate for drow without being forced and the other choices still come up. Training
 weapons are filtered out of civ lists.
 
+RANGED vs MELEE is decided BEFORE the civ list is consulted, because those lists are flat
+preference tables -- a civ that fields bows at all fields them as often as anything else,
+which fills a crowd with archers. The list is split by what each weapon actually fires
+(`ranged_ammo` in the raws) and one side is drawn from at the race's rate: ORCS 0%, every
+other race 15%. Within the chosen side the civ's own repeats still apply, so a drow
+drawing melee still overwhelmingly gets a scimitar. An empty side falls through to the
+other, so nobody is left unarmed by the split.
+
 HOW MANY, and whether a shield comes too, depends on whether the unit's civ fields
 shields at all:
   * civ WITH shields -- 50% one weapon, 25% two weapons, 25% one weapon and a shield.
@@ -228,6 +236,13 @@ local ARROWS_PER_QUIVER = 10
 local ARMING = {{w=50, weapons=1}, {w=25, weapons=2}, {w=25, weapons=1, shield=true}}
 local MAX_WEAPONS = 2               -- hard ceiling, whatever the roll says
 local SHIELD_WOOD_CHANCE = 0.90     -- otherwise metal
+
+-- How often a minted weapon is a RANGED one. Without this the civ weapon list decides,
+-- and those lists are flat preference tables -- a civ that fields bows at all fields them
+-- as often as any other entry, so crowds come out full of archers. Keyed by the unit's
+-- RACE, like OUTFITS. Orcs never carry one; everyone else is occasional.
+local RANGED_CHANCE = {HA_ORC = 0.0}
+local DEFAULT_RANGED_CHANCE = 0.15
 
 -- OUTFITS: a weighted roll per unit, made once and then remembered.
 --   w       relative weight
@@ -882,13 +897,33 @@ end
 --     with twin blades), anything else single
 -- Never leaves a unit holding more than MAX_WEAPONS. A minted ranged weapon also gets a
 -- quiver of matching ammo.
+-- Split a weapon list into melee and ranged by what the RAWS say it fires, then draw
+-- from one or the other at the race's RANGED_CHANCE. Within the chosen pool the civ's
+-- own repeats still decide, so a drow drawing melee still overwhelmingly gets a
+-- scimitar. If a pool is empty the other one is used -- a race with no melee weapon at
+-- all still gets armed, and a 0% race with nothing but bows is not left empty-handed.
+local function pick_weapon(u, list)
+    local melee, ranged = {}, {}
+    for _, id in ipairs(list) do
+        if ammo_class_of(id) then ranged[#ranged + 1] = id else melee[#melee + 1] = id end
+    end
+    local cr = df.global.world.raws.creatures.all[u.race]
+    local cid = cr and tostring(cr.creature_id) or ''
+    local chance = RANGED_CHANCE[cid] or DEFAULT_RANGED_CHANCE
+    local pool = (#ranged > 0 and math.random() < chance) and ranged or melee
+    if #pool == 0 then pool = #melee > 0 and melee or ranged end
+    if #pool == 0 then return end
+    return pool[math.random(#pool)]
+end
+
 local function mint_arms(u, o)
     if not o.weapon then return end
     if armed(u) then return end
     local wtype, windex = mat(o.weapon)
     if not wtype then return end
     local list = o.arms or civ_arms(u)
-    local pick = list[math.random(#list)]
+    local pick = pick_weapon(u, list)
+    if not pick then return end
     local isub = subtype_index(df.item_type.WEAPON, pick)
     if not isub then return end
 
