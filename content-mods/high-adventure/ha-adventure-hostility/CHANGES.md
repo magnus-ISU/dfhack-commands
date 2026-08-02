@@ -35,6 +35,38 @@ world load.
   their thralls and for trade but never wear it, and the ha-illithids stripping pass
   already exempts thralls.
 
+### war-gear, shipped under the same 0.18 (deployed over bundle v17, version deliberately not bumped)
+
+- **FIXED: gauntlets were being scattered on the ground.** `dfhack.items.createItem`
+  follows DF's forging rules, and DF forges gauntlets as a PAIR -- the call returns TWO
+  items, handed 1 and 2, where boots and breastplates return one. `apply()` used only
+  `created[1]` and abandoned the left piece of every pair where it stood; a world survey
+  found 35 left gauntlets against 6 right. The same bug put a `created[1]` -- always the
+  right -- on BOTH hands, which is what `fix_handedness` had been papering over since
+  0.13. `apply()` now carries the surplus to the next swap in the same slot, so one call
+  dresses both hands, and destroys anything genuinely left over. A forced re-gear of 51
+  units afterwards added zero ground gauntlets. Added `create_one()` and routed the seven
+  other mint paths through it, since they shared the same `created[1]` assumption.
+- **High elves rebalanced** to six even sixths: twinkling armour, steel armour, grown
+  WOODEN armour with a steel weapon, cloak-and-robe with a twinkling weapon, plain
+  twinkling-fabric clothes, and giant cave spider silk. The last two are unarmed; a cloak
+  or robe is what earns a weapon. `gendered` puts elf women in skirts or dresses and never
+  elf men; `outer` decides the cloak. In FORTRESS mode a besieging elf army ignores the
+  table and is always armoured, an even split of steel and twinkling -- visitors and
+  residents still take the ordinary roll.
+- **Shields.** A civ that fields them rolls 50% one weapon, 25% two, 25% weapon and
+  shield; a civ with none (the drow) keeps the old scimitar-pair rule. Shields are wooden
+  90% of the time -- elves use their own grown wood -- and metal otherwise. Nothing may
+  leave with more than two weapons.
+- **Ranged weapons come with ammo.** A minted bow, crossbow, blowgun or sling gets a
+  leather quiver holding 10 rounds of what it actually fires. The pairing is read from the
+  raws (`ranged_ammo` vs `ammo_class`), so modded ranged weapons need no entry.
+- **Helmets are much more common.** An armouring outfit issues one 80% of the time (was
+  40%); an outfit carrying only a weapon now issues one 40% of the time in the weapon's
+  own metal, where it previously issued none at all. Fabric outfits still get none -- a
+  cloth helm is not a legal item -- and children reach neither branch. Measured on 51
+  units: 27% helmed before, 69% after.
+
 ## v0.17 -- kobolds are brave only under a dragon
 
 - **Kobolds now get NOFEAR, but only while one of their ancient-dragon overlords is on

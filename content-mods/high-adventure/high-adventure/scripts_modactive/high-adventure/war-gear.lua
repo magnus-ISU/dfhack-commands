@@ -37,7 +37,16 @@ Who gets what -- OUTFITS below is a weighted roll, made ONCE per unit and rememb
     HA_DROW  MALE           80% iron, 20% steel -- armor + weapon
              DRIDER         always steel
              FEMALE         giant cave spider silk clothing, no armor, no weapon
-    HA_HIGH_ELF             twinkling metal armor; clothing rewoven in twinkling fabric
+    HA_HIGH_ELF     1/6     full twinkling armor + twinkling weapon
+                    1/6     full steel armor + twinkling weapon
+                    1/6     grown WOODEN armor + steel weapon
+                    1/6     cloak or robe, twinkling fabric clothes, twinkling weapon
+                    1/6     twinkling fabric clothes, no cloak, UNARMED
+                    1/6     giant cave spider silk clothes, no cloak, UNARMED
+              women always wear a skirt or dress, men never do (`gendered`)
+              FORTRESS MODE: a besieging elf army ignores the table above and is always
+              armored, an even split of steel and twinkling (`siege`). Visitors and
+              residents still take the ordinary roll, so a diplomat arrives robed.
     HA_ILLITHID  THRALL_M   20% bronze weapon, no armor
                  THRALL_F   30% copper armor + copper weapon
                             20% copper armor + bronze weapon
@@ -53,16 +62,37 @@ it, and ha-illithids strips any that reaches one (that pass already exempts thra
 WEAPONS come from the unit's OWN CIV list unless the outfit names one. That list has
 REPEATS and the repeats are the civ's preference ratio -- the drow entity lists
 SCIMITAR ten times against one each of bow, pike, whip and the rest, so scimitars
-dominate for drow without being forced and the other choices still come up. A roll
-that lands on a scimitar mints a PAIR; anything else mints one. Training weapons are
-filtered out of civ lists.
+dominate for drow without being forced and the other choices still come up. Training
+weapons are filtered out of civ lists.
+
+HOW MANY, and whether a shield comes too, depends on whether the unit's civ fields
+shields at all:
+  * civ WITH shields -- 50% one weapon, 25% two weapons, 25% one weapon and a shield.
+    The shield subtype is one the civ actually lists (shield or buckler); it is wooden
+    90% of the time and metal otherwise. Elves carry their own grown wood; every other
+    race uses whatever wood the world has.
+  * civ WITHOUT shields (the drow field none) -- the older rule stands: a roll that
+    lands on a scimitar mints a PAIR, anything else mints one.
+No unit is ever left holding more than MAX_WEAPONS (2), whatever the roll says.
 
 ADDED PIECES -- the swap pass only ever replaces something already worn, but two cases
 deliberately mint into an EMPTY slot:
   * a `leather` outfit issues a leather CLOAK (if the unit had no cloak or cape to
     re-make in leather);
-  * a unit with NOTHING on its head -- no helm, cap, hood or veil -- gets a helm 40% of
-    the time. Only for outfits that armor: a "weapon only" outfit means only a weapon.
+  * a unit with NOTHING on its head -- no helm, cap, hood or veil -- gets a helm. An
+    outfit that ARMORS issues one 80% of the time in its armor material; an outfit that
+    carries only a WEAPON issues one 40% of the time in the weapon's own metal. A FABRIC
+    outfit issues none (a cloth helm is not a legal item), and children get neither,
+    since run() strips armor and weapon off them first.
+  * a minted RANGED weapon comes with a leather quiver holding 10 rounds of whatever it
+    actually fires -- arrows for a bow, bolts for a crossbow, darts for a blowgun, and
+    bullets for the kobold sling. The pairing is read from the raws (weapon `ranged_ammo`
+    vs ammo `ammo_class`), so a modded ranged weapon needs no entry here. The subtype
+    prefers the unit's OWN civ ammo list, so an elf gets elven arrows; heads are the
+    outfit's weapon metal. Only when this script mints the weapon -- a unit that already
+    had one is left alone, along with whatever it was carrying.
+  * `outer` on an outfit forces the cloak question: true mints a cloak or robe if the unit
+    has none, false strips any cloak, cape or robe it has. Absent = leave it alone.
 
 OUTERWEAR: cloaks and capes share item_type.ARMOR with tunics and shirts, so they are
 never promoted -- otherwise someone in a tunic AND a cloak ends up in two breastplates
@@ -128,6 +158,8 @@ local LEATHER  = 'CREATURE_MAT:COW:LEATHER'
 local GCS_SILK = 'CREATURE_MAT:SPIDER_CAVE_GIANT:SILK'
 local TWINKLING        = 'INORGANIC:HA_TWINKLING_METAL'
 local TWINKLING_FABRIC = 'INORGANIC:HA_TWINKLING_FABRIC'
+-- the high elves' own grown wood: their armour and their shields
+local GROWN_WOOD       = 'PLANT_MAT:HA_HE_GROWN:WOOD'
 
 -- the "miner's kit" weapon set, for outfits that name it explicitly
 local PICK_AXE_SPEAR = {'ITEM_WEAPON_PICK', 'ITEM_WEAPON_AXE_BATTLE', 'ITEM_WEAPON_SPEAR'}
@@ -165,8 +197,37 @@ local PAIRED_SLOT = {[df.item_type.GLOVES]=true, [df.item_type.SHOES]=true}
 local UNDERLAYER = {ITEM_SHOES_SOCKS=true, ITEM_SHOES_CHAUSSE=true,
                     ITEM_GLOVES_MITTENS=true}
 local MAX_PER_PAIRED_SLOT = 2   -- two feet, two hands: a hard backstop
--- a leather outfit also issues a cloak; chance of issuing a helm to a bare head
-local HELM_CHANCE = 0.40
+-- a leather outfit also issues a cloak; chance of issuing a helm to a bare head.
+-- An armouring outfit is generous about it; an outfit that carries only a weapon still
+-- offers one, at a lower rate, in the weapon's own metal.
+local HELM_CHANCE = 0.80
+local WEAPON_ONLY_HELM_CHANCE = 0.40
+
+-- Outerwear, for an outfit that declares `outer`. Wider than OUTERWEAR above: that set
+-- exists to stop capes being PROMOTED into breastplates, whereas this one is "the garment
+-- you wear over everything", which for an elf includes the robe.
+local OUTER_GARMENT = {ITEM_ARMOR_CLOAK=true, ITEM_ARMOR_CAPE=true, ITEM_ARMOR_ROBE=true}
+local OUTER_MINT = {'ITEM_ARMOR_CLOAK', 'ITEM_ARMOR_ROBE'}
+
+-- Lower-body garments the `gendered` rule sorts on. A dress lives in item_type.ARMOR and
+-- the skirts in item_type.PANTS, so both types have to be considered together.
+local SKIRTLIKE = {ITEM_PANTS_SKIRT=true, ITEM_PANTS_SKIRT_SHORT=true,
+                   ITEM_PANTS_SKIRT_LONG=true, ITEM_ARMOR_DRESS=true}
+local WOMENS_MINT = {{df.item_type.PANTS, 'ITEM_PANTS_SKIRT'},
+                     {df.item_type.ARMOR, 'ITEM_ARMOR_DRESS'}}
+-- what a man gets instead, if stripping a skirt would have left him bare-legged
+local MENS_PANTS = 'ITEM_PANTS_PANTS'
+
+-- ammo issued alongside a minted bow
+local ARROWS_PER_QUIVER = 10
+
+-- How a race that carries shields arms itself. Rolled once per unit, in this order:
+-- one weapon / two weapons / a weapon and a shield. A race whose entity lists NO shield
+-- (the drow field none) skips this entirely and keeps the older rule, where a scimitar
+-- comes as a pair and everything else is single.
+local ARMING = {{w=50, weapons=1}, {w=25, weapons=2}, {w=25, weapons=1, shield=true}}
+local MAX_WEAPONS = 2               -- hard ceiling, whatever the roll says
+local SHIELD_WOOD_CHANCE = 0.90     -- otherwise metal
 
 -- OUTFITS: a weighted roll per unit, made once and then remembered.
 --   w       relative weight
@@ -221,8 +282,24 @@ local OUTFITS = {
         {w=15, weapon=IRON,   armor=IRON},
     },
     HA_HIGH_ELF = {
-        -- elves keep clothing as clothing; only real armor is upgraded
-        {w=100, weapon=TWINKLING, armor=TWINKLING, fabric=TWINKLING_FABRIC},
+        -- A third of elves are soldiery, a sixth are armed travellers in cloaks, and half
+        -- are unarmed civilians. `gendered` enforces "women in skirts or dresses, men
+        -- never"; `outer` decides whether they wear a cloak or robe over it.
+        -- ARMED: the two armoured outfits, plus the cloaked one -- a cloak or robe comes
+        -- with a twinkling weapon. Plain-clothed and silk-clad elves carry nothing.
+        {w=1, weapon=TWINKLING, armor=TWINKLING,  fabric=TWINKLING_FABRIC, wood=GROWN_WOOD, gendered=true},
+        {w=1, weapon=TWINKLING, armor=STEEL,      fabric=TWINKLING_FABRIC, wood=GROWN_WOOD, gendered=true},
+        {w=1, weapon=STEEL,     armor=GROWN_WOOD, fabric=TWINKLING_FABRIC, wood=GROWN_WOOD, gendered=true},
+        {w=1, weapon=TWINKLING, fabric=TWINKLING_FABRIC, wood=GROWN_WOOD, outer=true,  gendered=true},
+        {w=1, fabric=TWINKLING_FABRIC, outer=false, gendered=true},
+        {w=1, fabric=GCS_SILK,         outer=false, gendered=true},
+        -- FORTRESS MODE ONLY, and only for an invading army: a siege is always armoured,
+        -- an even split of steel and twinkling. Visitors and residents fall through to the
+        -- roll above, so a diplomat still turns up in robes rather than plate.
+        siege = {
+            {w=1, weapon=TWINKLING, armor=TWINKLING, fabric=TWINKLING_FABRIC, gendered=true},
+            {w=1, weapon=TWINKLING, armor=STEEL,     fabric=TWINKLING_FABRIC, gendered=true},
+        },
     },
     HA_DROW = {
         by_caste = {
@@ -332,6 +409,12 @@ local function caste_of(u)
     return c and c.caste_id or ''
 end
 
+-- part of an attacking army, as opposed to a visitor or resident. Same three flags
+-- adventure-hostility uses to tell a siege from a social call.
+local function is_invader(u)
+    return u.flags1.active_invader or u.flags1.invader_origin or u.flags1.marauder
+end
+
 local function is_target(u)
     if not dfhack.units.isActive(u) then return false end
     if dfhack.world.isAdventureMode() then
@@ -356,11 +439,23 @@ local DEF_VEC = {
     [df.item_type.GLOVES] = function() return df.global.world.raws.itemdefs.gloves end,
     [df.item_type.SHOES]  = function() return df.global.world.raws.itemdefs.shoes end,
     [df.item_type.WEAPON] = function() return df.global.world.raws.itemdefs.weapons end,
+    [df.item_type.SHIELD] = function() return df.global.world.raws.itemdefs.shields end,
 }
 
 local function subtype_index(itype, id)
     local get = DEF_VEC[itype]
     return get and itemdef_index(get(), id)
+end
+
+-- Create ONE item, destroying anything else the call minted. Needed because createItem
+-- follows DF's forging rules and returns a PAIR for some gear (gauntlets), so the naive
+-- `createItem(...)[1]` silently drops the other piece on the floor. Only apply() wants the
+-- surplus (it dresses the second hand with it); every mint path below wants exactly one.
+local function create_one(u, itype, isub, mt, mi)
+    local created = dfhack.items.createItem(u, itype, isub, mt, mi)
+    if not (created and created[1]) then return end
+    for i = 2, #created do pcall(dfhack.items.remove, created[i]) end
+    return created[1]
 end
 
 -- true if ANY equipped piece is a masterwork or artifact. Gates the MINTING of new
@@ -490,10 +585,37 @@ local function plan(u, o, mtype, mindex, want_rank, ftype, findex)
     return out, made_outer
 end
 
+-- DF FORGES SOME GEAR IN PAIRS. createItem for gauntlets hands back TWO items -- a right
+-- and a left, already handed 1 and 2 -- where boots, breastplates and helms give one.
+-- Taking only created[1] therefore did two bad things at once: it abandoned the left
+-- gauntlet of every pair on the floor (the litter), and it put a created[1] on BOTH hands,
+-- which is the "two right gauntlets" fix_handedness was invented to paper over.
+-- The surplus is now carried to the next swap in the same slot, so one call dresses both
+-- hands; anything genuinely left over is destroyed rather than dropped.
 local function apply(u, swaps)
+    local spare = {}
     for _, t in ipairs(swaps) do
-        local created = dfhack.items.createItem(u, t.itype, t.isub, t.mt, t.mi)
-        local newit = created and created[1]
+        local newit
+        local pool = spare[t.itype]
+        if pool then
+            for i, cand in ipairs(pool) do
+                if cand:getSubtype() == t.isub then
+                    newit = cand
+                    table.remove(pool, i)
+                    break
+                end
+            end
+        end
+        if not newit then
+            local created = dfhack.items.createItem(u, t.itype, t.isub, t.mt, t.mi)
+            if created and created[1] then
+                newit = created[1]
+                if #created > 1 then
+                    spare[t.itype] = spare[t.itype] or {}
+                    for i = 2, #created do table.insert(spare[t.itype], created[i]) end
+                end
+            end
+        end
         if newit then
             newit:setQuality(t.quality)
             if t.hand and t.hand ~= 0 then
@@ -502,6 +624,10 @@ local function apply(u, swaps)
             dfhack.items.remove(t.old)
             dfhack.items.moveToInventory(newit, u, t.mode, t.bp)
         end
+    end
+    -- never leave a surplus piece lying where it was minted
+    for _, pool in pairs(spare) do
+        for _, it in ipairs(pool) do pcall(dfhack.items.remove, it) end
     end
 end
 
@@ -519,22 +645,33 @@ end
 --   * a bare head gets a helm HELM_CHANCE of the time
 -- Both mint into an empty slot, which the swap pass deliberately never does.
 local function mint_extras(u, o, mtype, mindex, had_outer)
-    if not o.armor then return end
-    if o.leather and not had_outer then
+    -- the issued cloak belongs to the leather policy, so it stays armour-gated
+    if o.armor and o.leather and not had_outer then
         local idx = subtype_index(df.item_type.ARMOR, 'ITEM_ARMOR_CLOAK')
         if idx then
-            local created = dfhack.items.createItem(u, df.item_type.ARMOR, idx, mtype, mindex)
-            local it = created and created[1]
+            local it = create_one(u, df.item_type.ARMOR, idx, mtype, mindex)
             if it then dfhack.items.moveToInventory(it, u, df.inv_item_role_type.Worn, -1) end
         end
     end
-    if bare_headed(u) and math.random() < HELM_CHANCE then
+    -- HELMETS. An outfit that ARMOURS issues one at HELM_CHANCE in its armour material.
+    -- An outfit carrying only a WEAPON -- no armour, no fabric -- issues one at
+    -- WEAPON_ONLY_HELM_CHANCE in the weapon's own metal, so a copper-armed orc still ends
+    -- up in a copper helm instead of bare-headed. A FABRIC outfit gets none: the material
+    -- there is cloth, and ITEM_HELM_HELM is [METAL]/[LEATHER], so it would be an
+    -- impossible item. Children reach neither branch -- run() strips armor and weapon off
+    -- them before this is called.
+    local chance, ht, hi
+    if o.armor then
+        chance, ht, hi = HELM_CHANCE, mtype, mindex
+    elseif o.weapon and not o.fabric then
+        chance, ht, hi = WEAPON_ONLY_HELM_CHANCE, mat(o.weapon)
+    end
+    if chance and ht and bare_headed(u) and math.random() < chance then
         -- ITEM_HELM_HELM carries both [LEATHER] and [METAL], so it is legal in a
         -- leather outfit's material as well as in a metal one
         local idx = subtype_index(df.item_type.HELM, 'ITEM_HELM_HELM')
         if idx then
-            local created = dfhack.items.createItem(u, df.item_type.HELM, idx, mtype, mindex)
-            local it = created and created[1]
+            local it = create_one(u, df.item_type.HELM, idx, ht, hi)
             if it then dfhack.items.moveToInventory(it, u, df.inv_item_role_type.Worn, -1) end
         end
     end
@@ -560,8 +697,191 @@ local function fix_handedness(u)
     end
 end
 
--- Mint a weapon for the unarmed, in the outfit's weapon metal. A scimitar is minted
--- as a PAIR -- drow fight with twin blades -- anything else as a single weapon.
+-- every equipped piece whose subtype passes `pred`
+local function worn_matching(u, pred)
+    local out = {}
+    for _, inv in ipairs(u.inventory) do
+        local it = inv.item
+        if it and EQUIPPED[inv.mode] then
+            local ok, sub = pcall(function() return it.subtype and it.subtype.id end)
+            if ok and sub and pred(sub) then out[#out+1] = it end
+        end
+    end
+    return out
+end
+
+local function wear_new(u, itype, sub_id, mt, mi)
+    local idx = subtype_index(itype, sub_id)
+    if not idx then return end
+    local it = create_one(u, itype, idx, mt, mi)
+    if it then dfhack.items.moveToInventory(it, u, df.inv_item_role_type.Worn, -1) end
+    return it
+end
+
+-- `outer` on an outfit: true = make sure there IS a cloak or robe, false = make sure there
+-- is not, nil = leave whatever the unit came with (every race but the high elves).
+local function apply_outer(u, o, mt, mi)
+    if o.outer == nil then return end
+    local have = worn_matching(u, function(sub) return OUTER_GARMENT[sub] end)
+    if o.outer then
+        if #have == 0 then
+            wear_new(u, df.item_type.ARMOR, OUTER_MINT[math.random(#OUTER_MINT)], mt, mi)
+        end
+    else
+        for _, it in ipairs(have) do dfhack.items.remove(it) end
+    end
+end
+
+-- `gendered`: elf women always in a skirt or dress, elf men never. Runs AFTER the swap
+-- pass, so it sorts out whatever the unit was left wearing rather than what it arrived in.
+local function apply_gendered(u, o, mt, mi)
+    if not o.gendered then return end
+    local ok, female = pcall(function() return dfhack.units.isFemale(u) end)
+    if not ok then female = (u.sex == 0) end        -- pronoun_type: 0 she, 1 he
+    local skirts = worn_matching(u, function(sub) return SKIRTLIKE[sub] end)
+    if female then
+        if #skirts == 0 then
+            local pick = WOMENS_MINT[math.random(#WOMENS_MINT)]
+            wear_new(u, pick[1], pick[2], mt, mi)
+        end
+    else
+        if #skirts == 0 then return end
+        for _, it in ipairs(skirts) do dfhack.items.remove(it) end
+        -- do not leave him bare-legged: if that took his only leg covering, issue trousers
+        local legs = worn_matching(u, function(sub)
+            return (ALLOW_FABRIC[df.item_type.PANTS] or {})[sub]
+                or (ALLOW_METAL[df.item_type.PANTS] or {})[sub]
+        end)
+        if #legs == 0 then wear_new(u, df.item_type.PANTS, MENS_PANTS, mt, mi) end
+    end
+end
+
+-- The ammo CLASS a weapon fires ('ARROW', 'BOLT', 'BLOWDART', 'BULLET' for the kobold
+-- sling...), or nil for a melee weapon. This is the raws' own linkage -- weapon itemdefs
+-- carry `ranged_ammo` and ammo itemdefs carry a matching `ammo_class` -- so a modded
+-- ranged weapon is handled without naming it here.
+local function ammo_class_of(weapon_sub)
+    local W = df.global.world.raws.itemdefs.weapons
+    for i = 0, #W - 1 do
+        if tostring(W[i].id) == weapon_sub then
+            local c = tostring(W[i].ranged_ammo)
+            return c ~= '' and c or nil
+        end
+    end
+end
+
+-- The ammo itemdef INDEX for a class, preferring the unit's OWN civ list so an elf gets
+-- elven arrows, and falling back to any ammo of that class in the world.
+--
+-- Indexed numerically because the INDEX itself is the value we need to return -- ipairs
+-- over a df vector yields 0-based indices correctly, but writing the bound out makes it
+-- obvious that `ai` is an itemdef index and not a position in a Lua list.
+local function ammo_index_for(u, class)
+    local A = df.global.world.raws.itemdefs.ammo
+    local ent = u.civ_id and u.civ_id >= 0 and df.historical_entity.find(u.civ_id)
+    if ent then
+        local list = ent.resources.ammo_type
+        for i = 0, #list - 1 do
+            local ai = list[i]
+            local d = A[ai]
+            if d and tostring(d.ammo_class) == class then return ai end
+        end
+    end
+    for i = 0, #A - 1 do
+        if tostring(A[i].ammo_class) == class then return i end
+    end
+end
+
+-- A minted RANGED weapon comes with a leather quiver holding ARROWS_PER_QUIVER rounds of
+-- whatever it actually fires -- arrows for a bow, bolts for a crossbow, darts for a
+-- blowgun. Heads are the outfit's weapon metal.
+local function give_quiver(u, weapon_sub, wtype, windex)
+    local class = ammo_class_of(weapon_sub)
+    if not class then return end
+    local aidx = ammo_index_for(u, class)
+    if not aidx then return end
+    local lt, li = mat(LEATHER)
+    if not lt then return end
+    local quiver = create_one(u, df.item_type.QUIVER, -1, lt, li)
+    if not quiver then return end
+    dfhack.items.moveToInventory(quiver, u, df.inv_item_role_type.Worn, -1)
+    local rounds = create_one(u, df.item_type.AMMO, aidx, wtype, windex)
+    if rounds then
+        rounds:setStackSize(ARROWS_PER_QUIVER)
+        dfhack.items.moveToContainer(rounds, quiver)
+    end
+end
+
+-- how many real weapons the unit is already carrying
+local function weapon_count(u)
+    local n = 0
+    for _, inv in ipairs(u.inventory) do
+        if inv.item and inv.mode == df.inv_item_role_type.Weapon
+           and df.item_weaponst:is_instance(inv.item) then n = n + 1 end
+    end
+    return n
+end
+
+local function has_shield(u)
+    for _, inv in ipairs(u.inventory) do
+        if inv.item and EQUIPPED[inv.mode]
+           and inv.item:getType() == df.item_type.SHIELD then return true end
+    end
+    return false
+end
+
+-- The shield subtypes this unit's civ actually fields, as itemdef ids. Empty = a civ that
+-- does not use shields at all (the drow), which is what switches the arming roll off.
+local function civ_shields(u)
+    local ent = u.civ_id and u.civ_id >= 0 and df.historical_entity.find(u.civ_id)
+    local out = {}
+    if ent then
+        local list = ent.resources.shield_type
+        for i = 0, #list - 1 do
+            local d = df.global.world.raws.itemdefs.shields[list[i]]
+            if d then out[#out+1] = tostring(d.id) end
+        end
+    end
+    return out
+end
+
+-- Any wood in the world, for a shield whose outfit names none. Cached: the scan only ever
+-- runs until the first plant that has a WOOD material.
+local wood_cache
+local function default_wood()
+    if wood_cache ~= nil then return wood_cache end
+    local P = df.global.world.raws.plants.all
+    wood_cache = false
+    for i = 0, #P - 1 do
+        local tok = 'PLANT_MAT:' .. tostring(P[i].id) .. ':WOOD'
+        if dfhack.matinfo.find(tok) then wood_cache = tok break end
+    end
+    return wood_cache
+end
+
+-- Shields are wooden SHIELD_WOOD_CHANCE of the time and metal otherwise. The wood is the
+-- outfit's own if it names one (elves carry grown wood), else whatever the world has.
+local function mint_shield(u, o, sub_id)
+    local mt, mi
+    if math.random() < SHIELD_WOOD_CHANCE then
+        local w = o.wood or default_wood()
+        if w then mt, mi = mat(w) end
+    end
+    if not mt then mt, mi = mat(o.armor or o.weapon or '') end
+    if not mt then return end
+    local idx = subtype_index(df.item_type.SHIELD, sub_id)
+    if not idx then return end
+    local it = create_one(u, df.item_type.SHIELD, idx, mt, mi)
+    -- a shield rides in the Weapon role, same as a weapon, without being one
+    if it then dfhack.items.moveToInventory(it, u, df.inv_item_role_type.Weapon, -1) end
+end
+
+-- Mint arms for the unarmed, in the outfit's weapon metal.
+--   * a shield-bearing civ rolls ARMING: 50% one weapon, 25% two, 25% weapon + shield
+--   * a civ with no shields keeps the old rule -- a scimitar comes as a PAIR (drow fight
+--     with twin blades), anything else single
+-- Never leaves a unit holding more than MAX_WEAPONS. A minted ranged weapon also gets a
+-- quiver of matching ammo.
 local function mint_arms(u, o)
     if not o.weapon then return end
     if armed(u) then return end
@@ -571,11 +891,25 @@ local function mint_arms(u, o)
     local pick = list[math.random(#list)]
     local isub = subtype_index(df.item_type.WEAPON, pick)
     if not isub then return end
-    local n = pick == 'ITEM_WEAPON_SCIMITAR' and 2 or 1
+
+    local shields = civ_shields(u)
+    local n, want_shield = 1, false
+    if #shields > 0 then
+        local r = roll(ARMING)
+        n, want_shield = r.weapons, r.shield or false
+    elseif pick == 'ITEM_WEAPON_SCIMITAR' then
+        n = 2
+    end
+    n = math.min(n, MAX_WEAPONS - weapon_count(u))
+
     for _ = 1, n do
-        local created = dfhack.items.createItem(u, df.item_type.WEAPON, isub, wtype, windex)
-        local it = created and created[1]
+        local it = create_one(u, df.item_type.WEAPON, isub, wtype, windex)
         if it then dfhack.items.moveToInventory(it, u, df.inv_item_role_type.Weapon, -1) end
+    end
+    -- any weapon the raws say fires something gets a quiver of the right ammo
+    if n > 0 then pcall(give_quiver, u, pick, wtype, windex) end
+    if want_shield and not has_shield(u) then
+        pcall(mint_shield, u, o, shields[math.random(#shields)])
     end
 end
 
@@ -595,7 +929,15 @@ function run()
         local entry = by_race[u.race]
         if entry and not done[u.id] and is_target(u) then
             local caste = caste_of(u)
-            local list = (entry.by_caste and entry.by_caste[caste]) or entry
+            -- A besieging army in FORTRESS mode uses the siege list if the race has one:
+            -- an assault turns up armoured. Visitors, residents and everyone in adventure
+            -- mode fall through to the ordinary roll.
+            local list
+            if entry.siege and dfhack.world.isFortressMode() and is_invader(u) then
+                list = entry.siege
+            else
+                list = (entry.by_caste and entry.by_caste[caste]) or entry
+            end
             local o = roll(list)
             if o and not o.skip then
                 -- CHILDREN in every civ: never armored, never armed. Material upgrades
@@ -613,6 +955,12 @@ function run()
                     local swaps, had_outer = plan(u, o, mtype, mindex, rank_of(mtype, mindex), ftype, findex)
                     pcall(apply, u, swaps)
                     pcall(mint_extras, u, o, mtype, mindex, had_outer)
+                    -- cloak policy and the gendered garment rule both operate on CLOTHING,
+                    -- so they use the fabric material when the outfit has one, and run
+                    -- after the swap pass has settled what the unit is actually wearing.
+                    local ct, ci = ftype or mtype, findex or mindex
+                    pcall(apply_outer, u, o, ct, ci)
+                    pcall(apply_gendered, u, o, ct, ci)
                 end
                 if not has_masterwork(u) then pcall(mint_arms, u, o) end
                 pcall(fix_handedness, u)
