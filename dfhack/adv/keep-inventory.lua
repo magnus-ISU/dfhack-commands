@@ -57,6 +57,20 @@ Dropping a STACK (coins) opens a "how many?" prompt after the panel closes. The 
 that -- and any other context menu -- to finish before feeding its key, so it does not fight the
 prompt.
 
+THE PICK-UP MENU is kept open too: the "What do you want to do?" list you get by right-clicking
+a tile with items (or pressing `g`) closes after every "Get", so looting a pile is right-click,
+Get, right-click, Get. With keep-inventory enabled, when that menu closes and something actually
+LANDED IN YOUR INVENTORY, the menu is reopened (scrolled back to where it was). The gate matters:
+the same list carries "Path to here" / "View yourself" style options, and those must not summon
+it back -- so the reopen fires only when the adventurer's inventory count grew since the list
+opened. Esc / right-click dismiss it for good, as with the panel.
+
+The reopen is fed as `A_GROUND` (the `g` ground list): a fed right-click never reaches DF
+(hardware-only), so the exact right-click menu cannot be resurrected -- but both are the same
+option_list widget, and the ground list carries the same "Get" rows. Only the two pickup
+contexts (GROUND, DIRECT_CLICK) are watched; the other option_list contexts (movement options,
+aim, interact-with-building, look) share the struct and are deliberately left alone.
+
 Registered as overlay `keep-inventory.watcher`.
 ]]
 
@@ -73,8 +87,27 @@ escapes = escapes or 0    -- ...of those, closed by Esc/right-click (no reopen)
 reopens = reopens or 0    -- panel confirmed back open after our key feed
 restores = restores or 0  -- scroll offset written back
 
+-- pick-up list (ground) flow, separately countable: these say WHICH gate a
+-- failed reopen died at, which is unobservable in game
+g_close = g_close or 0    -- pickup list closed by an action (job started)
+g_esc = g_esc or 0        -- pickup list dismissed by Esc/right-click
+g_gate = g_gate or 0      -- job ended at the nothing-was-picked-up gate
+g_feed = g_feed or 0      -- A_GROUND fed
+g_back = g_back or 0      -- pickup list confirmed back open
+g_dead = g_dead or 0      -- gave up: fed repeatedly, list never came back
+g_note = g_note or ''     -- last gate detail
+
 local CTX = df.adventure_interface_inventory_context_type
 local LIST = df.adventure_inventory_option_list_type
+local OL_CTX = df.adventure_interface_option_list_context_type
+
+-- the two pickup flavors of the shared option list: the `g` ground list and the
+-- right-click "What do you want to do?" menu. The other contexts (movement
+-- options, aim, building-interact, look) share the struct and are not ours.
+local OL_PICKUP = {
+    [OL_CTX.GROUND] = true,
+    [OL_CTX.DIRECT_CLICK] = true,
+}
 
 -- every inventory context DF can be opened straight into has its own key; the reopen feeds the
 -- one matching the context the panel was in. The remaining contexts (PUT_IN_DESTINATION,
@@ -107,7 +140,15 @@ local CONTEXT_LIST = {
 }
 
 local function inv() return df.global.game.main_interface.adventure.inventory end
+local function ol() return df.global.game.main_interface.adventure.option_list end
 local function feed(k) gui.simulateInput(dfhack.gui.getDFViewscreen(true), k) end
+
+-- how many things the adventurer is carrying; an increase between the pick-up
+-- list opening and closing is the proof a "Get" actually happened
+local function carried_count()
+    local ok, n = pcall(function() return #dfhack.world.getAdventurer().inventory end)
+    return ok and n or 0
+end
 
 -- how many rows the panel is showing. `option_current` is the list on screen; the context's own
 -- bucket is a fallback for frames where DF has not filled that in yet. The LARGER of the two is
@@ -133,8 +174,8 @@ end
 -- or any context menu). The panel is closed during these, but the action is not finished --
 -- reopening now would fight the prompt, so the reopen waits them out.
 local function prompt_open()
-    local ol = df.global.game.main_interface.adventure.option_list
-    return ol.open or ol.entering_number or ol.doing_pickup_amount
+    local o = ol()
+    return o.open or o.entering_number or o.doing_pickup_amount
 end
 
 -- ---- overlay ----------------------------------------------------------------
@@ -161,6 +202,13 @@ function KeepInventory:reset()
     self.context = CTX.MAIN
     self.scroll = 0
     self.restore_until = 0
+    self.ol_was_open = false
+    self.ol_escaped = false
+    self.ol_base = 0
+    self.ol_scroll = 0
+    self.ol_restore_until = 0
+    self.ol_items = {}
+    self.ol_nopt = -1
 end
 
 -- put the saved scroll offset back, clamped: the list may be shorter now (we just dropped
@@ -173,33 +221,76 @@ function KeepInventory:hold_scroll()
     end
 end
 
--- Drive a pending reopen across frames:
+-- same clamp-and-reassert for the pick-up list; its row count is plain
+-- #option (the shared option list has no per-context buckets)
+function KeepInventory:hold_ol_scroll()
+    local ok, n = pcall(function() return #ol().option end)
+    if ok and n and n > 0 then
+        ol().scroll_position = math.max(0, math.min(self.ol_scroll, n - 1))
+        restores = restores + 1
+    end
+end
+
+-- Drive a pending reopen across frames (job.kind nil = inventory panel, 'ground' = pick-up list):
 --   'wait'   -> the action's turn is still running; wait for the map + input-ready, then settle
 --   'verify' -> the key was fed; confirm the panel came back, else re-feed a bounded number of times
 function KeepInventory:drive()
     local job = self.job
+    local ground = job.kind == 'ground'
     if job.stage == 'wait' then
         if not (on_map() and input_ready()) or prompt_open() then
             job.wait = job.wait + 1
-            if job.wait > 400 then self.job = nil end     -- something is wrong: bail, don't spam
+            if job.wait > 400 then                        -- something is wrong: bail, don't spam
+                if ground then
+                    g_dead = g_dead + 1
+                    g_note = 'wait timeout at ' .. (dfhack.gui.getCurFocus(true)[1] or '?')
+                end
+                self.job = nil
+            end
             return
         end
         job.settle = job.settle + 1
         if job.settle < 4 then return end                 -- let the frame settle before feeding
-        feed(CONTEXT_KEY[self.context] or 'A_INV_LOOK')
+        if ground then
+            -- reopen only when the close actually TOOK something -- the same list carries
+            -- "Path to here" style options whose choice must not summon the menu back.
+            -- Checked here, after the coin-amount prompt has resolved, not at close time.
+            -- Two signals, either proves a Get: an item the list showed left the ground
+            -- (covers the usual auto-stow into the backpack), or the carried count grew
+            -- (belt and braces for anything getItem() could not resolve).
+            local taken = carried_count() > self.ol_base
+            if not taken then
+                for _, id in ipairs(self.ol_items or {}) do
+                    local it = df.item.find(id)
+                    if it and not it.flags.on_ground then taken = true break end
+                end
+            end
+            if not taken then
+                g_gate = g_gate + 1
+                g_note = ('nothing taken (%d listed items)'):format(#(self.ol_items or {}))
+                self.job = nil
+                return
+            end
+            g_feed = g_feed + 1
+            feed('A_GROUND')
+        else
+            feed(CONTEXT_KEY[self.context] or 'A_INV_LOOK')
+        end
         job.stage, job.tries = 'verify', 0
     elseif job.stage == 'verify' then
-        -- NOTE: the success case is NOT handled here. overlay_onupdate tests inv().open before
-        -- it ever calls drive(), so on the frame the panel comes back it takes that branch and
-        -- returns -- this one is unreachable on success. Claiming the reopen there is what
-        -- makes the scroll restore actually run; leaving it here silently did nothing.
-        if inv().open then self.job = nil return end
+        -- NOTE: the success case is NOT handled here. overlay_onupdate tests the panel-open
+        -- branches before it ever calls drive(), so on the frame the panel comes back it takes
+        -- that branch and returns -- this one is unreachable on success. Claiming the reopen
+        -- there is what makes the scroll restore actually run; leaving it here silently did
+        -- nothing.
+        if (ground and ol().open) or (not ground and inv().open) then self.job = nil return end
         job.tries = job.tries + 1
         if job.tries > 8 then
             job.attempts = job.attempts + 1
             if job.attempts < 4 then
                 job.stage, job.wait, job.settle = 'wait', 0, 0   -- re-feed
             else
+                if ground then g_dead = g_dead + 1 end
                 self.job = nil                                   -- gave up quietly
             end
         end
@@ -240,7 +331,66 @@ function KeepInventory:overlay_onupdate()
         return
     end
 
+    local o = ol()
+    if o.open then
+        if OL_PICKUP[o.context] then
+            -- a pending ground reopen just landed: as with the panel, this is the only
+            -- place that can observe it -- start the scroll-restore window here
+            if self.job and self.job.kind == 'ground' and self.job.stage == 'verify' then
+                reopens = reopens + 1
+                g_back = g_back + 1
+                self.ol_restore_until = dfhack.getTickCount() + RESTORE_MS
+            end
+            if self.job and self.job.kind == 'ground' then self.job = nil end
+            if not self.ol_was_open then
+                -- carried count at open: one of the two "Get happened" signals
+                self.ol_base = carried_count()
+            end
+            -- remember which ITEMS the rows resolve to. A picked-up item does NOT
+            -- reliably grow unit.inventory -- "Get" auto-stows into the backpack, and
+            -- container contents are not top-level entries -- so the reopen gate also
+            -- checks whether any listed item left the ground. Rebuilt only when the
+            -- row count changes, not per frame.
+            if #o.option ~= self.ol_nopt then
+                self.ol_nopt = #o.option
+                local ids = {}
+                for i = 0, #o.option - 1 do
+                    local okI, it = pcall(function() return o.option[i]:getItem() end)
+                    if okI and it then ids[#ids + 1] = it.id end
+                end
+                self.ol_items = ids
+            end
+            self.ol_was_open = true
+            self.ol_escaped = false
+            if dfhack.getTickCount() < (self.ol_restore_until or 0) then
+                self:hold_ol_scroll()
+            else
+                self.ol_restore_until = 0
+                self.ol_scroll = o.scroll_position
+            end
+        end
+        return
+    end
+
     if self.job then self:drive(); return end
+
+    if self.ol_was_open then
+        self.ol_was_open = false
+        self.ol_nopt = -1          -- next open must rebuild the row->item map
+        closes = closes + 1
+        g_close = g_close + 1
+        if self.ol_escaped then                 -- Esc / right-click: dismissed for good
+            self.ol_escaped = false
+            escapes = escapes + 1
+            g_esc = g_esc + 1
+            return
+        end
+        -- an option was chosen; whether it was a "Get" is decided in drive(), after
+        -- any coin-amount prompt has resolved and the carried count is trustworthy
+        self.job = {kind = 'ground', stage = 'wait', wait = 0, settle = 0, tries = 0, attempts = 0}
+        self:drive()
+        return
+    end
 
     if self.was_open then
         self.was_open = false
@@ -271,6 +421,11 @@ function KeepInventory:onInput(keys)
             self.escaped = true
         end
     end
+    if enabled and ol().open and OL_PICKUP[ol().context] then
+        if keys.LEAVESCREEN or keys._MOUSE_R or keys._MOUSE_R_DOWN then
+            self.ol_escaped = true
+        end
+    end
     return false
 end
 
@@ -287,5 +442,5 @@ else
 end
 require('plugins.overlay').rescan()
 print('keep-inventory: ' .. (enabled
-    and 'ON -- the inventory stays open after actions (Ctrl+I or `disable keep-inventory` to stop).'
+    and 'ON -- the inventory and the pick-up menu stay open after actions (Ctrl+I or `disable keep-inventory` to stop).'
     or 'OFF.'))
