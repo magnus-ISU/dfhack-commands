@@ -304,6 +304,8 @@ try('overlay enable item-description.expand', function() dfhack.run_command('ove
 -- installs from that window have it persisted off under the new name. Enabling
 -- here makes running magnus-scripts always bring it back, whatever the history.
 try('overlay enable fort/dwarf-rts.clickmove', function() dfhack.run_command('overlay', 'enable', 'fort/dwarf-rts.clickmove') end)
+try('overlay enable fort/right-click-cancel.cancel', function() dfhack.run_command('overlay', 'enable', 'fort/right-click-cancel.cancel') end)
+try('overlay enable fort/plan-tile.tile', function() dfhack.run_command('overlay', 'enable', 'fort/plan-tile.tile') end)
 try('right-click-cancel (load + enable overlay)', function() dfhack.run_script('fort/right-click-cancel') end)
 try('dig-shapes (right-click=mining; shaped digs->stairs/walls/chop/remove)', function() dfhack.run_script('fort/dig-shapes') end)
 try('plan-tile (drag to tile many buildings during placement)', function() dfhack.run_script('fort/plan-tile') end)
