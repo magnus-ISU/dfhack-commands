@@ -30,6 +30,16 @@ Site cards lead with the occupier's race, so a conquered site reads as such
     Roc Lair: Clodmoth the Large Controller
       Lives here: Ruxava the Earthen Wind (roc)
 
+    Mysterious Palace: Sewersculptures
+      of The Breeches of Baiting
+      Lives here: Aingoa Buttonhugs (illithid)
+
+Monument sites resolve to what they really are via `subtype_info.monument_type`:
+Tomb, Vault, or -- for the MYTHICAL kind -- Mysterious Lair / Dungeon / Palace,
+told apart by site size (5 / 15 / 100; one palace per world).  Mysterious
+headlines carry no occupier race: DF gives these sites a placeholder
+government whose race (dwarf, here) has nothing to do with the residents.
+
 A camp's population comes from two disjoint stores -- an abstract per-race
 head count (`populace.inhabitants`) and the individually named residents
 (`populace.nemesis`) -- so the card shows ONE merged total ("7 in all")
@@ -65,9 +75,15 @@ How the lesser map is decoded (all verified live against drawn markers):
   layer buffers are ROW-major (`idx = y*dim_x + x`).
 - One lesser-map cell = one MID TILE (1/16 world tile, 3 army-steps), or one
   army-step when zoomed in near a site (`adventure.site_level_zoom` == 1).
-  The player is always drawn at the center cell `(screen_x, screen_y)`, so
-  `mid = center//3 + (cell - center_cell)`.  (On the greater map one cell =
-  one world tile, same centering -- that map keeps DF's own hover text.)
+  The player is always drawn at the CENTER OF THE GRID, `(dim_x//2, dim_y//2)`
+  -- verified against the marker on `screentexpos_army`.  NOT at
+  `(screen_x, screen_y)`: that pair is the LOCAL map's player-draw cell, which
+  only equals the grid center while the local camera is free to recenter.  At a
+  site the local view clamps at the map edge, the pair drifts (read (62,40)
+  with the marker at (60,33)), and anchoring on it shifted every tooltip --
+  the original version got away with it only because open wilderness keeps
+  the local camera centered.  (On the greater map one cell = one world tile,
+  same centering -- that map keeps DF's own hover text.)
 - That center is the player ARMY only once the journey has started.  DF mints
   the army on the first travel step; before that `player_army_id` resolves to
   nothing and DF draws you at `adventure.travel_origin_x/y` (same army-unit
@@ -102,8 +118,8 @@ local MAX_ARMY_NAMES = 3   -- named army members shown
 local LEGEND_PTS = 15000   -- worldgen skill points = level x 1000; 15 = Legendary
 local MAX_WIDTH = 60       -- tooltip line clamp, in text cells
 
--- world_site_type -> what a player calls it ("LairShrine" is the lair marker,
--- vaults and the mysterious structures are ImportantLocation on this build)
+-- world_site_type -> what a player calls it ("LairShrine" is the lair marker;
+-- Monument is resolved by monument_kind below)
 local TYPE_NAMES = {
     PlayerFortress = 'Abandoned Fortress',
     DarkFortress = 'Dark Fortress',
@@ -115,8 +131,28 @@ local TYPE_NAMES = {
     LairShrine = 'Lair',
     Fortress = 'Fortress',
     Camp = 'Camp',
-    Monument = 'Monument',
 }
+
+-- Monument covers tombs, vaults and the mysterious structures; the subtype is
+-- `subtype_info.monument_type`, and the MYTHICAL tier is told by site size --
+-- lairs are 5, dungeons 15 and the world's single palace 100 (verified live:
+-- 19/5/1 in this world).  Second return = "keep the headline plain": mystery
+-- sites and vaults get a placeholder government whose race (dwarf, here --
+-- while the vault's residents are DIVINE angels) has nothing to do with the
+-- dwellers, so the usual race prefix would mislead.  Tombs keep it: a tomb's
+-- owner is the civ that built it.
+local function monument_kind(s)
+    local mt
+    pcall(function() mt = df.monument_type[s.subtype_info.monument_type] end)
+    if mt == 'MYTHICAL' then
+        return s.size >= 100 and 'Mysterious Palace'
+            or s.size >= 15 and 'Mysterious Dungeon'
+            or 'Mysterious Lair', true
+    end
+    if mt == 'TOMB' then return 'Tomb' end
+    if mt == 'VAULT' then return 'Vault', true end
+    return 'Monument'
+end
 
 -- a non-government occupying entity, as noun ("of the bandits") and as the
 -- adjective slotted into the headline ("Human Bandit Camp")
@@ -131,8 +167,9 @@ local ENTITY_KIND = {
     Outcast = 'Outcast',
 }
 
-local function type_name(t)
-    local raw = df.world_site_type[t] or tostring(t)
+local function type_name(s)
+    local raw = df.world_site_type[s.type] or tostring(s.type)
+    if raw == 'Monument' then return monument_kind(s) end
     return TYPE_NAMES[raw] or raw:gsub('(%l)(%u)', '%1 %2')
 end
 
@@ -370,18 +407,21 @@ local function site_lines(s, lines)
     end
 
     -- headline: lead with the occupier's race ("Illithid Dark Fortress",
-    -- "Human Bandit Camp"); lairs lead with the dweller's species instead
+    -- "Human Bandit Camp"); lairs lead with the dweller's species instead;
+    -- mysterious structures stay plain -- the dweller lines name the residents
     local resident_hfs = residents(s)
-    local head = type_name(s.type)
-    if owner then
-        local rn = race_name(owner.race)
-        if rn then
-            head = title_case(rn) .. (kind_adj and (' ' .. kind_adj) or '') .. ' ' .. head
+    local head, keep_plain = type_name(s)
+    if not keep_plain then
+        if owner then
+            local rn = race_name(owner.race)
+            if rn then
+                head = title_case(rn) .. (kind_adj and (' ' .. kind_adj) or '') .. ' ' .. head
+            end
+        elseif DWELLING[stype] then
+            local alive = living(resident_hfs)
+            local species = #alive > 0 and race_name(alive[1].race) or nil
+            if species then head = title_case(species) .. ' ' .. head end
         end
-    elseif DWELLING[stype] then
-        local alive = living(resident_hfs)
-        local species = #alive > 0 and race_name(alive[1].race) or nil
-        if species then head = title_case(species) .. ' ' .. head end
     end
     lines[#lines + 1] = head .. (name ~= '' and (': ' .. name) or '')
 
@@ -627,8 +667,11 @@ local function paint()
         cache_key = key
         -- near a site the lesser map rescales to one army-unit per cell
         local s = adv.site_level_zoom ~= 0 and 1 or 3
-        local mx = (ax + (cx - mp.screen_x) * s) // 3
-        local my = (ay + (cy - mp.screen_y) * s) // 3
+        -- the player is drawn at the grid center; mp.screen_x/y is the LOCAL
+        -- map's draw cell and drifts whenever that view clamps (see header)
+        local ccx, ccy = mp.dim_x // 2, mp.dim_y // 2
+        local mx = (ax + (cx - ccx) * s) // 3
+        local my = (ay + (cy - ccy) * s) // 3
         cache_lines = tile_info(mx, my)
     end
     if not cache_lines then return end
