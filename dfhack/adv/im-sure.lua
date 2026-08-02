@@ -25,7 +25,8 @@ performance grounds: identifying those menus needs a screen read (~10k
 dfhack.screen.readTile calls), and the check ran EVERY FRAME with no gate --
 measured at 59 FPS with this script running against 316 FPS without, i.e. about
 80% of frame time. What is left here scans only while the prompt state is
-actually set, and at most once a second, so it costs nothing at rest.
+actually set, and at most every 100ms (wall clock), so it costs nothing at
+rest.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -76,7 +77,8 @@ function dismiss()
 end
 
 -- per-frame watcher state (locals, reset on script reload -- the counter above persists)
-local stuck, cooldown = 0, 0
+local RETRY_MS = 100           -- wall-clock pause between click attempts
+local prompt_since, last_try = nil, 0
 
 local function step()
     if not running or not dfhack.world.isAdventureMode() then return end
@@ -85,18 +87,17 @@ local function step()
     local prompt = df.global.adventure.player_control_state
         == df.adventure_game_loop_type.TAKING_TOO_LONG_INPUT
     if not prompt then
-        stuck, cooldown = 0, 0
+        prompt_since = nil
         return
     end
 
-    stuck = stuck + 1
-    if cooldown > 0 then cooldown = cooldown - 1 end
-    -- give the prompt a moment to render, then click; retry at ~1/second.
-    -- the cooldown is what keeps the screen scan off the per-frame path.
-    if stuck > 15 and cooldown <= 0 then
-        if dismiss() then dismissed = dismissed + 1 end
-        cooldown = 100
-    end
+    -- give the prompt RETRY_MS to render, then click; retry every RETRY_MS.
+    -- wall-clock, not frames, so the cadence survives any frame rate.
+    local now = dfhack.getTickCount()
+    prompt_since = prompt_since or now
+    if now - prompt_since < RETRY_MS or now - last_try < RETRY_MS then return end
+    if dismiss() then dismissed = dismissed + 1 end
+    last_try = now
 end
 
 -- ---- overlay driver ---------------------------------------------------------
