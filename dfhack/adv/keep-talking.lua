@@ -5,8 +5,27 @@
 In adventure mode a conversation drops back to the map every time you pick a topic -- to ask
 the next thing you press `k` (talk) and choose "Continue conversation with ...". With
 keep-talking ENABLED, that's done for you: after you pick a topic the conversation is reopened
-automatically, so you keep asking questions in one flowing exchange instead of re-initiating
-every line. Closing the menu with ESCAPE does NOT reopen it -- that's how you leave: press Esc.
+automatically -- scrolled back to where you were in the topic list -- so you keep asking
+questions in one flowing exchange instead of re-initiating every line. Closing the menu with
+ESCAPE does NOT reopen it -- that's how you leave: press Esc.
+
+SCROLL -- the topic list (`choice_scroll_position`, row count `#conv_choice_info`) reopens at
+the top, so the saved offset is restored keep-inventory style: RE-ASSERTED for 400ms rather
+than written once (DF zeroes the scroll while finishing the open), without refreshing the
+saved value from the struct during that window, and UNCLAMPED -- every available row count
+undercounts the scroll's real range (26 choices while DF held 38), and clamping to one pinned
+deep restores short of the bottom. One trap is OPPOSITE to
+keep-inventory's: its restore window must be claimed in overlay_onupdate's "panel is open"
+branch because its key-fed reopen lands a frame later -- but OUR reopen ends in a CLICK, and
+simulateInput runs DF's screen logic synchronously, so the conversation is open before that
+branch could ever see the pending job. The window is therefore claimed at the click itself
+(the traced failure: three exchanges, saves perfect, and not one restore window ever started).
+
+A third trap is on the SAVE side: on the very frame you click a topic DF zeroes
+choice_scroll_position while the panel still reads as open, so saving the raw value every frame
+made 0 the "saved" offset on every single selection -- the restore machinery then worked
+perfectly, restoring you to the top. The save therefore only adopts a value after it has
+survived two consecutive frames.
 
     enable keep-talking       auto-reopen conversations (this session)
     disable keep-talking      stop
@@ -31,6 +50,18 @@ local overlay = require('plugins.overlay')
 
 enabled = enabled or false
 function isEnabled() return enabled end
+
+-- scroll-restore debug trace. Kept in _G, NOT the script env: the overlay
+-- widget and an RPC `reqscript` can hold two different envs (a re-execution
+-- after deploy gives the reader a fresh, empty buffer while the widget logs
+-- into the old one). _G is the one table every env shares. Read with:
+--   lua 'for _,l in ipairs(rawget(_G,"kt_dbg") or {}) do print(l) end'
+local dbg = rawget(_G, 'kt_dbg') or {}
+rawset(_G, 'kt_dbg', dbg)
+local function dlog(fmt, ...)
+    dbg[#dbg + 1] = ('%d %s'):format(dfhack.getTickCount() % 1000000, fmt:format(...))
+    if #dbg > 200 then table.remove(dbg, 1) end
+end
 
 local CONTINUE = 'Continue conversation'   -- the menu label the reopen click looks for
 
@@ -105,7 +136,38 @@ KeepTalking.ATTRS{
     overlay_onupdate_max_freq_seconds = 0,
 }
 
-function KeepTalking:reset() self.was_open = false; self.job = nil end
+-- how long to keep re-asserting the saved scroll after the conversation comes
+-- back -- wall clock, since this fires once per render frame at wildly varying
+-- FPS. Same pattern as adv/keep-inventory, for the same reason: DF zeroes
+-- choice_scroll_position while it finishes opening the panel, so a single
+-- write would land only to be wiped.
+local RESTORE_MS = 400
+
+function KeepTalking:reset()
+    self.was_open = false
+    self.job = nil
+    self.scroll = 0
+    self.scroll_prev = 0
+    self.restore_until = 0
+end
+
+-- Put the saved topic-list offset back VERBATIM -- no clamp. Every row count
+-- the structs offer UNDERCOUNTS what choice_scroll_position can legally hold:
+-- #conv_choice_info read 26 while DF's own scroll sat at 38 on that same list,
+-- and `title.text` is the unwrapped string, not rendered lines, so it reads 26
+-- too. Clamping to either pinned every deep restore short of the bottom (the
+-- keep-inventory option[] trap, twice over). The saved value was DF-legal
+-- moments ago on what is nearly the same list, and DF tolerates a slightly
+-- past-end offset (it held 27 on a "26-line" list itself), so verbatim it is.
+function KeepTalking:hold_scroll()
+    local c = mi().adventure.conversation
+    local v = math.max(0, self.scroll)
+    if v ~= self.dbg_hold then
+        dlog('hold: write %d (df had %d)', v, c.choice_scroll_position)
+        self.dbg_hold = v
+    end
+    c.choice_scroll_position = v
+end
 
 -- Drive a pending reopen across frames. Stages:
 --   'talk'   -> conversation just closed: feed A_TALK to raise the "who to talk to" menu
@@ -143,7 +205,17 @@ function KeepTalking:drive()
     elseif job.stage == 'select' then
         if in_conversation() then self.job = nil; return end             -- resumed: done
         if in_select_menu() then
-            if click_text(CONTINUE) then self.job = nil; return end       -- clicked Continue: done
+            if click_text(CONTINUE) then
+                -- clicked Continue: done. The window MUST start here: simulateInput runs
+                -- DF's screen logic synchronously, so the conversation is already open
+                -- before onupdate's "panel is open" branch could ever see self.job --
+                -- waiting for that branch (keep-inventory's pattern) never fired at all.
+                self.restore_until = dfhack.getTickCount() + RESTORE_MS
+                self.dbg_hold, self.dbg_rows = nil, nil
+                dlog('continue clicked: restoring %d', self.scroll)
+                self.job = nil
+                return
+            end
             job.tries = job.tries + 1                                     -- menu up, label not rendered
             if job.tries > 8 then feed('LEAVESCREEN'); self.job = nil end -- no ongoing convo: back out
         else
@@ -164,9 +236,40 @@ function KeepTalking:overlay_onupdate()
     if not enabled then self:reset(); return end
     if not dfhack.world.isAdventureMode() then return end
     if in_conversation() then                            -- actually talking: remember it (+ the input
+        -- a pending reopen just landed: this branch runs BEFORE drive() ever sees the reopened
+        -- panel (same unreachable-success-path trap keep-inventory documents), so the
+        -- scroll-restore window can only be claimed here
+        if self.job then
+            self.restore_until = dfhack.getTickCount() + RESTORE_MS
+            self.dbg_hold, self.dbg_rows = nil, nil
+            dlog('reopen landed: restoring %d (rows %d, df has %d)', self.scroll,
+                #mi().adventure.conversation.conv_choice_info,
+                mi().adventure.conversation.choice_scroll_position)
+        end
         self.was_open = true                             -- stamp, so a later close can tell select vs Escape)
         self.conv_stamp = input_stamp()
         self.job = nil
+        if dfhack.getTickCount() < (self.restore_until or 0) then
+            -- still re-asserting after a reopen: keep writing our value, and do NOT read DF's
+            -- back over it, or the zero it just wrote becomes the new "saved" position
+            self:hold_scroll()
+        else
+            if (self.restore_until or 0) ~= 0 then
+                dlog('window over: df scroll now %d',
+                    mi().adventure.conversation.choice_scroll_position)
+            end
+            self.restore_until = 0
+            -- adopt only values that survive two consecutive frames: on the topic-click frame
+            -- DF zeroes choice_scroll_position while the panel still reads as open, so a raw
+            -- per-frame save made 0 the "saved" offset every single time -- which is why the
+            -- restore always landed at the top of the list
+            local cur = mi().adventure.conversation.choice_scroll_position
+            if cur == self.scroll_prev then
+                if cur ~= self.scroll then dlog('saved %d', cur) end
+                self.scroll = cur
+            end
+            self.scroll_prev = cur
+        end
         return
     end
     if self.job then self:drive(); return end            -- a reopen is in flight (incl. the select menu)
