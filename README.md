@@ -134,11 +134,11 @@ Keeps tree-cutting under the elves' yearly limit by designating the nearest tree
 ### **`fort/broker-ready`**
 Frees a soldier broker to trade, then puts their squad back on duty afterward.
 
-### **`fort/rusty-adventurers`**
-Keeps skill rust off retired adventurers — and only them, matched on the nemesis
-`ADVENTURER` flag, never a name or a skill count — so a hero you played doesn't decay
-into a rusty militia commander. Swept once a game year. There is no stock DFHack tool
-for this.
+### **`fort/rusty-legends`**
+Keeps skill rust off a retired adventurer's every skill — matched on the nemesis
+`ADVENTURER` flag, never a name or a skill count — and off any citizen's legendary
+skills. Everything else rusts as normal. Swept once a game year. There is no stock
+DFHack tool for this.
 
 ## Information
 

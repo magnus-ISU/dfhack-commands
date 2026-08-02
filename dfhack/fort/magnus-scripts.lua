@@ -56,8 +56,8 @@ cinematic catch-up: `smooth-movement camera speed 150`).
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
-full description), enable rusty-adventurers (yearly sweep that keeps skill rust off
-retired adventurers; a no-op in forts without one), and enable a batch of stock
+full description), enable rusty-legends (yearly sweep that keeps skill rust off
+retired adventurers and off anyone's legendary skills), and enable a batch of stock
 DFHack tools:
     enable: autobutcher, autoclothing, autonestbox, burrow (auto-grow
             `name+` burrows), prioritize, seedwatch, suspendmanager, timestream
@@ -244,7 +244,7 @@ if ({...})[1] == 'disable' then
     try('disable plan-tile overlay', function() dfhack.run_command('overlay', 'disable', 'fort/plan-tile.tile') end)
     try('disable auto-name (migrant renamer)', function() dfhack.run_command('disable', 'fort/auto-name') end)
     try('disable statue-redirect (auto-open statue details)', function() dfhack.run_command('disable', 'fort/statue-redirect') end)
-    try('disable rusty-adventurers', function() dfhack.run_command('disable', 'fort/rusty-adventurers') end)
+    try('disable rusty-legends', function() dfhack.run_command('disable', 'fort/rusty-legends') end)
     -- notifications (turn off + persist the notify config)
     try('disable notifications', function()
         local n = reqscript('internal/notify/notifications')
@@ -347,10 +347,11 @@ if lovely then
         function() dfhack.run_command('enable', 'fort/statue-redirect') end)
 
     -- a retired adventurer arrives with a lifetime of skills and then rusts them away
-    -- sitting in a dining room; this scrubs rust off those units only (matched on the
-    -- nemesis ADVENTURER flag). A no-op in forts that have no adventurer.
-    try('rusty-adventurers (no skill rust on retired adventurers)',
-        function() dfhack.run_command('enable', 'fort/rusty-adventurers') end)
+    -- sitting in a dining room; a legendary crafter loses an edge to a season of
+    -- hauling. Scrubs rust off adventurers (every skill, matched on the nemesis
+    -- ADVENTURER flag) and off any citizen's Legendary+ skills. Nothing else rusts less.
+    try('rusty-legends (no skill rust on adventurers or legendary skills)',
+        function() dfhack.run_command('enable', 'fort/rusty-legends') end)
 
     -- hide the stock "N thieving or mischievous creature(s)" notify line (kea/rhesus
     -- noise). The other stock lines this pack replaces (agitated_count, hostile_count)
