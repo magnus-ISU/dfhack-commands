@@ -92,7 +92,7 @@ local function over_other_overlay(mx, my)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'stockpile-place.watcher' then
+        if name ~= 'fort/stockpile-place.watcher' then
             local w = e.widget
             local r = w.frame_rect
             if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2
@@ -418,5 +418,5 @@ if dfhack_flags.module then return end
 require('plugins.overlay').rescan()
 -- default_enabled only applies on first discovery; once an off state has persisted, rescan alone
 -- won't bring it back -- so running the script re-enables the overlay to be reliable.
-dfhack.run_command('overlay', 'enable', 'stockpile-place.watcher')
+dfhack.run_command('overlay', 'enable', 'fort/stockpile-place.watcher')
 print('stockpile-place: drag a box in the stockpile view to create an UNSELECTED pile.')

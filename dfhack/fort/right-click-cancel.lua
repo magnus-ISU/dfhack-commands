@@ -69,7 +69,7 @@ local function over_other_overlay(mx, my)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'right-click-cancel.cancel' then
+        if name ~= 'fort/right-click-cancel.cancel' then
             local w = e.widget
             local r = w.frame_rect
             if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2
@@ -434,7 +434,7 @@ OVERLAY_WIDGETS = {cancel = RightClickCancel}
 
 if not dfhack_flags.module then
     require('plugins.overlay').rescan()
-    dfhack.run_command('overlay', 'enable', 'right-click-cancel.cancel')
+    dfhack.run_command('overlay', 'enable', 'fort/right-click-cancel.cancel')
     print('right-click-cancel: overlay enabled.')
     print('  left-drag = box designate (the game renders the box), left-click = normal click')
     print('  right-drag = box remove, right-click = cancel under cursor')

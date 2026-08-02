@@ -437,4 +437,4 @@ try('arm auto-run on load (' .. (lovely and 'lovely' or 'plain') .. ')',
 print('Done. One-shot commands: destroy-forbidden, clear-flows, raid-status, attack-invaders.')
 print('Manual toggle: no-pausing (stops all pausing).')
 print(('Auto-run-on-load ARMED (%s). It will re-run every time this fort loads until you run '
-    .. '`magnus-scripts disable`.'):format(lovely and 'magnus-scripts lovely' or 'magnus-scripts'))
+    .. '`fort/magnus-scripts disable`.'):format(lovely and 'fort/magnus-scripts lovely' or 'fort/magnus-scripts'))

@@ -449,7 +449,7 @@ OVERLAY_WIDGETS = {tile = PlanTile}
 
 if not dfhack_flags.module then
     require('plugins.overlay').rescan()
-    dfhack.run_command('overlay', 'enable', 'plan-tile.tile')
+    dfhack.run_command('overlay', 'enable', 'fort/plan-tile.tile')
     print('plan-tile: overlay enabled.')
     print('  During building placement, left-drag a box to place a grid of that building,')
     print('  tiled by its footprint (every 3 tiles for a 3x3 workshop, etc.).')

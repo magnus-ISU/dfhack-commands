@@ -217,10 +217,13 @@ MoodBurrowOverlay = defclass(MoodBurrowOverlay, overlay.OverlayWidget)
 MoodBurrowOverlay.ATTRS{
     desc = 'Adds a mood-burrow selector to the burrow screen.',
     default_pos = {x = 9, y = 8},                 -- top left: 8 right, 7 down from the corner
-    default_enabled = true,
+    -- OFF by default: the feature is filed in BROKEN_FEATURES (TODO) and was only
+    -- ever meant as a manual toggle -- the fort/ move's widget rename reset it to
+    -- the old default and silently switched it on everywhere
+    default_enabled = false,
     viewscreens = 'dwarfmode/Burrow',
     frame = {w = 30, h = 1},
-    version = 2,                                  -- bumped so the new position takes effect
+    version = 3,                                  -- bumped so the corrected default overrides saved state
 }
 
 function MoodBurrowOverlay:init()
