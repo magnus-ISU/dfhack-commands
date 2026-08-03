@@ -50,8 +50,8 @@ Activates the "always-on" helpers in this pack:
 In ADVENTURE mode this script instead enables the adventure helpers, among them
 adv/auto-save (saves as "adventurer-autosave" every 20 minutes, timed from the
 last successful save and deferred until no menu is open) and smooth-movement
-(the free camera is auto-on in adventure mode; the glide is set to a slow,
-cinematic catch-up: `smooth-movement camera speed 150`).
+(adventure mode animates NPCs and slides the world tiles under the pinned
+player; tune the slide with `smooth-movement slidems <n>`).
 
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
@@ -179,10 +179,9 @@ if not dfhack.world.isFortressMode() then
             -- slow glide tau makes the catch-up leisurely/cinematic (default 35 = ~100ms;
             -- 150 = ~450ms). Fails gracefully when the plugin binary isn't installed
             -- (run `make build` in dfhack-commands).
-            atry('smooth-movement (player/creature interpolation + slow camera glide)', function()
+            atry('smooth-movement (NPC interpolation + world-tile slide)', function()
                 pcall(dfhack.run_command, 'load', 'smooth-movement')
                 dfhack.run_command('enable', 'smooth-movement')
-                pcall(dfhack.run_command, 'smooth-movement', 'camera', 'speed', '150')
             end)
         end
     end
