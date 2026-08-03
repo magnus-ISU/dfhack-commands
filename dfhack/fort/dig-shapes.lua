@@ -11,8 +11,16 @@ SHAPED DIG BOXES are reclassified on completion:
                                            constructed up/down staircase).
   * selection through OPEN-AIR tiles     -> constructed WALLS/FLOORS, bottom-up (wall if the tile
                                             below is a wall -- natural or a placed wall -- else floor).
-  * selection of ONLY constructions/ramps (air allowed) -> designate them for REMOVAL.
+  * selection of ONLY constructions/ramps (air allowed) -> designate them for REMOVAL, EXCEPT a
+                                            constructed wall bearing a MASTERWORK engraving --
+                                            that one is left standing (an announcement says how
+                                            many were spared). Natural stone walls are still
+                                            mined out however they are engraved: digging is the
+                                            only way to remove one at all.
   * tree tiles                            -> CHOP.
+  * ANY tree in the selection             -> chop ONLY; no walls or floors are built anywhere in
+                                            that box. Boxing in woodland means "clear this", so
+                                            the open sky between the trunks is left alone.
   * natural rock                          -> left as ordinary dig (mining).
 
 DEBUG: set DEBUG=true to append a trace to the log file (read by the maintainer while testing).
@@ -230,9 +238,50 @@ local function construct_door(pos)
     log('  DOOR (buildingplan) @' .. fmt(pos))
 end
 
+-- engravings live in one flat vector; index it by z/y/x so a removal box can ask per tile.
+-- Entries are only added and removed (an engraving's pos/quality never change), so the vector
+-- length is a sound key for rebuilding the index.
+local PRESERVE_QUALITY = df.item_quality.Masterful
+local engraving_index = {by_z = nil, count = -1}
+local function engraving_at(pos)
+    local all = df.global.world.event.engravings
+    if engraving_index.count ~= #all then
+        local by_z = {}
+        for _, e in ipairs(all) do
+            local p = e.pos
+            local grid = by_z[p.z]; if not grid then grid = {}; by_z[p.z] = grid end
+            local row = grid[p.y]; if not row then row = {}; grid[p.y] = row end
+            row[p.x] = e
+        end
+        engraving_index.by_z, engraving_index.count = by_z, #all
+    end
+    local grid = engraving_index.by_z[pos.z]; if not grid then return end
+    local row = grid[pos.y]; if not row then return end
+    return row[pos.x]
+end
+
+-- a masterwork engraving on this tile? Only a SMOOTH tile can carry one (constructed walls
+-- included -- an engraved ConstructedWall reads as special=SMOOTH), so that cheap tiletype
+-- check gates the lookup and the index is usually never built at all.
+local function has_masterwork_engraving(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    if not tt or df.tiletype.attrs[tt].special ~= df.tiletype_special.SMOOTH then return false end
+    local e = engraving_at(pos)
+    return e ~= nil and e.quality >= PRESERVE_QUALITY
+end
+
+-- returns true when the tile was deliberately LEFT ALONE (masterwork engraving)
 local function remove_here(pos)
     -- completed/in-progress construction -> constructions API; natural ramp -> mine it away
     if construction_here(pos) then
+        -- a CONSTRUCTED wall carrying a masterwork engraving stays up: taking it down destroys
+        -- the masterpiece and enrages its engraver, and nothing forces the issue -- the wall can
+        -- simply remain. Natural stone walls are NOT spared: mining one out is the only way to
+        -- remove it at all, so refusing would make an engraved rock wall permanent.
+        if is_wall_tile(pos) and has_masterwork_engraving(pos) then
+            log('  remove SKIP (masterwork engraving) @' .. fmt(pos))
+            return true
+        end
         local ok = pcall(dfhack.constructions.designateRemove, pos)
         if not ok then ok = pcall(dfhack.constructions.designateRemove, pos.x, pos.y, pos.z) end
         log(('  remove construction @%s ok=%s'):format(fmt(pos), tostring(ok)))
@@ -321,8 +370,15 @@ function convert_dig_box(a, b)
     -- selection is ONLY removables (constructions/ramps), open tiles allowed -> designate removal
     if (#cons + #ramps) > 0 and #trees == 0 and #rocks == 0 then
         log('  -> REMOVE (constructions/ramps)')
-        for _, p in ipairs(cons) do remove_here(p) end
+        local spared = 0
+        for _, p in ipairs(cons) do if remove_here(p) then spared = spared + 1 end end
         for _, p in ipairs(ramps) do remove_here(p) end
+        if spared > 0 then
+            dfhack.gui.showAnnouncement(
+                ('%d constructed wall%s left standing -- masterwork engraving%s.')
+                    :format(spared, spared == 1 and '' or 's', spared == 1 and '' or 's'),
+                COLOR_YELLOW, true)
+        end
         return true
     end
 
@@ -337,7 +393,12 @@ function convert_dig_box(a, b)
     local all_floor = true
     for _, p in ipairs(opens) do if has_floor_here(p) then all_floor = false; break end end
     local floor_slab = all_floor and dz == 1   -- an NxMx1 all-floor slab is allowed even when thick
-    if #opens > 0 and #rocks == 0 and (not thick or floor_slab) then
+    -- A selection holding ANY tree is a clearing job, not a building job: chop only, build
+    -- nothing. Dragging a box over woodland is how you clear it, and the open sky between the
+    -- trunks is not somewhere you asked for walls -- getting both meant undoing a scatter of
+    -- unwanted constructions every time. (Tree tiles themselves were never built on; they are a
+    -- bucket of their own. This is about the open tiles sharing the box with them.)
+    if #opens > 0 and #rocks == 0 and #trees == 0 and (not thick or floor_slab) then
         -- a single 1x1 click on an open tile flanked by exactly 2 orthogonal walls is a doorway
         -- -> build a DOOR instead of a wall
         local single = dx == 1 and dy == 1 and dz == 1

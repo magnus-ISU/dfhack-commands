@@ -9,9 +9,18 @@ cheapest / most renewable material the item can be made from:
     * furniture & wooden goods                  -> wood
     * metal gear (weapons, armor, ...)          -> copper
     * coins (minted from a metal bar)           -> copper (else any metal bar)
-    * stone-only goods (mechanisms, statues)    -> any (stone)
+    * stone goods (mechanisms, statues, querns,
+      millstones, slabs)                        -> obsidian if the fort has usable
+                                                   boulders of it, else unconstrained
 
 If a mandate demands a specific material, that material is used instead.
+
+Obsidian is preferred for stone goods because it is worthless to trade and endlessly
+renewable from a magma/water casting setup, so spending it on a noble's whim costs
+nothing. It is skipped when the stone-use settings hold obsidian back as an economic
+stone (DF's default) -- an order pinned to a stone the masons will not touch is worse
+than an open one, since an unmade mandate is a punished mandate. Run `auto-mandate`
+and the reason is printed next to the order.
 
 Usage:
     auto-mandate                 queue orders for current mandates, once
@@ -23,12 +32,13 @@ matching order. The enabled state persists with the fort.
 ]]
 
 local GLOBAL_KEY = 'auto-mandate'
+
 local CYCLE_DAYS = 1
 
 -- item_type token -> { job token, material policy, kind }
 --   kind 'sub'   : set order.item_subtype (forge jobs pick the specific gear)
 --   kind 'fixed' : the job implies the item; set neither
-local W, C, A = 'wood', 'copper', 'any'
+local W, C, A, S = 'wood', 'copper', 'any', 'stone'
 local RAW = {
     -- jewelry/craft goods: use the SPECIFIC make-job (NOT generic "make crafts",
     -- which makes a random item and would not satisfy the mandate)
@@ -55,7 +65,12 @@ local RAW = {
     -- coin mandate rarely names a metal, so default to the cheap-metal policy (copper, else any bar)
     {'COIN', 'MintCoins', C, 'fixed'},
     {'SHIELD', 'MakeShield', W, 'sub'}, {'AMMO', 'MakeAmmo', W, 'sub'},
-    {'STATUE', 'ConstructStatue', A, 'fixed'}, {'TRAPPARTS', 'ConstructMechanisms', A, 'fixed'},
+    {'STATUE', 'ConstructStatue', S, 'fixed'}, {'TRAPPARTS', 'ConstructMechanisms', S, 'fixed'},
+    -- Mason's-workshop goods. Never a metal policy: the mason makes these from a boulder and no
+    -- forge job produces them, so pinning a metal would queue an order no workshop in the fort
+    -- could ever work.
+    {'QUERN', 'ConstructQuern', S, 'fixed'}, {'MILLSTONE', 'ConstructMillstone', S, 'fixed'},
+    {'SLAB', 'ConstructSlab', S, 'fixed'},
 }
 
 local MAP = {}
@@ -89,6 +104,29 @@ end
 local function any_metal_bar()
     local bars = df.global.world.items.other.BAR
     if #bars > 0 then return bars[0].mat_type, bars[0].mat_index end
+end
+
+-- Obsidian for stone goods -- but only when the masons would actually pick it up. Returns the
+-- matinfo, or nil plus the reason it was passed over.
+--
+-- A stone flagged in `economic_stone` is held back by the fort's stone-use settings for its
+-- industrial purpose (obsidian is one of DF's defaults, alongside the ores, gems and flux).
+-- Pinning an order to a held-back stone risks queueing work nobody picks up, and an unmade
+-- mandate is a PUNISHED mandate -- so a restricted obsidian counts as "not available" and we
+-- leave the material open instead.
+local function usable_obsidian()
+    local ob = dfhack.matinfo.find('OBSIDIAN')
+    if not ob then return nil, 'no obsidian in this world' end
+    local econ = df.global.plotinfo.economic_stone
+    -- economic_stone is a 0/1 vector, NOT booleans -- and 0 is truthy in Lua, so a bare
+    -- `if econ[i]` reads every stone as restricted. Compare explicitly.
+    if ob.index < #econ and econ[ob.index] == 1 then
+        return nil, 'obsidian is restricted in the stone-use settings'
+    end
+    for _, it in ipairs(df.global.world.items.other.BOULDER) do
+        if it.mat_type == ob.type and it.mat_index == ob.index then return ob end
+    end
+    return nil, 'no obsidian boulders in stock'
 end
 
 -- is this material in stock as a craftable input (bar/boulder/log/block)?
@@ -155,6 +193,13 @@ local function choose_material(o, policy, m)
             return info and info:toString() or 'metal'
         end
         return nil   -- no metal at all: cannot fulfil
+    elseif policy == S then
+        local ob, why = usable_obsidian()
+        if ob then
+            o.mat_type, o.mat_index = ob.type, ob.index
+            return 'obsidian'
+        end
+        return 'any material (' .. why .. ')'
     end
     return 'any material'   -- A: unconstrained (uses any available stone/etc.)
 end

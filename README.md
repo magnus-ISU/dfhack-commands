@@ -131,6 +131,13 @@ Fills Make mandates with cheap materials (even minting coins) and prioritizes th
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
 
+### **`fort/adamantine-hospital`**
+Stops the hospital spending adamantine on bruises. DF gives a hospital no material filter, so
+dressings and sutures happily consume adamantine cloth and strands. This watches the job list
+and, the moment a treatment job has claimed adamantine cloth or thread, forbids that item and
+cancels the job — the hospital re-issues the treatment and reaches for ordinary cloth, and
+nothing is consumed. `adamantine-hospital release` hands the thread back to your smelter.
+
 ### **`fort/broker-ready`**
 Frees a soldier broker to trade, then puts their squad back on duty afterward.
 

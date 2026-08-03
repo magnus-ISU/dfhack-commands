@@ -77,7 +77,9 @@ end
 
 -- true while the adventurer shares a Conflict activity with a foe that
 -- matters.  world.activities is small (tens); sides/unit_ids a handful each.
-local function in_combat()
+-- EXPORTED: adv/always-be-satiated gates its eating on this same judgement,
+-- so "combat" means one thing across the suite.
+function in_combat()
     local me = dfhack.world.getAdventurer()
     if not me then return false end
     local id = me.id

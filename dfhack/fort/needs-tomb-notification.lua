@@ -57,7 +57,19 @@ local function ghost_risk(u)
         and not dfhack.units.isInvader(u) and not dfhack.units.isOpposedToLife(u)
 end
 
--- Full scan: walks corpses + ghosts once, then derives the two lists plus a
+-- Fort membership never changes once a unit is dead, and `isOwnGroup` is a comparatively
+-- expensive call (~140ms across a 1600-unit world), so the answer is remembered per unit id.
+local member_cache = {}
+local function is_fort_member(u)
+    local v = member_cache[u.id]
+    if v == nil then
+        v = dfhack.units.isOwnGroup(u) or false
+        member_cache[u.id] = v
+    end
+    return v
+end
+
+-- Full scan: corpses, corpse-less dead, and ghosts, then derives the two lists plus a
 -- unit-id -> corpse-position map (for jumping to a relative's remains).
 -- Returns (and caches) {needs_tomb=<list>, entombed=<list>, pos_by_unit=<map>}.
 local function scan()
@@ -68,57 +80,76 @@ local function scan()
         return cache.result
     end
 
+    -- Memorial slabs, keyed by the historical figure they name. ENGRAVED and BUILT are kept
+    -- apart: an engraved slab means the memorial already exists (don't queue another), but
+    -- only a BUILT one actually lays the dead to rest.
+    local slab_built, slab_engraved = {}, {}
+    for _, it in ipairs(df.global.world.items.other.SLAB) do
+        if it.engraving_type == df.slab_engraving_type.Memorial
+            and it.topic and it.topic >= 0
+            and not (it.flags.garbage_collect or it.flags.removed)
+        then
+            slab_engraved[it.topic] = true
+            if it.flags.in_building then slab_built[it.topic] = true end
+        end
+    end
+
     -- per dead unit: interred part / loose part / positions / ghost
     local info, order = {}, {}
-    local memorialized = {}
-    local vec = df.global.world.items.other.IN_PLAY
-    for i = 0, #vec - 1 do
-        local it = vec[i]
-        local t = it and it:getType()
-        if it and t == df.item_type.SLAB
-            and it.engraving_type == df.slab_engraving_type.Memorial
-            and it.topic and it.topic >= 0 and it.flags.in_building
-            and not (it.flags.garbage_collect or it.flags.removed)
-        then
-            memorialized[it.topic] = true
+    local function rec_for(u)
+        local rec = info[u.id]
+        if not rec then
+            rec = {unit = u, buried = false, unburied = false, pos = nil, bpos = nil,
+                   ghostly = u.flags3.ghostly}
+            info[u.id] = rec
+            table.insert(order, u.id)
         end
-        if it and (t == df.item_type.CORPSE or t == df.item_type.CORPSEPIECE)
-            and not (it.flags.garbage_collect or it.flags.removed)
-        then
-            local uid = it.unit_id
-            local u = uid and uid >= 0 and df.unit.find(uid)
-            if u and dfhack.units.isDead(u) and is_sapient(u) and ghost_risk(u) then
-                local rec = info[uid]
-                if not rec then
-                    rec = {unit = u, buried = false, unburied = false, pos = nil, bpos = nil,
-                           ghostly = u.flags3.ghostly}
-                    info[uid] = rec
-                    table.insert(order, uid)
-                end
-                local x, y, z = dfhack.items.getPosition(it)
-                if it.flags.in_building then
-                    rec.buried = true                 -- in a coffin
-                    if not rec.bpos and x then rec.bpos = xyz2pos(x, y, z) end
-                else
-                    rec.unburied = true
-                    if not rec.pos and x then rec.pos = xyz2pos(x, y, z) end
+        return rec
+    end
+
+    -- Corpses, via the TYPED vectors rather than items.other.IN_PLAY: 500-odd items instead
+    -- of ~9500 for exactly the same answer.
+    for _, vec in ipairs({df.global.world.items.other.CORPSE,
+                          df.global.world.items.other.CORPSEPIECE}) do
+        for _, it in ipairs(vec) do
+            if not (it.flags.garbage_collect or it.flags.removed) then
+                local uid = it.unit_id
+                local u = uid and uid >= 0 and df.unit.find(uid)
+                if u and dfhack.units.isDead(u) and is_sapient(u) and ghost_risk(u) then
+                    local rec = rec_for(u)
+                    local x, y, z = dfhack.items.getPosition(it)
+                    if it.flags.in_building then
+                        rec.buried = true                 -- in a coffin
+                        if not rec.bpos and x then rec.bpos = xyz2pos(x, y, z) end
+                    else
+                        rec.unburied = true
+                        if not rec.pos and x then rec.pos = xyz2pos(x, y, z) end
+                    end
                 end
             end
+        end
+    end
+
+    -- Dead fort members with NO CORPSE AT ALL -- killed off-site on a raid, eaten, or burned
+    -- up. A corpse-driven scan can never see them, which is exactly where this list used to
+    -- fall short of DF's own "needs a memorial" filter, and they are the people a memorial
+    -- slab is *for*: with no body, engraving is the only way to lay them to rest.
+    -- `flags2.killed` is a raw field read (~1ms across every unit in the world) while
+    -- dfhack.units.isDead() is a call costing 150x that, so the flag is the first cut and the
+    -- real tests only run on what survives it.
+    for _, u in ipairs(df.global.world.units.all) do
+        if (u.flags2.killed or u.flags3.ghostly) and not info[u.id]
+            and is_sapient(u) and is_fort_member(u) and dfhack.units.isDead(u)
+        then
+            rec_for(u)
         end
     end
 
     -- GHOSTS: any ghost on the map is not at rest, whatever the burial state.
     for _, u in ipairs(df.global.world.units.active) do
         if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) then
-            local uid = u.id
-            local rec = info[uid]
-            if not rec then
-                rec = {unit = u, buried = false, unburied = false, pos = nil, bpos = nil, ghostly = true}
-                info[uid] = rec
-                table.insert(order, uid)
-            else
-                rec.ghostly = true
-            end
+            local rec = rec_for(u)
+            rec.ghostly = true
             if not rec.pos then
                 local x, y, z = dfhack.units.getPosition(u)
                 if x then rec.pos = xyz2pos(x, y, z) end
@@ -131,15 +162,19 @@ local function scan()
     for _, uid in ipairs(order) do
         local rec = info[uid]
         local hf = rec.unit.hist_figure_id
-        local belongs = dfhack.units.isOwnCiv(rec.unit) or dfhack.units.isOwnGroup(rec.unit)
+        -- Match DF's own memorial list: fort MEMBERS, not everyone sharing our civilization.
+        -- A dead caravan guard or visiting civ member is not ours to bury, and this world has
+        -- ~145 such dead against 51 of our own.
+        local belongs = is_fort_member(rec.unit)
         pos_by_unit[uid] = rec.pos or rec.bpos
         local entry = {
             unit_id = uid, hf = hf,
             name = unit_display_name(rec.unit),
             pos = rec.pos or rec.bpos,
         }
-        if (rec.ghostly or (rec.unburied and not rec.buried and belongs))
-            and not memorialized[hf] then
+        -- A ghost is not at rest however its body lies -- only a BUILT slab settles one.
+        local at_rest = rec.ghostly and slab_built[hf] or (not rec.ghostly and (rec.buried or slab_built[hf]))
+        if belongs and not at_rest then
             table.insert(needs_tomb, entry)
         elseif belongs and rec.buried then
             -- at rest in a coffin and not on the needs list = entombed

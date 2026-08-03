@@ -71,7 +71,9 @@ which fills a crowd with archers. The list is split by what each weapon actually
 (`ranged_ammo` in the raws) and one side is drawn from at the race's rate: ORCS 0%, every
 other race 15%. Within the chosen side the civ's own repeats still apply, so a drow
 drawing melee still overwhelmingly gets a scimitar. An empty side falls through to the
-other, so nobody is left unarmed by the split.
+other, so nobody is left unarmed by the split. A ranged weapon is always issued ONCE --
+neither the two-weapon roll nor the scimitar pair rule below ever hands out a second bow,
+which the unit could not draw and would not need, since both would share the one quiver.
 
 HOW MANY, and whether a shield comes too, depends on whether the unit's civ fields
 shields at all:
@@ -81,7 +83,9 @@ shields at all:
     race uses whatever wood the world has.
   * civ WITHOUT shields (the drow field none) -- the older rule stands: a roll that
     lands on a scimitar mints a PAIR, anything else mints one.
-No unit is ever left holding more than MAX_WEAPONS (2), whatever the roll says.
+Both pair rules are about a blade in each hand, so neither applies to a RANGED pick: a
+bow, crossbow, blowgun or sling is minted exactly once. No unit is ever left holding more
+than MAX_WEAPONS (2), whatever the roll says.
 
 ADDED PIECES -- the swap pass only ever replaces something already worn, but two cases
 deliberately mint into an EMPTY slot:
@@ -104,8 +108,11 @@ deliberately mint into an EMPTY slot:
 
 OUTERWEAR: cloaks and capes share item_type.ARMOR with tunics and shirts, so they are
 never promoted -- otherwise someone in a tunic AND a cloak ends up in two breastplates
-with the cloak gone. They are re-made in the outfit's material instead. For the same
-reason only ONE piece per slot is ever promoted.
+with the cloak gone. They are re-made instead, in the first material the RAWS allow that
+piece to be: the outfit's own fabric, then its armor material, then plain leather, so an
+elf keeps twinkling, a leather outfit keeps its leather cloak, and an armored unit ends up
+in a leather cloak over the plate rather than an iron one -- a cloak is [SOFT][LEATHER]
+and cannot be metal at all. For the same reason only ONE piece per slot is ever promoted.
 
 CLOTHING -> ARMOR: an outfit with `armor` promotes cloth to the armor piece for that
 slot (tunic -> breastplate, skirt -> greaves, hood -> helm, gloves -> gauntlets,
@@ -132,6 +139,12 @@ RULES THAT APPLY TO EVERY RACE
   item/material combinations. It generates a fresh item of the same type and
   subtype in the target metal, copies the old quality across, swaps it in, and
   removes the original.
+- **Never mints an impossible item.** Every combination is checked against the raws
+  before it is made: the itemdef's own [SOFT]/[HARD]/[METAL]/[LEATHER] tokens against
+  the material's matching ITEMS_* flags, which is the pairing DF itself uses to decide
+  whether the combination has a reaction at all. A piece with nothing legal on offer is
+  left exactly as it is. Item types carrying no such tokens -- weapons, shields, quivers
+  -- have no opinion and are unaffected.
 - **Children are never armored or armed**, in any civ. They still get material
   upgrades, so an elf child is rewoven in twinkling fabric instead of being left in
   rags -- but a cloth item stays a cloth item and no weapon is minted.
@@ -462,11 +475,45 @@ local function subtype_index(itype, id)
     return get and itemdef_index(get(), id)
 end
 
+-- Can this itemdef legally be MADE of this material? Both halves are read from the raws:
+-- the itemdef's own [SOFT]/[HARD]/[METAL]/[LEATHER] tokens against the material's matching
+-- ITEMS_* flags, which is the pairing DF itself uses to decide whether the combination has
+-- a reaction at all. ITEM_ARMOR_CLOAK is [SOFT][LEATHER] and iron is ITEMS_METAL/ITEMS_HARD,
+-- so the "large iron cloak" this was written for answers false.
+--
+-- Test the ITEMS_* flags and never IS_METAL: the high elves' twinkling FABRIC is an
+-- inorganic and carries IS_METAL alongside ITEMS_SOFT, so an IS_METAL test would decide
+-- their clothing was metal and refuse to weave it.
+--
+-- Returns nil -- "no opinion" -- for item types that carry no such tokens at all (weapons,
+-- shields and quivers have no `props`), leaving the caller's own choice of material alone.
+local MAT_FOR_DEF_FLAG = {METAL='ITEMS_METAL', SOFT='ITEMS_SOFT',
+                          LEATHER='ITEMS_LEATHER', HARD='ITEMS_HARD'}
+
+local function material_legal(itype, isub, mt, mi)
+    local get = DEF_VEC[itype]
+    if not get then return end
+    local okf, flags = pcall(function() return get()[isub].props.flags end)
+    if not okf or not flags then return end
+    local minfo = dfhack.matinfo.decode(mt, mi)
+    if not minfo then return end
+    for def_flag, mat_flag in pairs(MAT_FOR_DEF_FLAG) do
+        local ok, allowed = pcall(function()
+            return flags[def_flag] and minfo.material.flags[mat_flag]
+        end)
+        if ok and allowed then return true end
+    end
+    return false
+end
+
 -- Create ONE item, destroying anything else the call minted. Needed because createItem
 -- follows DF's forging rules and returns a PAIR for some gear (gauntlets), so the naive
 -- `createItem(...)[1]` silently drops the other piece on the floor. Only apply() wants the
 -- surplus (it dresses the second hand with it); every mint path below wants exactly one.
 local function create_one(u, itype, isub, mt, mi)
+    -- never mint a combination the raws have no reaction for; the mint paths all funnel
+    -- through here, so this is the one place that has to hold the line
+    if material_legal(itype, isub, mt, mi) == false then return end
     local created = dfhack.items.createItem(u, itype, isub, mt, mi)
     if not (created and created[1]) then return end
     for i = 2, #created do pcall(dfhack.items.remove, created[i]) end
@@ -551,12 +598,26 @@ local function plan(u, o, mtype, mindex, want_rank, ftype, findex)
                     end
                 elseif (ALLOW_FABRIC[itype] or {})[sub] then
                     if OUTERWEAR[sub] then
-                        -- never promoted; re-made in the outfit's own material so a
-                        -- leather outfit ends up with a leather cloak
-                        local ot, oi = mtype, mindex
-                        if ftype then ot, oi = ftype, findex end
-                        isub, at, ai = it:getSubtype(), ot, oi
+                        -- Never promoted; re-made in a material the piece can ACTUALLY be
+                        -- made of. A cloak is [SOFT][LEATHER], so an armouring outfit's
+                        -- metal is not on offer -- it used to be taken anyway, which minted
+                        -- iron cloaks DF has no reaction for. Preference: the outfit's own
+                        -- fabric (an elf keeps twinkling), then its armour material (a
+                        -- leather outfit still gets its leather cloak), then plain leather,
+                        -- so an armoured unit ends up in a leather cloak over the plate. If
+                        -- the raws accept none of the three the piece is left exactly as it
+                        -- is -- better a worn cloak than an impossible one.
+                        -- Set whether or not it is re-made: the unit HAS outerwear either
+                        -- way, and mint_extras must not then issue it a second cloak.
                         made_outer = true
+                        local osub = it:getSubtype()
+                        local lt, li = mat(LEATHER)
+                        for _, c in ipairs({{ftype, findex}, {mtype, mindex}, {lt, li}}) do
+                            if c[1] and material_legal(itype, osub, c[1], c[2]) ~= false then
+                                isub, at, ai = osub, c[1], c[2]
+                                break
+                            end
+                        end
                     elseif o.armor and slot_map[itype] then
                         -- ONE promotion per body slot (shirt+tunic must not become two
                         -- breastplates). PAIRED slots get one per BODY PART instead, so
@@ -582,7 +643,11 @@ local function plan(u, o, mtype, mindex, want_rank, ftype, findex)
                         isub, at, ai = it:getSubtype(), ftype, findex   -- stays clothing
                     end
                 end
-                if isub and at then
+                -- apply() mints through createItem directly (it needs the pair the call
+                -- hands back), so the legality check cannot live in create_one for this
+                -- path -- a swap DF has no reaction for is dropped here instead, leaving
+                -- the unit in what it was already wearing.
+                if isub and at and material_legal(itype, isub, at, ai) ~= false then
                     -- handedness is a BitArray field, so copying `it.handedness` across
                     -- silently did nothing and left units in two right gauntlets. The
                     -- accessors are the real API: 1 = right, 2 = left.
@@ -935,6 +1000,11 @@ local function mint_arms(u, o)
     elseif pick == 'ITEM_WEAPON_SCIMITAR' then
         n = 2
     end
+    -- A RANGED weapon is only ever issued ONCE, whatever the arming roll said. Two bows
+    -- is one bow and a stick the unit can never draw -- they share the one quiver, fire
+    -- the same ammo, and DF gains nothing from the duplicate. The pair rules above are
+    -- about fighting with a blade in each hand.
+    if ammo_class_of(pick) then n = math.min(n, 1) end
     n = math.min(n, MAX_WEAPONS - weapon_count(u))
 
     for _ = 1, n do

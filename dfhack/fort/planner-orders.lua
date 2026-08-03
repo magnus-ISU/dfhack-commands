@@ -29,12 +29,15 @@ Items with no make-job are listed as unmakeable and skipped.
 
 When the fort has a hospital, it ALSO offers orders for the supplies a hospital needs --
 splints, crutches, buckets, thread, cloth, empty leather bags (to hold plaster powder),
-soap, and plaster powder. These thread/cloth are the GENERAL orders (process/weave any plant,
-keep a target stock). Every choice names
-the item it makes. Soap options are spelled out ("from tallow [animal fat]" / "from oil
-[plants]") and queue their prerequisites -- the ash->lye chain, plus a render-fat order
-when you pick tallow. Item supplies keep a target stock; soap/plaster are one-time batches
-(their outputs can't be counted cleanly by material) you can set to repeat.
+soap, and plaster powder. Thread/cloth here are the GENERAL orders (process/weave any plant,
+keep a target stock). Soap comes as tallow or oil and queues its prerequisites (the ash->lye
+chain, plus render-fat for tallow). Every supply is a REPEATING order held at a target by its
+own conditions -- soap runs a batch of 30 whenever soap bars drop under 10.
+
+The FIBRE CLOTH CHAINS (yarn and silk) offer one weave order PER KIND of thread (each
+creature's wool and each spider's silk is its own material): Daily x1 WeaveCloth pinned to that
+material, keeping 5 cloth of it, running only while more than 3 of that thread is on hand --
+and only offered once that thread passes 3. One at a time so a batch never drains the fibre.
 
 Separately, the PIG-TAIL CLOTH CHAIN offers orders that specifically target pig tails (via
 their conditions): "Pig tail thread" (Daily x5 ProcessPlants while pig tail plants > 8) and
@@ -44,6 +47,15 @@ the general hospital thread/cloth, so both can exist at once.
 
 It also runs standing-order checks and warns when a useful repeating order is missing;
 accepting creates it (all conditioned so they only run when sensible):
+  - Good meals: presses sweet pods into DWARVEN SYRUP (Farmer's Workshop, while an unrotten
+    sweet pod and an EMPTY barrel are on hand) and cooks LAVISH MEALS (Kitchen, while over
+    100 cookable solid ingredients are in stock). A dwarf's "eat good meals" need only
+    clears on a preferred food or a meal worth over 20, and a meal is worth about what its
+    ingredients are -- syrup is material value 20 against plump helmet's 2.
+  - Milling: cave wheat -> dwarven flour and sweet pods -> dwarven sugar (both value-20
+    cooking ingredients), dimple cups -> dimple dye, one order each at a Quern/Millstone,
+    gated on that plant plus an EMPTY bag. Adds a pig-tail CLOTH BAG order alongside, since
+    every mill job consumes a bag. Milling returns the seeds, so it costs no seed stock.
   - Brewing: two "brew drink from plant" orders -- under 200 drinks / under 200 seeds, each
     only while you have at least 1 barrel and 1 plant.
   - Charcoal: makes 20 while you have fewer than 20 fuel bars.
@@ -75,6 +87,7 @@ now` opens the dialog immediately.
 ]]
 
 local NAME = 'planner_orders'
+
 local dlg = require('gui.dialogs')
 local bp = require('plugins.buildingplan')
 
@@ -84,6 +97,7 @@ local BREW_TARGET = 200           -- keep at least this many drinks / seeds via 
 local BREW_AMOUNT = 30            -- brew jobs queued per cycle while under target
 local COAL_MAT = 7                -- builtin material for coal bars (charcoal AND coke = fuel)
 local FUEL_TARGET = 20            -- make fuel (charcoal/coke) while under this many bars
+local SOAP_CAP = 10               -- keep this many soap bars (the standing soap order's gate)
 local SMELT_CAP = 10              -- stop smelting an ORE once the metal has this many bars
 local METAL_CAP = 100             -- steel cap (steel isn't ore-smelted, so kept higher)
 local PIG_IRON_CAP = 10           -- pig iron is an intermediate -- keep only a few
@@ -170,9 +184,9 @@ end
 -- offers an order for each of these that has none yet. Three kinds:
 --   item     -- pick a material (wood/metal), keep `target` in stock
 --   job      -- one production method, no material choice, keep `target` in stock
---   reaction -- a workshop reaction; choose among `options`. Reactions whose output can't
---               be counted cleanly by material (soap, plaster) are queued as a one-time
---               batch (you can set them to repeat). `chain` queues prerequisite orders.
+--   reaction -- a workshop reaction; choose among `options`. Soap and plaster get REPEATING
+--               orders held at a target by their own conditions. `also` queues the
+--               prerequisite orders an option needs.
 local HOSPITAL_SUPPLIES = {
     {supply = 'Splints',  kind = 'item', job = 'ConstructSplint', cond_item = 'SPLINT', target = 5},
     {supply = 'Crutches', kind = 'item', job = 'ConstructCrutch', cond_item = 'CRUTCH', target = 5},
@@ -192,15 +206,16 @@ local HOSPITAL_SUPPLIES = {
             .. 'Leather Works; keeps ~10 EMPTY bags in stock.'},
     {supply = 'Soap', kind = 'reaction', target = 30, makes = 'soap (a bar)',
         count = {item_type = 'BAR', mat_id = 'SOAP'},   -- soap bars: BAR of the SOAP material
-        note = 'Cleans wounds (prevents infection). Needs LYE + a fat source; each option\n'
-            .. 'also queues its prerequisites (ash->lye, and rendering fat for tallow).',
+        note = 'Cleans wounds. Needs lye + a fat source; queues those prerequisites too.\n'
+            .. 'Repeats a batch of 30 whenever you have under 10 soap bars.',
         options = {
             -- `also` entries are prerequisite job_types (MakeAsh/MakeLye) or reaction codes
             -- (RENDER_FAT); each gets its own one-time batch order if not already present.
+            -- `standing`: a repeating order gated on the soap-bar count instead of a batch.
             {label = 'Soap from tallow [animal fat]', reaction = 'MAKE_SOAP_FROM_TALLOW',
-                also = {'MakeAsh', 'MakeLye', 'RENDER_FAT'}},
+                standing = {cap = SOAP_CAP}, also = {'MakeAsh', 'MakeLye', 'RENDER_FAT'}},
             {label = 'Soap from oil [plants]', reaction = 'MAKE_SOAP_FROM_OIL',
-                also = {'MakeAsh', 'MakeLye'}},
+                standing = {cap = SOAP_CAP}, also = {'MakeAsh', 'MakeLye'}},
         }},
     {supply = 'Plaster powder', kind = 'reaction', target = 30, makes = 'plaster powder',
         count = {item_type = 'POWDER_MISC', mat_id = 'PLASTER'},   -- POWDER_MISC of INORGANIC:PLASTER
@@ -231,10 +246,24 @@ local function pigtail_mat()
     return dfhack.matinfo.find('PLANT:GRASS_TAIL_PIG:THREAD')
 end
 
+-- Stock the fort can actually put into a job. An ask must never name something you do not
+-- have: a suggestion that reads "you have 40 pale blue devil silk thread" when the looms have
+-- none of it is worse than no suggestion, because accepting it creates an order that cannot run.
+--
+-- The trap that prompted this: an uncollected COBWEB is an item_threadst too -- DF stores a
+-- cavern web as THREAD of the spider's silk, flagged `spider_web` -- so a naive scan reported
+-- thousands of "cave spider silk thread" for a fort whose looms had ten. A web is not thread
+-- until a dwarf gathers it. The rest are the ordinary "exists but is not yours to use" cases.
+local function usable_stock(it)
+    local f = it.flags
+    return not (f.spider_web or f.forbid or f.dump or f.hostile or f.trader or f.artifact
+                or f.rotten or f.garbage_collect or f.removed or f.encased or f.construction)
+end
+
 -- any pig tail plants on hand? (GRASS_TAIL_PIG -- the fort's thread crop)
 local function pig_tails_present()
-    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if it:getType() == df.item_type.PLANT then
+    for _, it in ipairs(df.global.world.items.other.PLANT) do
+        if usable_stock(it) then
             local m = dfhack.matinfo.decode(it)
             if m and m.plant and m.plant.id == 'GRASS_TAIL_PIG' then return true end
         end
@@ -292,7 +321,7 @@ local FIBRE_FINISHED = {   -- item types that are woven/finished (so NOT raw spi
 }
 local function hair_wool_present()
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if not FIBRE_FINISHED[it:getType()] then
+        if not FIBRE_FINISHED[it:getType()] and usable_stock(it) then
             local m = dfhack.matinfo.decode(it)
             if m and m.material and m.material.flags[df.material_flags.YARN] then return true end
         end
@@ -300,30 +329,44 @@ local function hair_wool_present()
     return false
 end
 
--- yarn thread on hand to WEAVE? (spun wool/hair -- item_type THREAD, material flagged YARN)
-local function yarn_thread_present()
-    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if it:getType() == df.item_type.THREAD then
-            local m = dfhack.matinfo.decode(it)
-            if m and m.material and m.material.flags[df.material_flags.YARN] then return true end
-        end
-    end
-    return false
-end
+-- Every distinct thread material of a fibre family (yarn, silk) in the fort, with how much of
+-- it is on hand.
+--
+-- A fibre family is not a material: each creature's wool is its own material, and so is each
+-- spider's silk, so a fort can hold three unrelated silks and two unrelated wools. One
+-- class-wide weave order (matching on the yarn/silk flag) would let the loom pick whichever it
+-- liked and keep re-weaving the abundant fibre while a scarcer one sat untouched -- so each
+-- material gets its own order, pinned to that material the way the adamantine weave already is.
+--
+-- Counts sum stack_size, which is what a manager-order condition measures.
+local FIBRE_MIN = 3          -- offer/run only while MORE than this much of that thread is held
+local FIBRE_CLOTH_CAP = 5    -- keep this many cloth of each thread material
 
--- is there a WeaveCloth order that specifically targets YARN cloth (a condition with the yarn
--- flag)? Distinguishes it from the general / pig-tail weave orders, like order_targets_pigtail.
-local function weave_targets_yarn()
-    local all = df.global.world.manager_orders.all
-    for i = 0, #all - 1 do
-        local o = all[i]
-        if o.job_type == df.job_type.WeaveCloth then
-            for _, c in ipairs(o.item_conditions) do
-                if c.flags2.yarn then return true end
+local FIBRE_FAMILIES = {
+    {name = 'Yarn cloth', flag = df.material_flags.YARN, label = 'yarn (wool/hair)'},
+    {name = 'Silk cloth', flag = df.material_flags.SILK, label = 'silk'},
+}
+
+local function fibre_threads(flag)
+    local by = {}
+    for _, it in ipairs(df.global.world.items.other.THREAD) do
+        if usable_stock(it) then
+            local m = dfhack.matinfo.decode(it)
+            if m and m.material and m.material.flags[flag] then
+                local key = m.type .. ':' .. m.index
+                local e = by[key]
+                if not e then
+                    e = {type = m.type, index = m.index, name = m:toString(), n = 0}
+                    by[key] = e
+                end
+                e.n = e.n + (it.stack_size or 1)
             end
         end
     end
-    return false
+    local out = {}
+    for _, e in pairs(by) do out[#out + 1] = e end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    return out
 end
 
 -- ---- materials --------------------------------------------------------------
@@ -440,9 +483,16 @@ local FIXED_WS = {
     MakeAsh               = {label = 'a Wood Furnace',         fu = df.furnace_type.WoodFurnace},
     MakeLye               = {label = 'an Ashery',              ws = df.workshop_type.Ashery},
     ProcessPlants         = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
+    ProcessPlantsBarrel   = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     SpinThread            = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     WeaveCloth            = {label = 'a Loom',                 ws = df.workshop_type.Loom},
     ConstructBag          = {label = 'a Leather Works',        ws = df.workshop_type.Leatherworks},
+    -- cloth bags are sewn at a Clothier's, not a Leather Works (same ConstructBag job, so
+    -- this is a synthetic key -- order_workshop picks between them by material)
+    ConstructBagCloth     = {label = "a Clothier's Shop",      ws = df.workshop_type.Clothiers},
+    MillPlants            = {label = 'a Quern or Millstone',   ws = df.workshop_type.Quern,
+                             ws2 = df.workshop_type.Millstone},
+    PrepareMeal           = {label = 'a Kitchen',              ws = df.workshop_type.Kitchen},
     ConstructMechanisms   = {label = "a Mechanic's Workshop",  ws = df.workshop_type.Mechanics},
     RENDER_FAT            = {label = 'a Kitchen',              ws = df.workshop_type.Kitchen},
     MAKE_SOAP_FROM_TALLOW = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
@@ -479,6 +529,8 @@ local function ws_exists(req)
         local st = b:getSubtype()
         if req.ws and t == df.building_type.Workshop
             and (st == req.ws or st == WS_MAGMA_ALT[req.ws]) then return true end
+        -- ws2: a second workshop that satisfies the same requirement (quern OR millstone)
+        if req.ws2 and t == df.building_type.Workshop and st == req.ws2 then return true end
         if req.fu and t == df.building_type.Furnace
             and (st == req.fu or st == FU_MAGMA_ALT[req.fu]) then return true end
         if req.def and t == df.building_type.Workshop and b:getSubtype() == df.workshop_type.Custom then
@@ -527,6 +579,10 @@ for _, jn in pairs(ITEM_JOB) do MANAGED_JOBS[jn] = true end
 local function order_workshop(o)
     local jn = df.job_type[o.job_type]
     if jn == 'CustomReaction' then return FIXED_WS[o.reaction_name] end   -- only our reactions
+    -- bags: leather ones are sewn at a Leather Works, cloth ones at a Clothier's
+    if jn == 'ConstructBag' then
+        return o.material_category.leather and FIXED_WS.ConstructBag or FIXED_WS.ConstructBagCloth
+    end
     if FIXED_WS[jn] then return FIXED_WS[jn] end
     if MANAGED_JOBS[jn] then
         return workshop_for(jn, {mat_type = o.mat_type, mat_index = o.mat_index, wood = o.material_category.wood})
@@ -704,9 +760,8 @@ local function scan()
     -- when the fort has a hospital, also offer orders for the supplies it needs
     if hospital_exists() then
         for _, spec in ipairs(HOSPITAL_SUPPLIES) do
-            -- offer the supply when there's no order pending AND -- for the one-time soap/plaster
-            -- batches we can't keep-stock with a manager condition -- you're actually low on it.
-            -- This is the "script re-triggers a fresh batch when needed" approach.
+            -- offer the supply when there's no order pending AND -- for soap/plaster, whose
+            -- stock is counted here in Lua rather than by the ask itself -- you're low on it.
             if not hospital_has_order(spec)
                 and (not spec.count or reaction_stock(spec) < spec.target) then
                 gaps[#gaps + 1] = make_hospital_gap(spec)
@@ -785,6 +840,13 @@ local function add_order(p)
             reaction_class = c.reaction_class or ''})
         -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
         if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
+        -- flags1 item-state match (unrotten / millable / processable_to_barrel / cookable /
+        -- solid ...): counts only items in that state, the way DF's own hand-made orders do
+        -- ("more than 100 cookable solid unrotten ingredients", "an unrotten millable plant")
+        if c.flags1 then
+            local cond = o.item_conditions[#o.item_conditions - 1]
+            for _, fl in ipairs(c.flags1) do cond.flags1[fl] = true end
+        end
         -- flags2 material-class match (yarn / hair_wool / silk / plant): count only items of that
         -- fibre class, so a "yarn cloth" order counts wool/hair cloth across every creature at once
         if c.flags2 then
@@ -830,10 +892,10 @@ local function create_order(gap, choice)
     return {}
 end
 
--- reaction gap (soap/plaster): a one-time batch of the chosen reaction, plus the option's
--- prerequisites (`also`: job_types like MakeAsh/MakeLye, or reaction codes like RENDER_FAT),
--- each queued once if not already present. No count condition (outputs can't be counted
--- cleanly by material) -- it's a batch you can set to repeat. Returns missing-workshop labels.
+-- reaction gap (soap/plaster): a repeating order for the chosen reaction, held at a target by
+-- its own conditions, plus the option's prerequisites (`also`: job_types like MakeAsh/MakeLye,
+-- or reaction codes like RENDER_FAT), each queued once if not already present as a one-time
+-- batch the soap-chain check later turns repeating. Returns missing-workshop labels.
 local function create_reaction(gap, opt)
     local missing = {}
     local function note_ws(name)
@@ -854,6 +916,12 @@ local function create_reaction(gap, opt)
                 C('LessThan', 30, df.item_type.POWDER_MISC, plaster and plaster.type, plaster and plaster.index),
                 bag,
             }}
+    elseif opt.standing then
+        -- soap: a STANDING order matching the hand-made one -- a batch of 30 whenever soap
+        -- bars run under 10. flags2.soap counts soap of ANY material, not just the builtin.
+        add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
+            amount = gap.amount, frequency = df.workquota_frequency_type.Daily,
+            conds = {C('LessThan', opt.standing.cap, df.item_type.BAR, nil, nil, nil, {'soap'})}}
     else
         add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
                   amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
@@ -998,11 +1066,56 @@ local CHAIN_LINK = {
         C('GreaterThan', 0, df.item_type.GLOB),              -- while fat globs are available
     }},
 }
+local function F1(c, ...) c.flags1 = {...}; return c end   -- item-state flags on a condition
 -- which links each soap reaction needs (tallow soap also renders fat)
 local SOAP_CHAIN = {
     MAKE_SOAP_FROM_TALLOW = {'MakeAsh', 'MakeLye', 'RENDER_FAT'},
     MAKE_SOAP_FROM_OIL    = {'MakeAsh', 'MakeLye'},
 }
+
+-- ---- the food chain (syrup + lavish meals, milling) -------------------------
+
+-- a plant's material by raw id and part: STRUCTURAL is the plant item itself, MILL the
+-- milled product, EXTRACT the pressed/processed liquid. The MILL slot is a different
+-- material index per plant (dimple dye sits in another slot than dwarven flour), so always
+-- look it up instead of computing it.
+local function plant_mat(id, part) return dfhack.matinfo.find('PLANT:' .. id .. ':' .. part) end
+
+-- Is a HARVESTED plant of this crop actually on hand?
+--
+-- Seeds deliberately do NOT count. They used to -- the idea being "we could grow it" -- but an
+-- ask should never name something the fort does not have: offering to mill cave wheat off the
+-- back of a single seed puts a crop you have never harvested in front of you, and accepting
+-- creates an order that cannot run. Wait until the first harvest; the ask appears then.
+--
+-- Only usable stock counts, for the same reason a cobweb is not thread: a plant that is
+-- forbidden, dumped, a trader's, or rotting in a refuse pile is not one you can mill or press.
+local function plant_stock(idx)
+    for _, it in ipairs(df.global.world.items.other.PLANT) do
+        if it:getMaterialIndex() == idx and usable_stock(it) then return true end
+    end
+    return false
+end
+
+-- plants worth grinding. Flour and sugar are material value 20 -- ten times a plump helmet --
+-- which is what gets a meal over the "good meal" bar; dimple dye is for the Dyer's, not food.
+local MILL_PLANTS = {
+    {id = 'GRASS_WHEAT_CAVE',    plant = 'cave wheat',  makes = 'dwarven flour', cap = 30},
+    {id = 'POD_SWEET',           plant = 'sweet pods',  makes = 'dwarven sugar', cap = 30},
+    {id = 'MUSHROOM_CUP_DIMPLE', plant = 'dimple cups', makes = 'dimple dye',    cap = 20},
+}
+local MILL_BAG_TARGET = 15    -- keep more empty bags than the leather-bag ask (10) wants, so
+                              -- a satisfied leather order still leaves milling a bag to use
+
+-- PrepareMeal's mat_type is the ingredient count: 2 = easy, 3 = fine, 4 = lavish
+local LAVISH = 4
+local function lavish_meal_ordered()
+    local all = df.global.world.manager_orders.all
+    for i = 0, #all - 1 do
+        if all[i].job_type == df.job_type.PrepareMeal and all[i].mat_type == LAVISH then return true end
+    end
+    return false
+end
 
 -- each STANDING entry is a function returning a list of gap descriptors
 -- {name, note, shops, build} for the orders currently worth offering. The smelting source
@@ -1050,20 +1163,45 @@ STANDING = {
                 return missing_shops({'SpinThread'})
             end}}
     end,
-    function()   -- yarn cloth: weave yarn (wool/hair) thread into cloth at a Loom
-        if not yarn_thread_present() then return {} end
+    function()   -- fibre cloth: ONE weave order per kind of yarn thread and per kind of silk
         if not ws_exists(FIXED_WS['WeaveCloth']) then return {} end      -- Loom
-        if weave_targets_yarn() then return {} end
-        return {{name = 'Yarn cloth', shops = {'WeaveCloth'},
-            note = 'Weaves yarn (wool/hair) thread into cloth at a Loom -- Daily x5, running\n'
-                .. 'while you have under 30 yarn cloth and more than 8 yarn thread (a small batch\n'
-                .. 'so it does not run the yarn thread dry).',
-            build = function()
-                add_order{job_type = df.job_type.WeaveCloth, amount = 5, frequency = Daily,
-                    conds = {C('LessThan', 30, df.item_type.CLOTH, nil, nil, nil, {'yarn'}),
-                             C('GreaterThan', 8, df.item_type.THREAD, nil, nil, nil, {'yarn'})}}
-                return missing_shops({'WeaveCloth'})
-            end}}
+        local asks = {}
+        for _, fam in ipairs(FIBRE_FAMILIES) do
+            local todo = {}
+            for _, y in ipairs(fibre_threads(fam.flag)) do
+                -- only once that fibre is actually accumulating: below the gate the order
+                -- could never run anyway, and offering it would just be noise
+                if y.n > FIBRE_MIN
+                    and not order_exists_mat(df.job_type.WeaveCloth, y.type, y.index) then
+                    todo[#todo + 1] = y
+                end
+            end
+            if #todo > 0 then
+                local lines = {}
+                for _, y in ipairs(todo) do
+                    lines[#lines + 1] = ('  * Weave %s thread -> cloth, Daily x1, while under %d %s cloth\n    and more than %d of that thread (you have %d).')
+                        :format(y.name, FIBRE_CLOTH_CAP, y.name, FIBRE_MIN, y.n)
+                end
+                asks[#asks + 1] = {name = fam.name, shops = {'WeaveCloth'},
+                    note = ('Weaves %s thread into cloth at a Loom -- one order per KIND, since every\n'):format(fam.label)
+                        .. 'source has its own material and a single class-wide order would let the loom\n'
+                        .. 'keep re-weaving whichever fibre happened to be most abundant while a scarcer\n'
+                        .. 'one sat untouched.\n\n'
+                        .. 'Each runs ONE AT A TIME, so a batch never drains the thread you were saving,\n'
+                        .. 'and only while that thread is above ' .. FIBRE_MIN .. '.\n\n'
+                        .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+                    build = function()
+                        for _, y in ipairs(todo) do
+                            add_order{job_type = df.job_type.WeaveCloth,
+                                mat_type = y.type, mat_index = y.index, amount = 1, frequency = Daily,
+                                conds = {C('LessThan', FIBRE_CLOTH_CAP, df.item_type.CLOTH, y.type, y.index),
+                                         C('GreaterThan', FIBRE_MIN, df.item_type.THREAD, y.type, y.index)}}
+                        end
+                        return missing_shops({'WeaveCloth'})
+                    end}
+            end
+        end
+        return asks
     end,
     function()   -- soap chain integrity: keep the repeating ash/lye/(fat) orders alive
         local missing, shops, names, seen = {}, {}, {}, {}
@@ -1096,6 +1234,107 @@ STANDING = {
                         add_order{job_type = df.job_type.CustomReaction, reaction_name = link.reaction,
                             amount = link.amount, frequency = Daily, conds = link.conds}
                     end
+                end
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- good meals: dwarven syrup + lavish meals (the "eat good meals" need)
+        local sweet = plant_mat('POD_SWEET', 'STRUCTURAL')
+        if not sweet then return {} end
+        -- only offer the press while sweet pods (or their seeds) are actually around
+        local need_syrup = plant_stock(sweet.index)
+            and not order_exists_mat(df.job_type.ProcessPlantsBarrel, sweet.type, sweet.index)
+        local need_meal = not lavish_meal_ordered()
+        if not (need_syrup or need_meal) then return {} end
+        local shops = {}
+        if need_syrup then shops[#shops + 1] = 'ProcessPlantsBarrel' end
+        if need_meal then shops[#shops + 1] = 'PrepareMeal' end
+        return {{name = 'Good meals', shops = shops,
+            note = 'Dwarves have an "eat good meals" need (from the IMMODERATION facet). In a fort it\n'
+                .. 'clears two ways only: eating a PREFERRED food (or a preferred booze cooked into a\n'
+                .. 'meal), or eating any meal worth OVER 20. Unprepared food is not the problem as\n'
+                .. 'such -- raw plants just are not worth enough. A meal is worth roughly what its\n'
+                .. 'ingredients are worth, and plump helmets, tallow and meat are material value 2-8,\n'
+                .. 'so ordinary roasts land around 2-6 per portion and never satisfy anybody. Dwarven\n'
+                .. 'syrup, pressed from sweet pods, is material value 20 -- putting it in a lavish meal\n'
+                .. 'is the cheapest way over the bar. This matters most for RETIRED ADVENTURERS: they\n'
+                .. 'are created with no preferences at all, so meal value is their only route.\n\n'
+                .. 'Creates (each only if missing):\n'
+                .. '  * Process sweet pods to barrel -> dwarven syrup, Daily x1, while an unrotten\n'
+                .. '    sweet pod and an EMPTY barrel are on hand.\n'
+                .. '  * Prepare Lavish Meal, Daily x10, while over 100 cookable solid ingredients are\n'
+                .. '    in stock.',
+            build = function()
+                if need_syrup then
+                    add_order{job_type = df.job_type.ProcessPlantsBarrel,
+                        mat_type = sweet.type, mat_index = sweet.index, amount = 1, frequency = Daily,
+                        conds = {
+                            F1(C('GreaterThan', 0, df.item_type.PLANT, sweet.type, sweet.index),
+                               'unrotten', 'processable_to_barrel'),
+                            EMPTY(C('GreaterThan', 0, df.item_type.BARREL))}}
+                end
+                if need_meal then
+                    add_order{job_type = df.job_type.PrepareMeal, mat_type = LAVISH,
+                        amount = 10, frequency = Daily,
+                        conds = {F1(C('GreaterThan', 100, df.item_type.NONE),
+                                    'unrotten', 'cookable', 'solid')}}
+                end
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- milling: flour / sugar / dye, plus the bags every mill job consumes
+        local todo = {}
+        for _, m in ipairs(MILL_PLANTS) do
+            local plant, prod = plant_mat(m.id, 'STRUCTURAL'), plant_mat(m.id, 'MILL')
+            if plant and prod and plant_stock(plant.index)
+                and not order_exists_mat(df.job_type.MillPlants, plant.type, plant.index) then
+                todo[#todo + 1] = {spec = m, plant = plant, prod = prod}
+            end
+        end
+        -- the bag leg is offered whenever milling is (or already is) happening, since a mill
+        -- job with no empty bag just stalls
+        local pt = pigtail_mat()
+        local need_bags = pt and pig_tails_present()
+            and not order_exists_mat(df.job_type.ConstructBag, pt.type, pt.index)
+            and (#todo > 0 or has_order(df.job_type.MillPlants, -1))
+        if #todo == 0 and not need_bags then return {} end
+        local shops = {}
+        if #todo > 0 then shops[#shops + 1] = 'MillPlants' end
+        if need_bags then shops[#shops + 1] = 'ConstructBagCloth' end
+        local lines = {}
+        for _, t in ipairs(todo) do
+            lines[#lines + 1] = ('  * Mill %s -> %s, Daily x5, while under %d %s, an unrotten\n    millable plant on hand, and an EMPTY bag to grind into.')
+                :format(t.spec.plant, t.spec.makes, t.spec.cap, t.spec.makes)
+        end
+        if need_bags then
+            lines[#lines + 1] = ('  * Sew pig tail cloth into bags, Daily x5, while under %d empty bags and pig\n    tail cloth is on hand.')
+                :format(MILL_BAG_TARGET)
+        end
+        return {{name = 'Milling', shops = shops,
+            note = 'Milling grinds a plant into a powder, in a bag: cave wheat -> dwarven flour and\n'
+                .. 'sweet pods -> dwarven sugar are both material value 20 (a plump helmet is 2), so\n'
+                .. 'they are what lifts a lavish meal over the "good meal" bar; dimple cups -> dimple\n'
+                .. 'dye is for dyeing thread and cloth, not for the kitchen.\n\n'
+                .. 'Milling costs you NO SEEDS -- the job returns the seeds of every plant it grinds.\n'
+                .. '(Cooking a raw plant is what destroys its seeds.) Each job does consume one EMPTY\n'
+                .. 'bag, though, which is why the pig tail bag order comes with it.\n\n'
+                .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+            build = function()
+                for _, t in ipairs(todo) do
+                    add_order{job_type = df.job_type.MillPlants,
+                        mat_type = t.plant.type, mat_index = t.plant.index, amount = 5, frequency = Daily,
+                        conds = {
+                            C('LessThan', t.spec.cap, df.item_type.POWDER_MISC, t.prod.type, t.prod.index),
+                            F1(C('GreaterThan', 0, df.item_type.PLANT, t.plant.type, t.plant.index),
+                               'unrotten', 'millable'),
+                            EMPTY(C('GreaterThan', 0, df.item_type.BAG))}}
+                end
+                if need_bags then
+                    add_order{job_type = df.job_type.ConstructBag,
+                        mat_type = pt.type, mat_index = pt.index, amount = 5, frequency = Daily,
+                        conds = {
+                            EMPTY(C('LessThan', MILL_BAG_TARGET, df.item_type.BAG)),
+                            C('GreaterThan', 0, df.item_type.CLOTH, pt.type, pt.index)}}
                 end
                 return missing_shops(shops)
             end}}
@@ -1316,7 +1555,7 @@ local function gap_prompt(gap, i, total)
         for _, o in ipairs(gap.options) do choices[#choices + 1] = {text = o.label, reaction = o.reaction, also = o.also} end
         return choices, ('%s: %s  (%d/%d)'):format(gap.title or 'Hospital supply', gap.name, i, total),
             (gap.note or '')
-                .. ('\n\nMakes: %s. Queues a one-time batch of %d (set it to repeat for a steady supply):'):format(gap.makes or gap.name:lower(), gap.amount)
+                .. ('\n\nMakes %s, as a repeating order:'):format(gap.makes or gap.name:lower())
                 .. reaction_ws_warning(gap)
     elseif kind == 'job' then
         local req = FIXED_WS[df.job_type[gap.job_type]]

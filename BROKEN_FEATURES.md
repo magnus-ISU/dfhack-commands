@@ -43,6 +43,27 @@ in practice and likely to be **removed** rather than repaired.
 
 Broken and switched off, with a plan to fix them.
 
+### **`fort/adamantine-hospital` — the `retarget` mode (REMOVED, worth retrying)**
+The tool itself works; this was a third mode, now deleted from the script. Instead of forbidding
+the adamantine a medical job had claimed and cancelling the treatment, it **swapped the claim**:
+find an ordinary cloth/thread satisfying the same job filter (validated against DF's own
+`isSuitableItem` / `isSuitableMaterial`), `disconnectJobItem` the adamantine, erase its
+`job_item_ref` from `job.items`, and `attachJobItem` the replacement. Nicer outcome — the patient
+keeps the treatment, no job churn, and the adamantine never has to be forbidden, so the smelter
+can still reach it.
+
+**It crashed DF.** Rewriting a live job's item list from inside DFHack's update tick produced a
+`SIGSEGV` in `bit_container_identity::lua_item_read` — a Lua callback later reading `.flags` off
+a pointer the edit had invalidated. Four crashes in ~40 minutes under an orc siege plus a strange
+mood (heavy job and item churn); switching the mode off ran 34+ minutes clean with everything
+else unchanged, which is what pinned it.
+
+It was guarded against the obvious hazard — it refused to swap once a dwarf was already carrying
+the item — so the damage is from the in-place `job.items` surgery itself, not from stealing a
+carried item. A retry needs a mechanism that never edits a live job's item vector: cancel and
+re-post the treatment with a pre-attached replacement, or find a DF-side call that reassigns a
+claim atomically.
+
 ### **`fort/mood-burrow`**
 Confines a moody dwarf to a chosen burrow until it grabs its first material. Not referenced by
 `magnus-scripts`.

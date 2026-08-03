@@ -25,8 +25,9 @@ WHEN IT ACTS -- all of these have to hold:
     reads like the normal map, and only the menu enum says otherwise.
   * HUNGRY or THIRSTY by DF's own numbers: hunger_timer >= 50000 is when DF starts flashing
     "Hungry" (starving at 75000), thirst_timer >= 25000 is "Thirsty" (dehydrated at 50000).
-  * NOT IN COMBAT -- no living hostile (units.isDanger) within COMBAT_RADIUS tiles and 2
-    z-levels, and no attack menu open. Eating burns a turn you would rather spend swinging.
+  * NOT IN COMBAT -- judged exactly the way adv/reveal judges it (its exported in_combat:
+    a shared Conflict activity with a proximity-gated foe), plus no attack menu open.
+    Eating burns a turn you would rather spend swinging.
   * STOMACH HAS ROOM -- see below.
   * Something edible is actually in the pack.
 
@@ -147,7 +148,6 @@ local UNIT = 50000
 -- an action above three units -- the worst case then settles at four, still clear of it.
 local STOMACH_CEILING = 3 * UNIT
 
-local COMBAT_RADIUS = 10  -- tiles; a hostile this close counts as "in combat"
 local SETTLE_MS = 120     -- let DF render the panel/scroll before reading the screen for it
 local RETRY_MS = 4000     -- after a failed or pointless attempt, wait this long before retrying
 
@@ -395,21 +395,20 @@ local function needs(u)
     return c.hunger_timer >= HUNGRY, c.thirst_timer >= THIRSTY
 end
 
--- a living hostile close enough to be a fight. isDanger is the same judgement adv/fight uses
--- for "will actually attack me"; the cheap distance test runs first so the call is only made
--- for units already nearby.
+-- combat is judged the way adv/reveal judges it: the adventurer shares a
+-- Conflict ACTIVITY with a proximity-gated foe (reveal's foe_matters handles
+-- the lingering-conflict and bystander pitfalls). One computation across the
+-- suite -- when the map hides, the fork goes down, and vice versa. The old
+-- isDanger radius scan disagreed with it in both directions: it ate mid-duel
+-- (a sparring partner is not "isDanger") and it fasted at peaceful hostiles
+-- ten tiles off that no conflict listed. The attack menu stays as a cheap
+-- extra tell. Fails open (not in combat) if reveal is somehow absent.
 local function in_combat(u)
     if df.global.game.main_interface.adventure.attack.open then return true end
-    for _, other in ipairs(df.global.world.units.active) do
-        if other.id ~= u.id and other.pos.x >= 0
-            and math.abs(other.pos.x - u.pos.x) <= COMBAT_RADIUS
-            and math.abs(other.pos.y - u.pos.y) <= COMBAT_RADIUS
-            and math.abs(other.pos.z - u.pos.z) <= 2
-            and not dfhack.units.isDead(other) and not other.flags1.inactive
-            and not other.flags1.caged and not other.flags1.chained then
-            local ok, danger = pcall(dfhack.units.isDanger, other)
-            if ok and danger then return true end
-        end
+    local ok, rv = pcall(reqscript, 'adv/reveal')
+    if ok and rv and rv.in_combat then
+        local ok2, fighting = pcall(rv.in_combat)
+        return ok2 and fighting == true
     end
     return false
 end

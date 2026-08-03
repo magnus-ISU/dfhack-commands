@@ -47,6 +47,7 @@ counters have to be re-zeroed on a timer.
 ]]
 
 local GLOBAL_KEY = 'rusty-legends'
+
 local OLD_KEY = 'rusty-adventurers'   -- this tool's name before it grew legendary skills
 
 local ADVENTURER = df.nemesis_flags.ADVENTURER
@@ -71,10 +72,22 @@ local CYCLE_TICKS = TICKS_PER_YEAR
 -- adventurer bit on unit.flags or on the historical figure. `ADVENTURER` is set for
 -- good once a unit has been an adventurer; `ACTIVE_ADVENTURER` marks the one being
 -- controlled right now, so checking both covers a tactical-mode swap too.
+-- The flags live in a df-flagarray, which is a {bits pointer, size} pair -- and a record whose
+-- bits were never allocated has a NULL pointer with size 0. DFHack's Lua bridge does not bounds
+-- check an indexed flagarray read: it dereferences straight through the null and takes DF down
+-- with it (SIGSEGV inside bit_container_identity::lua_item_read). pcall cannot catch that, so
+-- the length MUST be checked before touching an index.
+local MAX_FLAG = math.max(ADVENTURER, ACTIVE_ADVENTURER)
+
 local function is_adventurer(unit)
     local nem = dfhack.units.getNemesis(unit)
     if not nem then return false end
-    return nem.flags[ADVENTURER] or nem.flags[ACTIVE_ADVENTURER]
+    local ok, n = pcall(function() return #nem.flags end)
+    if not ok or type(n) ~= 'number' or n <= MAX_FLAG then return false end
+    local got, v = pcall(function()
+        return nem.flags[ADVENTURER] or nem.flags[ACTIVE_ADVENTURER]
+    end)
+    return got and v or false
 end
 
 -- 'all' scrubs every skill, 'legendary' only the ones at Legendary+, nil skips the

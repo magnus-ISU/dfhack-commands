@@ -24,6 +24,11 @@ captain beating on the adventurer):
   BECAUSE you bleed, and an open wound drips every few frames -- keying on
   it would pin a bleeding adventurer in place.  Only fresh damage stops
   the walk.
+- STARTING TO DROWN (or being strangled: `counters.suffocation` leaving 0)
+  stops the walk too -- a click-walk that dips through deep water would
+  otherwise march you along the riverbed.  Onset only: the counter climbs
+  every tick you cannot breathe, so a level-trigger would re-cancel the
+  escape walk you start WHILE drowning on its every step.
 
 Why the cancel is a BUTTON CLICK and nothing else.  A click-walk is
 `unit.path` (dest + step queue) plus per-step Move `unit_action`s that DF
@@ -111,12 +116,15 @@ local function moving(u)
     return false
 end
 
+local last_suff = 0
+
 local function check()
     local u = df.global.world.units.adv_unit
     if not u then last_unit = nil; latch_until = 0 return end
     local wid = u.body.wound_next_id
+    local suff = u.counters.suffocation
     if u.id ~= last_unit then          -- new adventurer / reload: just resync
-        last_unit, last_wid, latch_until = u.id, wid, 0
+        last_unit, last_wid, last_suff, latch_until = u.id, wid, suff, 0
         return
     end
     local now = dfhack.getTickCount()
@@ -127,11 +135,14 @@ local function check()
             press_stop()
             last_try = now
         end
-    elseif moving(u) and wid > last_wid then
+    -- drowning triggers on ONSET only (suffocation leaving 0): the counter rises
+    -- every tick you cannot breathe, so triggering on the level would re-cancel a
+    -- deliberate escape walk on every step of it
+    elseif moving(u) and (wid > last_wid or (suff > 0 and last_suff == 0)) then
         latch_until, last_try = now + GIVE_UP_MS, now
         press_stop()
     end
-    last_wid = wid
+    last_wid, last_suff = wid, suff
 end
 
 FearDeath = defclass(FearDeath, overlay.OverlayWidget)

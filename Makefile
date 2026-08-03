@@ -166,6 +166,9 @@ install-mods: check-bundle
 	fi
 	cd "$(MODS_SRC)"
 	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
+	# declared up front: .SHELLFLAGS carries -u, so the first append below would otherwise
+	# abort the whole deploy on an unbound variable
+	drifted=""
 	for m in */; do
 	  m="$${m%/}"
 	  [ -f "$$m/info.txt" ] || continue
@@ -187,7 +190,9 @@ install-mods: check-bundle
 	  mv "$$tmp" "$$dst"
 	  if [ "$$old" = "$$new" ]; then
 	    printf '  %-26s %s%s\n' "$$m" "$$new" "$$same_ver_drift"
-	    [ -n "$$same_ver_drift" ] && drifted="$$drifted $$m"
+	    # a full `if`, not `[ ... ] && ...`: -e would treat the false test as a failed
+	    # command and kill the loop on the first mod that redeploys cleanly
+	    if [ -n "$$same_ver_drift" ]; then drifted="$$drifted $$m"; fi
 	  else printf '  %-26s %s -> %s\n' "$$m" "$$old" "$$new"; fi
 	done
 	if [ -n "$${drifted:-}" ]; then

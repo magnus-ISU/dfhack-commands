@@ -36,6 +36,8 @@ Activates the "always-on" helpers in this pack:
                                  until you flag a chop burrow in gui/autochop)
     * caravan-unstick           (weekly watchdog: clears stuck caravans, which silently
                                  block ALL future caravans and, for the home civ, migrants)
+    * adamantine-hospital       (forbids adamantine cloth/thread the moment a hospital
+                                 treatment job claims it, and cancels that job)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
@@ -235,6 +237,7 @@ if ({...})[1] == 'disable' then
     try('disable auto-elf-chop', function() dfhack.run_command('disable', 'fort/auto-elf-chop') end)
     try('disable tarrasque', function() dfhack.run_command('disable', 'fort/tarrasque') end)
     try('disable caravan-unstick', function() dfhack.run_command('disable', 'fort/caravan-unstick') end)
+    try('disable adamantine-hospital', function() dfhack.run_command('disable', 'fort/adamantine-hospital') end)
     try('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
     try('disable smooth-movement', function() dfhack.run_command('disable', 'smooth-movement') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'fort/dwarf-rts.clickmove') end)
@@ -295,6 +298,7 @@ try('military-labor (daily-sync the Military work detail)', function() dfhack.ru
 try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', function() dfhack.run_command('enable', 'fort/auto-tomb') end)
 try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'fort/auto-elf-chop') end)
 try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'fort/caravan-unstick') end)
+try('adamantine-hospital (forbid adamantine cloth/thread a hospital job claims)', function() dfhack.run_command('enable', 'fort/adamantine-hospital') end)
 -- stock DFHack tool, but always-on rather than `lovely`-only: it also covers ADVENTURE
 -- popups (it keys off an ADVENTURE_POPUP_ prefix), so the adventure branch enables it too
 try('hide-tutorials (suppress fort AND adventure tutorial popups)', function() dfhack.run_command('enable', 'hide-tutorials') end)

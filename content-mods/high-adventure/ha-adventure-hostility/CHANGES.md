@@ -61,6 +61,27 @@ world load.
 - **Ranged weapons come with ammo.** A minted bow, crossbow, blowgun or sling gets a
   leather quiver holding 10 rounds of what it actually fires. The pairing is read from the
   raws (`ranged_ammo` vs `ammo_class`), so modded ranged weapons need no entry.
+- **FIXED: iron cloaks.** `ITEM_ARMOR_CLOAK` is `[SOFT][LEATHER]` with no `[METAL]`, so a
+  metal cloak is a combination DF has no reaction for -- you cannot forge one -- and an
+  invader turned up in a "large iron cloak". The outerwear rule re-made a worn cloak or cape
+  in the outfit's own material, which for every armouring outfit without a `fabric` (dwarves,
+  goblins, humans, orcs, drow males, thralls) is a metal. It now picks the first material the
+  itemdef actually permits: the outfit's fabric, then its armour material, then plain
+  leather, so an elf keeps twinkling and an armoured unit gets a leather cloak over the
+  plate. Present since the outfit engine landed in 0.15.
+- **Nothing impossible is minted anywhere now.** The legality test reads both halves from
+  the raws -- the itemdef's `[SOFT]`/`[HARD]`/`[METAL]`/`[LEATHER]` tokens against the
+  material's matching `ITEMS_*` flags -- and guards every mint path plus the swap pass, so
+  this class of bug cannot come back through a new outfit. It tests `ITEMS_METAL` and never
+  `IS_METAL`, because the elves' twinkling FABRIC is an inorganic carrying `IS_METAL`
+  alongside `ITEMS_SOFT` and would otherwise have been refused as a metal. Weapons, shields
+  and quivers carry no such tokens, so they are left alone. Existing metal cloaks in a live
+  world are NOT retroactively fixed -- `done` keeps each unit to one pass.
+- **A ranged weapon is only ever issued once.** The arming roll's 25% "two weapons" branch
+  applied to whatever the pick was, so a quarter of the archers walked out with two bows --
+  a second one they can never draw, firing from the same single quiver. Both doubling rules
+  (the two-weapon roll and the drow scimitar pair) are about a blade in each hand, so a
+  pick the raws say fires ammo is now clamped to one whichever branch it came from.
 - **Helmets are much more common.** An armouring outfit issues one 80% of the time (was
   40%); an outfit carrying only a weapon now issues one 40% of the time in the weapon's
   own metal, where it previously issued none at all. Fabric outfits still get none -- a
