@@ -321,10 +321,12 @@ try('plan-tile (drag to tile many buildings during placement)', function() dfhac
 -- the binary isn't installed this just fails gracefully -- run `make build` to build it
 -- (SDL 2D renderer only). Part of the BASE set (not just lovely): the camera is opted in
 -- here for fort mode too (adventure mode turns it on by itself).
-try('smooth-movement (smooth creature movement + free camera)', function()
+try('smooth-movement (smooth creature movement)', function()
     pcall(dfhack.run_command, 'load', 'smooth-movement')
     dfhack.run_command('enable', 'smooth-movement')
-    pcall(dfhack.run_command, 'smooth-movement', 'camera', 'on')
+    -- the offset-repaint extras (free camera / world slide) cost a full extra map
+    -- render per frame while gliding -- too heavy; opt in manually with
+    -- `smooth-movement camera on` or `smooth-movement slide on` if ever wanted.
 end)
 
 -- ---- `magnus-scripts lovely`: standing orders + the stock-tool batch ---------
