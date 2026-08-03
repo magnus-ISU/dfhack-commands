@@ -88,6 +88,22 @@ now` opens the dialog immediately.
 
 local NAME = 'planner_orders'
 
+-- A few orders are offered ONCE per fort and never again. A normal "does this order exist?"
+-- check would re-offer them the moment the player deletes one, which turns a helpful nudge
+-- into a nag -- deleting it IS the answer. So the fact that we already offered is persisted
+-- with the site instead of inferred from the order list.
+local ONCE_KEY = 'planner-orders/once'
+local function offered_once(flag)
+    local d = dfhack.persistent.getSiteData(ONCE_KEY, {})
+    return type(d) == 'table' and d[flag] == true
+end
+local function mark_offered(flag)
+    local d = dfhack.persistent.getSiteData(ONCE_KEY, {})
+    if type(d) ~= 'table' then d = {} end
+    d[flag] = true
+    pcall(dfhack.persistent.saveSiteData, ONCE_KEY, d)
+end
+
 local dlg = require('gui.dialogs')
 local bp = require('plugins.buildingplan')
 
@@ -482,8 +498,15 @@ end
 local FIXED_WS = {
     MakeAsh               = {label = 'a Wood Furnace',         fu = df.furnace_type.WoodFurnace},
     MakeLye               = {label = 'an Ashery',              ws = df.workshop_type.Ashery},
+    MakePotashFromAsh     = {label = 'an Ashery',              ws = df.workshop_type.Ashery},
+    MAKE_PEARLASH         = {label = 'a Kiln',                 fu = df.furnace_type.Kiln},
+    MakeRawGlass          = {label = 'a Glass Furnace',        fu = df.furnace_type.GlassFurnace},
+    CutGlass              = {label = "a Jeweler's Workshop",  ws = df.workshop_type.Jewelers},
     ProcessPlants         = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     ProcessPlantsBarrel   = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
+    PROCESS_PLANT_TO_BAG  = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
+    CollectSand           = {label = 'a Glass Furnace',         fu = df.furnace_type.GlassFurnace},
+    PRESS_OIL             = {label = 'a Screw Press',          def = 'SCREW_PRESS'},
     SpinThread            = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     WeaveCloth            = {label = 'a Loom',                 ws = df.workshop_type.Loom},
     ConstructBag          = {label = 'a Leather Works',        ws = df.workshop_type.Leatherworks},
@@ -1050,6 +1073,8 @@ end
 -- draining a one-time batch and silently breaking. Amounts + conditions mirror DF's own
 -- suggested conditions. ASH/LYE are builtin materials (ash bars, lye liquid).
 local ASH_MAT, LYE_MAT = 9, 11
+local POTASH_MAT, PEARLASH_MAT = 8, 10
+local GLASS_CLEAR_MAT = 4        -- builtin material id for clear glass
 local function EMPTY(c) c.empty = true; return c end   -- count only EMPTY items
 local CHAIN_LINK = {
     MakeAsh = {job = 'MakeAsh', amount = 3, conds = {
@@ -1099,11 +1124,30 @@ end
 
 -- plants worth grinding. Flour and sugar are material value 20 -- ten times a plump helmet --
 -- which is what gets a meal over the "good meal" bar; dimple dye is for the Dyer's, not food.
+-- `cap = nil` means UNCAPPED: mill it for as long as the plant and a bag are there.
+-- Dwarven sugar is left uncapped on purpose. It and dwarven syrup are both material value
+-- 20 and both come from the same sweet pods, so the two orders compete for one crop -- and
+-- an uncapped syrup order will take every pod the moment it is harvested. Sugar is the more
+-- useful of the two (it cooks into the same value without tying up a barrel), so sugar runs
+-- freely and syrup is the one held to a ceiling.
 local MILL_PLANTS = {
     {id = 'GRASS_WHEAT_CAVE',    plant = 'cave wheat',  makes = 'dwarven flour', cap = 30},
-    {id = 'POD_SWEET',           plant = 'sweet pods',  makes = 'dwarven sugar', cap = 30},
+    {id = 'POD_SWEET',           plant = 'sweet pods',  makes = 'dwarven sugar', cap = nil},
     {id = 'MUSHROOM_CUP_DIMPLE', plant = 'dimple cups', makes = 'dimple dye',    cap = 20},
 }
+local SYRUP_CAP = 100      -- stop pressing syrup once this much is in stock
+local ROCK_NUT_MIN = 100   -- only press nuts for oil above this many (it eats the seeds)
+local GLASS_WOOD_MIN = 50  -- pearlash chain starts at wood; only offer with a real surplus
+local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
+local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
+
+-- Every bag-consuming order must leave a FLOOR of empty bags behind, or whichever job runs
+-- first eats the last bag and starves the rest -- this fort hit 0 empty bags because milling
+-- sugar kept claiming them the moment they were sewn. Three jobs compete for the pool today
+-- (collect sand, process plant to bag, mill), so a floor of 5 leaves room for each plus spare;
+-- if more bag users are ever added the floor grows with them.
+local BAG_JOBS = 3         -- collect sand, process plant to bag, mill plants
+local BAG_MIN = (BAG_JOBS > 3) and (BAG_JOBS + 1) or 5
 local MILL_BAG_TARGET = 15    -- keep more empty bags than the leather-bag ask (10) wants, so
                               -- a satisfied leather order still leaves milling a bag to use
 
@@ -1260,24 +1304,213 @@ STANDING = {
                 .. 'is the cheapest way over the bar. This matters most for RETIRED ADVENTURERS: they\n'
                 .. 'are created with no preferences at all, so meal value is their only route.\n\n'
                 .. 'Creates (each only if missing):\n'
-                .. '  * Process sweet pods to barrel -> dwarven syrup, Daily x1, while an unrotten\n'
-                .. '    sweet pod and an EMPTY barrel are on hand.\n'
+                .. ('  * Process sweet pods to barrel -> dwarven syrup, Daily x1, while under %d\n'):format(SYRUP_CAP)
+                .. '    syrup, with an unrotten sweet pod and an EMPTY barrel on hand. Capped\n'
+                .. '    because syrup and sugar compete for the same pods and sugar is worth more\n'
+                .. '    to you; the sugar order is uncapped.\n'
                 .. '  * Prepare Lavish Meal, Daily x10, while over 100 cookable solid ingredients are\n'
                 .. '    in stock.',
             build = function()
                 if need_syrup then
+                    local syrup = plant_mat('POD_SWEET', 'EXTRACT')
+                    local conds = {
+                        F1(C('GreaterThan', 0, df.item_type.PLANT, sweet.type, sweet.index),
+                           'unrotten', 'processable_to_barrel'),
+                        EMPTY(C('GreaterThan', 0, df.item_type.BARREL))}
+                    -- Ceiling on syrup: it and dwarven sugar compete for the same pods, and
+                    -- without one the press takes every pod forever (this fort reached 67
+                    -- barrels against 3 sugar).
+                    if syrup then
+                        table.insert(conds, 1,
+                            C('LessThan', SYRUP_CAP, df.item_type.LIQUID_MISC, syrup.type, syrup.index))
+                    end
                     add_order{job_type = df.job_type.ProcessPlantsBarrel,
-                        mat_type = sweet.type, mat_index = sweet.index, amount = 1, frequency = Daily,
-                        conds = {
-                            F1(C('GreaterThan', 0, df.item_type.PLANT, sweet.type, sweet.index),
-                               'unrotten', 'processable_to_barrel'),
-                            EMPTY(C('GreaterThan', 0, df.item_type.BARREL))}}
+                        mat_type = sweet.type, mat_index = sweet.index, amount = 1,
+                        frequency = Daily, conds = conds}
                 end
                 if need_meal then
                     add_order{job_type = df.job_type.PrepareMeal, mat_type = LAVISH,
                         amount = 10, frequency = Daily,
                         conds = {F1(C('GreaterThan', 100, df.item_type.NONE),
                                     'unrotten', 'cookable', 'solid')}}
+                end
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- process plant to bag (quarry bush -> leaves) + the bags it consumes
+        local bush = plant_mat('BUSH_QUARRY', 'STRUCTURAL')
+        if not bush or not plant_stock(bush.index) then return {} end
+        local need_job = not reaction_ordered('PROCESS_PLANT_TO_BAG')
+        local pt = pigtail_mat()
+        local need_bags = pt and pig_tails_present()
+            and not order_exists_mat(df.job_type.ConstructBag, pt.type, pt.index)
+        if not (need_job or need_bags) then return {} end
+        local shops, lines = {}, {}
+        if need_job then
+            shops[#shops + 1] = 'PROCESS_PLANT_TO_BAG'
+            lines[#lines + 1] = ('  * Process plant to bag, Daily x1, while an unrotten plant is on hand\n    and over %d bags are EMPTY.'):format(BAG_MIN)
+        end
+        if need_bags then
+            shops[#shops + 1] = 'ConstructBagCloth'
+            lines[#lines + 1] = ('  * Sew pig tail cloth into bags, Daily x5, while under %d empty bags and\n    pig tail cloth is on hand.'):format(MILL_BAG_TARGET)
+        end
+        return {{name = 'Process plant to bag', shops = shops,
+            note = 'Quarry bushes process into cookable leaves and give back their rock nut\n'
+                .. 'seeds.\n\n'
+                .. ('Runs one at a time and only while over %d bags are empty, so it cannot strip\n'):format(BAG_MIN)
+                .. 'the bags that milling and sand collection also need.\n\n'
+                .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+            build = function()
+                if need_job then
+                    add_order{reaction_name = 'PROCESS_PLANT_TO_BAG',
+                        job_type = df.job_type.CustomReaction, amount = 1, frequency = Daily,
+                        conds = {
+                            EMPTY(C('GreaterThan', BAG_MIN, df.item_type.BAG)),
+                            F1(C('GreaterThan', 0, df.item_type.PLANT), 'unrotten')}}
+                end
+                if need_bags then
+                    add_order{job_type = df.job_type.ConstructBag,
+                        mat_type = pt.type, mat_index = pt.index, amount = 5, frequency = Daily,
+                        conds = {
+                            EMPTY(C('LessThan', MILL_BAG_TARGET, df.item_type.BAG)),
+                            C('GreaterThan', 0, df.item_type.CLOTH, pt.type, pt.index)}}
+                end
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- collect sand, once there is a glass furnace to use it
+        if not ws_exists(FIXED_WS['CollectSand']) then return {} end
+        if has_order(df.job_type.CollectSand, -1) then return {} end
+        return {{name = 'Collect sand', shops = {},
+            note = 'Sand is free and endless, and each load needs an EMPTY BAG to carry it.\n\n'
+                .. 'You must place a "Gather Sand" activity zone on sandy floor first -- without\n'
+                .. 'one the job has nowhere to go and the order never runs.\n\n'
+                .. ('Creates: Collect sand, Daily x2, while at most 10 sand is held and at least %d\n  bags are empty.'):format(BAG_MIN),
+            build = function()
+                add_order{job_type = df.job_type.CollectSand, amount = 2, frequency = Daily,
+                    conds = {
+                        F1(C('AtMost', 10, df.item_type.NONE), 'sand_bearing'),
+                        EMPTY(C('AtLeast', BAG_MIN, df.item_type.BAG))}}
+                return {}
+            end}}
+    end,
+    function()   -- pearlash: the one thing clear glass needs that green glass does not
+        -- Gate on the raw inputs, not the intermediates: the whole chain starts at wood, and
+        -- sand only has to exist at all (the collect-sand order keeps it topped up).
+        if #df.global.world.items.other.WOOD <= GLASS_WOOD_MIN then return {} end
+        local sand = 0
+        for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+            local ok, sb = pcall(function() return it:isSandBearing() end)
+            if ok and sb then sand = sand + 1; break end
+        end
+        if sand == 0 then return {} end
+        local need_ash    = not has_order(df.job_type.MakeAsh, -1)
+        local need_potash = not has_order(df.job_type.MakePotashFromAsh, -1)
+        local need_pearl  = not reaction_ordered('MAKE_PEARLASH')
+        -- the batch orders are offered once per fort; delete them and they stay deleted
+        local need_glass  = not offered_once('clear_glass_batch')
+        if not (need_ash or need_potash or need_pearl or need_glass) then return {} end
+        local shops, lines = {}, {}
+        if need_ash then
+            shops[#shops + 1] = 'MakeAsh'
+            lines[#lines + 1] = ('  * Make ash from wood, while under %d ash.'):format(GLASS_KEEP)
+        end
+        if need_potash then
+            shops[#shops + 1] = 'MakePotashFromAsh'
+            lines[#lines + 1] = ('  * Make potash from ash, while under %d potash.'):format(GLASS_KEEP)
+        end
+        if need_pearl then
+            shops[#shops + 1] = 'MAKE_PEARLASH'
+            lines[#lines + 1] = ('  * Make pearlash from potash, while under %d pearlash.'):format(GLASS_KEEP)
+        end
+        if need_glass then
+            shops[#shops + 1] = 'MakeRawGlass'
+            shops[#shops + 1] = 'CutGlass'
+            lines[#lines + 1] = ('  * Make %d raw clear glass (one-time).'):format(GLASS_BATCH)
+            lines[#lines + 1] = ('  * Cut %d clear glass to gems (one-time). Offered once -- delete\n    them and they will not come back.'):format(GLASS_BATCH)
+        end
+        return {{name = 'Pearlash (clear glass)', shops = shops,
+            note = 'Clear glass takes SAND + PEARLASH; green glass takes sand alone. Clear is worth\n'
+                .. 'more and makes better windows, so the only thing standing between you and it is\n'
+                .. 'a pearlash supply.\n\n'
+                .. 'Pearlash comes off the end of a wood chain: wood -> ash (Wood Furnace) -> potash\n'
+                .. '(Ashery) -> pearlash (Kiln). These orders keep each step stocked so the glass\n'
+                .. 'furnace always has pearlash to hand.\n\n'
+                .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+            build = function()
+                if need_ash then
+                    add_order{job_type = df.job_type.MakeAsh, amount = 5, frequency = Daily,
+                        conds = {C('LessThan', GLASS_KEEP, df.item_type.BAR, ASH_MAT),
+                                 C('GreaterThan', 0, df.item_type.WOOD)}}
+                end
+                if need_potash then
+                    add_order{job_type = df.job_type.MakePotashFromAsh, amount = 5, frequency = Daily,
+                        conds = {C('LessThan', GLASS_KEEP, df.item_type.BAR, POTASH_MAT),
+                                 C('GreaterThan', 0, df.item_type.BAR, ASH_MAT)}}
+                end
+                if need_pearl then
+                    add_order{reaction_name = 'MAKE_PEARLASH',
+                        job_type = df.job_type.CustomReaction, amount = 5, frequency = Daily,
+                        conds = {C('LessThan', GLASS_KEEP, df.item_type.BAR, PEARLASH_MAT),
+                                 C('GreaterThan', 0, df.item_type.BAR, POTASH_MAT)}}
+                end
+                if need_glass then
+                    -- GLASS_CLEAR is a BUILTIN material (type 4, no index), not an inorganic
+                    add_order{job_type = df.job_type.MakeRawGlass,
+                        mat_type = GLASS_CLEAR_MAT, mat_index = -1,
+                        amount = GLASS_BATCH, frequency = OneTime}
+                    add_order{job_type = df.job_type.CutGlass,
+                        mat_type = GLASS_CLEAR_MAT, mat_index = -1,
+                        amount = GLASS_BATCH, frequency = OneTime}
+                    mark_offered('clear_glass_batch')
+                end
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- rock nut oil: only once nuts have really piled up, since it EATS the seeds
+        local seed = plant_mat('BUSH_QUARRY', 'SEED')
+        if not seed then return {} end
+        local nuts = 0
+        for _, it in ipairs(df.global.world.items.other.SEEDS) do
+            if it:getMaterial() == seed.type and it:getMaterialIndex() == seed.index
+                and usable_stock(it) then nuts = nuts + (it.stack_size or 1) end
+        end
+        if nuts <= ROCK_NUT_MIN then return {} end
+        local need_paste = not reaction_ordered('MILL_SEEDS_NUTS_TO_PASTE')
+        local need_press = not reaction_ordered('PRESS_OIL')
+        -- soap-from-oil is only worth prompting when you have actually chosen that route
+        local soap_oil = reaction_ordered('MAKE_SOAP_FROM_OIL')
+        if not (need_paste or need_press) then return {} end
+        local shops, lines = {}, {}
+        if need_paste then
+            shops[#shops + 1] = 'MillPlants'
+            lines[#lines + 1] = ('  * Mill seeds/nuts to paste, Daily x1, while over %d rock nuts.'):format(ROCK_NUT_MIN)
+        end
+        if need_press then
+            shops[#shops + 1] = 'PRESS_OIL'
+            lines[#lines + 1] = ('  * Press liquid from paste -> rock nut oil, Daily x1, while over %d\n    rock nuts.'):format(ROCK_NUT_MIN)
+        end
+        return {{name = soap_oil and 'Rock nut oil (for your soap)' or 'Rock nut oil', shops = shops,
+            note = ('You have %d rock nuts. Unlike every other dwarven crop process, this one\n'):format(nuts)
+                .. 'CONSUMES the seeds rather than returning them -- rock nuts ARE the input -- so it\n'
+                .. ('only offers itself once you are over %d and can spare them.\n\n'):format(ROCK_NUT_MIN)
+                .. 'Two steps: mill the nuts into paste at a Quern/Millstone, then press the paste\n'
+                .. 'into oil at a Screw Press. Both run ONE at a time, checked daily, so the pile\n'
+                .. 'drains slowly and stops the moment it drops back under the threshold.\n\n'
+                .. (soap_oil
+                    and 'Your soap is set to be made FROM OIL, so this is the chain that feeds it.\n\n'
+                    or 'Rock nut oil is material value 5; its main use is soap (you can also get\nsoap from tallow, which costs no seeds).\n\n')
+                .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+            build = function()
+                if need_paste then
+                    add_order{reaction_name = 'MILL_SEEDS_NUTS_TO_PASTE',
+                        job_type = df.job_type.CustomReaction, amount = 1, frequency = Daily,
+                        conds = {C('GreaterThan', ROCK_NUT_MIN, df.item_type.SEEDS, seed.type, seed.index)}}
+                end
+                if need_press then
+                    add_order{reaction_name = 'PRESS_OIL',
+                        job_type = df.job_type.CustomReaction, amount = 1, frequency = Daily,
+                        conds = {C('GreaterThan', ROCK_NUT_MIN, df.item_type.SEEDS, seed.type, seed.index)}}
                 end
                 return missing_shops(shops)
             end}}
@@ -1303,8 +1536,11 @@ STANDING = {
         if need_bags then shops[#shops + 1] = 'ConstructBagCloth' end
         local lines = {}
         for _, t in ipairs(todo) do
-            lines[#lines + 1] = ('  * Mill %s -> %s, Daily x5, while under %d %s, an unrotten\n    millable plant on hand, and an EMPTY bag to grind into.')
-                :format(t.spec.plant, t.spec.makes, t.spec.cap, t.spec.makes)
+            lines[#lines + 1] = t.spec.cap
+                and ('  * Mill %s -> %s, Daily x5, while under %d %s, an unrotten\n    millable plant on hand, and over %d EMPTY bags to grind into.')
+                    :format(t.spec.plant, t.spec.makes, t.spec.cap, t.spec.makes, BAG_MIN)
+                or ('  * Mill %s -> %s, Daily x5, UNCAPPED -- runs while an unrotten millable\n    plant is on hand and over %d EMPTY bags to grind into.')
+                    :format(t.spec.plant, t.spec.makes, BAG_MIN)
         end
         if need_bags then
             lines[#lines + 1] = ('  * Sew pig tail cloth into bags, Daily x5, while under %d empty bags and pig\n    tail cloth is on hand.')
@@ -1321,13 +1557,17 @@ STANDING = {
                 .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
             build = function()
                 for _, t in ipairs(todo) do
+                    local conds = {
+                        F1(C('GreaterThan', 0, df.item_type.PLANT, t.plant.type, t.plant.index),
+                           'unrotten', 'millable'),
+                        EMPTY(C('GreaterThan', BAG_MIN, df.item_type.BAG))}
+                    if t.spec.cap then
+                        table.insert(conds, 1,
+                            C('LessThan', t.spec.cap, df.item_type.POWDER_MISC, t.prod.type, t.prod.index))
+                    end
                     add_order{job_type = df.job_type.MillPlants,
-                        mat_type = t.plant.type, mat_index = t.plant.index, amount = 5, frequency = Daily,
-                        conds = {
-                            C('LessThan', t.spec.cap, df.item_type.POWDER_MISC, t.prod.type, t.prod.index),
-                            F1(C('GreaterThan', 0, df.item_type.PLANT, t.plant.type, t.plant.index),
-                               'unrotten', 'millable'),
-                            EMPTY(C('GreaterThan', 0, df.item_type.BAG))}}
+                        mat_type = t.plant.type, mat_index = t.plant.index, amount = 5,
+                        frequency = Daily, conds = conds}
                 end
                 if need_bags then
                     add_order{job_type = df.job_type.ConstructBag,
