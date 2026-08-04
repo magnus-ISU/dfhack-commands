@@ -72,14 +72,26 @@ accepting creates it (all conditioned so they only run when sensible):
     needs ash + an empty bucket), render fat (keep under 20 tallow, needs fat) -- so the
     chain self-sustains instead of draining a one-time batch.
   - Melting: a melt order when items are marked for melting but nothing melts them.
-  - Adamantine: once you have raw adamantine, three keep-1-in-stock orders -- extract raw
-    adamantine into thread (Craftsdwarf's Workshop), smelt thread into wafers (ADAMANTINE_WAFERS
-    at a Smelter), and weave thread into cloth (Loom) -- each targeting adamantine specifically
-    (mat 0/25) and gated so they only run while their input is on hand.
+  - Adamantine: once you have raw adamantine, three keep-3-in-stock orders queued in priority
+    order -- wafers first (ADAMANTINE_WAFERS at a Smelter), then cloth (Loom), then a thread
+    reserve (extract at a Craftsdwarf's Workshop). Thread feeds the other two, so capping it
+    last is what halts the chain: everything beyond 3/3/3 stays as raw adamantine instead of
+    being extracted "just in case". Each targets adamantine specifically and only runs while
+    its input is on hand.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
 Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
 forge/mason's/carpenter's for the chosen material), it warns you which to build.
+
+Every ask can be IGNORED permanently -- press `i` on it in the status screen, or
+`planner-orders ignore <name>`. An ignored ask is still scanned, it is just never offered, so
+un-ignoring resumes it immediately. The list survives save/reload;
+`planner-orders disable` clears it.
+
+`planner-orders gui` opens a STATUS SCREEN listing every ask this tool knows about:
+    PENDING  offered right now        IGNORED  permanently dismissed
+    WAITING  precondition not met     DONE     applicable, orders already exist
+Enter creates the selected pending ask, `i` toggles ignore, `r` refreshes.
 
 Run `planner-orders` to register the notification (idempotent; add to dfhack.init or
 magnus-scripts to load each session). `planner-orders list` prints the gaps; `planner-orders
@@ -92,6 +104,33 @@ local NAME = 'planner_orders'
 -- check would re-offer them the moment the player deletes one, which turns a helpful nudge
 -- into a nag -- deleting it IS the answer. So the fact that we already offered is persisted
 -- with the site instead of inferred from the order list.
+-- Permanently dismissed asks, by the name the player sees. Persisted with the site: an ask
+-- you have declined is a decision, not a transient state, so it must survive a reload. Kept
+-- separate from the once-only flags because these are reversible (`planner-orders disable`).
+local IGNORE_KEY = 'planner-orders/ignore'
+local function ignore_set()
+    local d = dfhack.persistent.getSiteData(IGNORE_KEY, {})
+    return type(d) == 'table' and d or {}
+end
+local function is_ignored(name) return ignore_set()[name] == true end
+local function set_ignored(name, on)
+    local d = ignore_set()
+    d[name] = on and true or nil
+    pcall(dfhack.persistent.saveSiteData, IGNORE_KEY, d)
+end
+local function clear_ignores()
+    local d, n = ignore_set(), 0
+    for _ in pairs(d) do n = n + 1 end
+    pcall(dfhack.persistent.saveSiteData, IGNORE_KEY, {})
+    return n
+end
+local function ignored_names()
+    local out = {}
+    for k in pairs(ignore_set()) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+
 local ONCE_KEY = 'planner-orders/once'
 local function offered_once(flag)
     local d = dfhack.persistent.getSiteData(ONCE_KEY, {})
@@ -105,6 +144,8 @@ local function mark_offered(flag)
 end
 
 local dlg = require('gui.dialogs')
+local gui = require('gui')
+local widgets = require('gui.widgets')
 local bp = require('plugins.buildingplan')
 
 local ORDER_AMOUNT = 1
@@ -502,6 +543,7 @@ local FIXED_WS = {
     MAKE_PEARLASH         = {label = 'a Kiln',                 fu = df.furnace_type.Kiln},
     MakeRawGlass          = {label = 'a Glass Furnace',        fu = df.furnace_type.GlassFurnace},
     CutGlass              = {label = "a Jeweler's Workshop",  ws = df.workshop_type.Jewelers},
+    CutGems               = {label = "a Jeweler's Workshop",  ws = df.workshop_type.Jewelers},
     ProcessPlants         = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     ProcessPlantsBarrel   = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
     PROCESS_PLANT_TO_BAG  = {label = "a Farmer's Workshop",    ws = df.workshop_type.Farmers},
@@ -652,6 +694,7 @@ local function reaction_ordered(code)
 end
 
 local STANDING   -- forward decl: the standing-order producers, defined after order helpers
+local STANDING_INFO   -- forward decl: their names, assigned alongside STANDING below
 
 local function item_label(item_type)
     if df.item_type[item_type] == 'TRAPPARTS' then return 'Mechanism' end   -- game calls it a mechanism
@@ -794,13 +837,27 @@ local function scan()
     -- standing-order checks (brewing, fuel, smelting per-ore, barrels/bins, melting, ...).
     -- A source either yields a ready gap (it set its own kind, e.g. a material-picker 'item'
     -- gap) or a {name, note, shops, build} descriptor we wrap as a single-confirm 'standing'.
-    for _, source in ipairs(STANDING) do
-        for _, g in ipairs(source()) do
-            gaps[#gaps + 1] = g.kind and g or {name = g.name, kind = 'standing', producer = g}
+    local active_groups = {}
+    for i, source in ipairs(STANDING) do
+        local group = STANDING_INFO[i] and STANDING_INFO[i].name or ('check ' .. i)
+        local produced = source()
+        if #produced > 0 then active_groups[group] = true end
+        for _, g in ipairs(produced) do
+            local gap = g.kind and g or {name = g.name, kind = 'standing', producer = g}
+            gap.group = group
+            gaps[#gaps + 1] = gap
         end
     end
+    -- An ignored ask still gets SCANNED -- we just do not offer it. The status screen needs
+    -- to show what is being suppressed, and re-offering has to resume the moment it is
+    -- un-ignored, so the decision is applied here at the end rather than inside each check.
+    local offered, ignored = {}, {}
+    for _, g in ipairs(gaps) do
+        if is_ignored(g.name) then ignored[#ignored + 1] = g else offered[#offered + 1] = g end
+    end
     table.sort(unmakeable)
-    return {gaps = gaps, unmakeable = unmakeable, missing = missing_workshops()}
+    return {gaps = offered, ignored = ignored, active_groups = active_groups,
+            unmakeable = unmakeable, missing = missing_workshops()}
 end
 
 -- Cache the (expensive) scan so the ~1/second notification refresh doesn't re-walk buildings,
@@ -822,6 +879,13 @@ local function get_scan()
     end
     cache.frame, cache.t, cache.result = fc, now, scan()
     return cache.result
+end
+
+-- Drop the cache so the very next read re-scans. Needed after we change something the scan
+-- depends on (creating an order, ignoring an ask) -- otherwise the status screen would show a
+-- stale answer for up to the TTL and look broken.
+local function invalidate_scan()
+    cache.frame, cache.t, cache.result = nil, nil, nil
 end
 
 -- ---- order creation ---------------------------------------------------------
@@ -1140,6 +1204,8 @@ local ROCK_NUT_MIN = 100   -- only press nuts for oil above this many (it eats t
 local GLASS_WOOD_MIN = 50  -- pearlash chain starts at wood; only offer with a real surplus
 local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
 local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
+local ROUGH_GEM_MIN = 10   -- start cutting once the rough pile is bigger than this
+local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then cloth, then thread
 
 -- Every bag-consuming order must leave a FLOOR of empty bags behind, or whichever job runs
 -- first eats the last bag and starves the rest -- this fort hit 0 empty bags because milling
@@ -1407,9 +1473,12 @@ STANDING = {
         local need_ash    = not has_order(df.job_type.MakeAsh, -1)
         local need_potash = not has_order(df.job_type.MakePotashFromAsh, -1)
         local need_pearl  = not reaction_ordered('MAKE_PEARLASH')
-        -- the batch orders are offered once per fort; delete them and they stay deleted
-        local need_glass  = not offered_once('clear_glass_batch')
-        if not (need_ash or need_potash or need_pearl or need_glass) then return {} end
+        if not (need_ash or need_potash or need_pearl) then return {} end
+        -- The glass batch rides along with the chain it depends on -- it never raises the ask
+        -- by itself. Pearlash is the thing worth prompting about; the raw glass and the gems
+        -- are just what you do with it once the chain exists. Still once per fort: delete
+        -- either order and it stays deleted.
+        local need_glass = not offered_once('clear_glass_batch')
         local shops, lines = {}, {}
         if need_ash then
             shops[#shops + 1] = 'MakeAsh'
@@ -1436,6 +1505,7 @@ STANDING = {
                 .. 'Pearlash comes off the end of a wood chain: wood -> ash (Wood Furnace) -> potash\n'
                 .. '(Ashery) -> pearlash (Kiln). These orders keep each step stocked so the glass\n'
                 .. 'furnace always has pearlash to hand.\n\n'
+                .. (need_glass and ('It also queues a ONE-TIME batch to put the chain straight to use: %d raw clear\nglass, and %d of it cut to gems. Those two are offered once per fort -- delete them\nand they will not come back.\n\n'):format(GLASS_BATCH, GLASS_BATCH) or '')
                 .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
             build = function()
                 if need_ash then
@@ -1465,6 +1535,25 @@ STANDING = {
                     mark_offered('clear_glass_batch')
                 end
                 return missing_shops(shops)
+            end}}
+    end,
+    function()   -- cut gems: turn the rough surplus into cut stones
+        local rough = 0
+        for _, it in ipairs(df.global.world.items.other.ROUGH) do
+            if usable_stock(it) then rough = rough + (it.stack_size or 1) end
+        end
+        if rough <= ROUGH_GEM_MIN then return {} end
+        if has_order(df.job_type.CutGems, -1) then return {} end
+        return {{name = 'Cut gems', shops = {'CutGems'},
+            note = ('You have %d rough gems. Cut ones are worth far more and are what a jeweler\n'):format(rough)
+                .. 'encrusts with, so a rough pile sitting in a stockpile is wasted value.\n\n'
+                .. ('Creates: Cut gems, Daily x1, while over %d rough gems remain -- it takes the\n'):format(ROUGH_GEM_MIN)
+                .. 'surplus one at a time and always leaves that many uncut, so it never empties\n'
+                .. 'the pile or floods the jeweler with work.',
+            build = function()
+                add_order{job_type = df.job_type.CutGems, amount = 1, frequency = Daily,
+                    conds = {C('GreaterThan', ROUGH_GEM_MIN, df.item_type.ROUGH)}}
+                return missing_shops({'CutGems'})
             end}}
     end,
     function()   -- rock nut oil: only once nuts have really piled up, since it EATS the seeds
@@ -1717,7 +1806,7 @@ STANDING = {
                 return missing_shops({'MeltMetalObject'})
             end}}
     end,
-    function()   -- adamantine: keep 1 thread / 1 wafer / 1 cloth once you have raw adamantine
+    function()   -- adamantine: 3 wafers, then 3 cloth, then 3 thread; the rest stays raw
         -- TWO distinct inorganics: RAW_ADAMANTINE is the mined boulder (the extract INPUT);
         -- ADAMANTINE is the processed material (thread / wafer / cloth -- the products).
         local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
@@ -1725,49 +1814,142 @@ STANDING = {
         if not boulder_present(RAW) then return {} end    -- only while raw adamantine is on hand
         local THREAD, CLOTH = df.item_type.THREAD, df.item_type.CLOTH
         local out = {}
-        -- extraction: raw adamantine -> adamantine thread (keep 1), at a Craftsdwarf's Workshop
-        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW) then
-            out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
-                note = 'Extracts adamantine strands from raw adamantine into thread at a\n'
-                    .. "Craftsdwarf's Workshop -- keeps 1 adamantine thread in stock, running while\n"
-                    .. 'you have raw adamantine to extract.',
-                build = function()
-                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
-                        amount = 1, frequency = Daily, conds = {
-                            C('LessThan', 1, THREAD, 0, ADAM),      -- keep 1 adamantine thread (product)
-                            C('AtLeast', 1, BOULDER, 0, RAW)}}      -- while RAW adamantine is on hand
-                    return missing_shops({'ExtractMetalStrands'})
-                end}
-        end
-        -- wafers: smelt adamantine thread -> wafers (keep 1), via the ADAMANTINE_WAFERS reaction
+        -- Priority is the ORDER THESE ARE ADDED: DF works the manager list top-down, so wafers
+        -- are filled before cloth and cloth before a thread reserve. Everything is capped at
+        -- ADAM_KEEP, which is what leaves the remainder sitting as raw adamantine -- extraction
+        -- stops once thread is stocked, so the boulders are never drained "just in case".
+        --
+        -- Cloth explicitly waits for the wafer step: it will not run until 3 wafers exist.
+        --
+        -- The THREAD step is deliberately NOT gated on the step "before" it. Thread is the input
+        -- to both wafers and cloth, so requiring cloth (or wafers) first would deadlock the whole
+        -- chain -- with nothing extracted there is no thread, so no wafers, so no cloth, so the
+        -- gate never opens. Its cap alone does the job: extraction stops at 3 thread, the other
+        -- two consume it, extraction tops it back up, and everything halts at 3/3/3 with the
+        -- remaining boulders untouched.
         if not reaction_ordered('ADAMANTINE_WAFERS') then
             out[#out + 1] = {name = 'Adamantine wafers', shops = {'ADAMANTINE_WAFERS'},
-                note = 'Smelts adamantine thread into wafers at a Smelter -- keeps 1 adamantine wafer\n'
-                    .. 'in stock, running while you have adamantine thread to smelt.',
+                note = ('Smelts adamantine thread into wafers at a Smelter -- keeps %d in stock,\n'):format(ADAM_KEEP)
+                    .. 'running while you have adamantine thread to smelt. First call on the\n'
+                    .. 'chain: wafers are what adamantine is actually worth forging.',
                 build = function()
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'ADAMANTINE_WAFERS',
-                        amount = 1, frequency = Daily, conds = {
-                            C('LessThan', 1, BAR, 0, ADAM),         -- keep 1 adamantine wafer (a bar)
-                            C('GreaterThan', 0, THREAD, 0, ADAM)}}  -- while adamantine thread is on hand
+                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                            C('LessThan', ADAM_KEEP, BAR, 0, ADAM),  -- wafers are bars
+                            C('GreaterThan', 0, THREAD, 0, ADAM)}}   -- while thread is on hand
                     return missing_shops({'ADAMANTINE_WAFERS'})
                 end}
         end
-        -- cloth: weave adamantine thread -> cloth (keep 1), at a Loom
         if not order_exists_mat(df.job_type.WeaveCloth, 0, ADAM) then
             out[#out + 1] = {name = 'Adamantine cloth', shops = {'WeaveCloth'},
-                note = 'Weaves adamantine thread into cloth at a Loom -- keeps 1 adamantine cloth in\n'
-                    .. 'stock, running while you have adamantine thread to weave.',
+                note = ('Weaves adamantine thread into cloth at a Loom -- keeps %d in stock, and\n'):format(ADAM_KEEP)
+                    .. ('will not start until %d adamantine WAFERS exist, so the wafer step really\n'):format(ADAM_KEEP)
+                    .. 'is finished before any thread goes to cloth.',
                 build = function()
                     add_order{job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
-                        amount = 1, frequency = Daily, conds = {
-                            C('LessThan', 1, CLOTH, 0, ADAM),       -- keep 1 adamantine cloth
-                            C('GreaterThan', 0, THREAD, 0, ADAM)}}  -- while adamantine thread is on hand
+                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                            C('LessThan', ADAM_KEEP, CLOTH, 0, ADAM),
+                            -- the wafer step must be FINISHED first: no cloth until 3 wafers exist
+                            C('AtLeast', ADAM_KEEP, BAR, 0, ADAM),
+                            C('GreaterThan', 0, THREAD, 0, ADAM)}}
                     return missing_shops({'WeaveCloth'})
+                end}
+        end
+        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW) then
+            out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
+                note = ('Extracts raw adamantine into thread at a Craftsdwarf\'s Workshop -- keeps\n%d in stock, running while raw adamantine remains.\n\n'):format(ADAM_KEEP)
+                    .. 'Last in the chain on purpose: it is the reserve the wafer and cloth orders\n'
+                    .. 'draw from, and capping it is what stops the fort extracting every boulder.\n'
+                    .. 'Whatever is left over stays as raw adamantine.',
+                build = function()
+                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
+                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                            C('LessThan', ADAM_KEEP, THREAD, 0, ADAM),
+                            C('AtLeast', 1, BOULDER, 0, RAW)}}       -- while RAW adamantine is on hand
+                    return missing_shops({'ExtractMetalStrands'})
                 end}
         end
         return out
     end,
 }
+
+-- Names for the standing checks above, in the same order, so the status screen can list every
+-- ask this tool knows about -- including the ones that produced nothing this scan. `ready` is
+-- an optional cheap re-test of the check's own precondition: false means "not applicable yet",
+-- absent means "assume applicable", which lets the screen tell WAITING apart from DONE.
+STANDING_INFO = {
+    {name = 'Pig tail thread',        blocked = function()
+        if not pig_tails_present() then return 'no pig tail plants on hand' end end,
+                                      done  = function() return order_targets_pigtail(df.job_type.ProcessPlants) end},
+    {name = 'Pig tail cloth',         blocked = function()
+        if not pig_tails_present() then return 'no pig tail plants on hand' end end,
+                                      done  = function() return order_targets_pigtail(df.job_type.WeaveCloth) end},
+    {name = 'Spin thread',            blocked = function()
+        if not hair_wool_present() then return 'no raw wool or hair to spin' end end,
+                                      done  = function() return has_order(df.job_type.SpinThread, -1) end},
+    {name = 'Fibre cloth',            blocked = function()
+        if not ws_exists(FIXED_WS['WeaveCloth']) then return 'no Loom built' end end},
+    {name = 'Soap chain'},
+    {name = 'Good meals'},
+    {name = 'Process plant to bag',   blocked = function()
+        local b = plant_mat('BUSH_QUARRY', 'STRUCTURAL')
+        if not (b and plant_stock(b.index)) then return 'no quarry bushes on hand' end end,
+                                      done  = function() return reaction_ordered('PROCESS_PLANT_TO_BAG') end},
+    {name = 'Collect sand',           blocked = function()
+        if not ws_exists(FIXED_WS['CollectSand']) then return 'no Glass Furnace built' end end,
+                                      done  = function() return has_order(df.job_type.CollectSand, -1) end},
+    {name = 'Pearlash (clear glass)', done  = function()
+        return has_order(df.job_type.MakePotashFromAsh, -1) and reaction_ordered('MAKE_PEARLASH') end,
+                                      blocked = function()
+        local w = #df.global.world.items.other.WOOD
+        if w <= GLASS_WOOD_MIN then
+            return ('only %d wood logs, needs over %d'):format(w, GLASS_WOOD_MIN) end end},
+    {name = 'Cut gems',               done  = function() return has_order(df.job_type.CutGems, -1) end,
+                                      blocked = function()
+        local n = 0
+        for _, it in ipairs(df.global.world.items.other.ROUGH) do
+            if usable_stock(it) then n = n + (it.stack_size or 1) end
+        end
+        if n <= ROUGH_GEM_MIN then
+            return ('only %d rough gems, needs over %d'):format(n, ROUGH_GEM_MIN) end end},
+    {name = 'Rock nut oil',           done  = function()
+        return reaction_ordered('MILL_SEEDS_NUTS_TO_PASTE') and reaction_ordered('PRESS_OIL') end,
+                                      blocked = function()
+        local sd = plant_mat('BUSH_QUARRY', 'SEED')
+        if not sd then return 'no quarry bush in this world' end
+        local n = 0
+        for _, it in ipairs(df.global.world.items.other.SEEDS) do
+            if it:getMaterial() == sd.type and it:getMaterialIndex() == sd.index
+                and usable_stock(it) then n = n + (it.stack_size or 1) end
+        end
+        if n <= ROCK_NUT_MIN then
+            return ('only %d rock nuts, needs over %d'):format(n, ROCK_NUT_MIN) end end},
+    {name = 'Milling'},
+    {name = 'Brewing'},
+    {name = 'Charcoal',               blocked = function()
+        if #df.global.world.items.other.WOOD == 0 then return 'no wood to burn' end end},
+    {name = 'Coke'},
+    {name = 'Containers',             blocked = function()
+        if not ws_exists{ws = df.workshop_type.Carpenters} then
+            return "no Carpenter's Workshop built" end end},
+    {name = 'Cages'},
+    {name = 'Smelting'},
+    {name = 'Melting',                blocked = function()
+        if melt_count() == 0 then return 'nothing is marked for melting' end end},
+    {name = 'Adamantine',             blocked = function()
+        local RAW = inorg_idx('RAW_ADAMANTINE')
+        if not RAW or not boulder_present(RAW) then return 'no raw adamantine on hand' end end,
+                                      done  = function()
+        local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
+        if not (RAW and ADAM) then return false end
+        return order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW)
+            and reaction_ordered('ADAMANTINE_WAFERS')
+            and order_exists_mat(df.job_type.WeaveCloth, 0, ADAM) end},
+}
+if #STANDING_INFO ~= #STANDING then
+    qerror(('planner-orders: %d standing checks but %d names -- they must stay in step')
+        :format(#STANDING, #STANDING_INFO))
+end
 
 -- ---- dialog -----------------------------------------------------------------
 
@@ -1829,6 +2011,19 @@ end
 
 -- walk the gaps one at a time, each with its picker + Skip/Cancel. `made` collects what
 -- was created; `warns` collects missing-workshop labels across all created orders.
+-- Apply ONE creation choice to ONE gap. Shared by the step-through walk and the inline
+-- buttons on the planner screen, so both create orders through exactly the same path.
+-- Returns (missing-workshop labels, a human label for what was made).
+function apply_choice(gap, choice)
+    local kind = gap.kind or 'build'
+    if kind == 'reaction' then
+        return create_reaction(gap, choice), choice.text
+    elseif kind == 'standing' then
+        return gap.producer.build(), gap.name:lower() .. ' orders'
+    end
+    return create_order(gap, choice), (choice.text or gap.name):gsub(' %[magma%-safe%]', '')
+end
+
 local function process(gaps, i, made, warns)
     made, warns = made or {}, warns or {}
     if i > #gaps then
@@ -1857,19 +2052,9 @@ local function process(gaps, i, made, warns)
         on_select = function(_, choice)
             if choice.action == 'cancel' then return end
             if choice.action ~= 'skip' then
-                local missing
-                local kind = gap.kind or 'build'
-                if kind == 'reaction' then
-                    missing = create_reaction(gap, choice)
-                    made[#made + 1] = choice.text
-                elseif kind == 'standing' then
-                    missing = gap.producer.build()
-                    made[#made + 1] = gap.name:lower() .. ' orders'
-                else
-                    missing = create_order(gap, choice)
-                    made[#made + 1] = (choice.text or gap.name):gsub(' %[magma%-safe%]', '')
-                end
-                for _, label in ipairs(missing or {}) do warns[label] = true end
+                local missing, label = apply_choice(gap, choice)
+                made[#made + 1] = label
+                for _, w in ipairs(missing or {}) do warns[w] = true end
             end
             process(gaps, i + 1, made, warns)
         end,
@@ -1908,6 +2093,274 @@ local function message()
     return table.concat(parts, '; ')
 end
 
+-- ---- the planner screen -----------------------------------------------------
+--
+-- ONE screen, opened by the notification. Left sidebar = every ask this tool knows about and
+-- its state; right pane = the selected ask's own description.
+--
+-- Four states, and the honest limits of each:
+--   PENDING  -- offered right now (it is in scan's gap list)
+--   IGNORED  -- permanently dismissed; still scanned, just not offered
+--   WAITING  -- the check's precondition is not met yet (no quarry bush, too few rock nuts)
+--   DONE     -- applicable, but produced nothing, i.e. its orders already exist
+--
+-- WAITING vs DONE comes from the optional `ready` probe in STANDING_INFO. Where a check has no
+-- probe we cannot tell them apart from outside, so it reports DONE -- "nothing to do" either
+-- way, which is what the player acts on.
+local function status_rows()
+    local r = get_scan()
+    local rows, seen = {}, {}
+    local function add(name, state, gap, reason)
+        if seen[name] then return end
+        seen[name] = true
+        rows[#rows + 1] = {name = name, state = state, gap = gap, reason = reason}
+    end
+    for _, g in ipairs(r.gaps) do add(g.name, 'PENDING', g) end
+    for _, g in ipairs(r.ignored) do add(g.name, 'IGNORED', g) end
+    for _, n in ipairs(ignored_names()) do add(n, 'IGNORED') end
+    for _, info in ipairs(STANDING_INFO or {}) do
+        if not r.active_groups[info.name] then
+            -- `done` wins over `blocked`: once the orders exist the ask is satisfied, whether
+            -- or not its trigger still holds. Cut gems idling at exactly its 10-gem reserve is
+            -- DONE, not WAITING -- the order is there and will fire when the pile grows.
+            local state, reason = 'DONE', nil
+            local settled = false
+            if info.done then
+                local good, v = pcall(info.done)
+                settled = good and v and true or false
+            end
+            if not settled and info.blocked then
+                local good, why = pcall(info.blocked)
+                if good and why then state, reason = 'WAITING', why end
+            end
+            add(info.name, state, nil, reason)
+        end
+    end
+    local ORDER = {PENDING = 1, IGNORED = 2, WAITING = 3, DONE = 4}
+    table.sort(rows, function(a, b)
+        if a.state ~= b.state then return ORDER[a.state] < ORDER[b.state] end
+        return a.name < b.name
+    end)
+    return rows, r
+end
+
+local STATE_PEN = {PENDING = COLOR_LIGHTGREEN, IGNORED = COLOR_DARKGREY,
+                   WAITING = COLOR_BROWN,      DONE = COLOR_GREY}
+
+-- Re-flow a note to the pane width.
+--
+-- The notes are hand-wrapped to ~78 columns, so naively re-wrapping them to a narrower pane
+-- double-wraps: every source line becomes a full line plus a three-word orphan. So paragraphs
+-- (runs of plain lines between blanks) are JOINED first and then wrapped fresh. Lines that
+-- carry their own shape -- indented text and "  * " bullets -- are left alone and only hard-cut
+-- if they genuinely overrun.
+local function wrap_lines(text, width)
+    local function cut(line, into)
+        while #line > width do
+            local at = line:sub(1, width + 1):match('.*()%s') or width
+            into[#into + 1] = line:sub(1, at - 1)
+            line = line:sub(at):gsub('^%s+', '')
+        end
+        into[#into + 1] = line
+    end
+    local out, para = {}, {}
+    local function flush()
+        if #para == 0 then return end
+        cut(table.concat(para, ' '), out)
+        para = {}
+    end
+    for raw in (text .. '\n'):gmatch('([^\n]*)\n') do
+        if raw == '' then
+            flush()
+            out[#out + 1] = ''
+        elseif raw:match('^%s') then          -- keeps its own indentation/bullet shape
+            flush()
+            cut(raw, out)
+        else
+            para[#para + 1] = raw
+        end
+    end
+    flush()
+    return out
+end
+
+local SIDE_W = 34
+
+PlannerWindow = defclass(PlannerWindow, widgets.Window)
+PlannerWindow.ATTRS{frame_title = 'planner-orders', frame = {w = 104, h = 40}, resizable = true}
+
+function PlannerWindow:init()
+    self:addviews{
+        widgets.Label{frame = {t = 0, l = 0}, text = {
+            {text = 'click a button to act', pen = COLOR_GREY}, {text = '    '},
+            {text = 'i', pen = COLOR_LIGHTCYAN}, {text = ' ignore/un-ignore   '},
+            {text = 'r', pen = COLOR_LIGHTCYAN}, {text = ' refresh   '},
+            {text = 'Esc', pen = COLOR_LIGHTCYAN}, {text = ' close'}}},
+        widgets.List{view_id = 'side', frame = {t = 2, l = 0, w = SIDE_W, b = 2},
+            on_select = function(_, c) self:preview(c) end},
+        -- the description is a LIST of wrapped lines rather than a label: lists scroll for
+        -- free, and these notes run well past any pane height
+        widgets.List{view_id = 'desc', frame = {t = 2, l = SIDE_W + 2, r = 0, b = 11}},
+        -- actions live INLINE beside the description, rebuilt for whatever is selected --
+        -- there is no second screen to step into and no hidden Enter binding
+        widgets.Panel{view_id = 'acts', frame = {l = SIDE_W + 2, r = 0, b = 2, h = 8}},
+        widgets.Label{view_id = 'foot', frame = {b = 0, l = 0, r = 0, h = 1}, text = ''},
+    }
+    self:refresh()
+end
+
+function PlannerWindow:refresh(keep)
+    local rows, r = status_rows()
+    self.rows = rows
+    local choices, n = {}, {PENDING = 0, IGNORED = 0, WAITING = 0, DONE = 0}
+    for _, row in ipairs(rows) do
+        n[row.state] = (n[row.state] or 0) + 1
+        choices[#choices + 1] = {row = row, text = {
+            {text = ('%-8s'):format(row.state), pen = STATE_PEN[row.state]},
+            {text = row.name}}}
+    end
+    if #choices == 0 then choices = {{text = '(nothing to show)'}} end
+    self.subviews.side:setChoices(choices, keep or self.subviews.side:getSelected())
+    self.subviews.foot:setText({
+        {text = ('%d pending, %d ignored, %d waiting, %d done')
+            :format(n.PENDING, n.IGNORED, n.WAITING, n.DONE), pen = COLOR_GREY},
+        {text = #r.missing > 0 and ('   not built: ' .. table.concat(r.missing, ', ')) or '',
+         pen = COLOR_YELLOW}})
+    self:preview(self.subviews.side:getChoices()[self.subviews.side:getSelected()])
+end
+
+-- Read-only. Selecting an ask shows the same description it leads with when it offers itself;
+-- it deliberately offers NO actions here. Asks share dependencies -- ash feeds both soap and
+-- pearlash -- so an "undo" on one entry could quietly break another.
+function PlannerWindow:preview(choice)
+    local row = choice and choice.row
+    local w = math.max(20, (self.frame_rect and self.frame_rect.width or 104) - SIDE_W - 6)
+    local body
+    if not row then
+        body = ''
+    elseif row.gap then
+        local _, title, text = gap_prompt(row.gap, 1, 1)
+        body = (title or row.name) .. '\n\n' .. (text or '')
+        if row.state == 'IGNORED' then
+            body = body .. '\n\n[IGNORED -- press i to start offering this again]'
+        end
+    elseif row.state == 'WAITING' then
+        body = row.name .. '\n\nNot offered yet -- ' .. (row.reason or 'its precondition is not met')
+            .. '.\n\nIt will offer itself as soon as that changes.'
+    else
+        body = row.name .. '\n\nNothing to do: the orders this would create already exist.'
+    end
+    local lines = {}
+    for _, l in ipairs(wrap_lines(body, w)) do lines[#lines + 1] = {text = l} end
+    self.subviews.desc:setChoices(lines, 1)
+    self:rebuild_actions(row)
+end
+
+-- Build the inline buttons for whatever is selected.
+--   PENDING  every creation option the ask offers, then Skip / Ignore / Quit
+--   IGNORED  the same options, then Skip / Un-ignore
+--   DONE / WAITING  nothing -- there is no action to take
+local function button_labels(gap)
+    local out = {}
+    if not gap then return out end
+    local ok, choices = pcall(gap_prompt, gap, 1, 1)
+    if ok and choices then
+        for _, c in ipairs(choices) do out[#out + 1] = c end
+    end
+    return out
+end
+
+function PlannerWindow:rebuild_actions(row)
+    local acts = self.subviews.acts
+    for i = #acts.subviews, 1, -1 do acts.subviews[i] = nil end
+    acts.subviews = {}
+    -- relayout from the WINDOW: the panel has no parent rect of its own during init, and
+    -- laying out a detached panel throws
+    local function relayout() pcall(function() self:updateLayout() end) end
+    if not row or row.state == 'DONE' or row.state == 'WAITING' then
+        relayout()
+        return
+    end
+    local views, t = {}, 0
+    local function button(label, pen, fn)
+        -- HotkeyLabel, not TextButton: TextButton wraps one in a BannerPanel, and the panel
+        -- is what draws the [brackets]. Same click behaviour, no frame.
+        views[#views + 1] = widgets.HotkeyLabel{
+            frame = {t = t, l = 0, h = 1},
+            label = label, text_pen = pen, on_activate = fn}
+        t = t + 1
+    end
+    for _, c in ipairs(button_labels(row.gap)) do
+        local text = type(c.text) == 'table' and (c.text[1] and c.text[1].text or '?') or tostring(c.text)
+        button('Create: ' .. text, COLOR_LIGHTGREEN, function() self:do_create(row, c) end)
+    end
+    button('Skip', COLOR_GREY, function() self:do_skip() end)
+    if row.state == 'IGNORED' then
+        button('Un-ignore', COLOR_LIGHTCYAN, function() self:do_ignore(row, false) end)
+    else
+        button('Ignore', COLOR_BROWN, function() self:do_ignore(row, true) end)
+        button('Quit', COLOR_LIGHTRED, function() self:do_quit() end)
+    end
+    acts:addviews(views)
+    relayout()
+end
+
+function PlannerWindow:do_create(row, choice)
+    if not (row and row.gap) then return end
+    local sel = self.subviews.side:getSelected()
+    local missing = apply_choice(row.gap, choice)
+    if missing and #missing > 0 then
+        dfhack.printerr('planner-orders: not built -> ' .. table.concat(missing, ', '))
+    end
+    invalidate_scan()
+    self:refresh(sel)
+end
+
+function PlannerWindow:do_skip()
+    local list = self.subviews.side
+    local n = #list:getChoices()
+    if n > 0 then list:setSelected(math.min(list:getSelected() + 1, n)) end
+    self:preview(list:getChoices()[list:getSelected()])
+end
+
+function PlannerWindow:do_ignore(row, on)
+    set_ignored(row.name, on)
+    invalidate_scan()
+    self:refresh(self.subviews.side:getSelected())
+end
+
+function PlannerWindow:do_quit()
+    local ok, scr = pcall(dfhack.gui.getCurViewscreen, true)
+    if ok and scr then dfhack.screen.dismiss(scr) end
+end
+
+function PlannerWindow:toggle_ignore()
+    local choice = self.subviews.side:getChoices()[self.subviews.side:getSelected()]
+    local row = choice and choice.row
+    if not row or row.state == 'DONE' or row.state == 'WAITING' then return end
+    self:do_ignore(row, row.state ~= 'IGNORED')
+end
+
+function PlannerWindow:onInput(keys)
+    if keys.CUSTOM_I then self:toggle_ignore(); return true end
+    if keys.CUSTOM_R then invalidate_scan(); self:refresh(self.subviews.side:getSelected()); return true end
+    return PlannerWindow.super.onInput(self, keys)
+end
+
+PlannerScreen = defclass(PlannerScreen, gui.ZScreen)
+PlannerScreen.ATTRS{focus_path = 'planner-orders/status'}
+function PlannerScreen:init() self:addviews{PlannerWindow{}} end
+function PlannerScreen:onDismiss() status_view = nil end
+
+status_view = status_view or nil
+-- This script is not a module, so every CLI invocation gets a FRESH environment and the global
+-- above is always nil on entry -- it cannot dedupe across runs. Ask the game what is on screen.
+local function show_status()
+    local ok, up = pcall(dfhack.gui.matchFocusString, 'dfhack/lua/planner-orders/status')
+    if ok and up then return end
+    status_view = PlannerScreen{}:show()
+end
+
 -- ---- registration (mirrors needs-tomb-notification) -------------------------
 
 local function register()
@@ -1920,7 +2373,7 @@ local function register()
     end
     entry.desc = 'Notifies when a building-planner item has no manager order to produce it.'
     entry.dwarf_fn = message
-    entry.on_click = show_dialog
+    entry.on_click = show_status
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
     end
@@ -1944,12 +2397,39 @@ if arg == 'list' then
                 g.kind == 'standing' and 'standing order' or ((g.title or 'hospital'):lower() .. ' ' .. g.kind)))
         end
     end
+    if #r.ignored > 0 then
+        local n = {}
+        for _, g in ipairs(r.ignored) do n[#n + 1] = g.name end
+        print('  ignored: ' .. table.concat(n, ', '))
+    end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
     if #r.missing > 0 then print('  workshops needed but NOT built: ' .. table.concat(r.missing, ', ')) end
     return
 elseif arg == 'now' then
     if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
     show_dialog()
+    return
+elseif arg == 'gui' then
+    if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
+    show_status()
+    return
+elseif arg == 'disable' then
+    -- `disable` clears the ignore list rather than switching the tool off: there is nothing to
+    -- switch off (the notification registers itself), and un-ignoring everything is the one
+    -- destructive thing worth a command of its own.
+    if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
+    local n = clear_ignores()
+    invalidate_scan()
+    print(('planner-orders: cleared %d ignored ask%s; all will be offered again.')
+        :format(n, n == 1 and '' or 's'))
+    return
+elseif arg == 'ignore' or arg == 'unignore' then
+    if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
+    local name = table.concat({select(2, ...)}, ' ')
+    if name == '' then qerror('usage: planner-orders ' .. arg .. ' <ask name>') end
+    set_ignored(name, arg == 'ignore')
+    invalidate_scan()
+    print(('planner-orders: %s "%s"'):format(arg == 'ignore' and 'ignoring' or 'un-ignoring', name))
     return
 end
 
@@ -1960,3 +2440,4 @@ end
 print('planner-orders: "' .. NAME .. '" notification registered.')
 print('Click it (gui/notify panel) to create manager orders for planned-building items.')
 print('`planner-orders list` prints the gaps; `planner-orders now` opens the dialog.')
+print('`planner-orders gui` opens the status screen; `planner-orders disable` clears ignores.')
