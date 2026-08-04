@@ -29,8 +29,16 @@ column right of the panel bound and one row lower; description text pads 2 colum
 The native In-line is erased in place (text blanked, View-button pill patched out of the
 lower texture layer, the 5x3 anchored icon sprite zeroed) and re-drawn under the Remove
 row; clicking the moved [View] teleports the click to the native button so DF handles it.
-Items NOT on display (on the ground, built, worn...) keep the plain behavior: expand only
-when the description is longer than DF's box, drawn by the widget frame as before.
+
+Items NOT on display (on the ground, built, worn...) go through the SAME native-panel
+overlay -- there is no location line to move, so that step is simply skipped and the
+description starts right where DF's own box does, with no artificial gap. They only
+redraw when the description is longer than DF's box; short ones are left to DF, which
+renders those fully already. (There used to be a second, widget-frame-relative render
+path for this case; it positioned text from the overlay's own configured frame instead of
+the "Weight:"-anchored panel position, which could drift out of alignment and shift the
+text right of where DF's box actually is. It's gone now -- everything goes through the
+same geometry.)
 
 Layer map, measured live on a pedestal'd artifact bed (2026-08):
   * View button = screentexpos_lower pill, TWO rows tall (the In-line row and the row
@@ -314,7 +322,7 @@ end
 
 -- rebuilt block: cleared Remove row, moved location line, full description below.
 -- Without a location line (nothing held/no pill found) the line step is skipped
--- and the description starts right under the cleared Remove row.
+-- and the description starts right at the (cleared) Remove row -- no gap.
 local function render_display_mode(lines, vs)
     local now = dfhack.getTickCount()
     local gps = df.global.gps
@@ -344,10 +352,9 @@ local function render_display_mode(lines, vs)
         move_in_line(g, in_target)
         g.moved_in_row = in_target
     else
-        desc_top = g.remove_row + 3
-        for y = g.remove_row + 1, desc_top - 1 do
-            blank_span(y, paint_l, span_r)
-        end
+        -- nothing to shift up: no location line found (no holder), so the
+        -- description starts right at the native row, no artificial gap
+        desc_top = g.remove_row
         g.moved_in_row = nil
     end
 
@@ -376,11 +383,13 @@ function ItemDescriptionOverlay:onRenderFrame(dc, rect)
     local ok, err = pcall(function()
         local lines, vs = desc_lines()
         if not lines then geo = nil return end
-        if has_holder(vs) then
-            render_display_mode(lines, vs)
-        else
+        -- unheld items with a short description already fit DF's own box --
+        -- leave those alone rather than redraw them for no reason
+        if not has_holder(vs) and #lines <= DF_VISIBLE_ROWS then
             geo = nil
+            return
         end
+        render_display_mode(lines, vs)
     end)
     if not ok then
         geo = nil
@@ -420,33 +429,6 @@ function ItemDescriptionOverlay:onInput(keys)
         end
     end
     return false
-end
-
--- plain path: items not on display keep the old behavior -- only long
--- descriptions are redrawn, inside the widget frame
-function ItemDescriptionOverlay:onRenderBody(dc)
-    local lines, vs = desc_lines()
-    if not lines then return end
-    if has_holder(vs) then return end              -- handled by onRenderFrame
-    local total = #lines
-    -- leave short descriptions to DF (it renders those fully already)
-    if total <= DF_VISIBLE_ROWS then return end
-
-    -- use up to half the screen height; scroll the rest with DF's own scroll position
-    local maxrows = math.max(1, math.floor(df.global.gps.dimy / 2))
-    local n = math.min(total, maxrows)
-    local scroll = math.max(0, math.min(vs.scroll_position_item, total - n))
-
-    -- size the frame to exactly the lines we draw, so nothing below them is occluded
-    if self.frame.h ~= n then self.frame.h = n; self:updateLayout() end
-
-    local w = self.frame.w
-    local pen = {fg = COLOR_WHITE, bg = COLOR_BLACK}   -- opaque, to cover DF's short box
-    for row = 0, n - 1 do
-        local s = '  ' .. lines[scroll + row].value     -- DF indents the text two columns
-        if #s < w then s = s .. (' '):rep(w - #s) else s = s:sub(1, w) end
-        dc:seek(0, row):string(s, pen)
-    end
 end
 
 OVERLAY_WIDGETS = {expand = ItemDescriptionOverlay}

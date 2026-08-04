@@ -65,7 +65,21 @@ local function widget_on_screen(w, vs)
 end
 
 -- cursor over some OTHER visible overlay panel (notifications, etc.) that draws over the map?
+--
+-- A widget's frame_rect is only its MAXIMUM extent, not proof anything is actually drawn at
+-- this exact cell -- several stock DFHack toolbars (e.g. the warm/damp dig helper on
+-- dwarfmode/Designate/DIG_DIG*, mass-remove's on .../ERASE) declare a big hover-tooltip-sized
+-- frame and leave the top-level widget "visible" for the ENTIRE time their designation tool is
+-- selected, while only ever painting a small icon inside it. Trusting frame_rect alone turned
+-- their mostly-empty hitbox into a dead zone spanning a chunk of the lower screen for every
+-- drag/right-click while such a tool was active -- checked live (2026-08) against
+-- dig.warmdamptoolbar: frame_rect y=[55,65] out of dimy=69, always "visible" throughout
+-- DIG_DIG/stairs/ramps/channel, yet blank outside its ~4x3 icon. So first confirm something is
+-- actually rendered at (mx,my) (map tiles are graphics, ch==0; real panel content -- ours,
+-- native, or third-party -- sets a visible glyph) before even considering it "covered".
 local function over_other_overlay(mx, my)
+    local ok0, t = pcall(dfhack.screen.readTile, mx, my)
+    if not ok0 or not t or not t.ch or t.ch <= 32 then return false end
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
