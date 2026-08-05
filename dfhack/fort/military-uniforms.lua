@@ -1,12 +1,12 @@
--- Create steel military uniform templates, one per typical weapon type.
+-- Create steel military uniform templates and pin each soldier's actual gear items.
 --@module = true
 --@enable = true
 --[[
     military-uniforms            create/refresh the steel uniform set
-    military-uniforms orders     queue gear orders for outfitted soldiers, once
-    enable military-uniforms     background: queue gear orders as soldiers are
-                                 assigned (steel) uniforms
-    disable military-uniforms    stop the background order service
+    military-uniforms orders     run one gear cycle (pin items + queue orders), once
+    enable military-uniforms     background: pin gear items and queue orders as
+                                 soldiers are assigned uniforms
+    disable military-uniforms    stop the background service
 
 Creates a "<Metal> - <weapon>" uniform template on the fort entity for each of the
 typical weapons (short sword, war hammer, battle axe, spear, pick, mace,
@@ -15,60 +15,36 @@ gauntlets, greaves, high boots, and a shield -- plus a weapon of
 that type, with "replace clothing" on. Exceptions: the crossbow uniform uses a
 COPPER crossbow + buckler; the war hammer uniform uses a SILVER war hammer.
 
-Gauntlets and high boots are worn as pairs, so the service targets TWO of each
-per soldier. Gauntlets are HANDED: it requires one masterwork of EACH hand (left
-and right), not just any two. High boots have no handedness, so any two masterwork
-count. It melts inferior/surplus copies and reforges (in pairs) until each soldier
-has 1 masterwork left gauntlet, 1 masterwork right gauntlet, and 2 masterwork boots.
+HOW GEAR IS ASSIGNED (rewritten -- see "the model" below)
+Every soldier is given a CUSTOM uniform: for each slot their uniform asks for, the
+service picks one specific item out of the fort's stock and pins it to them, using
+DF's own "specific item" uniform mode. Nobody shares a claim, so there is no stock
+accounting, no backup-metal stocking, and no re-solve churn -- a pinned item is the
+player's explicit choice as far as DF is concerned, so DF's equipment solver does
+not second-guess it.
 
-SIZED PER WEARER: gear is sized to each soldier's RACE. Non-dwarf soldiers (e.g. a human
-mercenary) need bigger armor, so for them the manager order sets specdata.race = their race
-and the forge makes their size (the finished item records it in maker_race). Requirements
-and stock are tracked per size, so dwarf-sized armor never counts as covering a human (or
-vice-versa), and each soldier -- and their iron/copper backups -- is geared to fit.
+Asking what to PRODUCE then becomes trivial: anything a soldier is supposed to have
+but isn't pinned (nothing suitable in stock), or is pinned only to an inferior
+stand-in (wrong material), is exactly one order.
 
-BACKUP GEAR STOCK: the uniform is NEVER edited -- soldiers keep their steel uniform and
-pick what to wear themselves. Gear is made in the uniform's metal (steel). But whenever
-the soldiers don't have enough wearable/usable pieces for a slot (desired steel + backup
-stock < the number who need it), the service also stocks a BACKUP version of that piece
--- armour, shield, AND weapon -- so nobody is left without something to equip. The backup
-metal is IRON when there's iron to spare after the steel we still owe (iron ore x4 [4
-bars per smelted boulder] + iron bars - iron for the outstanding steel > 0), else
-COPPER; iron gear is far better, and
-picking iron also replaces copper backups. NOT gated on steel supply -- copper/iron fills
-the gap while steel forges; it stops once steel + backup covers everyone. (Uniform-copper
-pieces like the crossbow are skipped -- the main loop makes those.)
-
-Everything is resolved generically per world: STEEL/COPPER/SILVER by inorganic
-id, and every item subtype by name within the fort civ's producible lists (so it
-picks the dwarf-makeable breastplate, not a modded look-alike). Re-running
-refreshes the "Steel - *" templates it owns (it won't touch your own uniforms).
+SIZED PER WEARER: gear is sized to each soldier's RACE. A piece only counts as
+pinnable for a soldier if its size fits them (an item records its size in
+maker_race), and orders for non-dwarf soldiers set the manager order's
+specdata.race so the forge makes their size.
 
 The Equip screen overlay (dwarfmode/Squads/Equipment/Default) has four toggles. Queue gear
-orders, Upgrade to masterwork, and Forge Steel Picks show "Done" (instead of "On") once
-there is nothing left to do (every soldier fully equipped / everything masterwork / every
+orders, Upgrade to masterwork, and Forge Steel Tools show "Done" (instead of "On") once
+there is nothing left to do (every soldier fully pinned / everything masterwork / every
 miner has a masterwork steel pick).
-  Queue gear orders (Shift-G)      forges one soldier's set at a time PER METAL (so
-                                   steel finishes one soldier's set while silver can
-                                   progress another), one unit per gear piece, keeps 3
-                                   bars of each metal in reserve for moods, serves
-                                   dwarves in the "Military" work detail first, and
-                                   stocks BACKUP gear (armour + weapon; IRON if there's
-                                   iron to spare after steel, else COPPER) for any soldier
-                                   who lacks a piece (steel + backup < need)
-  Upgrade to masterwork (Shift-M)  upgrades EVERY soldier's pieces in parallel (not one
-                                   soldier at a time -- so soldier 2's shield isn't blocked
-                                   behind soldier 1's hard-to-masterwork piece), and melts
-                                   enough surplus inferior copies each cycle to cover the
-                                   masterwork shortfall (out of bars -> recycle the extras),
-                                   clearing forbid so they actually melt
-
-A masterwork only counts toward the goal if it is UNDAMAGED (wear 0) and NOT on display -- a
-worn masterwork has lost its edge, and a piece locked in a display case/pedestal can never be
-equipped -- so neither is treated as "done" (and displayed pieces are never melted). Whenever a
-better piece than what's in use becomes available (a fresh masterwork, or just any higher-quality
-item), the service flags DF to re-run equipment assignment for that slot, so soldiers swap UP to
-it -- fired only when a new, better piece actually appears, so there's no equip churn.
+  Queue gear orders (Shift-G)      pins each soldier's gear from stock and forges what is
+                                   still missing or only stood in for, keeping 3 bars of
+                                   each metal in reserve for moods, and serving dwarves in
+                                   the "Military" work detail first
+  Upgrade to masterwork (Shift-M)  additionally treats a pinned piece below masterwork
+                                   quality as something still owed, so the service forges
+                                   masterworks and re-pins soldiers onto them as they
+                                   appear; melts surplus unclaimed inferior copies to fund
+                                   the re-forging when bars run short
   Forge Steel Tools (Shift-P)      OFF by default. Keeps one steel pick per miner (Mining labor)
                                    AND one steel battle axe per woodcutter (Wood Cutting labor) in
                                    stock, forged one at a time, respecting the bar reserve. Honours
@@ -77,6 +53,9 @@ it -- fired only when a new, better piece actually appears, so there's no equip 
                                    tool type is complete, FORBIDS every other (non-steel) one so the
                                    workers switch to steel -- but never a battle axe a SOLDIER holds
                                    (the military's steel axes are left alone, not miscounted either).
+                                   This is the OLD pre-pinning path, kept as-is: a mining-labor
+                                   dwarf cannot be uniformed at all (a DF conflict), so their pick
+                                   has to be handled outside the uniform system.
   Train surplus war dogs (Shift-D) war-train adult male dogs beyond BREEDER_MALES
                                    breeders (Pets/Livestock training, done by an Animal
                                    Trainer -- not the soldiers). A male PUPPY counts toward
@@ -122,8 +101,16 @@ local function armour_slots(r, R, IT)
         [1] = {{IT.HELM, R.helms, r.helm_type, 'helm'}},
         [2] = {{IT.PANTS, R.pants, r.pants_type, 'greaves'}},   -- no leggings: they
                                                                 -- conflict with greaves and never equip
-        [3] = {{IT.GLOVES, R.gloves, r.gloves_type, 'gauntlet'}},
-        [4] = {{IT.SHOES, R.shoes, r.shoes_type, 'high boot'}},
+        -- gauntlets and high boots are listed TWICE: the wearer needs two of each, and the
+        -- pin model gives every item its own spec (see ensure_pair_specs). Declaring the
+        -- pair in the template keeps a squad position the same SHAPE as the template it was
+        -- applied from -- DF stores no squad->template link and matches by content, so a
+        -- position with two glove specs against a template with one stops being recognised
+        -- as that uniform at all.
+        [3] = {{IT.GLOVES, R.gloves, r.gloves_type, 'gauntlet'},
+               {IT.GLOVES, R.gloves, r.gloves_type, 'gauntlet'}},
+        [4] = {{IT.SHOES, R.shoes, r.shoes_type, 'high boot'},
+               {IT.SHOES, R.shoes, r.shoes_type, 'high boot'}},
     }
 end
 
@@ -181,29 +168,16 @@ local function on_hand(it)
         or f.dump or f.garbage_collect or f.encased or f.on_fire)
 end
 
--- how many metal (mattype 0) bars of each inorganic index the fort has on hand
-local function metal_bar_counts()
-    local c = {}
-    for _, it in ipairs(df.global.world.items.all) do
-        if it:getType() == df.item_type.BAR and it:getMaterial() == 0 and not it.flags.melt
-            and on_hand(it)
-        then
-            local mi = it:getMaterialIndex()
-            c[mi] = (c[mi] or 0) + 1
-        end
-    end
-    return c
-end
-
--- pick the metal to actually use: the preferred one if any of its bars are on hand,
--- else COPPER if copper bars are on hand (the requested fallback), else the preferred
--- one anyway (nothing on hand yet -> keep the aspiration rather than force copper).
--- Availability = "bars on hand right now" (per the chosen definition).
-local function resolve_metal(pref, copper, counts)
-    if pref and (counts[pref] or 0) > 0 then return pref end
-    if copper and (counts[copper] or 0) > 0 then return copper end
-    return pref or copper
-end
+-- NOTE: there used to be a resolve_metal() here that swapped the whole armour set to COPPER
+-- whenever zero steel bars were on hand at the moment the templates were built. Because
+-- magnus-scripts re-runs template creation every session, one session that happened to start
+-- with no steel bars silently rebuilt the fort's entire military as "Copper - <weapon>" --
+-- renamed AND with copper armour in the specs, which is a permanent downgrade of every squad
+-- the uniform is later applied to. It also contradicted the core rule that THE UNIFORM IS
+-- NEVER EDITED: the uniform states the goal, and a shortage is handled by making a cheaper
+-- STAND-IN (see queue_standins) which soldiers wear until the real thing is forged. So the
+-- templates now always ask for their intended metal. Deliberate per-weapon exceptions
+-- (SILVER war hammer, COPPER crossbow) live in GROUP and are unaffected.
 
 -- "STEEL" -> "Steel", "COPPER" -> "Copper" (for the template name)
 local function metal_name(idx)
@@ -233,7 +207,7 @@ local function create_template(ent, spec, armour, wmat)
         end
     end
     -- leather CLOAK (over-layer, slot 0) -- always leather regardless of the armour metal. Leather
-    -- wears out, so the service replaces a damaged one and the dwarf re-equips it (see the tally).
+    -- wears out, so the service replaces a damaged one and the dwarf re-equips it.
     add_to_slot(u, 0, IT.ARMOR, resolve_sub(R.armor, setof(r.armor_type), 'cloak'),
                 -1, -1, df.entity_material_category.Leather)
     -- shield (slot 5) -- armour metal; buckler for crossbow
@@ -258,8 +232,7 @@ local function create_civilian_uniform(ent, spec)
         if ent.uniforms[i].name:find('Melee') then proto = ent.uniforms[i]; break end
     end
     local steel = inorganic_idx('STEEL')
-    local wmat = resolve_metal(inorganic_idx(spec.wmat or 'STEEL') or steel,
-                               inorganic_idx('COPPER'), metal_bar_counts())
+    local wmat = inorganic_idx(spec.wmat or 'STEEL') or steel
     local u = df.entity_uniform:new()
     u.id = ent.next_uniform_id
     u.name = 'Civilian - ' .. spec.weapon
@@ -311,21 +284,28 @@ local function ensure_cloaks(ent)
             end
         end
     end
-    -- NOTE: this used to ALSO inject a cloak spec into every occupied squad POSITION in the
-    -- fort. That was wrong -- the script must never modify a squad's assigned gear on its own.
-    -- Cloaks belong in the uniform TEMPLATES it creates (above); a squad picks them up when
-    -- its uniform is (re)applied from the template. Existing position specs are left as they
-    -- are -- stripping them can't distinguish template-copied cloaks from injected ones.
-end
-
--- resolve the regular-shield subtype (not a buckler) once
-local shield_sub_cache
-local function shield_subtype(ent)
-    if shield_sub_cache == nil then
-        shield_sub_cache = resolve_sub(df.global.world.raws.itemdefs.shields,
-                                       setof(ent.resources.shield_type), 'shield') or false
+    -- PAIR ENTRIES: every owned template (military AND civilian) must declare gauntlets and
+    -- high boots TWICE, so a position split into one spec per item still matches the shape
+    -- of the template it came from. Migrates templates created before the pair split.
+    for i = 0, #ent.uniforms - 1 do
+        local u = ent.uniforms[i]
+        if is_owned_name(u.name) then
+            for _, pair in ipairs({{slot = 3, it = df.item_type.GLOVES},
+                                   {slot = 4, it = df.item_type.SHOES}}) do
+                local types = u.uniform_item_types[pair.slot]
+                local n = 0
+                for j = 0, #types - 1 do if types[j] == pair.it then n = n + 1 end end
+                if n == 1 then
+                    -- duplicate the existing entry exactly (subtype + material spec)
+                    local idx
+                    for j = 0, #types - 1 do if types[j] == pair.it then idx = j; break end end
+                    local info = u.uniform_item_info[pair.slot][idx]
+                    add_to_slot(u, pair.slot, pair.it, u.uniform_item_subtypes[pair.slot][idx],
+                                info.mattype, info.matindex, info.material_class)
+                end
+            end
+        end
     end
-    return shield_sub_cache or nil
 end
 
 -- remove the templates this tool owns (name prefix), so re-running is clean
@@ -400,14 +380,11 @@ function create_steel_uniforms()
     if not ent then qerror('no fort entity') end
     local steel = inorganic_idx('STEEL')
     if not steel then qerror('no STEEL inorganic in this world') end
-    local copper = inorganic_idx('COPPER')
-    local counts = metal_bar_counts()
-    -- steel unless there are no steel bars on hand and copper bars are (fall back to copper)
-    local armour = resolve_metal(steel, copper, counts)
+    local armour = steel          -- always: a shortage is met with stand-ins, not a downgrade
     remove_owned(ent)
     local made = {}
     for _, spec in ipairs(GROUP) do
-        local wmat = resolve_metal(inorganic_idx(spec.wmat or 'STEEL') or steel, copper, counts)
+        local wmat = inorganic_idx(spec.wmat or 'STEEL') or steel
         local u = create_template(ent, spec, armour, wmat)
         made[#made + 1] = u.name
     end
@@ -419,7 +396,41 @@ function create_steel_uniforms()
     return made, deleted_metal
 end
 
--- ---- order service: queue the gear each squad soldier's uniform requires -----
+-- =============================================================================
+-- THE MODEL
+--
+-- DF keeps a squad's uniform on the POSITION -- squad_position.equipment.uniform[slot],
+-- a vector of squad_uniform_spec -- and NOT on the squad: there is no squad ->
+-- entity_uniform link anywhere in the structures (`squad` carries only
+-- `uniform_priority`). The position outlives its occupant: removing a dwarf leaves the
+-- specs in place, which is why a fresh recruit dropped into that slot already wears the
+-- right uniform. The position specs are therefore the one persistent record of what a
+-- soldier is SUPPOSED to have, and this service never writes their filter fields
+-- (item_type / item_subtype / mattype / matindex / material_class). It only ever fills
+-- in WHICH ITEM satisfies them:
+--
+--   * `spec.assigned` (plus the position's assigned_items) is what actually makes a dwarf
+--     GO AND FETCH a piece. It is written for EVERY slot. `spec.item` alone does nothing:
+--     DF never back-fills `assigned` from it, so a slot pinned that way sits unequipped
+--     forever with no pickup job -- measured live, see pin_single.
+--   * `spec.item` is additionally set on SINGLETON slots: DF's native "specific item" pin,
+--     which records the choice, shows on the Equip screen, and stops the solver re-solving
+--     the slot out from under us. PAIR slots (gauntlets / high boots: ONE spec, TWO items)
+--     cannot use it -- it names only one item -- so they rely on `assigned` alone.
+--
+-- Reading intent back is just reading the spec, and that also settles ownership with no
+-- persisted bookkeeping at all:
+--
+--   spec.item >= 0, filters all -1    a HAND-PICKED specific item -- the player's, or
+--                                     noble-warriors' symbols of office. NEVER touched.
+--   spec.item >= 0, filters present   OUR pin. May be re-pinned (stand-in -> exact
+--                                     material, or an upgrade to masterwork).
+--   spec.item <  0, filters present   an unpinned filter spec -- ours to fill.
+--
+-- A spec naming a material we would never ask for (an adamantine short sword on an
+-- otherwise steel uniform) is the player customising that slot: we skip THAT property
+-- and leave the rest of their uniform managed.
+-- =============================================================================
 
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
@@ -431,6 +442,7 @@ local DAY_TICKS = 1200
 local BARS_PER_ITEM = 1   -- metal gear (armour/weapon) = ~1 bar each
 local RESERVE_BARS = 3    -- keep this many bars of each metal free (moods / other jobs)
 local BREEDER_MALES = 2   -- adult male dogs kept untrained for breeding
+local MAX_WEAR = 1        -- a piece worn beyond this is not worth pinning to anyone
 
 -- weapon subtype for the mining pick (ITEM_WEAPON_PICK), resolved per world
 local function pick_subtype()
@@ -454,8 +466,8 @@ local MAKE_JOB = {
     [df.item_type.WEAPON] = df.job_type.MakeWeapon,
 }
 
--- item_type -> the plotinfo.equipment.update dirty-flag field that makes DF re-run assignment
--- for that slot (so soldiers swap up to a better piece when one becomes available)
+-- item_type -> the plotinfo.equipment.update dirty-flag field that makes DF act on a
+-- changed assignment for that slot (generate the pickup job / drop the old piece)
 local UPDATE_FIELD = {
     [df.item_type.ARMOR]  = 'armor',
     [df.item_type.HELM]   = 'helm',
@@ -466,15 +478,26 @@ local UPDATE_FIELD = {
     [df.item_type.WEAPON] = 'weapon',
 }
 
--- gauntlets and high boots are worn as PAIRS, so a soldier needs 2 of each (a
--- uniform slot lists them once). They're forged a pair at a time, but each item's
--- quality is independent, so a "pair" can be one masterwork + one not.
-local PAIR_TYPES = {[df.item_type.GLOVES] = true, [df.item_type.SHOES] = true}
-local function slot_qty(item_type) return PAIR_TYPES[item_type] and 2 or 1 end
+-- item_type -> the world.items.other vector to scan for candidates. Scanning these
+-- (a few thousand entries) instead of world.items.all (hundreds of thousands) is what
+-- keeps a cycle cheap enough to run on DF's main thread.
+local OTHER_VEC = {
+    [df.item_type.ARMOR]  = df.items_other_id.ARMOR,
+    [df.item_type.HELM]   = df.items_other_id.HELM,
+    [df.item_type.PANTS]  = df.items_other_id.PANTS,
+    [df.item_type.GLOVES] = df.items_other_id.GLOVES,
+    [df.item_type.SHOES]  = df.items_other_id.SHOES,
+    [df.item_type.SHIELD] = df.items_other_id.SHIELD,
+    [df.item_type.WEAPON] = df.items_other_id.WEAPON,
+}
 
--- GAUNTLETS are HANDED (left/right, via the item's `handedness` bitarray): a soldier
--- needs 1 masterwork of EACH hand (not just any 2). HIGH BOOTS have no handedness
--- field, so they just need 2 masterwork of any hand. Only gloves are handed.
+-- gauntlets and high boots are worn as PAIRS: the uniform lists them once but the
+-- soldier wears two, so one spec owns TWO items.
+-- worn as a matched pair: the slot is split into one spec per item by ensure_pair_specs,
+-- after which nothing else in the pin pass needs to treat them specially
+local PAIR_TYPES = {[df.item_type.GLOVES] = true, [df.item_type.SHOES] = true}
+-- GAUNTLETS are HANDED (left/right, via the item's `handedness` bitarray): a soldier needs
+-- one of EACH hand, not just any two. HIGH BOOTS have no handedness, so any two will do.
 local HANDED = {[df.item_type.GLOVES] = true}
 -- which hand an item is (0 or 1); handedness bit 1 = one hand, bit 0/none = the other
 local function item_hand(it)
@@ -483,22 +506,22 @@ local function item_hand(it)
     return 0
 end
 
--- ARMOR/GEAR MUST BE SIZED TO THE WEARER. A dwarf fort forges non-dwarf-sized armor by setting a
+local function item_wear(it)
+    local ok, w = pcall(function() return it.wear end)
+    return (ok and w) or 0
+end
+
+-- ---- sizing -----------------------------------------------------------------
+-- ARMOR MUST BE SIZED TO THE WEARER. A dwarf fort forges non-dwarf-sized armor by setting a
 -- manager order's specdata.race; the finished item records that size in its maker_race.
 --
--- SIZING POLICY (per request):
---   * HYENA-MAN is a universal size -- its wearer sits between dwarves (6000) and humans (7000),
---     so hyena-man armor fits BOTH. We MAKE hyena-man armor for dwarves (slightly better than
---     dwarf-sized, and it cross-fits), and dwarves ACCEPT either hyena-man OR dwarf-sized.
---   * Humans MAKE and accept human-sized armor.
---   * MASTERWORK target = the make size: a dwarf's target is hyena-man (a dwarf-sized masterwork
---     doesn't satisfy it, so it gets upgraded to hyena-man); a human's is human.
--- (Simplification: humans do not count a hyena-sized piece toward basic coverage -- only
---  human-sized -- since fully sharing the hyena pool would need a bigger allocation rewrite and
---  the impact is nil: humans get human armor made for them.)
+-- HYENA-MAN is a universal size -- its wearer sits between dwarves (6000) and humans (7000),
+-- so hyena-man armor fits BOTH. We MAKE hyena-man armor for dwarves (slightly better than
+-- dwarf-sized, and it cross-fits), and dwarves ACCEPT either hyena-man OR dwarf-sized.
+-- Humans make and accept human-sized armor.
 local function civ_race() return df.global.plotinfo.race_id end
--- SHIELDS and WEAPONS are HELD, not worn -- one size fits all, so they are never sized per wearer;
--- they always key to civ size on both the requirement and stock sides.
+-- SHIELDS and WEAPONS are HELD, not worn -- one size fits all, so they are never sized per
+-- wearer; they always key to civ size on both the requirement and the stock side.
 local SIZELESS = {[df.item_type.SHIELD] = true, [df.item_type.WEAPON] = true}
 
 -- hyena-man creature index (our universal armor size), resolved once (raws are static)
@@ -513,19 +536,17 @@ local function hyena_race()
     return nil
 end
 
--- the size race to MAKE armor for a wearer of `race`: hyena-man for dwarves, else the wearer's
--- own race. Sizeless gear is always civ size. This is the req/order key size.
-local function make_race(item_type, race)
+-- the size race to MAKE armor for a wearer of `race`: hyena-man for dwarves, else the
+-- wearer's own race. Sizeless gear is always civ size. This is the req/order key size.
+local function key_race(item_type, race)
     if SIZELESS[item_type] then return civ_race() end
     local h = hyena_race()
     if h and race == civ_race() then return h end   -- dwarf -> hyena-man
     return race
 end
-local function key_race(item_type, race) return make_race(item_type, race) end
 
--- which req-key size an item's ACTUAL size satisfies for basic coverage: a hyena- OR dwarf-sized
--- piece both cover the dwarf (hyena) key; anything else keys to its own maker race. Sizeless ->
--- civ. This is where "dwarves accept dwarf-sized OR hyena-man" lives.
+-- which size key an item's ACTUAL size satisfies: a hyena- OR dwarf-sized piece both cover
+-- the dwarf (hyena) key; anything else keys to its own maker race. Sizeless -> civ.
 local function item_size_race(it)
     if SIZELESS[it:getType()] then return civ_race() end
     local ok, r = pcall(function() return it.maker_race end)
@@ -534,15 +555,38 @@ local function item_size_race(it)
     if h and (m == civ_race() or m == h) then return h end   -- dwarf/hyena-sized -> hyena key
     return m
 end
--- is this item ALREADY the MAKE size for its key? Only make-size pieces count toward the
--- MASTERWORK target (so a dwarf-sized masterwork does not satisfy a dwarf -> it upgrades to
--- hyena-man). Sizeless items are always "make size".
-local function item_is_makesize(it)
-    if SIZELESS[it:getType()] then return true end
-    local ok, r = pcall(function() return it.maker_race end)
-    local m = (ok and r and r >= 0) and r or civ_race()
-    return m == item_size_race(it)
+
+-- WEARABILITY IS ABOUT BODY SIZE, NOT RACE IDENTITY. Measured in this world:
+--   DWARF 6000, ELF 6000, GOBLIN 6000, HYENA_MAN 6500, HUMAN 7000, KOBOLD 2000
+-- so elf- and goblin-made armour is EXACTLY dwarf-sized and perfectly wearable, hyena-man
+-- is loose but fine, human is too big. Matching on the maker's race INDEX (which this did
+-- before) threw all of that away: 20 free leather cloaks sat unusable, marked "wrong size",
+-- while four soldiers had no cloak at all. Fits = same size, up to ~10% larger.
+local SIZE_TOLERANCE = 1.10
+local adult_size_cache = {}
+local function adult_size(race)
+    local v = adult_size_cache[race]
+    if v == nil then
+        local c = df.creature_raw.find(race)
+        v = (c and #c.caste > 0 and c.caste[0].misc.adult_size) or 0
+        adult_size_cache[race] = v
+    end
+    return v
 end
+
+-- the body size a worn item was made for; 0 for held gear (shields/weapons: one size fits all)
+local function item_maker_size(it)
+    if SIZELESS[it:getType()] then return 0 end
+    local ok, mr = pcall(function() return it.maker_race end)
+    local m = (ok and mr and mr >= 0) and mr or civ_race()
+    return adult_size(m)
+end
+
+local function size_fits(item_size, wearer_size)
+    if item_size == 0 or wearer_size == 0 then return true end
+    return item_size >= wearer_size and item_size <= wearer_size * SIZE_TOLERANCE
+end
+
 -- the race the soldier occupying a squad position is (for sizing their gear)
 local function occupant_race(pos)
     local hf = pos.occupant >= 0 and df.historical_figure.find(pos.occupant)
@@ -550,11 +594,11 @@ local function occupant_race(pos)
     return (u and u.race) or civ_race()
 end
 
--- ---- non-metal materials (wood shields, leather cloaks/armour, bone greaves) ----------------
+-- ---- non-metal materials (wood shields, leather cloaks/armour, bone greaves) -------------
 -- A gear material in our keys/orders is a (mat_type, mat_index) pair: a METAL is (0, inorganic
--- idx) as before; a WOOD / LEATHER / BONE piece is (-1, entity_material_category). MATCLASS maps
--- that category to the manager-order material_category field (to MAKE it) and the material_flags
--- bit (to DETECT it in stock).
+-- idx); a WOOD / LEATHER / BONE piece is (-1, entity_material_category). MATCLASS maps that
+-- category to the manager-order material_category field (to MAKE it) and the material_flags bit
+-- (to DETECT it in stock).
 local MATCLASS = {
     [df.entity_material_category.Leather] = {order = 'leather', flag = df.material_flags.LEATHER},
     [df.entity_material_category.Bone]    = {order = 'bone',    flag = df.material_flags.BONE},
@@ -579,186 +623,68 @@ local function item_matpair(it)
     if cls then return -1, cls end
     return it:getMaterial(), it:getMaterialIndex()
 end
--- the (mat_type, mat_index) key pair for a UNIFORM item's material spec: a specific material
--- (mattype>=0, e.g. steel) stays; a material CLASS (material_class>=0) becomes (-1, category).
--- Returns nil if the spec has neither (a bare "any material" slot we don't manage).
-local function uniform_matpair(it)
-    if it.mattype >= 0 then return it.mattype, it.matindex end
-    if it.material_class >= 0 and MATCLASS[it.material_class] then return -1, it.material_class end
+-- the (mat_type, mat_index) key pair for a UNIFORM spec's material: a specific material
+-- (mattype >= 0, e.g. steel) stays; a material CLASS (material_class >= 0) becomes
+-- (-1, category). Returns nil for a bare "any material" slot we don't manage.
+local function uniform_matpair(spec)
+    if spec.mattype >= 0 then return spec.mattype, spec.matindex end
+    if spec.material_class >= 0 and MATCLASS[spec.material_class] then return -1, spec.material_class end
     return nil
 end
 
--- tally what every assigned squad soldier's uniform asks for, by exact item +
--- material (so copper armour + iron sword each get their own order):
--- "type/sub/mt/mi" -> {item_type, subtype, mat_type, mat_index, count}
-local function compute_required()
-    local fort = df.global.plotinfo.group_id
-    local req = {}
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for p = 0, #sq.positions - 1 do
-                local pos = sq.positions[p]
-                if pos.occupant >= 0 then
-                    local srace = occupant_race(pos)   -- size this soldier's gear to their race
-                    for slot = 0, 6 do
-                        local v = pos.equipment.uniform[slot]
-                        for j = 0, #v - 1 do
-                            local it = v[j]
-                            -- squad_uniform_spec uses mattype/matindex (metal) OR material_class
-                            local mt, mi = uniform_matpair(it)
-                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and mt then
-                                local krace = key_race(it.item_type, srace)   -- civ for shields/weapons
-                                local key = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
-                                                                      mt, mi, krace)
-                                local r = req[key]
-                                if not r then
-                                    r = {item_type = it.item_type, subtype = it.item_subtype,
-                                         mat_type = mt, mat_index = mi,
-                                         size_race = krace, count = 0}
-                                    req[key] = r
-                                end
-                                r.count = r.count + slot_qty(it.item_type)
-                            end
-                        end
-                    end
-                end
-            end
+-- How good a metal is as ARMOUR/WEAPON stock, best first -- used both to choose the best
+-- stand-in already in stock and to decide what to forge when the demanded metal is
+-- unaffordable. Deliberately NOT the raw's material_value: that is an economic price, and
+-- by it SILVER outranks IRON, which would put soldiers in soft silver breastplates. Silver
+-- is last here for the same reason (it is only ever wanted where a uniform asks for it, on
+-- war hammers). Anything unlisted -- including wood/leather/bone -- sorts after all metals.
+local STANDIN_ORDER = {'STEEL', 'IRON', 'BRONZE', 'BISMUTH_BRONZE', 'COPPER', 'SILVER'}
+local WOOD_SHIELD_RANK = 1.5     -- better than iron (2), below the demanded steel (1)
+local metal_rank_cache
+local function metal_rank(mt, mi, item_type)
+    if mt ~= 0 then
+        -- A WOODEN SHIELD IS PREFERRED over any metal stand-in: it costs no bars at all and
+        -- blocks just as well while weighing far less. Only the material the uniform
+        -- actually demands outranks it.
+        if item_type == df.item_type.SHIELD and mi == df.entity_material_category.Wood then
+            return WOOD_SHIELD_RANK
+        end
+        return #STANDIN_ORDER + 1                          -- other material classes: worst
+    end
+    if not metal_rank_cache then
+        metal_rank_cache = {}
+        for i, id in ipairs(STANDIN_ORDER) do
+            local idx = inorganic_idx(id)
+            if idx then metal_rank_cache[idx] = i end
         end
     end
-    return req
+    return metal_rank_cache[mi] or (#STANDIN_ORDER + 1)
 end
 
--- unit ids in the "Military" work detail (the fort's active standing military, per
--- military-labor). Empty if there's no such detail.
-local function military_labor_set()
-    local wd = df.global.plotinfo.labor_info.work_details
-    for i = 0, #wd - 1 do
-        if wd[i].name == 'Military' then
-            local set = {}
-            for _, id in ipairs(wd[i].assigned_units) do set[id] = true end
-            return set
-        end
-    end
-    return {}
-end
-
--- squad ids DFHack's autotraining tool is currently driving (active only), read from its
--- persisted site data (keys are stored as strings, so coerce back to numbers). Matches how
--- military-labor / dwarf-rts read it. Non-leader members of these are only rostered to train,
--- not real soldiers, so we deprioritise their gear like a civilian's.
-local function autotraining_squads()
+-- MATERIALS THIS SERVICE IS WILLING TO ASK FOR. A uniform spec naming anything else -- the
+-- adamantine short sword on an otherwise steel uniform -- is the player customising that
+-- slot by hand: we leave that property alone entirely (no pin, no order), while still
+-- managing the rest of that soldier's uniform.
+local MANAGED_METALS = {'STEEL', 'IRON', 'COPPER', 'BRONZE', 'BISMUTH_BRONZE', 'SILVER'}
+local managed_cache
+local function managed_materials()
+    if managed_cache then return managed_cache end
     local set = {}
-    local d = dfhack.persistent.getSiteData('autotraining')
-    if d and d.training_squads then
-        for k, active in pairs(d.training_squads) do
-            if active then set[tonumber(k)] = true end
-        end
+    for _, id in ipairs(MANAGED_METALS) do
+        local idx = inorganic_idx(id)
+        if idx then set['0/' .. idx] = true end
     end
+    for cat in pairs(MATCLASS) do set['-1/' .. cat] = true end
+    managed_cache = set
     return set
 end
 
--- a squad position wearing a "Civilian - *" uniform: no metal breastplate / mail shirt in the
--- body slot (leather body armour instead). Same marker military-labor uses -- DFHack exposes no
--- squad->uniform-template link, so we can't read the name.
-local function position_is_civilian(pos)
-    local has_armor, has_metal = false, false
-    local body = pos.equipment.uniform[0]
-    for j = 0, #body - 1 do
-        if body[j].item_type == df.item_type.ARMOR then
-            has_armor = true
-            if body[j].mattype == 0 then has_metal = true end
-        end
-    end
-    return has_armor and not has_metal
-end
+-- ---- stock / ownership helpers ------------------------------------------------
 
--- does this position carry a CUSTOM uniform -- a slot requirement pinned to a SPECIFIC item (item
--- id >= 0), e.g. an artifact breastplate the player assigned by hand? The uniform + its assigned
--- items live on the POSITION, so such a member must NEVER be moved between squads (a move would drop
--- them into a standard position and wipe the custom assignment). We pin them in place like a leader.
-local function position_has_custom_uniform(pos)
-    for slot = 0, 6 do
-        local v = pos.equipment.uniform[slot]
-        for j = 0, #v - 1 do if v[j].item >= 0 then return true end end
-    end
-    return false
-end
-
--- index of the "Ready" routine in the fort's schedule list (what a squad's cur_routine_idx points
--- into), or nil if there's no routine by that name. Off-duty is index 0; "Ready" is the standard
--- station-and-train routine, so once a civilian militia is fully equipped we switch it on.
-local function ready_routine_idx()
-    local routines = df.global.plotinfo.alerts.routines
-    for i = 0, #routines - 1 do
-        if routines[i].name == 'Ready' then return i end
-    end
-end
-
--- ordered list of soldiers, each -> {unit_id, sid, civilian, needs = {{k=gearkey, hand=..}, ...}}
--- for the makeable pieces their uniform specifies. Ordered MILITARY first (Military-detail
--- members, then other military, in squad order), then CIVILIAN-uniform soldiers LAST -- so a
--- civilian's gear is only queued after every military dwarf already has theirs.
-local function compute_per_soldier()
-    local fort = df.global.plotinfo.group_id
-    local mil = military_labor_set()
-    local training = autotraining_squads()
-    local prioritized, rest, civ = {}, {}, {}
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for p = 0, #sq.positions - 1 do
-                local pos = sq.positions[p]
-                if pos.occupant >= 0 then
-                    local hf = df.historical_figure.find(pos.occupant)
-                    local uid = hf and hf.unit_id or -1
-                    local srace = occupant_race(pos)
-                    local needs = {}
-                    for slot = 0, 6 do
-                        local v = pos.equipment.uniform[slot]
-                        for j = 0, #v - 1 do
-                            local it = v[j]
-                            local mt, mi = uniform_matpair(it)
-                            if MAKE_JOB[it.item_type] and it.item_subtype >= 0 and mt then
-                                local k = ('%d/%d/%d/%d/%d'):format(it.item_type, it.item_subtype,
-                                    mt, mi, key_race(it.item_type, srace))
-                                if HANDED[it.item_type] then           -- gauntlets: one of each hand
-                                    needs[#needs + 1] = {k = k, hand = 0}
-                                    needs[#needs + 1] = {k = k, hand = 1}
-                                else                                    -- boots (x2) / everything (x1)
-                                    for _ = 1, slot_qty(it.item_type) do needs[#needs + 1] = {k = k} end
-                                end
-                            end
-                        end
-                    end
-                    if #needs > 0 then
-                        -- civilian for gear purposes = a Civilian-* uniform OR a non-leader member of
-                        -- an autotraining squad (only rostered to train; the leader stays a soldier).
-                        local real_civ = position_is_civilian(pos)   -- an actual Civilian-* squad member
-                        local civilian = real_civ or (training[sq.id] and p ~= 0)
-                        local entry = {unit_id = uid, sid = sq.id, civilian = civilian,
-                                       real_civ = real_civ, leader = (p == 0), needs = needs,
-                                       pinned = position_has_custom_uniform(pos)}   -- custom uniform: never move
-                        if civilian then civ[#civ + 1] = entry
-                        elseif mil[uid] then prioritized[#prioritized + 1] = entry
-                        else rest[#rest + 1] = entry end
-                    end
-                end
-            end
-        end
-    end
-    for _, e in ipairs(rest) do prioritized[#prioritized + 1] = e end   -- military detail, then rest military
-    for _, e in ipairs(civ) do prioritized[#prioritized + 1] = e end    -- ...then civilians LAST
-    return prioritized
-end
-
-local function barkey(mt, mi) return mt .. '/' .. mi end
-
--- df.global.world.items.all also lists items the fort doesn't possess -- e.g. named
--- artifacts and gear carried by offsite historical figures (UNIT_HOLDER to a unit
--- not loaded here, or a non-civ unit). Those would inflate our stock counts and
--- make us under-produce, so a "fort stock" item is one with no unit holder
--- (stockpile/building/ground) OR held by one of our own loaded dwarves.
+-- world.items.other also lists items the fort doesn't possess -- named artifacts and gear
+-- carried by offsite historical figures (UNIT_HOLDER to a unit not loaded here, or a
+-- non-civ unit). A "fort stock" item is one with no unit holder (stockpile/building/ground)
+-- OR held by one of our own loaded dwarves.
 local function not_fort_stock(it)
     for _, r in ipairs(it.general_refs) do
         if r:getType() == df.general_ref_type.UNIT_HOLDER then
@@ -769,27 +695,139 @@ local function not_fort_stock(it)
     return false
 end
 
--- is this item in a unit's inventory (worn / wielded / carried)? An equipped piece can't
--- be melted -- the melt job never fires -- so it must never be a melt candidate, even though
--- it still counts as owned stock. (Any UNIT_HOLDER = someone has it; offsite/enemy holders
--- are already filtered out by not_fort_stock before this is checked.)
-local function item_equipped(it)
-    for _, r in ipairs(it.general_refs) do
-        if r:getType() == df.general_ref_type.UNIT_HOLDER then return true end
-    end
-    return false
+-- is this item built into a building? Such a piece can never be equipped by a soldier:
+-- a weapon locked in a weapon TRAP, or a piece on DISPLAY in a case / pedestal (the
+-- player put it there on purpose). Never pinnable, never a melt candidate.
+local function item_installed(it) return it.flags.in_building end
+
+-- the unit holding an item (worn / wielded / hauled), or nil
+local function holder_of(it)
+    return dfhack.items.getHolderUnit(it)
 end
 
--- is this item built into a building? Such a piece can never be equipped by a soldier, so it
--- must NOT count as available gear (nor be a melt candidate). This covers two cases that would
--- otherwise inflate stock and mask a real shortage:
---   * a weapon locked in a weapon TRAP -- a fort can have dozens (e.g. 88 silver war hammers,
---     60+ spears in traps here), none of them equippable;
---   * a piece on DISPLAY in a case / pedestal (the player put it there on purpose).
--- flags.in_building is set for exactly these built-in items -- verified on this fort that every
--- in-building gear piece is a trap or display component, never loose/equippable stock.
-local function item_installed(it)
-    return it.flags.in_building
+-- ---- unsticking: why an assigned piece never reaches its soldier -------------
+-- Writing spec.assigned is necessary but NOT sufficient. Several states silently block a
+-- pickup, all measured on this fort (assignments correct, PickupEquipment jobs = 0). The
+-- list below is the one PunPun's "Military Reequip" workshop mod fixes, which is where the
+-- diagnosis came from:
+--   * the piece sits inside a BIN -- DF frequently never fetches uniform items out of one
+--   * flags.in_job is set while NO live job references the item (a stale claim)
+--   * flags.owned is set with no actual owner (stale ownership), or it is someone's property
+--   * the soldier is simply never given a PickupEquipment job
+
+-- item ids referenced by any live job. Built ONCE per cycle: the naive form (re-walk the
+-- job list per item) is O(items x jobs) and would freeze DF's main thread. Read-only --
+-- never mutate a live job's item list from here, that segfaults DF.
+local function live_job_items()
+    local set = {}
+    local link = df.global.world.jobs.list.next
+    local guard = 0
+    while link and guard < 4000 do
+        guard = guard + 1
+        local j = link.item
+        if j then
+            for _, jr in ipairs(j.items) do
+                if jr.item then set[jr.item.id] = true end
+            end
+        end
+        link = link.next
+    end
+    return set
+end
+
+-- a stale in_job claim: the flag is set but nothing is actually fetching the item, so it
+-- would block pickup forever. Returns true if the item is (now) free of a job claim.
+local function clear_stale_in_job(it, jobitems)
+    if not it.flags.in_job then return true end
+    if jobitems[it.id] then return false end        -- a real job wants it: leave it alone
+    if not dry_run then it.flags.in_job = false end
+    return true
+end
+
+-- the unit id that owns this item, or nil. Clears the flag when it is stale (owned set with
+-- no owner), a common corruption that hides perfectly good gear.
+local function owner_id_of(it)
+    if not it.flags.owned then return nil end
+    local ow = dfhack.items.getOwner(it)
+    if ow == nil then
+        if not dry_run then it.flags.owned = false end
+        return nil
+    end
+    return ow.id
+end
+
+-- is this item somebody ELSE's personal property? DF will never hand a dwarf another
+-- dwarf's belongings, so such a piece can be assigned but will sit unfetched forever --
+-- which is exactly how eight soldiers ended up with a permanently pending leather cloak
+-- that was some civilian's clothing. Pass the wearer's unit id; nil means "anyone's
+-- property disqualifies it".
+local function owned_by_other(it, unit_id)
+    local oid = owner_id_of(it)
+    return oid ~= nil and oid ~= unit_id
+end
+
+-- lift a piece out of its BIN onto the floor the bin stands on, so a soldier can reach it
+local function free_from_bin(it)
+    local c = dfhack.items.getContainer(it)
+    if not c or c:getType() ~= df.item_type.BIN then return false end
+    if dry_run then return true end
+    local ok = pcall(dfhack.items.moveToGround, it, xyz2pos(c.pos.x, c.pos.y, c.pos.z))
+    return ok and true or false
+end
+
+-- STRANGE MOODS ARE SACRED. A moody dwarf's whole artifact sequence hangs off their
+-- current_job and the items they have reserved; interrupting it fails the mood and the
+-- dwarf goes insane. Measured live: this service replaced a Possessed dwarf's mood job with
+-- its own PickupEquipment job. Anyone in a real mood is skipped entirely -- not nudged, not
+-- re-pinned, and none of their reserved items touched. Baby and Traumatized are `mood_type`
+-- values too but are not artifact moods, so they must NOT disable gear handling.
+local REAL_MOODS = {}
+for _, n in ipairs{'Fey', 'Secretive', 'Possessed', 'Macabre', 'Fell', 'Melancholy',
+                   'Raving', 'Berserk'} do
+    if df.mood_type[n] then REAL_MOODS[df.mood_type[n]] = true end
+end
+local function in_strange_mood(u)
+    return u ~= nil and REAL_MOODS[u.mood] == true
+end
+
+-- jobs a soldier must never be yanked off to go fetch a sock
+local NUDGE_PROTECTED = {}
+for _, n in ipairs{'Eat', 'Drink', 'Sleep', 'Rest', 'AttackEnemy', 'Flee', 'Fight', 'Kill',
+                   'Hunt', 'MeleeAttack', 'RecoverWounded', 'PickupEquipment', 'CarryBody',
+                   'GiveWater', 'GiveFood', 'Diagnose', 'Surgery', 'Suture', 'DressWound',
+                   -- every mood job, plus the hunt for its materials
+                   'SeekArtifact', 'StrangeMoodCrafter', 'StrangeMoodJeweller',
+                   'StrangeMoodForge', 'StrangeMoodMagmaForge', 'StrangeMoodBrooding',
+                   'StrangeMoodFell', 'StrangeMoodCarpenter', 'StrangeMoodMason',
+                   'StrangeMoodBowyer', 'StrangeMoodTanner', 'StrangeMoodWeaver',
+                   'StrangeMoodGlassmaker', 'StrangeMoodMechanics'} do
+    if df.job_type[n] then NUDGE_PROTECTED[df.job_type[n]] = true end
+end
+
+-- Give a soldier a PickupEquipment job. DF very often does not generate one on its own even
+-- with the slot assigned and dirtied (measured: 0 such jobs fort-wide while 50+ slots were
+-- assigned and their owners idle), so we create it.
+--
+-- NEVER CANCEL AN EXISTING JOB. This used to interrupt a busy soldier via
+-- dfhack.job.removeJob, and that CRASHED THE GAME (SIGSEGV in DF's main loop): removeJob
+-- frees the job but does NOT clear unit.job.current_job, so the unit is left holding a
+-- dangling pointer and DF dereferences it on the next frame. It even looks like it worked
+-- from Lua -- reading current_job afterwards returns the freed struct's stale contents.
+--
+-- So a nudge only ever happens when the dwarf is genuinely IDLE. A busy one gets nudged on
+-- a later cycle instead; nothing is lost by waiting, and there is no safe way to take a job
+-- away from a unit from here. (NUDGE_PROTECTED is kept as a second gate for the same
+-- reason -- most importantly it covers every StrangeMood job.)
+local function nudge_pickup(unit)
+    if in_strange_mood(unit) then return false end     -- never interrupt an artifact mood
+    local cur = unit.job.current_job
+    if cur then return false end                       -- busy: leave them entirely alone
+    if dry_run then return true end
+    local job = df.job:new()
+    job.job_type = df.job_type.PickupEquipment
+    job.pos = xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z)
+    unit.job.current_job = job
+    return true
 end
 
 -- locate one of our tracked manager orders by id
@@ -798,24 +836,70 @@ local function order_by_id(id)
     for i = 0, #mo.all - 1 do if mo.all[i].id == id then return mo.all[i], i end end
 end
 
+-- ---- enable state: toggles, persisted ---------------------------------------
+
+state = state or nil
+-- gear picture from the most recent cycle, consumed by civilian_arrange() -- the
+-- `civilian-militia` command's engine
+civ_snapshot = civ_snapshot or nil
+
+-- DRY RUN (`military-uniforms dry`): every mutating primitive below becomes a no-op that
+-- records what it WOULD have done, so a cycle can be previewed against a live fort without
+-- touching a single uniform, order or item. Reset by the command that sets it.
+local dry_run = false
+local dry_log = nil
+local function note(fmt, ...)
+    if dry_log then dry_log[#dry_log + 1] = fmt:format(...) end
+end
+
+local function load_state()
+    if not state then
+        state = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
+        if state.queue == nil then state.queue = true end       -- gear queueing defaults ON
+        if state.masterwork == nil then state.masterwork = false end
+        if state.wardogs == nil then state.wardogs = false end
+        if state.pickaxes == nil then state.pickaxes = false end -- miner steel picks default OFF
+        if not state.orders then state.orders = {} end
+        state.best_q = nil          -- retired: the pinning model has no swap-up heuristic
+    end
+    return state
+end
+local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) end
+
+function isEnabled() return load_state().queue end
+
+-- any background service on? (gear queueing, war-dog training, or miner pickaxes)
+local function service_on() load_state(); return state.queue or state.wardogs or state.pickaxes end
+
 -- delete the order we track for `key`, if it still exists
 local function drop_order(key)
     local id = state.orders[key]
     if not id then return end
+    if dry_run then note('  - would drop order for %s', key); return end
     local o, idx = order_by_id(id)
     if o then df.global.world.manager_orders.all:erase(idx); o:delete() end
     state.orders[key] = nil
 end
 
--- DF makes the items of any order whose amount_left>0 the moment it's submitted,
--- WITHOUT checking conditions (conditions only decide whether to re-fire an
--- already-completed order), and it never re-arms an order sitting at amount_left=0.
--- So leaning on DF's repeat always force-produces at least one unit you may not
--- need. Instead we self-manage: run_cycle decides WHICH gear key to make (one
--- soldier's set at a time, honouring the bar reserve) and calls this to create or
--- re-arm exactly ONE unit for that key; drop_order removes a key once it's covered.
+-- DF makes the items of any order whose amount_left>0 the moment it's submitted, WITHOUT
+-- checking conditions (conditions only decide whether to re-fire an already-completed
+-- order), and it never re-arms an order sitting at amount_left=0. So leaning on DF's
+-- repeat always force-produces at least one unit you may not need. Instead we self-manage:
+-- run_cycle decides what is still owed and calls this to create or re-size exactly that
+-- many units; drop_order removes a key once it's covered.
 local function queue_one(key, r, n)
     n = n or 1
+    if dry_run then
+        local mat = 'material class ' .. tostring(r.mat_index)
+        if r.mat_type == 0 then
+            local raw = df.inorganic_raw.find(r.mat_index)
+            mat = raw and raw.id:lower() or ('mat ' .. r.mat_index)
+        elseif MATCLASS[r.mat_index] then mat = MATCLASS[r.mat_index].order end
+        note('  + would order %dx %s %s%s', n, mat,
+             tostring(df.item_type[r.item_type]):lower(),
+             key:sub(1, 4) == 'sub/' and '   (STAND-IN for an unaffordable metal)' or '')
+        return
+    end
     local o = state.orders[key] and order_by_id(state.orders[key])
     if not o then
         local mo = df.global.world.manager_orders
@@ -838,98 +922,1041 @@ local function queue_one(key, r, n)
         mo.all:insert(0, o)
         state.orders[key] = o.id
     else
-        -- re-size the outstanding batch to the amount we want NOW (the caller recomputes the
-        -- shortfall each cycle), so an over-large batch shrinks as pieces are forged and never
-        -- keeps hogging a metal's bar budget away from other gear.
+        -- re-size the outstanding batch to what we want NOW (the caller recomputes the
+        -- shortfall each cycle), so an over-large batch shrinks as pieces are forged and
+        -- never keeps hogging a metal's bar budget away from other gear.
         o.amount_total, o.amount_left = n, n
         o.status.active = true
     end
 end
 
-local function item_wear(it)
-    local ok, w = pcall(function() return it.wear end)
-    return (ok and w) or 0
-end
-
 -- mark an item for melting, clearing forbid so it can actually be hauled + melted. NEVER melt a
--- masterwork or artifact -- their quality/value is irreplaceable. (The callers already filter to
--- inferior copies, but guard here too so no future path can ever melt one.)
+-- masterwork or artifact -- their quality/value is irreplaceable.
 local function mark_melt(it)
     if it.flags.artifact or it:getQuality() >= df.item_quality.Masterful then return false end
+    if it.flags.in_job then return false end   -- could be a moody dwarf's reserved material
+    if dry_run then note('  ~ would melt %s', dfhack.items.getDescription(it, 0, true)); return true end
     it.flags.forbid = false
     return dfhack.items.markForMelting(it)
 end
 
--- Masterwork recycling: to re-forge a masterwork we must recycle an inferior copy into
--- metal -- but NEVER below the count needed to keep every soldier geared. So per material,
--- for the masterwork pieces we still owe (bars + in-flight melts not yet covering them), we
--- melt enough surplus inferior copies THIS cycle to cover the shortfall (worst first:
--- most-damaged, then lowest quality, never masterwork/artifact), only from item types with
--- more than `need` equippable copies -- so soldiers keep a full set while we recycle the
--- extras into bars for re-forging. `extra_short` adds non-gear steel demand (miner picks).
-local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_short, basic_done)
-    local short, inbound, cands = {}, {}, {}
-    if state.masterwork then     -- gear masterwork shortfall (only when upgrading is on)
-        for key, r in pairs(req) do
-            if not basic_done or basic_done[key] then   -- only recycle for a key past its basic set
-            local mk = barkey(r.mat_type, r.mat_index)
-            local owed
-            if HANDED[r.item_type] then
-                -- gauntlets: need one masterwork of EACH hand per soldier. r.count is 2 per
-                -- soldier (a pair), so soldiers-needing = count/2 = the per-hand target.
-                local perhand = r.count / 2
-                local h = mwstock_h[key] or {}
-                owed = math.max(0, perhand - (h[0] or 0)) + math.max(0, perhand - (h[1] or 0))
-            else
-                owed = math.max(0, r.count - (mwstock[key] or 0))
-            end
-            short[mk] = (short[mk] or 0) + owed
+-- ---- reading the squad: what each soldier is SUPPOSED to have -----------------
+
+-- squad ids DFHack's autotraining tool is currently driving (active only), read from its
+-- persisted site data (keys are stored as strings, so coerce back to numbers). Non-leader
+-- members of these are only rostered to train, not real soldiers, so we deprioritise their
+-- gear like a civilian's.
+local function autotraining_squads()
+    local set = {}
+    local d = dfhack.persistent.getSiteData('autotraining')
+    if d and d.training_squads then
+        for k, active in pairs(d.training_squads) do
+            if active then set[tonumber(k)] = true end
+        end
+    end
+    return set
+end
+
+-- the LIVE dwarf occupying a squad position, or nil (vacant, or the occupant is dead /
+-- off-map). A position keeps its uniform -- and anything we pinned into it -- after its
+-- occupant is gone, so "occupant >= 0" alone is not enough to call a position manned.
+local function position_occupant(pos)
+    if pos.occupant < 0 then return nil end
+    local hf = df.historical_figure.find(pos.occupant)
+    local u = hf and df.unit.find(hf.unit_id)
+    if u and not u.flags1.inactive then return u end
+    return nil
+end
+
+-- a squad position wearing a "Civilian - *" uniform: no metal breastplate / mail shirt in the
+-- body slot (leather body armour instead). Same marker military-labor uses -- DF exposes no
+-- squad->uniform-template link, so we can't read the name.
+local function position_is_civilian(pos)
+    local has_armor, has_metal = false, false
+    local body = pos.equipment.uniform[0]
+    for j = 0, #body - 1 do
+        local sp = body[j]
+        local it_type, mattype = sp.item_type, sp.mattype
+        -- a HAND-PICKED specific item carries no filter fields, so read the ITEM itself --
+        -- otherwise a soldier whose breastplate was chosen by hand shows only the leather
+        -- cloak in this slot and reads as a civilian (see the same fix in dwarf-rts)
+        if it_type < 0 and sp.item >= 0 then
+            local it = df.item.find(sp.item)
+            if it then it_type, mattype = it:getType(), it:getMaterial() end
+        end
+        if it_type == df.item_type.ARMOR then
+            has_armor = true
+            if mattype == 0 then has_metal = true end
+        end
+    end
+    return has_armor and not has_metal
+end
+
+-- Classify one spec. Returns nil when it isn't ours to manage, else a want descriptor.
+--   * a HAND-PICKED specific item (item set, every filter field -1) is the player's
+--     (or noble-warriors') -- never touched
+--   * a spec whose material is outside managed_materials() (an adamantine sword on a
+--     steel uniform) is the player customising THAT property -- skipped, while the rest
+--     of the uniform stays managed
+local function spec_want(spec, race, unit)
+    if spec.item >= 0 and spec.item_type < 0 then return nil end    -- hand-picked specific item
+    local it = spec.item_type
+    if not MAKE_JOB[it] or spec.item_subtype < 0 then return nil end
+    local mt, mi = uniform_matpair(spec)
+    if not mt or not managed_materials()[mt .. '/' .. mi] then return nil end
+    -- EVERY spec now owns exactly ONE item, pair slots included: ensure_pair_specs has
+    -- already split a gauntlet/boot slot into one spec per wearable item (and sized that
+    -- split to the soldier's actual anatomy, so a one-handed veteran gets one glove spec).
+    local qty = 1
+    return {item_type = it, subtype = spec.item_subtype, mat_type = mt, mat_index = mi,
+            size_race = key_race(it, race),          -- the size we ORDER in (make target)
+            wsize = adult_size(race), qty = qty,     -- the size that actually FITS them
+            handed = HANDED[it] or false}
+end
+
+-- the gear key an order/shortfall is tracked under
+local function want_key(w)
+    return ('%d/%d/%d/%d/%d'):format(w.item_type, w.subtype, w.mat_type, w.mat_index, w.size_race)
+end
+
+-- Walk every occupied fort squad position and build the per-soldier picture:
+--   {unit_id, unit, pos, sid, civilian, real_civ, leader, custom, specs = {{spec, want}, ...}}
+--
+-- ORDER = THE GAME'S OWN SQUAD ORDER (historical_entity.squads, i.e. exactly the order the
+-- Squads screen shows), then position within the squad. Gear is pinned first-come, so this
+-- order decides who gets the good stuff when stock is scarce -- which makes it the player's
+-- call, not ours. Reorder your squads on the Squads screen to change priority.
+--
+-- This deliberately does NOT re-rank soldiers by anything clever. An earlier version put
+-- "Military" work-detail members first and civilian-uniform members last; the effect was
+-- that a squad with 9/10 members in that detail silently outranked one with 10/10 and got
+-- first pick of every piece, which is not a decision this script should be making.
+-- (The civilian / real_civ / leader flags are still computed -- civilian-militia consumes
+-- them -- they just no longer influence ordering.)
+local function read_soldiers()
+    local fort = df.global.plotinfo.group_id
+    local training = autotraining_squads()
+    local out = {}
+    local ent
+    for _, e in ipairs(df.global.world.entities.all) do
+        if e.id == fort then ent = e; break end
+    end
+    -- the entity's ordered squad list is the Squads-screen order; fall back to the world
+    -- list only if it is somehow unavailable
+    local sids = {}
+    if ent and #ent.squads > 0 then
+        for i = 0, #ent.squads - 1 do sids[#sids + 1] = ent.squads[i] end
+    else
+        for s = 0, #df.global.world.squads.all - 1 do
+            local sq = df.global.world.squads.all[s]
+            if sq.entity_id == fort then sids[#sids + 1] = sq.id end
+        end
+    end
+    for _, sid in ipairs(sids) do
+        local sq = df.squad.find(sid)
+        if sq and sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                local u = position_occupant(pos)
+                if u then
+                    local specs, custom = {}, false
+                    for slot = 0, 6 do
+                        local v = pos.equipment.uniform[slot]
+                        for j = 0, #v - 1 do
+                            local spec = v[j]
+                            if spec.item >= 0 and spec.item_type < 0 then custom = true end
+                            local w = spec_want(spec, u.race, u)
+                            if w then specs[#specs + 1] = {spec = spec, want = w, slot = slot} end
+                        end
+                    end
+                    -- link specs that share a slot AND item type: pair slots need them to
+                    -- coordinate handedness (see assign_gear)
+                    for _, a in ipairs(specs) do
+                        local sibs = {}
+                        for _, b in ipairs(specs) do
+                            if b.slot == a.slot and b.want.item_type == a.want.item_type then
+                                sibs[#sibs + 1] = b
+                            end
+                        end
+                        a.siblings = sibs
+                    end
+                    if #specs > 0 or custom then
+                        -- civilian for gear purposes = a Civilian-* uniform OR a non-leader
+                        -- member of an autotraining squad (only rostered to train; the
+                        -- leader stays a soldier)
+                        local real_civ = position_is_civilian(pos)
+                        local civilian = real_civ or (training[sq.id] and p ~= 0)
+                        out[#out + 1] = {unit_id = u.id, unit = u, pos = pos, sid = sq.id,
+                                         civilian = civilian, real_civ = real_civ,
+                                         leader = (p == 0), custom = custom, specs = specs}
+                    end
+                end
             end
         end
     end
-    for mk, n in pairs(extra_short or {}) do short[mk] = (short[mk] or 0) + n end
-    for mk, b in pairs(bars) do inbound[mk] = b end
-    for _, it in ipairs(df.global.world.items.all) do
-        if not_fort_stock(it) then goto next_item end
-        local key = ('%d/%d/%d/%d/%d'):format(it:getType(), it:getSubtype(), it:getMaterial(),
-                                              it:getMaterialIndex(), item_size_race(it))
-        if req[key] then
-            local mk = barkey(it:getMaterial(), it:getMaterialIndex())
-            if it.flags.melt then
-                if item_equipped(it) then
-                    -- a worn piece marked for melt is STUCK (the melt job never fires while
-                    -- it's equipped) -- un-designate it so it stops blocking, and don't count
-                    -- it as inbound metal
-                    dfhack.items.cancelMelting(it)
-                elseif not it.flags.forbid then
-                    -- metal already on the way -- but a FORBIDDEN marked item can't be hauled
-                    -- to a smelter, so it never yields a bar; don't let it throttle marking
-                    inbound[mk] = (inbound[mk] or 0) + 1
+    return out
+end
+
+-- ---- the candidate pool: which items may be pinned to whom --------------------
+
+-- Drop a spec's assignments AND the ownership we stamped on them, otherwise a released
+-- piece stays flagged as the ex-soldier's property and build_pool would skip it forever.
+-- ONLY ownership belonging to this position's own occupant is cleared: a piece owned by
+-- somebody else is a civilian's clothing that we merely failed to obtain, and un-owning it
+-- would quietly confiscate their belongings.
+local function release_assignment(pos, spec)
+    if dry_run then return end
+    local hf = pos.occupant >= 0 and df.historical_figure.find(pos.occupant)
+    local uid = hf and hf.unit_id or nil
+    for k = #spec.assigned - 1, 0, -1 do
+        local id = spec.assigned[k]
+        utils.erase_sorted(pos.equipment.assigned_items, id)
+        spec.assigned:erase(k)
+        local it = df.item.find(id)
+        if it and it.flags.owned and uid then
+            local ow = dfhack.items.getOwner(it)
+            if ow and ow.id == uid then pcall(dfhack.items.setOwner, it, nil) end
+        end
+    end
+end
+
+-- A position keeps its uniform after its occupant leaves or dies -- that is exactly how DF
+-- gives a fresh recruit the right uniform -- but it also keeps whatever WE pinned into it,
+-- so the next dwarf to fill the slot would inherit a dead soldier's item ids and lock that
+-- gear away from everyone else. Clear OUR pins (and their assignments) off unmanned
+-- positions every cycle. Hand-picked specific items (filters all -1) are the player's
+-- standing choice for that position and are left in place.
+local function clear_unmanned_positions()
+    local fort = df.global.plotinfo.group_id
+    local cleared = 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                if not position_occupant(pos) then
+                    for slot = 0, 6 do
+                        local v = pos.equipment.uniform[slot]
+                        for j = 0, #v - 1 do
+                            local spec = v[j]
+                            local ours = spec.item >= 0 and spec.item_type >= 0
+                            if ours or (spec.item < 0 and #spec.assigned > 0) then
+                                if ours and not dry_run then spec.item = -1 end
+                                release_assignment(pos, spec)
+                                cleared = cleared + 1
+                            end
+                        end
+                    end
                 end
-            elseif it:getQuality() < df.item_quality.Masterful
-                and not it.flags.artifact
-                and not item_equipped(it)                     -- a worn piece can't be melted
-                and not item_installed(it)                    -- never melt a trapped/displayed piece
-                and dfhack.items.canMelt(it)
-                and (stock[key] or 0) > req[key].count        -- surplus only: keep a full set
-            then
-                cands[mk] = cands[mk] or {}
-                cands[mk][#cands[mk] + 1] = it
             end
         end
-        ::next_item::
+    end
+    return cleared
+end
+
+-- PAIR SLOTS GET ONE SPEC PER ITEM.
+--
+-- A gauntlet/boot slot needs two items, but `spec.item` names only one -- so the original
+-- model left pair slots with no pin at all and drove them purely through `spec.assigned`.
+-- DF's own "Refresh Equipment" button (and a save reload) re-solves every slot: it honours
+-- an explicit `spec.item` and DISCARDS hand-written `assigned` entries. The result was that
+-- boots and gauntlets -- and ONLY those -- were stripped off every soldier on a refresh,
+-- while all 114 singleton pins came through untouched.
+--
+-- Verified live that DF accepts TWO specs in one slot each pinning one item, and then wants
+-- exactly two items, not two pairs. So normalise every pair slot to one managed spec per
+-- item the wearer can actually use; from there pair slots pin exactly like every other slot.
+-- Hand-picked specs in the slot count toward the total and are never touched.
+local function ensure_pair_specs()
+    local fort = df.global.plotinfo.group_id
+    local added, removed = 0, 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                local u = position_occupant(pos)
+                if u then
+                    for _, it_type in ipairs({df.item_type.GLOVES, df.item_type.SHOES}) do
+                        local slot = (it_type == df.item_type.GLOVES) and 3 or 4
+                        local v = pos.equipment.uniform[slot]
+                        local mine, fixed = {}, 0
+                        for j = 0, #v - 1 do
+                            local sp = v[j]
+                            if sp.item >= 0 and sp.item_type < 0 then fixed = fixed + 1
+                            elseif sp.item_type == it_type and sp.item_subtype >= 0 then
+                                mine[#mine + 1] = {spec = sp, idx = j}
+                            end
+                        end
+                        if #mine > 0 then
+                            -- how many this body can actually wear (an amputee wears one)
+                            local anat = (it_type == df.item_type.GLOVES)
+                                and math.min(2, u.status2.limbs_grasp_count)
+                                or math.min(2, u.status2.limbs_stand_count)
+                            local want_n = math.max(0, anat - fixed)
+                            while #mine < want_n do
+                                local proto = mine[1].spec
+                                if dry_run then added = added + (want_n - #mine); break end
+                                v:insert('#', {new = df.squad_uniform_spec,
+                                    item = -1, item_type = proto.item_type,
+                                    item_subtype = proto.item_subtype,
+                                    material_class = proto.material_class,
+                                    mattype = proto.mattype, matindex = proto.matindex,
+                                    color = -1})
+                                mine[#mine + 1] = {spec = v[#v - 1], idx = #v - 1}
+                                added = added + 1
+                            end
+                            while #mine > want_n do
+                                if dry_run then removed = removed + (#mine - want_n); break end
+                                local last = table.remove(mine)
+                                release_assignment(pos, last.spec)
+                                for j = #v - 1, 0, -1 do
+                                    if v[j] == last.spec then v:erase(j); break end
+                                end
+                                removed = removed + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return added, removed
+end
+
+-- Every item currently spoken for by a MANNED fort squad position -- a pinned `spec.item`,
+-- or anything in that position's assigned_items. An item claimed by someone else can never
+-- be offered to a second soldier, which is what makes pinning conflict-free without any
+-- stock arithmetic. Unmanned positions are skipped (clear_unmanned_positions has already
+-- emptied ours, and a hand-picked item on a vacant position stays reserved for it).
+local function claimed_items()
+    local fort = df.global.plotinfo.group_id
+    local claimed = {}
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                local manned = position_occupant(pos) ~= nil
+                if manned then
+                    for _, iid in ipairs(pos.equipment.assigned_items) do claimed[iid] = pos end
+                end
+                for slot = 0, 6 do
+                    local v = pos.equipment.uniform[slot]
+                    for j = 0, #v - 1 do
+                        local spec = v[j]
+                        if spec.item >= 0 and (manned or spec.item_type < 0) then
+                            claimed[spec.item] = pos
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return claimed
+end
+
+-- Base legality of an item as gear for ANYBODY: it exists as real, reachable, undamaged
+-- fort stock that a soldier could actually be made to carry.
+--   * forbidden / dumped / garbage-collected / burning / encased -> unreachable
+--   * marked for melting -> on its way to a smelter
+--   * in_building -> locked in a weapon TRAP or a display case / PEDESTAL: never equippable
+--   * construction / trader -> not ours to hand out
+--   * artifact -> DF will not auto-equip one; the player pins those by hand (noble-warriors)
+--   * worn past MAX_WEAR -> falling apart, not worth assigning to anyone
+local function item_pinnable(it)
+    local f = it.flags
+    if f.forbid or f.dump or f.garbage_collect or f.melt or f.on_fire or f.encased then return false end
+    if f.in_building or f.construction or f.trader or f.artifact then return false end
+    if item_wear(it) > MAX_WEAR then return false end
+    if not_fort_stock(it) then return false end
+    return true
+end
+
+-- Build the pool of assignable items, bucketed by "item_type/subtype". One pass over the
+-- seven gear vectors in world.items.other (NOT items.all). Items already claimed by a
+-- squad position are left out -- they belong to that soldier until we release them.
+local function build_pool(claimed, jobitems)
+    local pool = {}
+    for item_type, vec_id in pairs(OTHER_VEC) do
+        local handed = HANDED[item_type]
+        for _, it in ipairs(df.global.world.items.other[vec_id]) do
+            -- an item someone is already carrying but which no position claims is loose
+            -- gear from a dead/discharged soldier: DF will not hand it to a new owner while
+            -- it is held, so skip it this cycle. (Checked first -- it also subsumes the
+            -- offsite/foreign-holder test, which is the expensive part of item_pinnable.)
+            -- Personal property is off limits, and an item a LIVE job is fetching is already
+            -- spoken for -- but a STALE in_job claim (no such job) is cleared, not respected.
+            if not claimed[it.id] and not holder_of(it) and item_pinnable(it)
+                and not owned_by_other(it, nil) and clear_stale_in_job(it, jobitems) then
+                local k = it:getType() .. '/' .. it:getSubtype()
+                local b = pool[k]
+                if not b then b = {}; pool[k] = b end
+                local mt, mi = item_matpair(it)
+                b[#b + 1] = {it = it, id = it.id, mt = mt, mi = mi,
+                             q = it:getQuality(), wear = item_wear(it),
+                             size = item_size_race(it),
+                             hand = handed and item_hand(it) or nil,
+                             rank = metal_rank(mt, mi, it:getType())}
+            end
+        end
+    end
+    return pool
+end
+
+-- Does a candidate fit this want at all? (type/subtype already matched by the bucket.)
+local function cand_fits(c, w, hand)
+    if c.size ~= w.size_race then return false end                  -- wrong size for this wearer
+    if hand ~= nil and c.hand ~= nil and c.hand ~= hand then return false end
+    return true
+end
+
+local function cand_exact(c, w) return c.mt == w.mat_type and c.mi == w.mat_index end
+
+-- Anything suitable THE SOLDIER IS ALREADY WEARING, not claimed by any spec.
+--
+-- This is essential, not an optimisation. build_pool deliberately skips items with a holder
+-- (gear on someone's back is not free stock), so a piece that becomes unassigned while its
+-- wearer still has it on is invisible to the pool FOREVER -- it can never be re-pinned. Any
+-- change to the matching rules therefore stripped soldiers permanently instead of simply
+-- re-pinning what they already had on: two successive rule tweaks released 64 and then 70
+-- assignments and drove "fully equipped" from 15/20 down to 1/20, purely through this hole.
+-- Always re-adopt from the wearer before reaching for the shared pool.
+local function take_from_inventory(sol, w, hand, claimed)
+    for _, ie in ipairs(sol.unit.inventory) do
+        local it = ie.item
+        if it:getType() == w.item_type and it:getSubtype() == w.subtype
+            and not claimed[it.id] and item_pinnable(it)
+            and item_size_race(it) == w.size_race
+            and (hand == nil or not HANDED[w.item_type] or item_hand(it) == hand)
+        then
+            local mt, mi = item_matpair(it)
+            return {it = it, id = it.id, mt = mt, mi = mi, q = it:getQuality(),
+                    wear = item_wear(it), size = item_size_race(it),
+                    hand = HANDED[w.item_type] and item_hand(it) or nil,
+                    rank = metal_rank(mt, mi, it:getType())}
+        end
+    end
+end
+
+-- Pick the best free candidate for a want. EXACT material always beats a stand-in; then
+-- higher quality, then less wear, then the more valuable material (so a stand-in is the
+-- best metal on hand rather than the first one found). `hand` restricts to one hand for
+-- gauntlets. `require` narrows what counts as acceptable at all:
+--   nil           anything that fits -- used to fill an EMPTY slot, where a stand-in
+--                 beats sending a soldier out bare
+--   'exact'       only the material the uniform demands -- used to replace a stand-in
+--   'masterwork'  only an exact-material masterwork -- used to upgrade a piece that is
+--                 already the right material while the masterwork toggle is on
+-- Returns the candidate and removes it from the pool.
+local function take_best(pool, w, hand, require)
+    local bucket = pool[w.item_type .. '/' .. w.subtype]
+    if not bucket then return nil end
+    local best, best_i
+    for i = 1, #bucket do
+        local c = bucket[i]
+        if cand_fits(c, w, hand) then
+            local ok = true
+            if require == 'exact' then
+                ok = cand_exact(c, w)
+            elseif require == 'masterwork' then
+                ok = cand_exact(c, w) and c.q >= df.item_quality.Masterful
+            end
+            if ok and (not best
+                or (cand_exact(c, w) and not cand_exact(best, w))
+                or (cand_exact(c, w) == cand_exact(best, w)
+                    and (c.q > best.q
+                        or (c.q == best.q and (c.wear < best.wear
+                            or (c.wear == best.wear and c.rank < best.rank))))))
+            then best, best_i = c, i end
+        end
+    end
+    if best then table.remove(bucket, best_i) end
+    return best
+end
+
+-- ---- writing the pin ---------------------------------------------------------
+
+local function add_assignment(pos, spec, id)
+    if dry_run then return end
+    spec.assigned:insert('#', id)
+    utils.insert_sorted(pos.equipment.assigned_items, id)
+end
+
+local function dirty(item_type)
+    if dry_run then return end
+    local f = UPDATE_FIELD[item_type]
+    if f then df.global.plotinfo.equipment.update[f] = true end
+end
+
+-- SINGLETON slot. BOTH fields must be written, and this was measured the hard way:
+--
+--   * `spec.item` is DF's native "specific item" pin -- it records the choice, shows on the
+--     Equip screen, and stops DF's solver re-solving the slot out from under us.
+--   * `spec.assigned` is what actually makes the dwarf GO AND FETCH the thing.
+--
+-- Setting `spec.item` ALONE does nothing: DF never back-fills `assigned` from it. Measured
+-- live -- of 110 slots pinned that way, the only 58 that equipped were the ones whose
+-- `assigned` was already populated (items the dwarf happened to be wearing), while the 52
+-- newly pinned sat at `assigned=EMPTY, in_job=false` forever and no pickup job was ever
+-- generated. Gauntlets and boots equipped fine over the same period precisely because the
+-- pair path writes `assigned` directly.
+--
+-- Writing both is a state DF is demonstrably happy with (those 58 adopted slots carry item
+-- + assigned together and wear correctly). The filter fields are still never touched --
+-- they remain the record of what this slot is SUPPOSED to be.
+-- Make an item genuinely reachable by the soldier we are giving it to: out of any bin,
+-- un-forbidden, and stamped as their property (DF's own "assign specific item" does the
+-- same, and unowned gear is what other haulers keep wandering off with).
+local function claim_item(unit, id)
+    local it = df.item.find(id)
+    if not it or dry_run then return end
+    free_from_bin(it)
+    if it.flags.forbid then it.flags.forbid = false end
+    -- never confiscate: pool candidates are already filtered to unowned items, so this only
+    -- guards the re-pin paths
+    if unit and not owned_by_other(it, unit.id) then
+        pcall(dfhack.items.setOwner, it, unit)
+    end
+end
+
+local function pin_single(pos, spec, id, unit)
+    release_assignment(pos, spec)
+    if not dry_run then
+        spec.item = id
+        add_assignment(pos, spec, id)
+    end
+    claim_item(unit, id)
+    dirty(spec.item_type)
+end
+
+-- What is this spec currently holding? The singleton pin, or the pair slot's assignments --
+-- and, for a singleton that is not pinned yet, whatever DF's own solver already assigned.
+-- ADOPTING DF's pick matters: without it the very first cycle would unpin every soldier in
+-- the fort and make them all drop and re-fetch gear they were already correctly wearing.
+local function current_pins(spec)
+    local out = {}
+    if spec.item >= 0 then
+        out[1] = spec.item
+    elseif #spec.assigned > 0 then
+        out[1] = spec.assigned[0]                    -- adopt DF's existing solution
+    end
+    return out
+end
+
+-- Is an already-pinned item still a legal pin for this soldier? Re-checked every cycle,
+-- because pinning means DF will NOT quietly find a replacement the way it does for a plain
+-- filter spec -- if the piece was melted, forbidden, put on a pedestal, worn out or taken
+-- by somebody else, we own noticing.
+local function pin_still_valid(id, w, unit_id, claimed)
+    local it = df.item.find(id)
+    if not it then return false end
+    if it:getType() ~= w.item_type or it:getSubtype() ~= w.subtype then return false end
+    if not item_pinnable(it) then return false end
+    if item_size_race(it) ~= w.size_race then return false end
+    -- somebody else's property: DF will never fetch it for this soldier, so the slot would
+    -- show "pending" forever. Release it and let the pin pass find (or order) another.
+    if owned_by_other(it, unit_id) then return false end
+    local h = holder_of(it)
+    if h and h.id ~= unit_id then return false end        -- somebody else is carrying it
+    local owner = claimed[id]
+    if owner and owner.occupant >= 0 then
+        local hf = df.historical_figure.find(owner.occupant)
+        if hf and hf.unit_id ~= unit_id then return false end   -- claimed by another position
+    end
+    return true
+end
+
+-- Make every ALREADY-ASSIGNED piece physically obtainable, whoever chose it.
+--
+-- This deliberately covers the player's HAND-PICKED specific items too. Freeing a piece
+-- from a bin, or clearing a phantom job claim, does not change WHAT was chosen -- it only
+-- lets the choice actually happen. Without it a hand-picked item that got hauled into a bin
+-- is red forever, because the pin pass refuses to touch those specs at all: one soldier here
+-- had four hand-picked steel pieces (mail shirt, helm, greaves, sword) all sitting in bins.
+--
+-- It also re-runs for OUR pins every cycle, not just at pin time: a piece can be assigned
+-- while loose and then hauled into a bin afterwards.
+local function unstick_assigned(soldiers, jobitems)
+    local freed, unjobbed, unforbid, owned = 0, 0, 0, 0
+    for _, sol in ipairs(soldiers) do
+        -- likewise: never move, un-forbid or re-own anything belonging to a moody dwarf
+        if in_strange_mood(sol.unit) then goto next_unstick end
+        for slot = 0, 6 do
+            local v = sol.pos.equipment.uniform[slot]
+            for j = 0, #v - 1 do
+                local sp = v[j]
+                local ids = {}
+                if sp.item >= 0 then ids[#ids + 1] = sp.item end
+                for _, id in ipairs(sp.assigned) do ids[#ids + 1] = id end
+                for _, id in ipairs(ids) do
+                    local it = df.item.find(id)
+                    local h = it and holder_of(it)
+                    -- someone else carrying it is a case we must not meddle with
+                    if it and (not h or h.id == sol.unit_id) then
+                        -- CLAIM OWNERSHIP EVERY CYCLE, not just when the pin is created.
+                        -- A leather cloak is CLOTHING (armorlevel 0), so while it sits
+                        -- unowned DF's clothing system will hand it to whichever citizen
+                        -- needs clothes -- and then the pin reads as "owned by someone
+                        -- else" next cycle and gets released. Pin, lose, release, re-pin,
+                        -- forever: that was a permanent churn loop of ~6 cloaks a day.
+                        if owner_id_of(it) == nil then
+                            if not dry_run then pcall(dfhack.items.setOwner, it, sol.unit) end
+                            owned = owned + 1
+                        end
+                        if not h then
+                            if free_from_bin(it) then freed = freed + 1 end
+                            if it.flags.in_job and not jobitems[id] then
+                                if not dry_run then it.flags.in_job = false end
+                                unjobbed = unjobbed + 1
+                            end
+                            -- only un-forbid what nobody owns: a forbidden piece that is
+                            -- somebody's property is not ours to hand out
+                            if it.flags.forbid and owner_id_of(it) == nil then
+                                if not dry_run then it.flags.forbid = false end
+                                unforbid = unforbid + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        ::next_unstick::
+    end
+    return freed, unjobbed, unforbid, owned
+end
+
+-- =============================================================================
+-- THE PIN PASS
+--
+-- For every soldier, for every spec we manage: keep the pins that are still valid, drop
+-- the ones that aren't, and fill the gaps from the pool. Returns the shortfall -- what
+-- nobody could be given, which is exactly what needs forging.
+-- =============================================================================
+local function assign_gear(soldiers, claimed, pool, jobitems)
+    local shortfall = {}                    -- key -> {want fields..., count}
+    local pinned, repinned, released, adopted, repaired, nudged, pruned = 0, 0, 0, 0, 0, 0, 0
+
+    -- `count` = pieces of the demanded material still owed (empty slots AND slots filled
+    -- only by a stand-in). `empty` = the subset with NOTHING on them at all. The two drive
+    -- different orders: `count` forges the real material, `empty` is the only thing that
+    -- justifies forging a cheap stand-in -- a soldier already wearing a bronze breastplate
+    -- does not need an iron one made, they need the steel one they are waiting for.
+    local function owe(w, n, empty)
+        if n <= 0 and (empty or 0) <= 0 then return end
+        local k = want_key(w)
+        local r = shortfall[k]
+        if not r then
+            r = {item_type = w.item_type, subtype = w.subtype, mat_type = w.mat_type,
+                 mat_index = w.mat_index, size_race = w.size_race, count = 0, empty = 0}
+            shortfall[k] = r
+        end
+        r.count = r.count + math.max(0, n)
+        r.empty = r.empty + math.max(0, empty or 0)
+    end
+
+    for _, sol in ipairs(soldiers) do
+        -- a dwarf in an artifact mood is left completely alone: no re-pinning, no releasing,
+        -- no ownership changes, no pickup job. Their gear can wait; the mood cannot.
+        if in_strange_mood(sol.unit) then
+            for _, entry in ipairs(sol.specs) do
+                entry.satisfied = true          -- and do not order replacements for them
+                entry.filled = entry.want.qty
+            end
+            goto next_soldier
+        end
+        for _, entry in ipairs(sol.specs) do
+            local spec, w = entry.spec, entry.want
+            local keep, stale = {}, false
+            for _, id in ipairs(current_pins(spec)) do
+                if pin_still_valid(id, w, sol.unit_id, claimed) then
+                    keep[#keep + 1] = id
+                else
+                    stale = true
+                    released = released + 1
+                end
+            end
+            -- surplus (anatomy shrank -- a soldier lost a hand): drop the extras
+            while #keep > w.qty do table.remove(keep); stale = true end
+
+            -- A handed spec holding the SAME hand an earlier sibling already has leaves the
+            -- other hand bare. Filling coordinates hands, but an assignment INHERITED from
+            -- before the pair split (or from DF's own solver) can duplicate one -- drop it
+            -- so step 1 re-fills with the hand that is actually missing.
+            if w.handed and #keep > 0 then
+                local taken = {}
+                for _, sib in ipairs(entry.siblings or {}) do
+                    if sib == entry then break end
+                    for _, id in ipairs(current_pins(sib.spec)) do
+                        local sit = df.item.find(id)
+                        if sit then taken[item_hand(sit)] = true end
+                    end
+                end
+                local held = df.item.find(keep[1])
+                if held and taken[item_hand(held)] then
+                    keep = {}
+                    stale = true
+                    released = released + 1
+                end
+            end
+
+            -- a stand-in of the wrong material, or (in masterwork mode) a piece below
+            -- masterwork, is a slot we still owe -- and one we upgrade the moment a
+            -- proper piece exists
+            local upgradeable = {}
+            for i, id in ipairs(keep) do
+                local it = df.item.find(id)
+                local mt, mi = item_matpair(it)
+                local exact = (mt == w.mat_type and mi == w.mat_index)
+                if not exact or (state.masterwork and it:getQuality() < df.item_quality.Masterful) then
+                    upgradeable[#upgradeable + 1] = i
+                end
+            end
+
+            -- HANDEDNESS ACROSS SIBLINGS. Each gauntlet spec holds one glove, so "one of
+            -- each hand" is now a property of the SLOT, not of a single spec: ask for
+            -- whichever hand the other specs in this slot are not already covering.
+            -- Without this the two specs would independently pick "best available" and
+            -- happily leave a soldier with two left gauntlets.
+            local want_hand
+            if w.handed then
+                local covered = {}
+                for _, sib in ipairs(entry.siblings or {}) do
+                    if sib ~= entry then
+                        for _, id in ipairs(current_pins(sib.spec)) do
+                            local sit = df.item.find(id)
+                            if sit then covered[item_hand(sit)] = true end
+                        end
+                    end
+                end
+                for _, id in ipairs(keep) do
+                    local it = df.item.find(id)
+                    if it then covered[item_hand(it)] = true end
+                end
+                if #(entry.siblings or {}) < 2 then want_hand = nil       -- only one glove wanted
+                elseif not covered[0] then want_hand = 0
+                elseif not covered[1] then want_hand = 1 end
+            end
+
+            local changed = stale
+            -- 1. fill empty slots from the pool (any material -- a stand-in beats nothing)
+            local gap = w.qty - #keep
+            local unfilled = 0
+            for _ = 1, gap do
+                local hand = want_hand
+                -- prefer something already on this dwarf, then the shared pool
+                local c = take_from_inventory(sol, w, hand, claimed) or take_best(pool, w, hand, false)
+                if c then
+                    keep[#keep + 1] = c.id
+                    claimed[c.id] = sol.pos
+                    changed = true
+                    pinned = pinned + 1
+                else
+                    unfilled = unfilled + 1
+                end
+            end
+            -- 2. upgrade stand-ins / sub-masterwork pieces when a proper one is now free.
+            -- A WRONG-MATERIAL stand-in upgrades to any exact-material piece; a piece that
+            -- is already the right material only ever upgrades to an exact masterwork (and
+            -- only while that toggle is on). Getting this split wrong is what would leave a
+            -- soldier in a copper breastplate just because no steel MASTERWORK existed yet.
+            local still_owed = unfilled
+            for _, idx in ipairs(upgradeable) do
+                local old = keep[idx]
+                local it = df.item.find(old)
+                local mt, mi = item_matpair(it)
+                local old_exact = (mt == w.mat_type and mi == w.mat_index)
+                local old_q = it:getQuality()
+                local hand = w.handed and item_hand(it) or nil   -- swap like for like
+                local c = take_best(pool, w, hand, old_exact and 'masterwork' or 'exact')
+                -- never swap DOWN in quality: a soldier should not drop a fine steel helm
+                -- to fetch a plain one of the same metal
+                if c and c.q >= old_q then
+                    keep[idx] = c.id
+                    claimed[c.id] = sol.pos
+                    claimed[old] = nil
+                    changed = true
+                    repinned = repinned + 1
+                    -- still owed if we only got as far as the right material but the
+                    -- masterwork toggle wants better
+                    if state.masterwork and c.q < df.item_quality.Masterful then
+                        still_owed = still_owed + 1
+                    end
+                else
+                    if c then                                    -- not an upgrade: put it back
+                        local bucket = pool[w.item_type .. '/' .. w.subtype]
+                        if bucket then bucket[#bucket + 1] = c end
+                    end
+                    still_owed = still_owed + 1
+                end
+            end
+            owe(w, still_owed, unfilled)
+
+            -- 3. write it back -- but only where the outcome actually differs from what is
+            -- already on the position, so an unchanged slot never makes a soldier drop and
+            -- re-fetch a piece they are correctly wearing
+            if keep[1] then
+                if spec.item ~= keep[1] then
+                    if #spec.assigned == 1 and spec.assigned[0] == keep[1] then
+                        -- DF's own solver already put exactly this item on the slot: adopt it
+                        -- as our pin without releasing anything. No churn, and from now on
+                        -- DF treats the slot as an explicit choice.
+                        if not dry_run then spec.item = keep[1] end
+                        adopted = adopted + 1
+                    else
+                        pin_single(sol.pos, spec, keep[1], sol.unit)
+                    end
+                elseif #spec.assigned == 0 then
+                    -- pinned but with no assignment, so nothing will ever fetch it. Writing
+                    -- the assignment is the repair; dirtying alone was proven insufficient
+                    -- (see pin_single). Also self-heals slots pinned by an older version of
+                    -- this script that only set spec.item.
+                    add_assignment(sol.pos, spec, keep[1])
+                    claim_item(sol.unit, keep[1])
+                    dirty(w.item_type)
+                    repaired = repaired + 1
+                elseif #spec.assigned > 1 and not dry_run then
+                    -- DF's own re-solve still treats a glove spec as meaning "a PAIR" and
+                    -- bolts a second item onto it. On a split pair slot that yields four
+                    -- gauntlets and duplicate hands (measured after a Refresh Equipment:
+                    -- 90 assignments across 79 specs, 7 soldiers with two of one hand).
+                    -- The pin is the truth -- drop anything else DF bolted on.
+                    for k = #spec.assigned - 1, 0, -1 do
+                        local id = spec.assigned[k]
+                        if id ~= spec.item then
+                            utils.erase_sorted(sol.pos.equipment.assigned_items, id)
+                            spec.assigned:erase(k)
+                            local extra = df.item.find(id)
+                            if extra and extra.flags.owned then
+                                local ow = dfhack.items.getOwner(extra)
+                                if ow and ow.id == sol.unit_id then
+                                    pcall(dfhack.items.setOwner, extra, nil)
+                                end
+                            end
+                            pruned = pruned + 1
+                        end
+                    end
+                    dirty(w.item_type)
+                end
+            elseif changed or spec.item >= 0 then
+                release_assignment(sol.pos, spec)
+                if not dry_run then spec.item = -1 end
+                dirty(w.item_type)
+            end
+            entry.satisfied = (still_owed == 0 and #keep == w.qty)
+            entry.filled = #keep                  -- pieces actually on the slot, any material
+        end
+        -- Anything assigned that the soldier is not yet carrying needs a pickup job, and DF
+        -- routinely never makes one (see nudge_pickup). Do it ourselves, once per soldier.
+        local needs_pickup = false
+        for _, e in ipairs(sol.specs) do
+            for _, id in ipairs(e.spec.assigned) do
+                local it = df.item.find(id)
+                if it and not it.flags.in_inventory then needs_pickup = true; break end
+            end
+            if needs_pickup then break end
+        end
+        if needs_pickup and nudge_pickup(sol.unit) then nudged = nudged + 1 end
+        if dry_log then
+            -- FILLED and CORRECT are different questions, and only the first one decides
+            -- whether a dwarf walks out with something on: a slot filled by a stand-in is
+            -- equipped but still owes production.
+            local want_n, filled_n, correct_n = 0, 0, 0
+            for _, e in ipairs(sol.specs) do
+                want_n = want_n + e.want.qty
+                filled_n = filled_n + e.filled
+                if e.satisfied then correct_n = correct_n + e.want.qty end
+            end
+            note('%-34s %s  equipped %d/%d   right material %d/%d%s',
+                dfhack.units.getReadableName(sol.unit):sub(1, 34),
+                sol.civilian and '[civ]' or '[mil]', filled_n, want_n, correct_n, want_n,
+                sol.custom and '  (+hand-picked)' or '')
+        end
+        ::next_soldier::
+    end
+    return shortfall, pinned, repinned, released, adopted, repaired, nudged, pruned
+end
+
+-- ---- production: forge exactly what nobody could be given ---------------------
+
+local function barkey(mt, mi) return mt .. '/' .. mi end
+
+-- Queue one order per gear key that is still short, sized to the shortfall and bounded by
+-- the metal's bar budget. Metal keys share their metal's budget evenly, so one big
+-- shortfall (39 helms) can't hog the bars and starve another (the civilians' axes).
+local function queue_shortfall(shortfall)
+    -- bars on hand, and what our own NON-gear orders (miner pick / woodcutter axe) already
+    -- committed. Gear orders are re-sized every cycle, so they are not pre-subtracted.
+    local bars = {}
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.BAR]) do
+        if on_hand(it) and not it.flags.melt then
+            local k = barkey(it:getMaterial(), it:getMaterialIndex())
+            bars[k] = (bars[k] or 0) + 1
+        end
+    end
+    local committed = {}
+    for k, id in pairs(state.orders) do
+        if not shortfall[k] and k:sub(1, 7) ~= 'supply/' then
+            local o = order_by_id(id)
+            if o and o.amount_left > 0 then
+                local mk = barkey(o.mat_type, o.mat_index)
+                committed[mk] = (committed[mk] or 0) + o.amount_left
+            end
+        end
+    end
+    local budget = {}
+    for mk, b in pairs(bars) do budget[mk] = math.max(0, b - RESERVE_BARS - (committed[mk] or 0)) end
+
+    -- fair share of each metal's budget across the keys short in it
+    local wanted_n = {}
+    for _, r in pairs(shortfall) do
+        if r.mat_type == 0 then
+            local mk = barkey(r.mat_type, r.mat_index)
+            wanted_n[mk] = (wanted_n[mk] or 0) + 1
+        end
+    end
+    local share = {}
+    for mk, cnt in pairs(wanted_n) do share[mk] = math.max(1, math.floor((budget[mk] or 0) / cnt)) end
+
+    local queued = 0
+    for key, r in pairs(shortfall) do
+        local mk = barkey(r.mat_type, r.mat_index)
+        local is_metal = r.mat_type == 0            -- wood / leather / bone cost no bars
+        if is_metal and (budget[mk] or 0) < BARS_PER_ITEM then
+            drop_order(key)                          -- no bars to spare past the reserve
+        else
+            local n = is_metal and math.max(1, math.min(r.count, share[mk] or 1)) or r.count
+            queue_one(key, r, n)
+            queued = queued + 1
+        end
+    end
+    -- drop orders for keys nobody is short of any more (soldier left, uniform changed,
+    -- gear finally arrived), plus anything left over from the pre-pinning model
+    for key in pairs(state.orders) do
+        if key:sub(1, 7) == 'supply/' then                  -- ensure_supply handles it
+        elseif key:sub(1, 4) == 'sub/' then                 -- queue_standins handles these
+        elseif key == 'pick' or key == 'axe' then           -- equip_workers handles these
+        elseif not shortfall[key] then
+            drop_order(key)                                 -- covered, or a retired cu/* key
+        end
+    end
+    return queued, budget
+end
+
+-- STAND-IN PRODUCTION. Everything above orders the material the uniform actually demands.
+-- When that material is unaffordable -- its bar budget is spent, e.g. 2 steel bars against a
+-- 3-bar reserve -- the order is withheld, and if stock is empty too the slot then stays bare
+-- FOREVER: nothing to pin, nothing being made. That is how five soldiers ended up with no
+-- shield at all while the fort had none in stock and no steel to forge one.
+--
+-- So also order the piece in the best material we CAN afford (for a shield, plain wood costs
+-- no bars at all). The pin pass already treats a wrong-material piece as a stand-in and
+-- upgrades the soldier the moment the real thing exists, so this costs nothing but a cheap
+-- item. Generalises the old wood-shield-only pass to every slot.
+local function queue_standins(shortfall, budget)
+    local want_sub = {}
+    for key, r in pairs(shortfall) do
+        local mk = barkey(r.mat_type, r.mat_index)
+        if (r.empty or 0) > 0 and r.mat_type == 0 and (budget[mk] or 0) < BARS_PER_ITEM then
+            local best_mi, best_rank
+            for _, id in ipairs(STANDIN_ORDER) do
+                local idx = inorganic_idx(id)
+                if idx and idx ~= r.mat_index and (budget[barkey(0, idx)] or 0) >= BARS_PER_ITEM then
+                    local rk = metal_rank(0, idx)
+                    if not best_rank or rk < best_rank then best_mi, best_rank = idx, rk end
+                end
+            end
+            local sub = 'sub/' .. key
+            local wood_shield = r.item_type == df.item_type.SHIELD
+                and #df.global.world.items.other[df.items_other_id.WOOD] > 0
+            if wood_shield then
+                -- PREFERRED over any metal stand-in (see metal_rank): costs no bars, so it
+                -- also leaves the whole metal budget for armour that actually needs metal.
+                queue_one(sub, {item_type = r.item_type, subtype = r.subtype, mat_type = -1,
+                                mat_index = df.entity_material_category.Wood,
+                                size_race = r.size_race}, r.empty)
+                want_sub[sub] = true
+            elseif best_mi then
+                local n = math.max(1, math.min(r.empty, budget[barkey(0, best_mi)]))
+                queue_one(sub, {item_type = r.item_type, subtype = r.subtype, mat_type = 0,
+                                mat_index = best_mi, size_race = r.size_race}, n)
+                budget[barkey(0, best_mi)] = budget[barkey(0, best_mi)] - n
+                want_sub[sub] = true
+            end
+        end
+    end
+    -- retire stand-ins whose real key is covered, or whose real material is affordable again
+    for key in pairs(state.orders) do
+        if key:sub(1, 4) == 'sub/' and not want_sub[key] then drop_order(key) end
+    end
+end
+
+-- Masterwork re-forging needs metal: melt surplus inferior copies of the gear types we
+-- manage. Surplus = a pinnable item NO squad position has claimed -- with everyone's gear
+-- pinned, anything left over is by definition spare -- and below masterwork. Bounded by
+-- what we are actually short of, worst (most damaged, then lowest quality) first.
+local function melt_surplus(shortfall, claimed, managed_ts, extra_short)
+    local short = {}
+    for _, r in pairs(shortfall) do
+        if r.mat_type == 0 then
+            local mk = barkey(r.mat_type, r.mat_index)
+            short[mk] = (short[mk] or 0) + r.count
+        end
+    end
+    for mk, n in pairs(extra_short or {}) do short[mk] = (short[mk] or 0) + n end
+    if not next(short) then return 0 end
+
+    -- NEVER recycle a kind of gear we are still short of. "Unclaimed" is not the same as
+    -- "surplus": a shield can be unclaimed because it is forbidden, the wrong size, or
+    -- simply not reached yet -- and melting it while five soldiers stand there shieldless
+    -- is the exact opposite of the goal. (Caught live: one steel shield was melt-designated
+    -- while the fort had zero free shields and five soldiers wanting one.)
+    local short_ts = {}
+    for _, r in pairs(shortfall) do short_ts[r.item_type .. '/' .. r.subtype] = true end
+
+    local cands, inbound = {}, {}
+    for _, vec_id in pairs(OTHER_VEC) do
+        for _, it in ipairs(df.global.world.items.other[vec_id]) do
+            local mk = barkey(it:getMaterial(), it:getMaterialIndex())
+            if short_ts[it:getType() .. '/' .. it:getSubtype()] then goto skip_item end
+            -- only ever recycle the KINDS of gear soldiers actually wear (a type+subtype
+            -- some uniform asks for). Anything else of the same metal -- a decorative
+            -- weapon subtype, gear for a squad we don't manage -- is left alone.
+            if short[mk] and not claimed[it.id]
+                and managed_ts[it:getType() .. '/' .. it:getSubtype()]
+                and not not_fort_stock(it) then
+                if it.flags.melt then
+                    if holder_of(it) then
+                        -- a worn piece marked for melt is STUCK (the melt job never fires
+                        -- while it's equipped) -- un-designate it so it stops blocking
+                        dfhack.items.cancelMelting(it)
+                    elseif not it.flags.forbid then
+                        inbound[mk] = (inbound[mk] or 0) + 1     -- metal already on the way
+                    end
+                elseif it:getQuality() < df.item_quality.Masterful
+                    and not it.flags.artifact
+                    and not holder_of(it)
+                    and not item_installed(it)
+                    and dfhack.items.canMelt(it)
+                then
+                    cands[mk] = cands[mk] or {}
+                    table.insert(cands[mk], it)
+                end
+            end
+            ::skip_item::
+        end
     end
     local marked = 0
     for mk, owed in pairs(short) do
         local list = cands[mk]
-        local deficit = owed - (inbound[mk] or 0)             -- bars still needed for the shortfall
+        local deficit = owed - (inbound[mk] or 0)
         if deficit > 0 and list and #list > 0 then
             table.sort(list, function(a, b)
                 local wa, wb = item_wear(a), item_wear(b)
                 if wa ~= wb then return wa > wb end            -- most-damaged first
                 return a:getQuality() < b:getQuality()          -- then lowest quality
             end)
-            for i = 1, math.min(deficit, #list) do              -- melt enough to cover it now
+            for i = 1, math.min(deficit, #list) do
                 if mark_melt(list[i]) then marked = marked + 1 end
             end
         end
@@ -937,9 +1964,9 @@ local function melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra_s
     return marked
 end
 
--- A leather-category supply order (backpack / waterskin) tracked like a gear
--- order: queue ONE while soldiers lack the item and a tanned hide is on hand;
--- delete it once everyone is covered. (A waterskin is just a leather FLASK.)
+-- A leather-category supply order (backpack / waterskin) tracked like a gear order: queue
+-- ONE while soldiers lack the item and a tanned hide is on hand; delete it once everyone
+-- is covered. (A waterskin is just a leather FLASK.)
 local function ensure_supply(key, job, want, have, hides)
     if want > 0 and have < want and hides >= 1 then
         local o = state.orders[key] and order_by_id(state.orders[key])
@@ -1064,83 +2091,13 @@ local function assign_war_dogs()
     return assigned
 end
 
--- ---- enable state: toggles, persisted ---------------------------------------
+-- ---- steel tools for miners / woodcutters (the OLD path, deliberately kept) ----
+-- A dwarf with the mining labor cannot be uniformed at all (a DF conflict), so a miner's
+-- pick can never be handled by the pinning model above -- it is not a uniform slot. Same
+-- for a woodcutter's axe. This keeps them stocked the pre-pinning way: forge toward one
+-- steel tool per worker, then forbid the others so they switch over.
 
-state = state or nil
--- gear picture from the most recent cycle (persoldier/req/stock/stock_h), consumed by
--- civilian_arrange() -- the `civilian-militia` command's engine
-civ_snapshot = civ_snapshot or nil
-
-local function load_state()
-    if not state then
-        state = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
-        if state.queue == nil then state.queue = true end       -- gear queueing defaults ON
-        if state.masterwork == nil then state.masterwork = false end
-        if state.wardogs == nil then state.wardogs = false end
-        if state.pickaxes == nil then state.pickaxes = false end -- miner steel picks default OFF
-        if not state.orders then state.orders = {} end
-        if not state.best_q then state.best_q = {} end           -- best avail quality per gear key
-    end
-    return state
-end
-local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) end
-
-function isEnabled() return load_state().queue end
-
--- any background service on? (gear queueing, war-dog training, or miner pickaxes)
-local function service_on() load_state(); return state.queue or state.wardogs or state.pickaxes end
-
--- item types that get a copper BACKUP piece stocked when soldiers lack a wearable/usable
--- one (a copper version is stocked so they can equip something instead of going naked or
--- unarmed; the uniform itself is never touched). Armour, shield, AND weapon -- a copper
--- weapon beats an empty hand. Pieces the uniform already specifies as copper are skipped.
-local BACKUP_TYPES = {
-    [df.item_type.ARMOR] = true, [df.item_type.HELM] = true, [df.item_type.PANTS] = true,
-    [df.item_type.GLOVES] = true, [df.item_type.SHOES] = true, [df.item_type.SHIELD] = true,
-    [df.item_type.WEAPON] = true,
-}
-
--- can this gear piece legally be forged from metal? (same rule quick-order uses) -- weapons /
--- shields always can; a body-armour piece only if its itemdef carries the METAL flag, so a
--- SOFT piece (cloak, robe, ...) never gets an impossible metal backup queued.
-local ARMOR_DEFVEC = {
-    [df.item_type.ARMOR] = 'armor', [df.item_type.HELM] = 'helms', [df.item_type.PANTS] = 'pants',
-    [df.item_type.GLOVES] = 'gloves', [df.item_type.SHOES] = 'shoes',
-}
-local function metal_legal(item_type, subtype)
-    local vn = ARMOR_DEFVEC[item_type]
-    if not vn then return true end                 -- weapon / shield / ammo: metal always fine
-    if (subtype or -1) < 0 then return true end
-    local vec = df.global.world.raws.itemdefs[vn]
-    for i = 0, #vec - 1 do
-        if vec[i].subtype == subtype then return vec[i].props.flags.METAL and true or false end
-    end
-    return true
-end
-
--- inorganic indices whose ore smelts to IRON (hematite/magnetite/limonite). Cached per
--- world (raws are static), rebuilt if the iron index differs (different world).
-local iron_ore_cache
-local function iron_ore_set(iron_idx)
-    if iron_ore_cache and iron_ore_cache.iron == iron_idx then return iron_ore_cache.set end
-    local set = {}
-    if iron_idx then
-        local i = 0
-        while df.inorganic_raw.find(i) do
-            local mo = df.inorganic_raw.find(i).metal_ore
-            if mo then
-                for _, m in ipairs(mo.mat_index) do
-                    if m == iron_idx then set[i] = true; break end
-                end
-            end
-            i = i + 1
-        end
-    end
-    iron_ore_cache = {iron = iron_idx, set = set}
-    return set
-end
-
--- fort citizens with the Mining labor enabled (the dwarves who dig)
+-- fort citizens with a given labor enabled
 local function workers_with_labor(labor)
     local out = {}
     for _, u in ipairs(df.global.world.units.active) do
@@ -1154,30 +2111,20 @@ end
 local function miners() return workers_with_labor(df.unit_labor.MINE) end
 local function woodcutters() return workers_with_labor(df.unit_labor.CUTWOOD) end
 
--- a citizen SOLDIER is holding this item? (a pick or battle axe wielded as a military weapon --
--- so the forbid never disarms them).
+-- a citizen SOLDIER is holding this item? (a pick or battle axe wielded as a military
+-- weapon -- so the forbid never disarms them)
 local function soldier_holding(it)
-    local u = dfhack.items.getHolderUnit(it)
+    local u = holder_of(it)
     return u and u.military.squad_id >= 0
 end
--- held by a FIGHTER: a soldier who is NOT one of the workers we're equipping. Both picks (the
--- "Steel - pick" uniform) and battle axes double as military weapons, so a tool assigned to such a
--- fighter must NOT be counted as a spare worker tool. A worker who is ALSO a soldier keeps their
--- tool counted (they're in worker_ids), so miner-militia aren't made to forge a second pick.
+-- held by a FIGHTER: a soldier who is NOT one of the workers we're equipping. Both picks
+-- and battle axes double as military weapons, so a tool assigned to such a fighter must
+-- NOT be counted as a spare worker tool.
 local function held_by_fighter(it, worker_ids)
-    local u = dfhack.items.getHolderUnit(it)
+    local u = holder_of(it)
     return u and u.military.squad_id >= 0 and not worker_ids[u.id]
 end
 
--- Equip a set of workers (miners / woodcutters) with a steel tool (pick / battle axe): keep one
--- steel tool per worker in stock, forged one at a time (respecting the steel reserve + whatever
--- soldier gear has committed). When "Upgrade to masterwork" is on, the target is a MASTERWORK tool
--- each and inferior surplus is melted to re-forge (same policy as the gear masterwork upgrade).
--- When every worker is covered, FORBIDS all OTHER (non-steel) tools of that type so the workers
--- drop them and pick up the steel ones. Tracked under order key `key`. Both picks and battle axes
--- also serve as MILITARY weapons, so a steel tool assigned to a FIGHTER (a soldier who isn't one of
--- these workers) is neither counted as a spare worker tool nor force-forbidden off them.
--- Independent of the gear-queue toggle.
 local function equip_workers(units, sub, key, done_field)
     local steel_idx = inorganic_idx('STEEL')
     if not steel_idx or not sub then drop_order(key); return 0 end
@@ -1186,29 +2133,31 @@ local function equip_workers(units, sub, key, done_field)
     local worker_ids = {}
     for _, u in ipairs(units) do worker_ids[u.id] = true end
 
-    -- tally steel picks (total + masterwork), steel bars, and inferior melt candidates
-    local total, mw, steel_bars, melting = 0, 0, 0, 0
+    -- tally steel tools (total + masterwork), steel bars, and inferior melt candidates
+    local total, mw, melting = 0, 0, 0
     local cands = {}
-    for _, it in ipairs(df.global.world.items.all) do
-        if not_fort_stock(it) then goto next end
-        local t = it:getType()
-        if t == df.item_type.BAR and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
-            if on_hand(it) then steel_bars = steel_bars + 1 end
-        elseif t == df.item_type.WEAPON and it:getSubtype() == sub
-            and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx then
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.WEAPON]) do
+        if it:getSubtype() == sub and it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx
+            and not not_fort_stock(it)
+        then
             if it.flags.melt then
                 melting = melting + 1                       -- steel already on the way back
-            elseif not item_installed(it)                   -- a trapped/displayed tool isn't usable stock
-                and not held_by_fighter(it, worker_ids) then -- a fighter's pick/axe is not worker stock
+            elseif not item_installed(it)                   -- a trapped/displayed tool isn't stock
+                and not held_by_fighter(it, worker_ids) then
                 total = total + 1
                 if it:getQuality() >= df.item_quality.Masterful and it.wear == 0 and not it.flags.artifact then
                     mw = mw + 1                             -- masterwork counts only if undamaged
-                elseif dfhack.items.canMelt(it) and not item_equipped(it) then
+                elseif dfhack.items.canMelt(it) and not holder_of(it) then
                     cands[#cands + 1] = it                  -- inferior, meltable, not in-hand
                 end
             end
         end
-        ::next::
+    end
+    local steel_bars = 0
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.BAR]) do
+        if it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx and on_hand(it) then
+            steel_bars = steel_bars + 1
+        end
     end
 
     -- steel budget: bars minus the reserve minus every steel order we already track
@@ -1221,7 +2170,7 @@ local function equip_workers(units, sub, key, done_field)
     end
     local budget = steel_bars - RESERVE_BARS - committed
 
-    -- forge toward one (masterwork, if enabled) pick per miner, one at a time
+    -- forge toward one (masterwork, if enabled) tool per worker, one at a time
     local avail = state.masterwork and mw or total
     local o = state.orders[key] and order_by_id(state.orders[key])
     local in_flight = o and o.amount_left > 0
@@ -1232,23 +2181,24 @@ local function equip_workers(units, sub, key, done_field)
         drop_order(key)
     end
 
-    -- COMPLETE = every miner has a (masterwork, if enabled) steel pick. Record it for the
-    -- overlay's "Done" label, and forbid all OTHER pickaxes (any pick that isn't one of our
-    -- steel ones) so miners drop them and pick up the steel picks instead.
+    -- COMPLETE = every worker has a (masterwork, if enabled) steel tool. Record it for the
+    -- overlay's "Done" label, and forbid all OTHER tools of that type so the workers drop
+    -- them and pick up the steel ones instead.
     local done = avail >= need
     state[done_field] = done
     if done then
-        for _, it in ipairs(df.global.world.items.all) do
-            if it:getType() == df.item_type.WEAPON and it:getSubtype() == sub
+        for _, it in ipairs(df.global.world.items.other[df.items_other_id.WEAPON]) do
+            if it:getSubtype() == sub
                 and not (it:getMaterial() == 0 and it:getMaterialIndex() == steel_idx)
                 and not it.flags.forbid
+                and not it.flags.trader and not not_fort_stock(it)   -- never a merchant's goods
                 and not soldier_holding(it)   -- never disarm a soldier (pick/axe as a weapon)
             then it.flags.forbid = true end
         end
     end
 
-    -- masterwork: recycle inferior surplus picks when steel + inbound melts don't cover the
-    -- masterwork shortfall (keep at least `need` picks so miners aren't left bare)
+    -- masterwork: recycle inferior surplus tools when steel + inbound melts don't cover the
+    -- masterwork shortfall (keep at least `need` so workers aren't left bare)
     if state.masterwork then
         local owed = math.max(0, need - mw)
         local deficit = owed - (steel_bars + melting)
@@ -1262,53 +2212,171 @@ local function equip_workers(units, sub, key, done_field)
         end
     end
 
-    -- report how many picks we still need but can't forge from current steel bars, so the
-    -- caller can recycle surplus steel GEAR into bars for them (out of bars -> melt extras)
+    -- report how many tools we still need but can't forge from current steel bars, so the
+    -- caller can recycle surplus steel GEAR into bars for them
     return math.max(0, (need - avail) - math.max(0, budget))
 end
 
--- Reserve ONE member's full set from the size-aware pools (all-or-nothing). Returns true and
--- DECREMENTS av/avh if every piece the member needs is in stock; false and leaves the pools intact.
-local function reserve_set(needs, av, avh)
-    local nk, nh = {}, {}
-    for _, need in ipairs(needs) do
-        if need.hand ~= nil then
-            nh[need.k] = nh[need.k] or {}
-            nh[need.k][need.hand] = (nh[need.k][need.hand] or 0) + 1
-        else
-            nk[need.k] = (nk[need.k] or 0) + 1
-        end
+-- ---- the cycle ---------------------------------------------------------------
+
+local function run_cycle()
+    if not dfhack.world.isFortressMode() then return end
+    load_state()
+    if state.wardogs and not dry_run then train_surplus_war_dogs(); assign_war_dogs() end
+    -- steel digging picks for miners + steel battle axes for woodcutters (same toggle)
+    local tool_short = 0
+    if state.pickaxes and not dry_run then
+        tool_short = equip_workers(miners(), pick_subtype(), 'pick', 'done_picks')
+                   + equip_workers(woodcutters(), axe_subtype(), 'axe', 'done_axes')
+    elseif not dry_run then
+        drop_order('pick'); drop_order('axe')
     end
-    for k, c in pairs(nk) do if (av[k] or 0) < c then return false end end
-    for k, hands in pairs(nh) do for h, c in pairs(hands) do
-        if ((avh[k] and avh[k][h]) or 0) < c then return false end
-    end end
-    for k, c in pairs(nk) do av[k] = av[k] - c end
-    for k, hands in pairs(nh) do for h, c in pairs(hands) do avh[k][h] = avh[k][h] - c end end
-    return true
+    if not state.queue then if not dry_run then save_state() end return end
+
+    local ent = fort_entity()
+    if ent then ensure_cloaks(ent) end   -- cloaks in the owned uniform TEMPLATES (never positions)
+
+    clear_unmanned_positions()           -- no dead soldier's pins locking gear away
+    -- one spec per wearable item in pair slots, so gauntlets/boots can carry a real
+    -- spec.item pin like everything else and survive DF's "Refresh Equipment"
+    local split_added, split_removed = ensure_pair_specs()
+    local soldiers = read_soldiers()
+    local jobitems = live_job_items()          -- one bounded walk; used to spot stale in_job
+    -- free already-assigned pieces (ours AND hand-picked ones) from bins / phantom job
+    -- claims BEFORE deciding anything, so this cycle's nudge can actually reach them
+    local freed, unjobbed, unforbid, owned = unstick_assigned(soldiers, jobitems)
+    local claimed = claimed_items()
+    local pool = build_pool(claimed, jobitems)
+    local shortfall, pinned, repinned, released, adopted, repaired, nudged, pruned =
+        assign_gear(soldiers, claimed, pool, jobitems)
+    local _, budget = queue_shortfall(shortfall)
+    queue_standins(shortfall, budget)   -- something wearable while the real metal is short
+
+    -- recycle surplus gear into bars: for the masterwork upgrade, and when the miner/
+    -- woodcutter tools have run the steel out
+    if state.masterwork or tool_short > 0 then
+        local managed_ts = {}
+        for _, sol in ipairs(soldiers) do
+            for _, e in ipairs(sol.specs) do
+                managed_ts[e.want.item_type .. '/' .. e.want.subtype] = true
+            end
+        end
+        local steel_idx = inorganic_idx('STEEL')
+        local extra = tool_short > 0 and steel_idx and {[barkey(0, steel_idx)] = tool_short} or nil
+        melt_surplus(shortfall, claimed, managed_ts, extra)
+    end
+
+    -- leather field kit: a backpack (food) and a waterskin/flask per soldier
+    local hides, flasks, backpacks = 0, 0, 0
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.SKIN_TANNED]) do
+        if on_hand(it) then hides = hides + 1 end
+    end
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.FLASK]) do
+        if not it.flags.melt then flasks = flasks + 1 end
+    end
+    for _, it in ipairs(df.global.world.items.other[df.items_other_id.BACKPACK]) do
+        if not it.flags.melt then backpacks = backpacks + 1 end
+    end
+    ensure_supply('supply/backpack', df.job_type.MakeBackpack, #soldiers, backpacks, hides)
+    ensure_supply('supply/flask', df.job_type.MakeFlask, #soldiers, flasks, hides)
+
+    -- CIVILIAN MILITIA: routine swapping + member shuffling are NOT part of the automatic
+    -- cycle (too brittle unattended -- it kept overriding hand-set squad schedules). The
+    -- cycle only SNAPSHOTS the picture here; `civilian-militia` applies an arrangement on
+    -- demand via civilian_arrange() below.
+    local snap = {}
+    for _, sol in ipairs(soldiers) do
+        local equipped = true
+        for _, e in ipairs(sol.specs) do if not e.satisfied then equipped = false; break end end
+        snap[#snap + 1] = {unit_id = sol.unit_id, sid = sol.sid, leader = sol.leader,
+                           real_civ = sol.real_civ, pinned = sol.custom, equipped = equipped}
+    end
+    civ_snapshot = {persoldier = snap}
+
+    -- completion flag for the overlay's "Done" labels: every managed slot pinned to a piece
+    -- of the demanded material (and, when the masterwork toggle is on, at masterwork
+    -- quality -- assign_gear folds that test into `satisfied`). Vacuously done when nothing
+    -- is required. The masterwork label only ever shows while its toggle is on, so it is
+    -- the same measurement under that toggle.
+    local queue_done = true
+    for _, sol in ipairs(soldiers) do
+        for _, e in ipairs(sol.specs) do
+            if not e.satisfied then queue_done = false; break end
+        end
+        if not queue_done then break end
+    end
+    state.done_queue = queue_done
+    state.done_masterwork = state.masterwork and queue_done or false
+
+    if dry_run then
+        local fully, partly = 0, 0
+        for _, sol in ipairs(soldiers) do
+            local want_n, filled_n = 0, 0
+            for _, e in ipairs(sol.specs) do
+                want_n = want_n + e.want.qty; filled_n = filled_n + e.filled
+            end
+            if filled_n >= want_n then fully = fully + 1
+            elseif filled_n > 0 then partly = partly + 1 end
+        end
+        note('')
+        note('%d of %d soldiers would have EVERY slot filled; %d partly, %d with nothing',
+             fully, #soldiers, partly, #soldiers - fully - partly)
+        note('slots: %d already correct (adopted), %d newly pinned, %d upgraded, %d stale released, %d repaired',
+             adopted, pinned, repinned, released, repaired)
+        note('%d soldier(s) would be given a PickupEquipment job', nudged)
+        note('pair slots: %d spec(s) would be added, %d removed', split_added, split_removed)
+        note('unstick: %d freed from bins, %d phantom job claims cleared, %d un-forbidden, %d ownership claimed',
+             freed, unjobbed, unforbid, owned)
+        local n, pieces = 0, 0
+        for _, r in pairs(shortfall) do n = n + 1; pieces = pieces + r.count end
+        note('still to forge: %d piece(s) across %d gear key(s)', pieces, n)
+        return
+    end
+    if split_added > 0 or split_removed > 0 then
+        print(('military-uniforms: pair slots normalised (%d spec(s) added, %d removed)')
+            :format(split_added, split_removed))
+    end
+    if freed > 0 or unjobbed > 0 or unforbid > 0 or owned > 0 then
+        print(('military-uniforms: unstuck %d from bins, %d phantom job claims, %d forbidden, claimed %d unowned')
+            :format(freed, unjobbed, unforbid, owned))
+    end
+    if pinned > 0 or repinned > 0 or released > 0 or repaired > 0 or nudged > 0 or pruned > 0 then
+        print(('military-uniforms: pinned %d, upgraded %d, released %d stale, repaired %d, nudged %d (%d already correct)')
+            :format(pinned, repinned, released, repaired, nudged, adopted)
+              .. (pruned > 0 and (', pruned %d DF-added extra(s)'):format(pruned) or ''))
+    end
+    save_state()        -- persist the updated order-id map + completion flags
 end
 
--- CIVILIAN MILITIA ARRANGEMENT: a squad set to "Ready" makes ALL its members equip, stripping any
--- who lack a full set down to naked. So instead of flipping a squad early, we PACK members between
--- civilian squads so every Ready squad holds only members who each have a complete set -- and each
--- person kits up as their own set comes off the forge. Squad LEADERS never move (they anchor their
--- squad, so a squad can be Ready only once its own leader is equippable). Everyone else sits in a
--- "No Orders" (Off-duty) squad, in civilian clothes. If there aren't enough civilian squads to keep
--- the equipped group and the not-yet-equipped group in SEPARATE squads, we ask (via a persisted
--- flag -> notification) for another civilian squad and leave the overflow squad on No Orders.
--- A member with a hand-assigned CUSTOM uniform (a specific item, e.g. an artifact breastplate) is
--- PINNED: never moved (a move would replace their custom uniform with the destination's standard
--- one), so they stay put whether they are a leader or a plain member -- their squad can go Ready
--- only once they, too, are equippable.
+-- ---- civilian militia arrangement -------------------------------------------
+-- A squad set to "Ready" makes ALL its members equip, stripping any who lack a full set
+-- down to naked. So instead of flipping a squad early, we PACK members between civilian
+-- squads so every Ready squad holds only members who are each fully equipped -- and each
+-- person kits up as their own set comes off the forge. Squad LEADERS never move (they
+-- anchor their squad). A member with a hand-assigned CUSTOM uniform is PINNED: never moved
+-- (a move would replace their custom uniform with the destination's standard one).
+--
+-- With gear pinned per soldier there is no stock pool to reserve against any more: a
+-- member is equippable exactly when every slot we manage for them is pinned, which the
+-- cycle already computed. That reduced this from a stock-allocation problem to a count.
 local OFF_ROUTINE = 0                       -- "No Orders" == the built-in Off-duty routine (index 0)
-local function arrange_civilian_squads(persoldier, req, stock, stock_h)
+
+-- index of the "Ready" routine in the fort's schedule list, or nil if there's none
+local function ready_routine_idx()
+    local routines = df.global.plotinfo.alerts.routines
+    for i = 0, #routines - 1 do
+        if routines[i].name == 'Ready' then return i end
+    end
+end
+
+local function arrange_civilian_squads(persoldier)
     local ridx = ready_routine_idx()
     if not ridx then return end
     local training = autotraining_squads()
 
-    -- gather real civilian squads (Civilian-* uniform, not autotraining). Split each squad's members
-    -- into its LEADER, PINNED members (a hand-assigned custom uniform -- never moved, else the move
-    -- wipes it), and MOVABLE members (standard uniform, freely repacked).
+    -- gather real civilian squads. Split each squad's members into its LEADER, PINNED
+    -- members (a hand-assigned custom uniform -- never moved, else the move wipes it), and
+    -- MOVABLE members (standard uniform, freely repacked).
     local squads, sids = {}, {}
     for _, e in ipairs(persoldier) do
         if e.real_civ and not training[e.sid] then
@@ -1322,42 +2390,24 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     if #sids == 0 then return end
     table.sort(sids)
 
-    local function fresh()
-        local av, avh = {}, {}
-        for key, r in pairs(req) do
-            if HANDED[r.item_type] then local s = stock_h[key] or {}; avh[key] = {[0] = s[0] or 0, [1] = s[1] or 0}
-            else av[key] = stock[key] or 0 end
-        end
-        return av, avh
-    end
-    local function clone(av, avh)                        -- so a squad's anchors can be tried atomically
-        local a, h = {}, {}
-        for k, v in pairs(av) do a[k] = v end
-        for k, v in pairs(avh) do h[k] = {[0] = v[0], [1] = v[1]} end
-        return a, h
-    end
     local movpool = {}
     for _, sid in ipairs(sids) do for _, m in ipairs(squads[sid].movable) do movpool[#movpool + 1] = m end end
 
-    -- M = total civilian members; S = how many can be fully equipped (leaders + pinned first -- the
-    -- fixed occupants -- then movable) -- both set how many Ready vs No-Orders squads are needed.
-    local M = 0
+    -- a PINNED member counts as equipped without further checks: their gear is hand-picked
+    -- specific items, so our managed-slot test says nothing about them
+    local function ok(m) return m.pinned or m.equipped end
+
+    -- M = total civilian members; S = how many are fully equipped -- together these set how
+    -- many Ready vs No-Orders squads are needed
+    local M, S = 0, 0
     for _, sid in ipairs(sids) do
-        M = M + (squads[sid].leader and 1 or 0) + #squads[sid].pinned + #squads[sid].movable
-    end
-    -- PINNED members (a custom uniform with hand-assigned specific items, e.g. noble-warriors'
-    -- symbols of office) count as EQUIPPED without reserving stock: their `needs` derive from
-    -- the uniform's leftover FILTER specs checked against FREE stock, so a fully hand-kitted
-    -- noble used to read as unequippable and doom their squad to No-Orders.
-    local S = 0
-    do
-        local av, avh = fresh()
-        for _, sid in ipairs(sids) do
-            local L = squads[sid].leader
-            if L and (L.pinned or reserve_set(L.needs, av, avh)) then S = S + 1 end
-        end
-        for _, sid in ipairs(sids) do for _, p in ipairs(squads[sid].pinned) do S = S + 1 end end
-        for _, m in ipairs(movpool) do if reserve_set(m.needs, av, avh) then S = S + 1 end end
+        local g = squads[sid]
+        local all = {}
+        if g.leader then all[#all + 1] = g.leader end
+        for _, p in ipairs(g.pinned) do all[#all + 1] = p end
+        for _, m in ipairs(g.movable) do all[#all + 1] = m end
+        M = M + #all
+        for _, m in ipairs(all) do if ok(m) then S = S + 1 end end
     end
     local avail = #sids
     local function ceil10(n) return n > 0 and math.floor((n + 9) / 10) or 0 end
@@ -1366,11 +2416,10 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     local R = feasible and ready_needed or math.max(0, avail - noorder_needed)
     local need_squad = not feasible
 
-    -- assign the first R squads as Ready. A squad's fixed occupants (leader + any pinned members)
-    -- can't be moved out, so it can be Ready only if EVERY one of them is equippable (else a pinned
-    -- member is stripped naked); then fill the rest with movable equippable members. Everything else
-    -- -> No Orders, with the fixed occupants staying put.
-    local av, avh = fresh()
+    -- assign the first R squads as Ready. A squad's fixed occupants (leader + any pinned
+    -- members) can't be moved out, so it can be Ready only if EVERY one of them is
+    -- equipped (else a fixed member is stripped naked); then fill the rest with movable
+    -- equipped members. Everything else -> No Orders.
     local target, routine, used = {}, {}, {}
     local ready_made = 0
     for _, sid in ipairs(sids) do
@@ -1384,18 +2433,11 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
         -- squad ids and gets planned No-Orders forever
         local has_pinned = (g.leader and g.leader.pinned) or #g.pinned > 0
         local can = g.leader ~= nil and (ready_made < R or has_pinned)
-        local ca, cah = clone(av, avh)
         if can then
-            for _, a in ipairs(anchors) do
-                -- pinned anchors are hand-kitted: no stock reservation needed
-                if not a.pinned and not reserve_set(a.needs, ca, cah) then can = false; break end
-            end
+            for _, a in ipairs(anchors) do if not ok(a) then can = false; break end end
         end
         if can then
-            av, avh = ca, cah                            -- commit the anchor reservations
             routine[sid] = ridx
-            -- pinned-anchored squads are Ready "for free": they don't consume a slot of the
-            -- consolidation budget R (which was sized for the movable population)
             if not has_pinned then ready_made = ready_made + 1 end
             local filled = #anchors
             for _, a in ipairs(anchors) do target[a.unit_id] = sid; used[a.unit_id] = true end
@@ -1404,7 +2446,7 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
             for _, m in ipairs(movpool) do order[#order + 1] = m end
             for _, m in ipairs(order) do
                 if filled >= 10 then break end
-                if not used[m.unit_id] and reserve_set(m.needs, av, avh) then
+                if not used[m.unit_id] and ok(m) then
                     target[m.unit_id] = sid; used[m.unit_id] = true; filled = filled + 1
                 end
             end
@@ -1413,8 +2455,9 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
             for _, a in ipairs(anchors) do target[a.unit_id] = sid; used[a.unit_id] = true end
         end
     end
-    -- place remaining MOVABLE members into No-Orders squads; the leader + pinned members already hold
-    -- fixed slots, so a No-Orders squad has (9 - #pinned) movable slots. Prefer their current squad.
+    -- place remaining MOVABLE members into No-Orders squads; the leader + pinned members
+    -- already hold fixed slots, so a No-Orders squad has (9 - #pinned) movable slots.
+    -- Prefer their current squad.
     local noorder, slots = {}, {}
     for _, sid in ipairs(sids) do
         if routine[sid] == OFF_ROUTINE then noorder[#noorder + 1] = sid; slots[sid] = 9 - #squads[sid].pinned end
@@ -1443,7 +2486,10 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
         return
     end
 
-    -- EXECUTE: free every mover first (so target slots open up), then re-add; leaders never move.
+    -- EXECUTE: free every mover first (so target slots open up), then re-add.
+    -- NOTE: a move drops the destination position's uniform on the mover, which includes
+    -- whatever WE pinned to that position's previous occupant -- the next cycle re-checks
+    -- every pin against its new owner and re-pins, so this self-corrects.
     local moves = {}
     for uid, sid in pairs(target) do
         local u = df.unit.find(uid)
@@ -1455,9 +2501,8 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
         local sq = df.squad.find(sid)
         if sq then
             -- RESPECT MANUAL ROUTINES: only ever flip a squad between Off-duty and Ready.
-            -- A squad the player put on ANY other routine (training, even/odd month, custom)
-            -- is never touched -- previously a squad planned No-Orders had its hand-set
-            -- schedule stomped back to Off-duty every pass.
+            -- A squad the player put on ANY other routine (training, even/odd month,
+            -- custom) is never touched.
             local cur = sq.cur_routine_idx
             if cur == OFF_ROUTINE or cur == ridx then
                 local want = routine[sid]
@@ -1469,594 +2514,25 @@ local function arrange_civilian_squads(persoldier, req, stock, stock_h)
     state.civ_need_squad = need_squad and true or false
 end
 
--- ---- unstick stalled equipment ------------------------------------------------
--- Two DF failure modes leave "N missing uniform items" stuck at a permanent floor
--- (diagnosed live: 4 soldiers stuck for years with 250+ spare steel gauntlets/boots
--- in the bins):
---   1. STALLED PICKUP: DF assigns a uniform item to a squad position but never
---      generates the "Pickup equipment" job -- the assigned piece sits in its bin
---      forever (not forbidden, not claimed, simply never fetched).
---   2. STALE PARTIAL MATCH: a slot demanding an exact material got a wrong-material
---      partial match when nothing better existed (a copper axe on a steel uniform),
---      and DF never re-solves the slot when the demanded material later appears.
--- Weekly remedy: (1) UNASSIGN any uniform item that is neither carried by its
--- soldier nor being fetched by an active job, and dirty that slot so DF re-solves
--- it fresh (uniform-unstick's manual fix, automated); (2) dirty any exact-material
--- slot stuck on a wrong-material piece while a free piece of the demanded material
--- exists in real fort stock. Both act only on genuinely stuck slots, so this cannot
--- reintroduce the swap churn the masterwork-only dirtying was designed to stop.
-local UNSTICK_DAYS = 7
-local OTHER_VEC = {
-    [df.item_type.ARMOR]  = df.items_other_id.ARMOR,
-    [df.item_type.HELM]   = df.items_other_id.HELM,
-    [df.item_type.PANTS]  = df.items_other_id.PANTS,
-    [df.item_type.GLOVES] = df.items_other_id.GLOVES,
-    [df.item_type.SHOES]  = df.items_other_id.SHOES,
-    [df.item_type.SHIELD] = df.items_other_id.SHIELD,
-    [df.item_type.WEAPON] = df.items_other_id.WEAPON,
-}
-
--- the BEST free piece of exactly this spec's material in real fort stock (not assigned
--- to any squad position, not held, not forbidden/artifact/foreign-held), or nil
-local function best_free_exact_piece(spec, assigned_any)
-    local vec_id = OTHER_VEC[spec.item_type]
-    if not vec_id then return nil end
-    local vec = df.global.world.items.other[vec_id]
-    local best
-    for i = 0, #vec - 1 do
-        local it = vec[i]
-        if it:getSubtype() == spec.item_subtype
-            and it:getMaterial() == spec.mattype and it:getMaterialIndex() == spec.matindex
-            and not it.flags.artifact and not it.flags.forbid and not it.flags.trader
-            and not it.flags.in_job and not assigned_any[it.id]
-            and not dfhack.items.getHolderUnit(it) and not not_fort_stock(it) then
-            if not best or it:getQuality() > best:getQuality() then best = it end
-        end
-    end
-    return best
-end
-
-local function unstick_stalled_gear()
-    local now_day = df.global.cur_year * 336 + df.global.cur_year_tick // 1200
-    if state.last_unstick and now_day - state.last_unstick < UNSTICK_DAYS
-        and now_day >= state.last_unstick then
-        return
-    end
-    state.last_unstick = now_day
-    local fort = df.global.plotinfo.group_id
-    local upd = df.global.plotinfo.equipment.update
-    -- every item currently assigned to any fort squad position, and the positions
-    local assigned_any, posns = {}, {}
-    for si = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[si]
-        if sq.entity_id == fort then
-            for pi = 0, #sq.positions - 1 do
-                local pos = sq.positions[pi]
-                if pos.occupant >= 0 then
-                    posns[#posns + 1] = pos
-                    for _, iid in ipairs(pos.equipment.assigned_items) do assigned_any[iid] = true end
-                end
-            end
-        end
-    end
-    local unstuck, resolves = 0, 0
-    for _, pos in ipairs(posns) do
-        local hf = df.historical_figure.find(pos.occupant)
-        local u = hf and df.unit.find(hf.unit_id)
-        if u and not u.flags1.inactive then
-            local carried = {}
-            for _, ie in ipairs(u.inventory) do carried[ie.item.id] = true end
-            for slot = 0, 6 do
-                local specs = pos.equipment.uniform[slot]
-                for j = 0, #specs - 1 do
-                    local spec = specs[j]
-                    local have_exact, worn_q = false, -1
-                    for k = #spec.assigned - 1, 0, -1 do
-                        local iid = spec.assigned[k]
-                        local it = df.item.find(iid)
-                        if not it then
-                            spec.assigned:erase(k)   -- item no longer exists: clean up
-                            utils.erase_sorted(pos.equipment.assigned_items, iid)
-                        elseif carried[iid] then
-                            if spec.matindex < 0 or (it:getMaterial() == spec.mattype
-                                and it:getMaterialIndex() == spec.matindex) then
-                                have_exact = true
-                            else
-                                worn_q = math.max(worn_q, it:getQuality())
-                            end
-                        elseif not it.flags.in_job then
-                            -- assigned, not carried, and nothing is fetching it: stalled
-                            spec.assigned:erase(k)
-                            utils.erase_sorted(pos.equipment.assigned_items, iid)
-                            local f = UPDATE_FIELD[spec.item_type]
-                            if f then upd[f] = true end
-                            unstuck = unstuck + 1
-                        end
-                    end
-                    -- exact-material slot stuck on a wrong-material partial match (e.g. the
-                    -- script's own copper backup axe after steel arrived): DF never re-solves
-                    -- these on its own -- an equal-quality incumbent always wins -- and merely
-                    -- dirtying the slot was proven insufficient. Swap the assignment DIRECTLY
-                    -- to the best free exact piece (as good or better), which verified live:
-                    -- DF generates the pickup job and the soldier swaps up.
-                    if not have_exact and spec.matindex >= 0 and #spec.assigned > 0 then
-                        local rep = best_free_exact_piece(spec, assigned_any)
-                        if rep and rep:getQuality() >= worn_q then
-                            for k = #spec.assigned - 1, 0, -1 do
-                                local old = spec.assigned[k]
-                                spec.assigned:erase(k)
-                                utils.erase_sorted(pos.equipment.assigned_items, old)
-                            end
-                            spec.assigned:insert('#', rep.id)
-                            utils.insert_sorted(pos.equipment.assigned_items, rep.id)
-                            assigned_any[rep.id] = true
-                            local f = UPDATE_FIELD[spec.item_type]
-                            if f then upd[f] = true end
-                            resolves = resolves + 1
-                        end
-                    end
-                end
-            end
-        end
-    end
-    if unstuck > 0 or resolves > 0 then
-        print(('military-uniforms: unstuck %d stalled uniform assignment%s; swapped %d wrong-material slot%s')
-            :format(unstuck, unstuck == 1 and '' or 's', resolves, resolves == 1 and '' or 's'))
-    end
-end
-
-local function run_cycle()
-    if not dfhack.world.isFortressMode() then return end
+-- Run one civilian-militia arrangement pass (the `civilian-militia` command's engine):
+-- runs a gear cycle first so the snapshot is fresh, then packs civilian squads and flips
+-- their routines (Off-duty <-> Ready only; hand-set routines are never touched).
+-- dry = print the plan, change nothing.
+function civilian_arrange(dry)
+    if not dfhack.world.isFortressMode() then qerror('civilian_arrange needs a loaded fortress') end
     load_state()
-    if state.wardogs then train_surplus_war_dogs(); assign_war_dogs() end
-    -- steel digging picks for miners + steel battle axes for woodcutters (same toggle). Both tools
-    -- also serve as military weapons, so each pass ignores tools held by a fighter (a soldier who
-    -- isn't that kind of worker) -- they aren't counted as spares nor forbidden off the soldier.
-    local pick_short = 0
-    if state.pickaxes then
-        pick_short = equip_workers(miners(), pick_subtype(), 'pick', 'done_picks')
-                   + equip_workers(woodcutters(), axe_subtype(), 'axe', 'done_axes')
-    else
-        drop_order('pick'); drop_order('axe')
+    if not state.queue then
+        qerror('the gear service ("Queue gear orders") is off -- no gear snapshot to plan from')
     end
-    if not state.queue then return end
-    local ent = fort_entity()
-    if ent then ensure_cloaks(ent) end   -- cloaks in the owned uniform TEMPLATES (never positions)
-    -- weekly: free stalled assignments / re-solve stale slots (log failures -- a silent
-    -- pcall here once hid a missing-require for a whole session)
-    local ok_us, err_us = pcall(unstick_stalled_gear)
-    if not ok_us then dfhack.printerr('military-uniforms: unstick pass failed: ' .. tostring(err_us)) end
-    local copper_idx = inorganic_idx('COPPER')
-    local iron_idx, pig_idx, steel_idx = inorganic_idx('IRON'), inorganic_idx('PIG_IRON'), inorganic_idx('STEEL')
-    local iron_ores = iron_ore_set(iron_idx)
-    local req = compute_required()
-    -- armour pieces soldiers need, indexed by "item_type/subtype" (for the iron/copper backup)
-    local backup_by_ts = {}
-    for key, r in pairs(req) do
-        if BACKUP_TYPES[r.item_type] then
-            backup_by_ts[r.item_type .. '/' .. r.subtype .. '/' .. r.size_race] = key
-        end
-    end
-    -- one pass over items: tally gear stock (total + masterwork) by item key, bar
-    -- stock by material, and the leather-supply counts. Items already flagged for
-    -- melting don't count (they're being recycled).
-    local stock, mwstock, bars = {}, {}, {}
-    local shields_by_sub = {}     -- wearable shields per subtype, ANY material (for the stand-in)
-    -- best AVAILABLE (unassigned, wearable) quality per gear key -> drives the upgrade re-equip
-    local availq = {}
-    -- hand-split counts for handed types (gauntlets): stock_h[key][hand], mwstock_h[key][hand]
-    local stock_h, mwstock_h = {}, {}
-    local bstock = {}            -- bstock[material_index]["type/sub"] = existing iron/copper backup pieces
-    local bstock_h = {}          -- hand-split backup stock for handed types: bstock_h[mat][ts][hand]
-    local iron_ore_count = 0
-    local hides, flasks, backpacks, logs = 0, 0, 0, 0
-    for _, it in ipairs(df.global.world.items.all) do
-        if not_fort_stock(it) then goto next_item end
-        local t = it:getType()
-        if t == df.item_type.BAR then
-            if on_hand(it) then
-                bars[barkey(it:getMaterial(), it:getMaterialIndex())] = (bars[barkey(it:getMaterial(), it:getMaterialIndex())] or 0) + 1
-            end
-        elseif t == df.item_type.BOULDER then
-            if it:getMaterial() == 0 and iron_ores[it:getMaterialIndex()] and on_hand(it) then
-                -- smelting one ore boulder yields 4 bars, so count it as 4 iron
-                iron_ore_count = iron_ore_count + 4
-            end
-        elseif t == df.item_type.WOOD and not it.flags.melt then
-            logs = logs + 1                                  -- for the wood-shield stand-in
-        elseif t == df.item_type.SKIN_TANNED then
-            hides = hides + 1
-        elseif not it.flags.melt and t == df.item_type.FLASK then
-            flasks = flasks + 1
-        elseif not it.flags.melt and t == df.item_type.BACKPACK then
-            backpacks = backpacks + 1
-        elseif not it.flags.melt and not item_installed(it) and MAKE_JOB[t] then
-            -- (only makeable gear types; an item built into a building -- weapon trap / display
-            -- case -- can never be equipped, so it does not count as gear stock)
-            if t == df.item_type.SHIELD then
-                shields_by_sub[it:getSubtype()] = (shields_by_sub[it:getSubtype()] or 0) + 1
-            end
-            local mt, mi_ = item_matpair(it)
-            local k = ('%d/%d/%d/%d/%d'):format(t, it:getSubtype(), mt, mi_, item_size_race(it))
-            -- LEATHER wears out: a damaged (worn) leather piece (cloak / leather armour) does NOT
-            -- count as coverage, so the service makes a fresh one and the dwarf re-equips it.
-            local leather_worn = mt == -1 and mi_ == df.entity_material_category.Leather and it.wear > 0
-            if req[k] and not leather_worn then
-                stock[k] = (stock[k] or 0) + 1
-                -- track the best quality among UNASSIGNED copies (an equipped piece is already
-                -- on a soldier -- it isn't something to upgrade TO)
-                if not item_equipped(it) then
-                    local q = it:getQuality()
-                    if q > (availq[k] or -1) then availq[k] = q end
-                end
-                local handed = HANDED[t]
-                local hand = handed and item_hand(it) or nil
-                if handed then
-                    stock_h[k] = stock_h[k] or {[0] = 0, [1] = 0}
-                    stock_h[k][hand] = stock_h[k][hand] + 1
-                end
-                -- a masterwork counts toward the goal only if it is UNDAMAGED (wear 0 -- a worn
-                -- masterwork has lost its edge) and not an artifact (artifacts never auto-equip
-                -- and can't be melted), so we don't treat a degraded/undisplayable piece as done
-                if it:getQuality() >= df.item_quality.Masterful
-                    and it.wear == 0
-                    and item_is_makesize(it)   -- a dwarf-sized masterwork isn't the hyena target
-                    and dfhack.items.getGeneralRef(it, df.general_ref_type.IS_ARTIFACT) == nil
-                then
-                    mwstock[k] = (mwstock[k] or 0) + 1
-                    if handed then
-                        mwstock_h[k] = mwstock_h[k] or {[0] = 0, [1] = 0}
-                        mwstock_h[k][hand] = mwstock_h[k][hand] + 1
-                    end
-                end
-            elseif mt == 0 then
-                -- an iron/copper piece of a backup-able type = existing backup stock
-                if mi_ == iron_idx or mi_ == copper_idx then
-                    local ts = t .. '/' .. it:getSubtype() .. '/' .. item_size_race(it)
-                    if backup_by_ts[ts] then
-                        bstock[mi_] = bstock[mi_] or {}
-                        bstock[mi_][ts] = (bstock[mi_][ts] or 0) + 1
-                        if HANDED[t] then    -- track backup gauntlets per hand so a bare hand is seen
-                            bstock_h[mi_] = bstock_h[mi_] or {}
-                            bstock_h[mi_][ts] = bstock_h[mi_][ts] or {[0] = 0, [1] = 0}
-                            local bh = item_hand(it)
-                            bstock_h[mi_][ts][bh] = bstock_h[mi_][ts][bh] + 1
-                        end
-                    end
-                end
-            end
-        end
-        ::next_item::
-    end
-
-    -- RE-EQUIP ON UPGRADE: when a freshly forged MASTERWORK piece becomes available, set DF's
-    -- per-slot dirty flag so it re-runs equipment assignment and soldiers swap up to it. We fire ONLY
-    -- when the best AVAILABLE (unassigned) quality reaches MASTERFUL and rises above what we last saw
-    -- for that key -- i.e. a new masterwork was created. We deliberately do NOT fire for lesser
-    -- quality bumps (a superior->exceptional piece): forcing a swap for every minor improvement made
-    -- soldiers repeatedly DROP a perfectly good piece to fetch a marginally better one, which is what
-    -- made the "properly outfitted" count bounce up and down. Basic (non-masterwork) gear is still
-    -- picked up -- DF fills empty uniform slots on its own; we just stop churning already-filled ones.
-    state.best_q = state.best_q or {}
-    local upd = df.global.plotinfo.equipment.update
-    local seen_key = {}
-    for key, r in pairs(req) do
-        seen_key[key] = true
-        local cur = availq[key] or -1
-        local field = UPDATE_FIELD[r.item_type]
-        if field and cur >= df.item_quality.Masterful and cur > (state.best_q[key] or -1) then
-            upd[field] = true
-        end
-        state.best_q[key] = cur
-    end
-    -- drop keys no longer needed, so if that piece is re-created later it re-triggers cleanly
-    for key in pairs(state.best_q) do if not seen_key[key] then state.best_q[key] = nil end end
-
-    -- count soldiers (occupied fort squad positions)
-    local fort = df.global.plotinfo.group_id
-    local soldiers = 0
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for p = 0, #sq.positions - 1 do if sq.positions[p].occupant >= 0 then soldiers = soldiers + 1 end end
-        end
-    end
-    -- drop gear orders no longer required (soldier left / uniform changed); leave the
-    -- leather-supply orders ("supply/*"), copper-backup orders ("cu/*"), and the miner
-    -- pickaxe order ("pick") to their own passes (but drop a cu/ order whose steel base is
-    -- gone from req).
-    for key in pairs(state.orders) do
-        if key:sub(1, 7) == 'supply/' then                                    -- ensure_supply handles it
-        elseif key == 'pick' or key == 'axe' then                             -- equip_workers handles these
-        elseif key == 'shieldstandin' then                                    -- shield stand-in pass handles it
-        elseif key:sub(1, 3) == 'cu/' then
-            if not req[key:sub(4)] then drop_order(key) end                   -- base steel piece gone
-        elseif not req[key] then
-            drop_order(key)
-        end
-    end
-    -- BASIC COVERAGE, PER KEY: a key's non-masterwork set is "done" once total stock (masterwork
-    -- pieces count -- a masterwork boot is still a boot to wear) covers everyone who wants it. Only
-    -- then may that key be UPGRADED to masterwork. This gates masterwork per item, so masterworks
-    -- are made only after every unit (military AND civilian) has a plain piece of that item -- and,
-    -- because civilians are ordered last for basic equip, only after the military are fully kitted.
-    local basic_done = {}
-    for key, r in pairs(req) do
-        if HANDED[r.item_type] then
-            local ph, sh = r.count / 2, stock_h[key] or {}
-            basic_done[key] = (sh[0] or 0) >= ph and (sh[1] or 0) >= ph
-        else
-            basic_done[key] = (stock[key] or 0) >= r.count
-        end
-    end
-
-    -- ONE SOLDIER AT A TIME, PER METAL: hand current stock to soldiers in order, then
-    -- for EACH metal independently forge one soldier at a time. A metal is "claimed" by
-    -- the first soldier (in order) still missing a piece of it, and only that soldier's
-    -- gaps in that metal are queued -- so e.g. a later soldier's SILVER warhammer still
-    -- gets made while STEEL is busy finishing an earlier soldier's set. This still
-    -- completes full sets (breastplate included) instead of spreading a metal thin.
-    -- A key that is in its MASTERWORK phase (masterwork toggle on AND its basic set done)
-    -- draws from the masterwork count instead, and upgrades in parallel.
-    -- Handed types (gauntlets) get a per-hand pool so we require one of EACH hand.
-    local persoldier = compute_per_soldier()
-    local avail, avail_h = {}, {}
-    for key, r in pairs(req) do
-        local mwph = state.masterwork and basic_done[key]   -- this key is upgrading to masterwork
-        if HANDED[r.item_type] then
-            local src = mwph and mwstock_h[key] or stock_h[key]
-            avail_h[key] = {[0] = src and src[0] or 0, [1] = src and src[1] or 0}
-        else
-            avail[key] = mwph and (mwstock[key] or 0) or (stock[key] or 0)
-        end
-    end
-    -- STEEL SHIELDS LAST: steel_gear_done is true once every NON-shield steel item is covered (and
-    -- masterworked, if upgrading). Computed BEFORE the pacing loop, because a steel shield is forged
-    -- last: while it is deferred it must NOT claim the steel slot, or a soldier whose only gap is
-    -- that deferred shield blocks every later soldier's real steel gear (their axes) behind it.
-    local steel_gear_done = true
-    if steel_idx then
-        for key, r in pairs(req) do
-            if r.mat_type == 0 and r.mat_index == steel_idx and r.item_type ~= df.item_type.SHIELD then
-                if HANDED[r.item_type] then
-                    local ph = r.count / 2
-                    local sh, mh = stock_h[key] or {}, mwstock_h[key] or {}
-                    if (sh[0] or 0) < ph or (sh[1] or 0) < ph then steel_gear_done = false end
-                    if state.masterwork and ((mh[0] or 0) < ph or (mh[1] or 0) < ph) then steel_gear_done = false end
-                else
-                    if (stock[key] or 0) < r.count then steel_gear_done = false end
-                    if state.masterwork and (mwstock[key] or 0) < r.count then steel_gear_done = false end
-                end
-            end
-        end
-    end
-
-    -- WANT every gear key that is still short across ALL soldiers -- no one-soldier-at-a-time
-    -- metal pacing. That pacing stalled shared keys (a sizeless steel axe, same-size armour): the
-    -- key was only forged when the ONE claiming soldier happened to need it, so a dozen others could
-    -- wait behind an unrelated piece. The queue pass instead forges each wanted key's whole
-    -- shortfall in one batch, bounded by the metal's bar budget -- which is what actually paces a
-    -- scarce metal. Overproduction is acceptable. (Deferred steel shields are dropped in the queue
-    -- pass regardless of want, so they still come last.)
-    local want = {}
-    for _, sreq in ipairs(persoldier) do
-        for _, need in ipairs(sreq.needs) do
-            local k = need.k
-            local r = req[k]
-            do
-                local covered
-                if need.hand ~= nil then                          -- gauntlet: this exact hand
-                    local pool = avail_h[k]
-                    if pool and pool[need.hand] > 0 then pool[need.hand] = pool[need.hand] - 1; covered = true end
-                elseif (avail[k] or 0) > 0 then
-                    avail[k] = avail[k] - 1; covered = true       -- covered from stock
-                end
-                if not covered and r then want[k] = true end     -- still short -> forge it
-            end
-        end
-    end
-
-    -- BAR RESERVE + gear budget. Keep RESERVE_BARS of each metal free for moods/other jobs. The
-    -- gear orders themselves are re-sized to fit each cycle, so they are NOT pre-subtracted -- only
-    -- our NON-gear steel orders (miner pick / woodcutter axe) are, since those are committed
-    -- elsewhere. (Pre-subtracting gear would let last cycle's big batch block this cycle's forging.)
-    local committed = {}
-    for k, id in pairs(state.orders) do
-        if not req[k] and k:sub(1, 7) ~= 'supply/' then   -- pick / axe / shieldstandin / cu-backup
-            local o = order_by_id(id)
-            if o and o.amount_left > 0 then
-                local mk = barkey(o.mat_type, o.mat_index)
-                committed[mk] = (committed[mk] or 0) + o.amount_left
-            end
-        end
-    end
-    local budget = {}
-    for mk, b in pairs(bars) do budget[mk] = math.max(0, b - RESERVE_BARS - (committed[mk] or 0)) end
-
-    -- FAIR SHARE: split each metal's budget evenly across the gear keys still short in it, so one
-    -- big shortfall (e.g. 39 helms) can't hog the bars and starve another (the civilians' axes).
-    -- Each key forges up to its share this cycle; overproduction is acceptable and the batch
-    -- re-sizes down as pieces are made. Masterwork upgrades / paired pieces stay one at a time.
-    local wanted_n = {}
-    for key, r in pairs(req) do
-        local defer = r.item_type == df.item_type.SHIELD and r.mat_type == 0 and r.mat_index == steel_idx and not steel_gear_done
-        if want[key] and r.mat_type == 0 and not defer
-            and not (state.masterwork and basic_done[key]) and not HANDED[r.item_type] then
-            local mk = barkey(r.mat_type, r.mat_index)
-            wanted_n[mk] = (wanted_n[mk] or 0) + 1
-        end
-    end
-    local share = {}
-    for mk, cnt in pairs(wanted_n) do share[mk] = math.max(1, math.floor((budget[mk] or 0) / cnt)) end
-
-    for key, r in pairs(req) do
-        local is_steel_shield = r.item_type == df.item_type.SHIELD
-            and r.mat_type == 0 and r.mat_index == steel_idx
-        local mk = barkey(r.mat_type, r.mat_index)
-        local is_metal = r.mat_type == 0        -- wood / leather / bone don't consume metal bars
-        if is_steel_shield and not steel_gear_done then
-            drop_order(key)    -- steel shields wait until the rest of the steel gear is done
-        elseif not want[key] then
-            drop_order(key)    -- covered
-        elseif is_metal and (budget[mk] or 0) < BARS_PER_ITEM then
-            drop_order(key)    -- no bars to spare past the reserve
-        else
-            local n
-            if (state.masterwork and basic_done[key]) or HANDED[r.item_type] then
-                n = 1                                            -- masterwork upgrade / paired: one at a time
-            elseif is_metal then
-                n = math.max(1, math.min(r.count - (stock[key] or 0), share[mk] or 1))
-            else
-                n = math.max(1, r.count - (stock[key] or 0))     -- wood/leather/bone: no bar limit
-            end
-            queue_one(key, r, n)
-        end
-    end
-
-    -- BACKUP GEAR STOCK (uniform untouched): whenever the soldiers don't have enough
-    -- wearable/usable pieces for a slot in the backup metal -- i.e. desired(steel) +
-    -- backup-metal stock < the number who need it -- stock a backup version so nobody is
-    -- left without something to equip. Armour, shield, AND weapon.
-    --
-    -- The BACKUP METAL is IRON when there's iron to spare after all the steel we still owe
-    -- (iron ore + iron bars - iron to make the outstanding steel > 0), else COPPER -- iron
-    -- gear is far better than copper. Coverage counts only the CHOSEN backup metal, so when
-    -- iron is picked it also replaces any copper backups (copper stops, iron is made in its
-    -- place). Not gated on steel supply; stops once steel + backup covers everyone. One per
-    -- type per cycle, respecting that metal's reserve; uniform-copper pieces are skipped.
-    local steel_short = 0
-    if steel_idx then
-        for key, r in pairs(req) do
-            if r.mat_type == 0 and r.mat_index == steel_idx then
-                steel_short = steel_short + math.max(0, r.count - (stock[key] or 0))
-            end
-        end
-    end
-    -- each outstanding steel bar needs 1 iron directly + 1 pig iron (itself 1 iron, unless
-    -- pig iron is already on hand)
-    local pig_bars = bars[barkey(0, pig_idx or -1)] or 0
-    local iron_for_steel = steel_short + math.max(0, steel_short - pig_bars)
-    local iron_left = ((bars[barkey(0, iron_idx or -1)] or 0) + iron_ore_count) - iron_for_steel
-    -- iron backup gear needs actual BARS at the forge: ore boulders keep iron "to spare"
-    -- on paper (iron_left), but with the bars completely run out nothing can be forged --
-    -- the budget check below would just veto every order and copper would never be tried.
-    -- So iron is only picked while at least one iron item is forgeable RIGHT NOW (bars
-    -- beyond the reserve); otherwise copper still gets made while the ore waits to smelt.
-    local iron_forgeable = iron_idx and (budget[barkey(0, iron_idx)] or 0) >= BARS_PER_ITEM
-    local backup_idx = (iron_left > 0 and iron_forgeable) and iron_idx or copper_idx
-    if backup_idx then
-        local bmk = barkey(0, backup_idx)
-        local backup_stock = bstock[backup_idx] or {}
-        local backup_stock_h = bstock_h[backup_idx] or {}
-        for key, r in pairs(req) do
-            local ts = r.item_type .. '/' .. r.subtype .. '/' .. r.size_race
-            local already_backup = r.mat_type == 0 and r.mat_index == backup_idx
-            if not metal_legal(r.item_type, r.subtype) then
-                drop_order('cu/' .. key)   -- can't be metal (cloak / soft armour): never a metal backup
-            elseif backup_by_ts[ts] == key and not already_backup then   -- a backup-able piece
-                local cukey = 'cu/' .. key
-                -- coverage = steel stock + chosen-backup-metal stock. For HANDED gauntlets this MUST
-                -- be per HAND: a hand with no wearable piece leaves that hand bare even when the
-                -- pair-total looks covered -- and it blocks that hand's masterwork goal too -- so keep
-                -- stocking backups until BOTH hands are covered.
-                local short
-                if HANDED[r.item_type] then
-                    local perhand = r.count / 2
-                    local sh, bh = stock_h[key] or {}, backup_stock_h[ts] or {}
-                    short = ((sh[0] or 0) + (bh[0] or 0) < perhand)
-                         or ((sh[1] or 0) + (bh[1] or 0) < perhand)
-                else
-                    short = (stock[key] or 0) + (backup_stock[ts] or 0) < r.count
-                end
-                local o = state.orders[cukey] and order_by_id(state.orders[cukey])
-                if o and (o.mat_type ~= 0 or o.mat_index ~= backup_idx) then
-                    drop_order(cukey); o = nil   -- backup metal switched -> remake in the new metal
-                end
-                local in_flight = o and o.amount_left > 0
-                if short
-                    and (in_flight or (budget[bmk] or 0) >= BARS_PER_ITEM) then
-                    if not in_flight then budget[bmk] = (budget[bmk] or 0) - BARS_PER_ITEM end
-                    queue_one(cukey, {item_type = r.item_type, subtype = r.subtype,
-                                      mat_type = 0, mat_index = backup_idx, size_race = r.size_race})
-                else
-                    drop_order(cukey)   -- everyone's covered
-                end
-            end
-        end
-    end
-
-    -- SHIELD REPLACEMENT: the uniforms are left exactly as written -- military ask for a STEEL
-    -- shield, civilians for a WOOD shield. The rule lives entirely in the orders: a STEEL shield
-    -- is only forged once NO OTHER steel item is still requested (steel_gear_done; the steel-shield
-    -- order is deferred in the main queue above). Otherwise a WOOD shield (or iron/copper) is made
-    -- as the replacement so soldiers have something to hold. Shields are sizeless, so we count
-    -- EVERY regular shield of the subtype (need = every soldier who wants one).
-    local ssub = ent and shield_subtype(ent)
-    if ssub and steel_idx and not steel_gear_done then
-        local need = 0
-        for _, r in pairs(req) do
-            if r.item_type == df.item_type.SHIELD and r.subtype == ssub then need = need + r.count end
-        end
-        if (shields_by_sub[ssub] or 0) < need then
-            local mt, mi, mc
-            if logs > 0 then
-                mt, mi, mc = -1, -1, df.entity_material_category.Wood
-            elseif iron_idx and (bars[barkey(0, iron_idx)] or 0) > 0 then
-                -- iron only on actual bars: ore alone can't fill the order (see backup metal)
-                mt, mi, mc = 0, iron_idx, -1
-            elseif copper_idx then
-                mt, mi, mc = 0, copper_idx, -1
-            end
-            if mt then
-                queue_one('shieldstandin', {item_type = df.item_type.SHIELD, subtype = ssub,
-                    mat_type = mt, mat_index = mi, size_race = civ_race()})
-            else
-                drop_order('shieldstandin')
-            end
-        else
-            drop_order('shieldstandin')
-        end
-    else
-        drop_order('shieldstandin')
-    end
-
-    -- recycle surplus steel: for the masterwork upgrade AND to free bars for miner picks
-    -- when we're out of steel (out of bars -> melt extra steel items that aren't needed)
-    if state.masterwork or pick_short > 0 then
-        local extra = pick_short > 0 and steel_idx
-            and {[barkey(0, steel_idx)] = pick_short} or nil
-        melt_for_masterwork(req, mwstock, mwstock_h, stock, bars, extra, basic_done)
-    end
-    -- leather field kit: a backpack (food) and a waterskin/flask (water) per soldier
-    ensure_supply('supply/backpack', df.job_type.MakeBackpack, soldiers, backpacks, hides)
-    ensure_supply('supply/flask', df.job_type.MakeFlask, soldiers, flasks, hides)
-
-    -- CIVILIAN MILITIA: routine swapping + member shuffling are NO LONGER part of the automatic
-    -- cycle -- too brittle to run unattended (it kept overriding hand-set squad schedules). The
-    -- cycle only SNAPSHOTS its gear picture here; the separate `civilian-militia` command applies
-    -- an arrangement on demand via civilian_arrange() below. Uniform templates are still created
-    -- automatically as before.
-    civ_snapshot = {persoldier = persoldier, req = req, stock = stock, stock_h = stock_h}
-
-    -- completion flags for the overlay's "Done" label: queue = every soldier has each piece
-    -- (by stock, hand-aware); masterwork = every piece is masterwork. Vacuously done if no
-    -- soldiers/pieces are required.
-    local queue_done, mw_done = true, true
-    for key, r in pairs(req) do
-        if HANDED[r.item_type] then
-            local perhand = r.count / 2
-            local sh, mh = stock_h[key] or {}, mwstock_h[key] or {}
-            if (sh[0] or 0) < perhand or (sh[1] or 0) < perhand then queue_done = false end
-            if (mh[0] or 0) < perhand or (mh[1] or 0) < perhand then mw_done = false end
-        else
-            if (stock[key] or 0) < r.count then queue_done = false end
-            if (mwstock[key] or 0) < r.count then mw_done = false end
-        end
-    end
-    state.done_queue, state.done_masterwork = queue_done, mw_done
-
-    save_state()        -- persist the updated order-id map + completion flags
+    run_cycle()
+    if not civ_snapshot then qerror('no gear snapshot (no squads with uniforms?)') end
+    _G.MU_DRY_ARRANGE = dry and true or nil
+    local ok, err = pcall(arrange_civilian_squads, civ_snapshot.persoldier)
+    _G.MU_DRY_ARRANGE = nil
+    if not ok then qerror(tostring(err)) end
 end
+
+-- ---- heartbeat ---------------------------------------------------------------
 
 -- per-frame heartbeat gated on the calendar (repeat-util's tick timers fire too
 -- coarsely on this build; see auto-mandate); runs the cycle ~once a game-day.
@@ -2064,17 +2540,30 @@ end
 -- survives script reloads: reloading/re-enabling bumps it, and every previously
 -- scheduled heartbeat -- including ones closed over an older copy of this code --
 -- sees my ~= current and exits instead of leaking a second ticking loop.
+--
+-- HOT-RELOAD TRAP, hit for real: the generation is only bumped by start_heartbeat /
+-- stop_heartbeat. `reqscript` alone returns at the dfhack_flags.module guard and calls
+-- NEITHER -- so a heartbeat scheduled by an EARLIER version of this file keeps ticking that
+-- old code against the same fort. That is not merely a duplicate loop, it is two different
+-- algorithms fighting: the pre-pinning version's weekly unstick pass erases any assignment
+-- whose item the soldier is not yet carrying and no job is fetching -- i.e. exactly the pins
+-- this version writes. Symptom was ~50 assignments silently reverting each game-day while
+-- the code looked correct. AFTER ANY HOT RELOAD, take ownership of the tick:
+--     dfhack-run lua 'reqscript("fort/military-uniforms").set_toggle("queue", true)'
+-- (Tell-tale that the old code is still live: state.last_unstick or state.best_q reappearing
+-- in the persisted site data -- only the pre-rewrite version ever wrote those.)
 local last_run = nil
 local function hb_gen(set)
     if set ~= nil then dfhack.internal.military_uniforms_hb_gen = set end
     return dfhack.internal.military_uniforms_hb_gen or 0
 end
 
--- Give every workshop job that came from one of OUR gear orders "top priority" (job.flags.do_now --
--- exactly what the workshop's "Make top priority" toggle sets), so the forge does auto-gear pieces
--- before other queued work. A job carries the manager order id it was assigned from (job.order_id),
--- so we match our tracked orders EXACTLY -- no guessing by type. Idempotent (skip jobs already set);
--- a bounded walk of the active job list so a corrupt list can never hang the game.
+-- Give every workshop job that came from one of OUR gear orders "top priority"
+-- (job.flags.do_now -- exactly what the workshop's "Make top priority" toggle sets), so the
+-- forge does auto-gear pieces before other queued work. A job carries the manager order id
+-- it was assigned from (job.order_id), so we match our tracked orders EXACTLY -- no guessing
+-- by type. Idempotent; a bounded walk of the active job list so a corrupt list can never
+-- hang the game.
 local function prioritize_gear_jobs()
     load_state()
     if not state.orders or not next(state.orders) then return end
@@ -2114,32 +2603,45 @@ local function drop_all_orders()
     for key in pairs(state.orders) do drop_order(key) end
 end
 
--- set a toggle; runs the cycle now and (re)starts/stops the shared heartbeat so
--- it ticks whenever either service (gear queueing or war-dog training) is on
--- Run one civilian-militia arrangement pass (the `civilian-militia` command's engine): runs a
--- gear cycle first so the stock/requirement snapshot is fresh, then packs civilian squads and
--- flips their routines (Off-duty <-> Ready only; hand-set routines are never touched).
--- dry = print the plan, change nothing.
-function civilian_arrange(dry)
-    if not dfhack.world.isFortressMode() then qerror('civilian_arrange needs a loaded fortress') end
-    load_state()
-    if not state.queue then
-        qerror('the gear service ("Queue gear orders") is off -- no gear snapshot to plan from')
+-- Release every pin this service made, leaving the uniforms' filter specs exactly as they
+-- were -- so switching the service off hands each slot back to DF's own solver. A
+-- hand-picked specific item (filters all -1) is never touched.
+local function release_all_pins()
+    local fort = df.global.plotinfo.group_id
+    local n = 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                for slot = 0, 6 do
+                    local v = pos.equipment.uniform[slot]
+                    for j = 0, #v - 1 do
+                        local spec = v[j]
+                        if spec.item >= 0 and spec.item_type >= 0 then   -- ours, not hand-picked
+                            spec.item = -1
+                            dirty(spec.item_type)
+                            n = n + 1
+                        end
+                    end
+                end
+            end
+        end
     end
-    run_cycle()
-    if not civ_snapshot then qerror('no gear snapshot (no squads with uniforms?)') end
-    _G.MU_DRY_ARRANGE = dry and true or nil
-    local ok, err = pcall(arrange_civilian_squads,
-        civ_snapshot.persoldier, civ_snapshot.req, civ_snapshot.stock, civ_snapshot.stock_h)
-    _G.MU_DRY_ARRANGE = nil
-    if not ok then qerror(tostring(err)) end
+    return n
 end
 
+-- set a toggle; runs the cycle now and (re)starts/stops the shared heartbeat so
+-- it ticks whenever any service is on
 function set_toggle(name, val)
     load_state()
     state[name] = val
     save_state()
-    if name == 'queue' and not val then drop_all_orders(); save_state() end
+    if name == 'queue' and not val then
+        drop_all_orders()
+        release_all_pins()
+        save_state()
+    end
     if name == 'pickaxes' and not val then drop_order('pick'); drop_order('axe'); save_state() end
     if service_on() then start_heartbeat() else stop_heartbeat() end
     run_cycle()
@@ -2181,10 +2683,6 @@ register_civ_squad_notify()
 local NOTE_GEAR = 'military_uniforms_gear'
 local NOTE_MW = 'military_uniforms_masterwork'
 local EQUIPPED_MODE = {[1] = true, [2] = true, [10] = true}    -- Weapon (wielded), Worn, Strapped
-local PAIR_ITEM = {}
-for _, nm in ipairs{'GLOVES', 'GAUNTLETS', 'SHOES', 'BOOTS'} do
-    if df.item_type[nm] then PAIR_ITEM[df.item_type[nm]] = true end   -- worn as a matched pair -> need 2
-end
 
 -- singular + plural name of a uniform piece (item_type + subtype), e.g. "gauntlet"/"gauntlets" --
 -- pulled from the itemdef so it reads like the game does; falls back to the item-type token.
@@ -2210,94 +2708,60 @@ local function piece_name(item_type, subtype)
     return base, base .. 's'
 end
 
--- Walk every occupied fort-squad position and compare the assigned uniform (item type+subtype,
--- pairs doubled) to what the occupant is actually wearing. Returns totals:
---   soldiers  = squad members that have an assigned uniform
---   missing   = members not wearing every assigned piece (a gap, of any kind)
---   notmw     = members wearing every assigned piece but with some piece below masterwork quality
--- plus the persisted done_queue / done_masterwork / masterwork flags (fort-wide stock coverage).
+-- Walk every occupied fort-squad position and compare the managed uniform specs to what the
+-- occupant is actually wearing. Returns totals:
+--   soldiers  = squad members with a managed uniform
+--   missing   = members not wearing every managed piece (a gap, of any kind)
+--   notmw     = members wearing every piece but with some piece below masterwork quality
+-- plus the persisted done_queue / done_masterwork / masterwork flags.
 -- Result is cached within a game tick so the two notifications don't each re-scan the fort.
 local _gear_cache, _gear_cache_tick
 local function analyze_gear()
     local now = df.global.cur_year * 1200000 + df.global.cur_year_tick
     if _gear_cache and _gear_cache_tick == now then return _gear_cache end
-    local IT = df.item_type
-    local fort = df.global.plotinfo.group_id
     local soldiers, missing, notmw = 0, 0, 0
     local miss_agg = {}   -- [item_type*100000+subtype] = total pieces of that type missing fort-wide
-    for s = 0, #df.global.world.squads.all - 1 do
-        local sq = df.global.world.squads.all[s]
-        if sq.entity_id == fort then
-            for pi = 0, #sq.positions - 1 do
-                local pos = sq.positions[pi]
-                if pos.occupant >= 0 then
-                    local hf = df.historical_figure.find(pos.occupant)
-                    local u = hf and df.unit.find(hf.unit_id)
-                    if u and not u.flags1.inactive then
-                        -- need[k] = {n = count, mt/mi = the material the uniform demands for this piece}
-                        local need, nkeys = {}, 0
-                        for slot = 0, 6 do
-                            local v = pos.equipment.uniform[slot]
-                            for j = 0, #v - 1 do
-                                local it = v[j]
-                                if it.item_type ~= IT.NONE and it.item_subtype >= 0 then
-                                    local k = it.item_type * 100000 + it.item_subtype
-                                    if not need[k] then
-                                        nkeys = nkeys + 1
-                                        need[k] = {n = 0, mt = it.mattype, mi = it.matindex}
-                                    end
-                                    -- pairs are demanded against the soldier's ACTUAL anatomy: a war
-                                    -- amputee with one hand can only ever wear one gauntlet (DF strips
-                                    -- a second assignment), and one foot means one boot -- demanding 2
-                                    -- made maimed veterans read as "missing items" forever
-                                    local qty = 1
-                                    if PAIR_ITEM[it.item_type] then
-                                        if it.item_type == IT.GLOVES then
-                                            qty = math.min(2, u.status2.limbs_grasp_count)
-                                        elseif it.item_type == IT.SHOES then
-                                            qty = math.min(2, u.status2.limbs_stand_count)
-                                        else
-                                            qty = 2
-                                        end
-                                    end
-                                    need[k].n = need[k].n + qty
-                                end
-                            end
-                        end
-                        if nkeys > 0 then
-                            soldiers = soldiers + 1
-                            local have, worstq = {}, {}
-                            for _, ie in ipairs(u.inventory) do
-                                if EQUIPPED_MODE[ie.mode] then
-                                    local it = ie.item
-                                    local k = it:getType() * 100000 + it:getSubtype()
-                                    local rq = need[k]
-                                    -- MATERIAL-AWARE: when the uniform demands an EXACT material (matindex >= 0,
-                                    -- e.g. steel), the worn piece only satisfies the slot if it IS that material.
-                                    -- A stopgap iron/copper backup does NOT count as wearing the correct thing --
-                                    -- otherwise a backup-wearer reads as satisfied, then flips to "missing" during
-                                    -- the walk when they swap up to steel (the count bouncing you saw). Pieces with
-                                    -- no exact material (a leather cloak: matindex -1) still match by type+subtype.
-                                    if rq and (rq.mi < 0
-                                        or (it:getMaterial() == rq.mt and it:getMaterialIndex() == rq.mi)) then
-                                        have[k] = (have[k] or 0) + 1
-                                        local q = it.getQuality and it:getQuality() or 0
-                                        if not worstq[k] or q < worstq[k] then worstq[k] = q end
-                                    end
-                                end
-                            end
-                            local short, below_mw = false, false
-                            for k, rq in pairs(need) do
-                                local gap = rq.n - (have[k] or 0)
-                                if gap > 0 then short = true; miss_agg[k] = (miss_agg[k] or 0) + gap end
-                                if (have[k] or 0) > 0 and (worstq[k] or 0) < 5 then below_mw = true end
-                            end
-                            if short then missing = missing + 1
-                            elseif below_mw then notmw = notmw + 1 end
+    for _, sol in ipairs(read_soldiers()) do
+        local u = sol.unit
+        -- what this soldier is supposed to have, by type+subtype, with the material demanded
+        local need = {}
+        for _, e in ipairs(sol.specs) do
+            local w = e.want
+            local k = w.item_type * 100000 + w.subtype
+            local rq = need[k]
+            if not rq then rq = {n = 0, mt = w.mat_type, mi = w.mat_index}; need[k] = rq end
+            rq.n = rq.n + w.qty
+        end
+        if next(need) then
+            soldiers = soldiers + 1
+            local have, worstq = {}, {}
+            for _, ie in ipairs(u.inventory) do
+                if EQUIPPED_MODE[ie.mode] then
+                    local it = ie.item
+                    local k = it:getType() * 100000 + it:getSubtype()
+                    local rq = need[k]
+                    -- MATERIAL-AWARE: when the uniform demands an EXACT material (steel), a
+                    -- worn piece only satisfies the slot if it IS that material. A stand-in
+                    -- does not count as wearing the correct thing -- otherwise a stand-in
+                    -- wearer reads as satisfied, then flips to "missing" when they swap up.
+                    if rq then
+                        local mt, mi = item_matpair(it)
+                        if mt == rq.mt and mi == rq.mi then
+                            have[k] = (have[k] or 0) + 1
+                            local q = it.getQuality and it:getQuality() or 0
+                            if not worstq[k] or q < worstq[k] then worstq[k] = q end
                         end
                     end
                 end
             end
+            local short, below_mw = false, false
+            for k, rq in pairs(need) do
+                local gap = rq.n - (have[k] or 0)
+                if gap > 0 then short = true; miss_agg[k] = (miss_agg[k] or 0) + gap end
+                if (have[k] or 0) > 0 and (worstq[k] or 0) < df.item_quality.Masterful then below_mw = true end
+            end
+            if short then missing = missing + 1
+            elseif below_mw then notmw = notmw + 1 end
         end
     end
     -- the item type with the most pieces missing fort-wide, and how many of it are short
@@ -2331,8 +2795,7 @@ end
 
 -- Line 2: only once "Upgrade to masterwork" is on AND EVERY soldier is already in their complete
 -- uniform (missing == 0) -- then count members who have all their pieces but not all at masterwork
--- quality. Gating on missing == 0 (not just done_queue) keeps this line from ever overlapping the
--- "missing uniform items" line above: while anyone still lacks a piece, only that line shows.
+-- quality. Gating on missing == 0 keeps this line from ever overlapping the line above.
 local function masterwork_message()
     if not dfhack.world.isFortressMode() then return end
     local g = analyze_gear()
@@ -2376,6 +2839,8 @@ register_gear_notify()
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
+        managed_cache, hyena_cache, cloak_sub_cache = nil, nil, nil   -- per-world caches
+        matval_cache = {}
         register_civ_squad_notify()
         register_gear_notify()
         if dfhack.world.isFortressMode() and service_on() then start_heartbeat() end
@@ -2398,7 +2863,7 @@ end
 
 MilitaryUniformOverlay = defclass(MilitaryUniformOverlay, overlay.OverlayWidget)
 MilitaryUniformOverlay.ATTRS{
-    desc = 'Toggles to auto-queue squad gear orders, upgrade to masterwork, and train war dogs.',
+    desc = 'Toggles to auto-pin squad gear, upgrade to masterwork, and train war dogs.',
     default_pos = {x = -93, y = 13},   -- right-anchored: the equip screen is flush to the
                                        -- screen's right edge, so track that edge to slide with it
     default_enabled = true,
@@ -2535,7 +3000,7 @@ if dfhack_flags.module then return end
 if dfhack_flags and dfhack_flags.enable ~= nil then
     if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
     set_toggle('queue', dfhack_flags.enable_state)
-    print('military-uniforms: gear queueing ' .. (load_state().queue and 'ON' or 'OFF'))
+    print('military-uniforms: gear service ' .. (load_state().queue and 'ON' or 'OFF'))
     return
 end
 
@@ -2563,10 +3028,116 @@ if args[1] == 'civilian' then
 end
 if args[1] == 'orders' then
     load_state()
-    run_cycle()        -- reconcile standing orders against current stock/need once
+    run_cycle()        -- pin what we can and reconcile standing orders against the shortfall
     local n = 0
     for _ in pairs(state.orders) do n = n + 1 end
     print(('military-uniforms: %d gear order(s) standing (short of need)'):format(n))
+    return
+end
+if args[1] == 'dry' then
+    -- preview a full cycle against the live fort without writing anything: no pins, no
+    -- assignments, no orders, no melts, no state saved
+    load_state()
+    dry_run, dry_log = true, {}
+    local ok, err = pcall(run_cycle)
+    dry_run = false
+    local log = dry_log
+    dry_log = nil
+    if not ok then qerror(tostring(err)) end
+    print('military-uniforms: DRY RUN -- nothing was changed.')
+    for _, line in ipairs(log) do print(line) end
+    return
+end
+if args[1] == 'release-unobtainable' then
+    -- A HAND-PICKED specific item (spec.item set, every filter -1) is normally untouchable:
+    -- it is the player's explicit choice. But when the named item can never arrive -- it no
+    -- longer exists, it is another dwarf's property or on their back, or it is locked into a
+    -- display case / weapon trap -- that slot shows red forever and the service is forbidden
+    -- from helping. This converts exactly those specs into ordinary managed FILTER specs for
+    -- the same kind of item, so the slot goes back into rotation and gets pinned or forged.
+    -- Nothing else about the uniform is touched.
+    load_state()
+    local dry = args[2] == 'dry'
+    local fort = df.global.plotinfo.group_id
+    local n = 0
+    for s = 0, #df.global.world.squads.all - 1 do
+        local sq = df.global.world.squads.all[s]
+        if sq.entity_id == fort then
+            for p = 0, #sq.positions - 1 do
+                local pos = sq.positions[p]
+                local hf = pos.occupant >= 0 and df.historical_figure.find(pos.occupant)
+                local u = hf and df.unit.find(hf.unit_id)
+                if u then
+                    for slot = 0, 6 do
+                        local v = pos.equipment.uniform[slot]
+                        for j = 0, #v - 1 do
+                            local spec = v[j]
+                            if spec.item >= 0 and spec.item_type < 0 then
+                                local it = df.item.find(spec.item)
+                                local why
+                                if not it then why = 'item no longer exists'
+                                elseif it.flags.in_building then why = 'locked in a building (display case / trap)'
+                                else
+                                    local ow = it.flags.owned and dfhack.items.getOwner(it) or nil
+                                    local h = dfhack.items.getHolderUnit(it)
+                                    if ow and ow.id ~= u.id then
+                                        why = 'owned by ' .. dfhack.units.getReadableName(ow)
+                                    elseif h and h.id ~= u.id then
+                                        why = 'carried by ' .. dfhack.units.getReadableName(h)
+                                    end
+                                end
+                                if why then
+                                    n = n + 1
+                                    print(('  %s: %s -- %s'):format(
+                                        dfhack.units.getReadableName(u):sub(1, 30),
+                                        it and dfhack.items.getDescription(it, 0, true) or ('#' .. spec.item),
+                                        why))
+                                    if not dry then
+                                        -- rebuild it as a managed filter for the same KIND of
+                                        -- thing: same item type + subtype, and the material
+                                        -- CLASS if it is one we manage (a leather cloak stays
+                                        -- "any leather cloak"), else that exact material.
+                                        spec.item = -1
+                                        if it then
+                                            spec.item_type, spec.item_subtype = it:getType(), it:getSubtype()
+                                            local mt, mi = item_matpair(it)
+                                            if mt == -1 then
+                                                spec.mattype, spec.matindex = -1, -1
+                                                spec.material_class = mi
+                                            else
+                                                spec.mattype, spec.matindex = mt, mi
+                                                spec.material_class = -1
+                                            end
+                                            local f = UPDATE_FIELD[spec.item_type]
+                                            if f then df.global.plotinfo.equipment.update[f] = true end
+                                        else
+                                            v:erase(j)   -- nothing left to describe: drop it
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if n == 0 then
+        print('military-uniforms: no unobtainable hand-picked items found.')
+    elseif dry then
+        print(('military-uniforms: DRY RUN -- %d hand-picked slot(s) would be handed back to the service.'):format(n))
+    else
+        print(('military-uniforms: %d hand-picked slot(s) released to the service.'):format(n))
+        run_cycle()
+    end
+    return
+end
+if args[1] == 'unpin' then
+    -- hand every managed slot back to DF's own equipment solver (leaves hand-picked
+    -- specific items alone). The service re-pins on its next cycle unless it is off.
+    load_state()
+    local n = release_all_pins()
+    print(('military-uniforms: released %d pinned uniform slot%s.'):format(n, n == 1 and '' or 's'))
     return
 end
 if args[1] == 'altsched' then
@@ -2597,7 +3168,7 @@ if #deleted > 0 then
     for _, n in ipairs(deleted) do print('    - ' .. n) end
 end
 
--- Queue gear orders defaults ON. The heartbeat normally starts on map load via
+-- The gear service defaults ON. The heartbeat normally starts on map load via
 -- onStateChange, but that already fired before this module loaded (e.g. when run from
 -- magnus-scripts), so start it here too if the service is on. Persist the resolved state
 -- (so the default sticks) -- a fort where you turned it OFF stays off (load_state only
@@ -2606,7 +3177,7 @@ load_state()
 save_state()
 if service_on() then
     start_heartbeat()
-    print('  gear-order service ON (Queue gear orders), running daily.')
+    print('  gear service ON (pins each soldier\'s gear, forges the rest), running daily.')
 else
-    print('  gear-order service is OFF (enable on the Equip screen with Shift-G).')
+    print('  gear service is OFF (enable on the Equip screen with Shift-G).')
 end

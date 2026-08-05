@@ -93,9 +93,31 @@ end
 
 -- active only while the specific-item picker is open (so the bar hides for the rest of the
 -- customize screen, and the base class resets/restores the list when you leave it)
+--
+-- DROPPING THE SNAPSHOT ON CLOSE IS NOT OPTIONAL. sortoverlay's single_vector_search caches the
+-- list the first time it filters (data.saved_original) and, on any later NON-incremental search,
+-- writes that cache straight back into the game's live vector:
+--     elseif not incremental then vec:assign(data.saved_original); vec:resize(...)
+-- Re-opening a picker is exactly such a search (onRenderBody sees cur_key go nil -> 'SPEC' and
+-- calls do_search(text, true), force_full_search). DF rebuilds cs_add_spec_id per SLOT, so the
+-- cache belongs to whichever slot was picked LAST -- open the body-armor slot, then the helm slot,
+-- and the helm picker gets stamped with body armour. That was the "assigning a helmet shows the
+-- armor list" bug.
+--
+-- The base class's own cleanup can never save us here: do_cleanup only runs on a cur_group change
+-- (we return no group, so cur_group is permanently nil) or on scope exit -- and the focus string
+-- stays dwarfmode/Squads/Equipment/Customizing/Default whether the picker is open or shut, so
+-- opening and closing pickers never leaves the scope. Clearing state.SPEC ourselves is the guard;
+-- DFHack's own SlabOverlay:get_key does the same thing for the same reason.
+--
+-- Clearing the WHOLE state.SPEC (not just saved_original) also drops prev_text, so a new picker
+-- opens with an empty search box instead of inheriting the previous slot's query.
 function SquadEquipmentSearchOverlay:get_key()
     if squad_equipment().cs_adding_specific_item then
         return 'SPEC'
+    end
+    if self.state and self.state.SPEC then
+        self.state.SPEC = nil
     end
 end
 

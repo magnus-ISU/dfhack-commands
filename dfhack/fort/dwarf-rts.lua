@@ -129,9 +129,21 @@ local function is_civilian_squad(sid)
         local body = sq.positions[p].equipment.uniform[0]
         local has_armor, has_metal = false, false
         for j = 0, #body - 1 do
-            if body[j].item_type == df.item_type.ARMOR then
+            local sp = body[j]
+            local it_type, mattype = sp.item_type, sp.mattype
+            -- A HAND-PICKED specific item (spec.item set, every filter field -1) describes
+            -- nothing about itself, so read the ITEM. Without this, a soldier whose
+            -- breastplate and mail shirt were chosen by hand looks unarmoured -- only the
+            -- leather cloak in the same slot is visible -- and one such member drags their
+            -- entire squad into the civilian group, sorting a real military squad below the
+            -- militia and excluding it from the RTS select-all.
+            if it_type < 0 and sp.item >= 0 then
+                local it = df.item.find(sp.item)
+                if it then it_type, mattype = it:getType(), it:getMaterial() end
+            end
+            if it_type == df.item_type.ARMOR then
                 has_armor = true
-                if body[j].mattype == 0 then has_metal = true end
+                if mattype == 0 then has_metal = true end
             end
         end
         if has_armor and not has_metal then return true end   -- leather body, no metal -> civilian
