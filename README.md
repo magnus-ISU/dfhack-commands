@@ -204,7 +204,8 @@ Counts down how many days the trader is ready; click to jump to the depot.
 Warns when a restricted work detail has nobody who can actually do it.
 
 ### **`fort/needs-tomb-notification`**
-Alerts when a dwarf dies with no tomb; click for a death browser with cause, kills and a
+Alerts when a dwarf dies with no tomb, or when anything is haunting the fort — a ghost counts
+whether or not it was ever a citizen. Click for a death browser with cause, kills and a
 clickable family tree, and queue memorial slabs in bulk.
 
 ### **`fort/civ-alert-notification`**

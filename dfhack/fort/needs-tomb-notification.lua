@@ -7,6 +7,12 @@ corpse (not interred), OR walking as a GHOST -- and have not been memorialized:
     * exactly one  -> "Urist McMiner needs a tomb!"
     * more than one -> "2 dwarves need tombs!"
 
+The corpse and corpse-less lists are limited to fort MEMBERS, but GHOSTS are not:
+anything haunting your fort counts, citizen or not (a resident, a visitor, an
+invader), because only a BUILT memorial slab lays a ghost to rest and it is your
+fort it is harassing. Ghosts are flagged "(haunting)" in the browser and get
+their own notification wording.
+
 Clicking the notification opens the DEAD BROWSER, a two-pane window:
     * LEFT: your dead, in two sections -- "Needs a tomb" then "Entombed"
       (dwarves already at rest in a coffin).
@@ -145,7 +151,8 @@ local function scan()
         end
     end
 
-    -- GHOSTS: any ghost on the map is not at rest, whatever the burial state.
+    -- GHOSTS: any ghost on the map is not at rest, whatever the burial state. No membership test
+    -- here on purpose -- see the `belongs` gate below.
     for _, u in ipairs(df.global.world.units.active) do
         if u.flags3.ghostly and dfhack.units.isDead(u) and is_sapient(u) then
             local rec = rec_for(u)
@@ -165,12 +172,20 @@ local function scan()
         -- Match DF's own memorial list: fort MEMBERS, not everyone sharing our civilization.
         -- A dead caravan guard or visiting civ member is not ours to bury, and this world has
         -- ~145 such dead against 51 of our own.
-        local belongs = is_fort_member(rec.unit)
+        --
+        -- A GHOST is exempt from that test. Whoever it was in life -- a petitioned resident, a
+        -- visiting bard, a human who never made citizen, an invader -- once it is up and haunting
+        -- YOUR fort it is your problem, and only a built memorial slab settles it. Membership is
+        -- also the wrong thing to ask a corpse-less death: someone who burned up in magma can
+        -- leave a unit whose fort links no longer read as ours (`isOwnGroup` false), so gating the
+        -- ghost on it silently hid the one dead person actively harassing the fort.
+        local belongs = rec.ghostly or is_fort_member(rec.unit)
         pos_by_unit[uid] = rec.pos or rec.bpos
         local entry = {
             unit_id = uid, hf = hf,
             name = unit_display_name(rec.unit),
             pos = rec.pos or rec.bpos,
+            ghostly = rec.ghostly or false,
         }
         -- A ghost is not at rest however its body lies -- only a BUILT slab settles one.
         local at_rest = rec.ghostly and slab_built[hf] or (not rec.ghostly and (rec.buried or slab_built[hf]))
@@ -618,7 +633,11 @@ function DeadScreen:init()
     header(('Needs a tomb (%d)'):format(#self.needs_list))
     if #self.needs_list == 0 then none() end
     for _, e in ipairs(self.needs_list) do
-        choices[#choices + 1] = {text = ('%s - %s'):format(e.name, e.killed_by or '?'), fig = e}
+        -- ghosts are called out: they need a BUILT slab specifically, and one may be a
+        -- non-citizen who would otherwise look out of place in a list of your dead
+        local row = {{text = ('%s - %s'):format(e.name, e.killed_by or '?')}}
+        if e.ghostly then row[#row + 1] = {text = '  (haunting)', pen = COLOR_LIGHTCYAN} end
+        choices[#choices + 1] = {text = row, fig = e}
     end
     header(('Entombed (%d)'):format(#self.entombed_list))
     if #self.entombed_list == 0 then none() end
@@ -761,7 +780,8 @@ local function open_browser(focus_unit)
     local function enrich(src)
         local out = {}
         for _, e in ipairs(src) do
-            out[#out + 1] = {unit_id = e.unit_id, hf = e.hf, name = e.name, pos = e.pos}
+            out[#out + 1] = {unit_id = e.unit_id, hf = e.hf, name = e.name, pos = e.pos,
+                             ghostly = e.ghostly}
         end
         attach_death_info(out)
         return out
@@ -793,8 +813,15 @@ local function needs_tomb_message()
     local list = scan().needs_tomb
     local count = #list
     if count == 0 then return end
+    -- ghosts get their own wording: a tomb does nothing for one, only a built memorial slab does
+    local ghosts = 0
+    for _, e in ipairs(list) do if e.ghostly then ghosts = ghosts + 1 end end
     if count == 1 then
+        if ghosts == 1 then return ('%s is haunting the fort!'):format(list[1].name) end
         return ('%s needs a tomb!'):format(list[1].name)
+    end
+    if ghosts > 0 then
+        return ('%d need tombs (%d haunting)!'):format(count, ghosts)
     end
     return ('%d need tombs!'):format(count)
 end
@@ -863,7 +890,7 @@ local function register()
         table.insert(n.NOTIFICATIONS_BY_IDX, entry)
         n.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
-    entry.desc = 'Notifies when a fortress dwarf has died but has no tomb (unburied corpse).'
+    entry.desc = 'Notifies when a fortress dwarf has died but has no tomb (unburied corpse), or a ghost is haunting the fort.'
     entry.dwarf_fn = needs_tomb_message
     entry.on_click = show_dialog
     if n.config and n.config.data and not n.config.data[NAME] then
