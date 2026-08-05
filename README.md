@@ -161,8 +161,10 @@ DFHack tool for this.
 
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill
-list — each megabeast type by name, and sentient kills split by caste ("27 orcs, 9 orc
-champions, 5 illithids, 2 ulitharids"), with male/female castes grouped together.
+list — each megabeast type by name, the cursed called out ahead of everything sentient
+("1 goblin vampire, 2 kobold necromancers, 1 weremoose"), and sentient kills split by caste
+("27 orcs, 9 orc champions, 5 illithids, 2 ulitharids"), with male/female castes grouped
+together.
 
 ![fort/creature-description demo](demos/fort-creature-description.png)
 
