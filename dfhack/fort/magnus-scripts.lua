@@ -38,6 +38,9 @@ Activates the "always-on" helpers in this pack:
                                  block ALL future caravans and, for the home civ, migrants)
     * adamantine-hospital       (forbids adamantine cloth/thread the moment a hospital
                                  treatment job claims it, and cancels that job)
+    * stable-stockpile-bins     (puts back the max bins/barrels/wheelbarrows you set on
+                                 a stockpile, which DF resets on any touch of its filter;
+                                 dormant until you set one of a pile's caps by hand)
     * item-description.expand   (overlay: expands a long item description to half-screen)
     * right-click-cancel        (overlay: right-click cancels designations/constructions)
     * dig-shapes                (overlay: right-click=mining; shaped digs -> stairs/walls/chop/remove)
@@ -58,7 +61,7 @@ player; tune the slide with `smooth-movement slidems <n>`).
 Run as `magnus-scripts lovely` to ALSO set two standing orders (no automatic
 weaving, no automatic web collection), enable auto-name (letter-per-wave migrant
 renamer), enable statue-redirect (selecting a statue jumps to its item sheet /
-full description), enable rusty-legends (yearly sweep that keeps skill rust off
+full description), enable rusty-legends (seasonal sweep that keeps skill rust off
 retired adventurers and off anyone's legendary skills), and enable a batch of stock
 DFHack tools:
     enable: autobutcher, autoclothing, autonestbox, burrow (auto-grow
@@ -238,6 +241,7 @@ if ({...})[1] == 'disable' then
     try('disable tarrasque', function() dfhack.run_command('disable', 'fort/tarrasque') end)
     try('disable caravan-unstick', function() dfhack.run_command('disable', 'fort/caravan-unstick') end)
     try('disable adamantine-hospital', function() dfhack.run_command('disable', 'fort/adamantine-hospital') end)
+    try('disable stable-stockpile-bins', function() dfhack.run_command('disable', 'fort/stable-stockpile-bins') end)
     try('disable hide-tutorials', function() dfhack.run_command('disable', 'hide-tutorials') end)
     try('disable smooth-movement', function() dfhack.run_command('disable', 'smooth-movement') end)
     try('disable dwarf-rts overlay', function() dfhack.run_command('overlay', 'disable', 'fort/dwarf-rts.clickmove') end)
@@ -299,6 +303,11 @@ try('auto-tomb (1x1 tomb zone on each coffin, pasture on each nest box)', functi
 try('auto-elf-chop (gate autochop by the elven tree-cutting limit)', function() dfhack.run_command('enable', 'fort/auto-elf-chop') end)
 try('caravan-unstick (weekly watchdog: stuck caravans block trade AND migrants)', function() dfhack.run_command('enable', 'fort/caravan-unstick') end)
 try('adamantine-hospital (forbid adamantine cloth/thread a hospital job claims)', function() dfhack.run_command('enable', 'fort/adamantine-hospital') end)
+-- DF recomputes a pile's bin/barrel/wheelbarrow caps on ANY filter touch, so the "0
+-- barrels" you set comes back as "30 barrels" later. This puts your number back. It
+-- only manages a pile once you've set one of its caps by hand, so it does nothing at
+-- all until you do -- safe to have on from the start of a fort.
+try('stable-stockpile-bins (stockpile bin/barrel caps survive filter edits)', function() dfhack.run_command('enable', 'fort/stable-stockpile-bins') end)
 -- stock DFHack tool, but always-on rather than `lovely`-only: it also covers ADVENTURE
 -- popups (it keys off an ADVENTURE_POPUP_ prefix), so the adventure branch enables it too
 try('hide-tutorials (suppress fort AND adventure tutorial popups)', function() dfhack.run_command('enable', 'hide-tutorials') end)

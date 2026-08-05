@@ -6,8 +6,13 @@ this adds controls in the bottom-left corner. Each button TOGGLES only its own
 group on/off, so you can compose a pile (binnables + food, food + drink, etc.):
 
     * all meltables -- a melt-feeder pile: Weapons, Armor and Finished goods
-                       restricted to METAL materials EXCEPT adamantine, at
-                       below-masterwork quality (no coins, bars/blocks or cages).
+                       restricted to the metals YOUR CIV WORKS (its
+                       entity.resources.metals), at below-masterwork quality
+                       (no coins, bars/blocks or cages). That allow list is what
+                       keeps adamantine, the 10 procedural divine metals,
+                       primordial fire and mod metals such as twinkling
+                       metal/fabric out of the smelter -- none of them are on it,
+                       and no flag reliably tells the mod ones from iron.
                        Ammo is configured the same way but accepts NO item types
                        (its metal bolts/arrows are kept, not melted). Also flips on
                        DFHack's native automelt (logistics) for the pile, so items
@@ -127,7 +132,7 @@ end
 -- ---- meltables (non-masterwork, non-adamantine METAL items) ----------------
 -- "all meltables" OVERWRITES the pile into a melt-feeder: it enables only the meltable metal
 -- categories (Weapons, Armor, Ammo, Finished goods -- deliberately NOT bars/blocks, coins, or cages),
--- restricts their materials to metals EXCEPT adamantine, drops quality to below-masterwork, and turns
+-- restricts their materials to the MELT_METALS allow list, drops quality to below-masterwork, and turns
 -- on DFHack's native automelt (the `logistics` per-stockpile melt flag) so anything routed here gets
 -- auto-designated for melting. Toggling off disables those categories and automelt. Food is left alone.
 local MELTABLE = {'cat_weapons', 'cat_armor', 'cat_ammo', 'cat_finished_goods'}
@@ -137,19 +142,56 @@ local NON_MELTABLE = {'cat_bars_blocks', 'cat_cloth', 'cat_coins', 'cat_gems', '
 local MELT_FIELD = {cat_weapons = 'weapons', cat_armor = 'armor', cat_ammo = 'ammo',
     cat_finished_goods = 'finished_goods'}
 
--- A category's `mats` bool vector is indexed parallel to raws.inorganics.all; `other_mats` holds the
--- non-inorganic materials. mask[df_idx]=true for every metal inorganic EXCEPT adamantine.
+-- The metals this pile may melt are ALLOW-LISTED, and the list is the game's own: the fort civ's
+-- `entity.resources.metals`, which is what DF builds its metal choices from. Everything the fort
+-- actually works is on it, and none of the things you must never melt are:
+--     adamantine, the 10 procedural DIVINE_n metals (shining/booming/slick metal, ...),
+--     primordial fire (MYTHICAL_REMNANT), and mod metals like twinkling metal/fabric.
+--
+-- It has to be an allow list rather than a flag test, because the mod metals carry no flag that
+-- tells them apart from iron -- twinkling metal has only WAFERS and twinkling fabric has no flags
+-- at all, while their material_value (200) sits right alongside the divine metals'. Asking the civ
+-- what it works sidesteps that entirely and keeps working for any mod, in either direction.
+--
+-- Only if a world has no civ metal list to read (no entity, empty vector) does this fall back to a
+-- flag test, which is strictly worse but better than an empty pile.
+local SPECIAL_METAL_FLAGS = {'GENERATED', 'SPECIAL', 'DIVINE', 'MYTHICAL', 'MYTHICAL_REMNANT',
+                             'MYTHICAL_SUBSTANCE', 'DEEP_SPECIAL', 'DEEP_SURFACE', 'WAFERS'}
+local function looks_special(ino)
+    for _, n in ipairs(SPECIAL_METAL_FLAGS) do
+        local f = df.inorganic_flags[n]
+        if f and ino.flags[f] then return true end
+    end
+    return false
+end
+
+-- civ metal indices as a set, or nil when there is no list to read. The vector holds indices into
+-- raws.inorganics.all -- the same index space as a stockpile category's `mats`.
+local function civ_metals()
+    local ent = df.historical_entity.find(df.global.plotinfo.civ_id)
+    local ok, vec = pcall(function() return ent and ent.resources.metals end)
+    if not (ok and vec and #vec > 0) then return nil end
+    local set = {}
+    for _, idx in ipairs(vec) do set[idx] = true end
+    return set
+end
+
+-- A category's `mats` bool vector is indexed parallel to raws.inorganics.all; `other_mats` holds
+-- the non-inorganic materials. mask[df_idx]=true for every metal the fort is allowed to melt.
 local function metal_mask()
     local mask = {}
+    local allowed = civ_metals()
     local all = df.global.world.raws.inorganics.all   -- indexed 0-based, parallel to a category's `mats`
     for i = 0, #all - 1 do
         local ino = all[i]
-        if ino.material.flags.IS_METAL and ino.id ~= 'ADAMANTINE' then mask[i] = true end
+        if ino.material.flags.IS_METAL
+            and (allowed and allowed[i] or (not allowed and not looks_special(ino)))
+        then mask[i] = true end
     end
     return mask
 end
 
--- restrict every meltable category to metal-only-minus-adamantine (the categories must already be
+-- restrict every meltable category to the allowed metals (the categories must already be
 -- enabled -- import_settings populates `mats`/`other_mats` -- before this filters them down).
 local function set_metal_only(sp)
     local mask = metal_mask()
@@ -195,7 +237,7 @@ local function apply_meltables()
         -- zero its item-type list so bolts/arrows/etc. never land here (metal bolts are too handy to melt).
         set_vec(sp.settings.ammo.type, false)
         set_melt(sp, true, c)
-        print('binnable-stockpile: set to all meltables (metal, no adamantine, below masterwork; automelt on)')
+        print('binnable-stockpile: set to all meltables (allowed metals only, below masterwork; automelt on)')
     end
 end
 

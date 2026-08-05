@@ -24,7 +24,14 @@ Drag to create a stockpile, expand a selected one, or erase tiles from any pile.
 
 ### **`fort/binnable-stockpile`**
 Stockpiles can be toggled on/off with one click, set to all meltables, binnables, food, or
-drink, and easily set allowed quality.
+drink, and easily set allowed quality. The meltables pile only accepts the metals your civ
+works, so adamantine, divine metals and mod metals never reach the smelter.
+
+### **`fort/stable-stockpile-bins`**
+Keeps the max bins/barrels/wheelbarrows you set on a stockpile from silently resetting the
+next time anything touches its filter. Caps DF can no longer honour — the container stopped
+applying, or your number no longer fits on the pile's tiles — go back to being DF's, as does
+a pile you give no type (the "None" icon, or clearing it out in Custom settings).
 
 ### **`fort/auto-tomb`**
 Drops the right zone onto furniture: a tomb on every coffin, a pasture on every nest box.
