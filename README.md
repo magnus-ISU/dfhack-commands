@@ -121,7 +121,8 @@ Auto-pens new tame animals, warns when a pasture is overcrowded, and adds graze/
 buttons to caged animals.
 
 ### **`fort/butcher-shop`**
-Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings.
+Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
+get their own rows and stay hidden until you ask for them (Ctrl-Y).
 
 ### **`fort/animal-training`**
 Assigns a trainer to many caged animals at once.

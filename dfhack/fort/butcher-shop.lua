@@ -18,6 +18,9 @@ livestock and genuinely wild caged captives are left out), grouped by species an
       body size of the species' LARGER gender, largest first, and within a species MALE before FEMALE.
     * A group whose species/sex has only ONE adult is shown in PINK -- a warning that slaughtering
       it removes your last breeder of that species/sex.
+    * YOUNG animals (babies and children) always get their own "(young)" row, never mixed into the
+      adult count, and are HIDDEN from the left panel by default -- Ctrl-Y shows them. Young that
+      are already marked always appear on the right, so a mark can always be undone.
     * Ctrl-G toggles "Split by gender" off, collapsing each species to a single row.
 
 Click a LEFT row to mark that group's OLDEST not-yet-marked animal for slaughter -- click again to
@@ -61,8 +64,10 @@ local function list_animals()
     return out
 end
 
+-- default TRUE: adulthood gates whether a row shows on the left, so an unreadable age must fail
+-- towards "visible adult" rather than silently hiding the animal
 local function is_adult(u)
-    local a = false
+    local a = true
     pcall(function() a = not dfhack.units.isBaby(u) and not dfhack.units.isChild(u) end)
     return a
 end
@@ -87,26 +92,32 @@ local function species_name(u)
     return (n and n ~= '') and n or 'animal'
 end
 
--- group by species (+ sex when by_gender); sort by the species' larger-gender size (desc), keeping
--- a species' rows adjacent, with the male row before the female row.
+-- group by species (+ sex when by_gender), and ALWAYS split young (babies/children) off into their
+-- own group so they never pad an adult row's count. Sort by the species' larger-gender size (desc),
+-- keeping a species' rows adjacent, male before female and each adult row above its young row.
+-- Also returns adult counts keyed by species/sex ("breed"), for the last-breeder warning.
 local function group_animals(animals, by_gender)
     local species_size = {}
     for _, u in ipairs(animals) do
         local sz = unit_size(u)
         if (species_size[u.race] or -1) < sz then species_size[u.race] = sz end
     end
-    local by_key, order = {}, {}
+    local by_key, order, breed_adults = {}, {}, {}
     for _, u in ipairs(animals) do
-        local key = by_gender and (u.race .. ':' .. u.sex) or tostring(u.race)
+        local breed = by_gender and (u.race .. ':' .. u.sex) or tostring(u.race)
+        local adult = is_adult(u)
+        if adult then breed_adults[breed] = (breed_adults[breed] or 0) + 1 end
+        local key = breed .. (adult and ':a' or ':y')
         local g = by_key[key]
         if not g then
-            g = {race = u.race, sex = by_gender and u.sex or nil, units = {}, ssize = species_size[u.race],
+            g = {race = u.race, sex = by_gender and u.sex or nil, breed = breed, adult = adult,
+                 units = {}, ssize = species_size[u.race],
                  nontame = is_nontame(u), tlevel = training_level(u)}
             by_key[key] = g; order[#order + 1] = g
         end
         g.units[#g.units + 1] = u
         local tl = training_level(u)
-        if tl < g.tlevel then g.tlevel = tl end                    -- one row per species/sex, showing the LEAST-trained level
+        if tl < g.tlevel then g.tlevel = tl end                    -- one row per group, showing the LEAST-trained level
     end
     table.sort(order, function(a, b)
         if a.nontame ~= b.nontame then return a.nontame end        -- non-tame prioritized to the top
@@ -114,9 +125,10 @@ local function group_animals(animals, by_gender)
         if a.race ~= b.race then return a.race < b.race end        -- keep a species' rows together
         local am = a.sex == 1 and 0 or 1                           -- male (sex 1) before female
         local bm = b.sex == 1 and 0 or 1
-        return am < bm
+        if am ~= bm then return am < bm end
+        return a.adult and not b.adult                             -- adults above their own young
     end)
-    return order
+    return order, breed_adults
 end
 
 -- oldest unit in `units` matching want_marked; nil if none
@@ -153,21 +165,33 @@ function Butcher:init()
             initial_option = true,
             on_change = function() self:refresh() end,
         },
-        widgets.Label{frame = {t = 2, l = 0}, text = 'Not for slaughter  (click \26 mark oldest)'},
+        widgets.ToggleHotkeyLabel{
+            view_id = 'show_young',
+            frame = {t = 1, l = 0},
+            key = 'CUSTOM_CTRL_Y',
+            label = 'Show young:     ',
+            initial_option = false,
+            on_change = function() self:refresh() end,
+        },
+        widgets.Label{frame = {t = 3, l = 0}, text = 'Not for slaughter  (click \26 mark oldest)'},
         widgets.List{
             view_id = 'keep',
-            frame = {t = 3, l = 0, w = 36, b = 2},
+            frame = {t = 4, l = 0, w = 36, b = 3},
             on_submit = function(_, choice) self:mark(choice) end,
         },
-        widgets.Label{frame = {t = 2, l = 38}, text = {{text = 'For slaughter  (click \26 un-mark)', pen = COLOR_LIGHTRED}}},
+        widgets.Label{frame = {t = 3, l = 38}, text = {{text = 'For slaughter  (click \26 un-mark)', pen = COLOR_LIGHTRED}}},
         widgets.List{
             view_id = 'slaughter',
-            frame = {t = 3, l = 38, b = 2},
+            frame = {t = 4, l = 38, b = 3},
             on_submit = function(_, choice) self:unmark(choice) end,
         },
         widgets.Label{
-            frame = {b = 0, l = 0},
-            text = 'Ctrl-G: split by gender.  Left marks the oldest (repeat for more); right un-marks.  Pink = only one adult left.',
+            frame = {b = 0, l = 0, h = 2},
+            text = {
+                'Ctrl-G: split by gender.  Left marks the oldest (repeat for more); right un-marks.  Pink = only one adult left.',
+                NEWLINE,
+                'Ctrl-Y: show young (babies/children) on the left -- young are always their own row, and marked young always show on the right.',
+            },
             text_pen = COLOR_GREY,
         },
     }
@@ -175,25 +199,37 @@ function Butcher:init()
 end
 
 function Butcher:refresh()
-    local groups = group_animals(list_animals(), self.subviews.by_gender:getOptionValue())
-    local keep, slaughter = {}, {}
+    local show_young = self.subviews.show_young:getOptionValue()
+    local groups, breed_adults = group_animals(list_animals(), self.subviews.by_gender:getOptionValue())
+    local keep, slaughter, hidden_young = {}, {}, 0
     for _, g in ipairs(groups) do
-        local adults, nkeep, nmark = 0, 0, 0
+        local nkeep, nmark = 0, 0
         for _, u in ipairs(g.units) do
-            if is_adult(u) then adults = adults + 1 end
             if is_marked(u) then nmark = nmark + 1 else nkeep = nkeep + 1 end
         end
-        local pink = adults == 1
+        -- the warning is about losing your last breeder, so it counts adults of the whole
+        -- species/sex (never the young row, which breeds nothing yet)
+        local pink = g.adult and (breed_adults[g.breed] or 0) == 1
         local gender = g.sex == 1 and ' male' or (g.sex == 0 and ' female' or '')
+        local tags = {}
+        if not g.adult then tags[#tags + 1] = 'young' end
+        if g.nontame then tags[#tags + 1] = level_name(g.tlevel) end               -- show level if not tame
         local base = ('%s%s'):format(species_name(g.units[1]), gender)
-        if g.nontame then base = base .. ' (' .. level_name(g.tlevel) .. ')' end  -- show level if not tame
+        if #tags > 0 then base = base .. ' (' .. table.concat(tags, ', ') .. ')' end
         if nkeep > 0 then
-            local label = ('%s x%d'):format(base, nkeep)
-            keep[#keep + 1] = {text = pink and {{text = label, pen = PINK}} or label, group = g}
+            if g.adult or show_young then
+                local label = ('%s x%d'):format(base, nkeep)
+                keep[#keep + 1] = {text = pink and {{text = label, pen = PINK}} or label, group = g}
+            else
+                hidden_young = hidden_young + nkeep
+            end
         end
-        if nmark > 0 then
+        if nmark > 0 then   -- marked young are always listed, else the mark could never be undone
             slaughter[#slaughter + 1] = {text = ('%s x%d'):format(base, nmark), group = g}
         end
+    end
+    if hidden_young > 0 then
+        keep[#keep + 1] = {text = {{text = ('(%d young hidden -- Ctrl-Y)'):format(hidden_young), pen = COLOR_GREY}}}
     end
     if #keep == 0 then keep = {{text = '(no tame, non-pet livestock)'}} end
     if #slaughter == 0 then slaughter = {{text = '(none marked)'}} end
