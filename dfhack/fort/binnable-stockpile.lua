@@ -35,10 +35,21 @@ Category toggles use DFHack's per-category library presets (cat_*.dfstock);
 food/drink/quality are edited directly. Also: clicking an already-selected
 main category (or middle-column sub-category) again toggles it all on/off.
 
+    binnable-stockpile check    list piles left with item types but no stockpile
+                                type -- they accept nothing, and DF does not say so
+    binnable-stockpile repair   turn those piles' categories back on
+
+A pile's `settings.flags.<category>` bit is the master "this category is on" marker: with it
+clear the pile accepts NOTHING, however complete its filter looks. Every toggle here drives
+that flag itself. Note that nothing writes settings on a timer -- the category set is only
+ever changed by a click of yours, because rewriting it under DF's open Customize panel both
+fought your edits and crashed the game.
+
 Registered automatically as overlay `binnable-stockpile.button`.
 Reposition with `gui/overlay`.
 ]]
 
+local gui = require('gui')
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local stockpiles = require('plugins.stockpiles')
@@ -54,6 +65,53 @@ local function vec_any_on(v)
         if (type(e) == 'boolean' and e) or (type(e) == 'number' and e ~= 0) then return true end end
     return false
 end
+-- ---- resizing settings under DF's open Customize panel CRASHES the game ----
+-- The Customize screen caches RAW POINTERS into the settings data: every displayed row is a
+-- custom_stockpile_itemst carrying a `set_pointer` into the byte it toggles, alongside a
+-- `sub_mode_ptr` vector of the same. Those vectors are sized LAZILY -- an untouched category is
+-- length 0 -- so enabling one means `import_settings`, which resizes it, and a resize reallocates
+-- the buffer. Every cached pointer then aims at freed memory and the next frame dies dereferencing
+-- it, inside DF's own render (render_things -> overlay.plug -> DF), with no Lua frame in the stack.
+--
+-- Writing EXISTING elements in place never reallocates, so that stays safe with the panel open.
+-- Only a resize is deadly, so the panel is closed through DF's own key handler first: DF frees its
+-- row cache on the way out and there is nothing stale left to render.
+local function close_customize()
+    if not df.global.game.main_interface.custom_stockpile.open then return false end
+    gui.simulateInput(dfhack.gui.getCurViewscreen(true), 'LEAVESCREEN')
+    return true
+end
+
+-- the ONE chokepoint for settings writes that can resize -- never call import_settings directly
+local function import_cat(preset, id, mode)
+    close_customize()
+    stockpiles.import_settings(preset, {id = id, mode = mode})
+end
+
+-- has this category ever been touched? An untouched one has every vector at length 0 and can only
+-- be filled by import_settings; a sized one can be toggled in place, with the panel left open.
+local function cat_sized(s)
+    if not s then return false end
+    for _, v in pairs(s) do
+        if type(v) == 'userdata' then
+            local ok, l = pcall(function() return #v end)
+            if ok and l > 0 then return true end
+        end
+    end
+    return false
+end
+
+-- flip every field of an already-sized category on/off without resizing anything
+local function set_cat_inplace(s, on)
+    for k, v in pairs(s) do
+        if type(v) == 'boolean' then s[k] = on
+        elseif type(v) == 'userdata' then
+            local ok = pcall(function() return #v end)
+            if ok then set_vec(v, on) end
+        end
+    end
+end
+
 -- any enabled element across every field of a category-settings struct
 local function cat_any_on(s)
     if not s then return false end
@@ -125,8 +183,17 @@ end
 -- enable/disable a whole category via its library preset, then force its group flag to match so the
 -- category (and the pile name) fully reflects the change -- import_settings won't clear it on disable.
 local function set_cat(sp, preset, on)
-    stockpiles.import_settings('library/' .. preset, {id = sp.id, mode = on and 'enable' or 'disable'})
-    set_cat_flag(sp, PRESET_FIELD[preset], on)
+    local field = PRESET_FIELD[preset]
+    local s = field and sp.settings[field]
+    -- An already-sized category can be flipped in place, which never reallocates and so is safe
+    -- with the Customize panel open. Only an untouched one needs the resizing import (which
+    -- closes the panel first -- see import_cat).
+    if s and cat_sized(s) then
+        set_cat_inplace(s, on)
+    else
+        import_cat('library/' .. preset, sp.id, on and 'enable' or 'disable')
+    end
+    set_cat_flag(sp, field, on)
 end
 
 -- ---- meltables (non-masterwork, non-adamantine METAL items) ----------------
@@ -291,13 +358,24 @@ local function set_extracts_milk_honey(f)
     end
 end
 
+-- Food and drink SHARE one category, so they share one group flag -- `settings.flags.food`. That
+-- flag is the master "this category is on" marker: it is what names the pile and what decides
+-- membership, so a pile with food item types set but the flag clear accepts NOTHING. Every other
+-- category drives its flag through set_cat_flag; food/drink wrote their item vectors and never
+-- touched it, so the flag survived only as long as ensure_food's one-time import happened to set
+-- it. Recomputed from the whole category (food fields OR drink fields), which is the one rule that
+-- keeps both toggles honest without either clobbering the other.
+local function sync_food_flag(sp, f)
+    sp.settings.flags.food = cat_any_on(f)
+end
+
 -- The food vectors are empty until the food category is touched. Populate them if needed, starting
 -- from all-OFF so the food/drink toggles only turn on what they mean to (and don't clobber a group
 -- the other button owns).
 local function ensure_food(sp)
     local f = sp.settings.food
     if #f.drink_plant > 0 then return f end
-    stockpiles.import_settings('library/cat_food', {id = sp.id, mode = 'enable'})
+    import_cat('library/cat_food', sp.id, 'enable')
     for k, v in pairs(f) do
         if type(v) == 'boolean' then f[k] = false
         elseif type(v) == 'userdata' then local ok = pcall(function() return #v end); if ok then set_vec(v, false) end end
@@ -331,6 +409,7 @@ local function apply_food()
         end)
         set_extracts_milk_honey(f)
     end
+    sync_food_flag(sp, f)
     print('binnable-stockpile: food ' .. (on and 'OFF' or 'ON'))
 end
 
@@ -340,6 +419,7 @@ local function apply_drink()
     local f = ensure_food(sp)
     local on = vec_any_on(f.drink_plant) or vec_any_on(f.drink_animal)
     set_vec(f.drink_plant, not on); set_vec(f.drink_animal, not on)
+    sync_food_flag(sp, f)
     print('binnable-stockpile: drink ' .. (on and 'OFF' or 'ON'))
 end
 
@@ -424,22 +504,6 @@ end
 -- category settings field name -> DFHack library preset name (mostly cat_<name>; "sheet" is plural)
 local function cat_preset(name)
     return name == 'sheet' and 'library/cat_sheets' or ('library/cat_' .. name)
-end
-
--- Heal "phantom" categories: a group flag left ON while the category holds NOTHING (no item types,
--- materials or quality). DF's own "None" button clears a category's contents but leaves its group
--- flag set, and that flag is what NAMES the pile -- so an emptied pile is misnamed after a leftover
--- category ("Sheet Stockpile" containing nothing). Clearing the flag of any truly-empty category
--- makes the name reflect reality. Safe: a category with ANY filter still set reads as on (any_on),
--- so a configured-but-item-less category is untouched; only fully-empty ones are cleared.
-local CAT_FIELDS = {'ammo', 'armor', 'bars_blocks', 'cloth', 'coins', 'finished_goods', 'gems',
-    'leather', 'sheet', 'weapons', 'animals', 'corpses', 'furniture', 'refuse', 'stone', 'wood', 'food'}
-local function heal_phantom_flags(settings)
-    for _, f in ipairs(CAT_FIELDS) do
-        if settings.flags[f] == true and settings[f] ~= nil and not any_on(settings[f]) then
-            settings.flags[f] = false
-        end
-    end
 end
 
 -- x-positions of the "All" column headers, and the row they sit on. Scans the top rows and keeps the
@@ -578,11 +642,15 @@ function CategoryToggle:onInput(keys)
 end
 
 function CategoryToggle:overlay_onupdate()
-    -- Keep the pile name honest every frame: clear any group flag stranded on a now-empty category
-    -- (DF's native "None" clears a category's contents but leaves its flag set, so the pile keeps a
-    -- phantom name like "Sheet Stockpile" with nothing in it). cs.sp is the live working settings.
-    local hcs = df.global.game.main_interface.custom_stockpile
-    if hcs.open and hcs.sp then heal_phantom_flags(hcs.sp) end
+    -- NO per-frame flag healing here. It used to clear any group flag whose category read as empty,
+    -- every frame, on the live settings -- and that was wrong twice over. A category is legitimately
+    -- empty for an instant mid-edit (ensure_food deliberately zeroes everything right after the
+    -- import), so the healer raced the food/drink toggles and cleared `flags.food` the frame after
+    -- they set it: the pile kept its item types, lost its type, and silently accepted nothing.
+    -- It also rewrote the category set under DF's open panel ~50x a second, for a cosmetic naming
+    -- fix. Each toggle now drives its own flag (see set_cat_flag / sync_food_flag), which is the
+    -- honest place for it. DF's native "None" can still strand a phantom name; re-clicking the
+    -- category clears it.
     -- After a redirect DF leaves gps.mouse parked on the header (it only refreshes the cursor on real
     -- OS movement), so the user's next stationary click would land on "All/None" and do nothing. Put
     -- the cursor back on the row they actually clicked so consecutive clicks keep toggling.
@@ -614,7 +682,14 @@ function CategoryToggle:overlay_onupdate()
         -- enable (judging by the flag would see it "on" and only ever try to disable -> stuck). We then
         -- drive the flag ourselves so a disabled category doesn't strand a phantom "Sheet Stockpile".
         local on = not any_on(cs.sp[name])
-        stockpiles.import_settings(cat_preset(name), {id = sp.id, mode = on and 'enable' or 'disable'})
+        -- In place whenever the category is already sized -- which the SELECTED one always is, since
+        -- DF has just rendered its rows -- so the panel stays open and its cached row pointers stay
+        -- valid. The resizing import is the fallback, and closes the panel first.
+        if cat_sized(cs.sp[name]) then
+            set_cat_inplace(cs.sp[name], on)
+        else
+            import_cat(cat_preset(name), sp.id, on and 'enable' or 'disable')
+        end
         if cs.sp.flags[name] ~= nil then cs.sp.flags[name] = on end
     end
 end
@@ -622,6 +697,51 @@ end
 OVERLAY_WIDGETS = {button = BinnableButton, category_toggle = CategoryToggle}
 
 if dfhack_flags.module then
+    return
+end
+
+-- `binnable-stockpile check|repair` -- find piles left with item types but NO group flag, which is
+-- what the flag-wiping bug above produced. Such a pile has a full filter and still accepts nothing,
+-- and nothing in the game tells you: DF just shows an untyped pile. `repair` turns the flag back on
+-- for every category that still holds its item types.
+--
+-- Only ever sets a flag whose category HAS contents, and only on piles with no flags at all. A pile
+-- with some flags set is left alone: leftover contents under a switched-off category are normal (a
+-- meltables pile keeps them), so flagging those would silently widen what the pile accepts.
+if ({...})[1] == 'check' or ({...})[1] == 'repair' then
+    if not dfhack.world.isFortressMode() then qerror('load a fortress first') end
+    local repair = ({...})[1] == 'repair'
+    local FIELDS = {'ammo', 'animals', 'armor', 'bars_blocks', 'cloth', 'coins', 'corpses',
+        'finished_goods', 'food', 'furniture', 'gems', 'leather', 'refuse', 'sheet', 'stone',
+        'weapons', 'wood'}
+    local found = 0
+    for _, sp in ipairs(df.global.world.buildings.other.STOCKPILE) do
+        local typed = false
+        for _, f in ipairs(FIELDS) do if sp.settings.flags[f] then typed = true break end end
+        if not typed then
+            local has = {}
+            for _, f in ipairs(FIELDS) do
+                local ok, a = pcall(cat_any_on, sp.settings[f])
+                if ok and a then has[#has + 1] = f end
+            end
+            if #has > 0 then
+                found = found + 1
+                print(('  #%d has no stockpile type but still holds: %s%s'):format(
+                    sp.stockpile_number, table.concat(has, ', '), repair and '  -> restored' or ''))
+                if repair then
+                    for _, f in ipairs(has) do sp.settings.flags[f] = true end
+                end
+            end
+        end
+    end
+    if found == 0 then
+        print('binnable-stockpile: no stockpile has lost its type.')
+    elseif not repair then
+        print(('binnable-stockpile: %d pile(s) accept nothing -- `binnable-stockpile repair` to fix')
+            :format(found))
+    else
+        print(('binnable-stockpile: restored the type of %d pile(s)'):format(found))
+    end
     return
 end
 
