@@ -26,6 +26,11 @@ stone (DF's default) -- an order pinned to a stone the masons will not touch is 
 than an open one, since an unmade mandate is a punished mandate. Run `auto-mandate`
 and the reason is printed next to the order.
 
+Every order queued is announced in the report log -- who mandated it, and what was
+ordered ("Mandate from Ducim Rimtar: work order queued for 3 mail shirts (copper)").
+The background service has nowhere else to say so, since its console output goes to a
+DFHack window nobody is watching mid-game.
+
 Usage:
     auto-mandate                 queue orders for current mandates, once
     enable auto-mandate          run in the background, re-checking periodically
@@ -236,6 +241,55 @@ local function item_label(m)
     return tok and tok:lower():gsub('_', ' ') or 'goods'
 end
 
+-- ---- naming the order for the announcement --------------------------------
+
+-- item_type -> the itemdef vector holding its subtype names, so a forge order reads
+-- "3 mail shirts" rather than "3 armor". (fort/mandate-notification keeps its own copy of
+-- this map to describe the MANDATE; here it describes the ORDER, which is not always the
+-- same thing -- see order_label.)
+local SUBTYPE_VEC = {
+    [df.item_type.WEAPON]   = 'weapons',
+    [df.item_type.ARMOR]    = 'armor',
+    [df.item_type.SHOES]    = 'shoes',
+    [df.item_type.GLOVES]   = 'gloves',
+    [df.item_type.HELM]     = 'helms',
+    [df.item_type.PANTS]    = 'pants',
+    [df.item_type.SHIELD]   = 'shields',
+    [df.item_type.AMMO]     = 'ammo',
+    [df.item_type.TRAPCOMP] = 'trapcomps',
+    [df.item_type.TOY]      = 'toys',
+}
+
+-- Names what the ORDER will make, count-correct. Only 'sub' orders carry a subtype: a
+-- 'fixed' job makes whatever the workshop offers (a TOY mandate names one toy, but
+-- MakeToy is not pinned to it), so naming the mandate's subtype there would describe an
+-- order we did not queue.
+local function order_label(m, map)
+    local n = m.amount_remaining
+    if map.kind == 'sub' then
+        local vec = SUBTYPE_VEC[m.item_type]
+        local def = vec and m.item_subtype >= 0 and df.global.world.raws.itemdefs[vec][m.item_subtype]
+        if def then
+            local one, many = def.name, def.name_plural
+            local name = (n == 1) and (one ~= '' and one or many) or (many ~= '' and many or one)
+            if name ~= '' then return name end
+        end
+    end
+    local name = item_label(m)
+    -- item tokens are singular ('cage', 'statue') bar the few already plural ('blocks',
+    -- 'shoes', 'trapparts'), which must not collect a second s
+    if n ~= 1 and name:sub(-1) ~= 's' then name = name .. 's' end
+    return name
+end
+
+local function noble_name(m)
+    local ok, name = pcall(function()
+        return m.unit and dfhack.translation.translateName(dfhack.units.getVisibleName(m.unit))
+    end)
+    if ok and name and name ~= '' then return name end
+    return 'a noble'
+end
+
 -- exposed for other tools (e.g. the mandate notification): is there already a
 -- manager order that would fulfil this Make mandate?
 function has_order_for(m)
@@ -244,6 +298,18 @@ function has_order_for(m)
     if not map then return false end
     local it, sub = order_target(m, map)
     return has_fulfillable_order(map.job, it, sub)
+end
+
+-- An announcement per order queued, in the report log like auto-elf-chop's. The
+-- background service is silent otherwise -- its console output goes to a DFHack window
+-- nobody is watching mid-game -- so this is the only place the fort is told that a
+-- mandate is being answered, and with what. Fired where the order is inserted, so the
+-- one-shot command announces on the same terms as the service. pcall'd: a naming failure
+-- must never take the queuing pass down with it.
+local function announce_order(m, desc)
+    pcall(dfhack.gui.showAnnouncement,
+        ('Mandate from %s: work order queued for %s.'):format(noble_name(m), desc),
+        COLOR_LIGHTGREEN, true)
 end
 
 -- scan all Make mandates and queue orders; returns lists of {queued, existing, skipped}
@@ -277,7 +343,10 @@ local function scan_and_queue()
                         o.id = mo.manager_order_next_id
                         mo.manager_order_next_id = o.id + 1
                         mo.all:insert('#', o)
-                        table.insert(queued, ('%d %s (%s)'):format(m.amount_remaining, label, matdesc))
+                        local desc = ('%d %s (%s)'):format(
+                            m.amount_remaining, order_label(m, map), matdesc)
+                        table.insert(queued, desc)
+                        announce_order(m, desc)
                     else
                         o:delete()
                         table.insert(skipped, label .. ' (no material available)')
@@ -362,7 +431,15 @@ end
 -- so checking the calendar delta gives an accurate once-per-day trigger.
 local DAY_TICKS = 1200 * CYCLE_DAYS
 local last_run = nil
-local hb_gen = 0   -- generation guard so only the newest heartbeat loop survives
+
+-- Generation guard so only the newest heartbeat loop survives. Held in dfhack.internal, not
+-- a local: `reqscript` builds fresh locals on reload, so a local counter strands the previous
+-- chunk's heartbeat holding a generation nothing can bump -- and this loop queues orders, so a
+-- stranded one goes on filling mandates with the old code beside the new.
+local function hb_gen(set)
+    if set ~= nil then dfhack.internal.auto_mandate_hb_gen = set end
+    return dfhack.internal.auto_mandate_hb_gen or 0
+end
 
 local function now_abs()
     return df.global.cur_year * 403200 + df.global.cur_year_tick
@@ -371,11 +448,11 @@ end
 local function start()
     enabled = true
     last_run = nil               -- run on the next heartbeat
-    hb_gen = hb_gen + 1
-    local my_gen = hb_gen
+    local my_gen = hb_gen() + 1
+    hb_gen(my_gen)
     local prio = 0
     local function heartbeat()
-        if not enabled or my_gen ~= hb_gen then return end   -- stale/stopped: end loop
+        if not enabled or my_gen ~= hb_gen() then return end   -- stale/stopped: end loop
         local now = now_abs()
         if not last_run or now - last_run >= DAY_TICKS then
             last_run = now
@@ -391,7 +468,7 @@ end
 
 local function stop()
     enabled = false
-    hb_gen = hb_gen + 1          -- invalidate any running heartbeat loop
+    hb_gen(hb_gen() + 1)         -- invalidate any running heartbeat loop
 end
 
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
