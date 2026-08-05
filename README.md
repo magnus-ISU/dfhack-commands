@@ -86,7 +86,9 @@ Type plain text on the Work Orders screen to create a legal manager order, with 
 stock" repeats. Only offers subtypes your civilization actually knows how to make.
 
 ### **`fort/planner-orders`**
-Warns of planned buildings nothing produces and offers the orders to make them.
+Warns of planned buildings nothing produces and offers the orders to make them. With a hospital
+up it also stocks the supplies one needs, traction benches included — the bench and its table,
+mechanism and chain each get their own ask.
 
 ### **`fort/labor-groups`**
 Tidies the Labor screen and creates any missing crafting work details.

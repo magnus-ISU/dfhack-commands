@@ -29,10 +29,26 @@ Items with no make-job are listed as unmakeable and skipped.
 
 When the fort has a hospital, it ALSO offers orders for the supplies a hospital needs --
 splints, crutches, buckets, thread, cloth, empty leather bags (to hold plaster powder),
-soap, and plaster powder. Thread/cloth here are the GENERAL orders (process/weave any plant,
-keep a target stock). Soap comes as tallow or oil and queues its prerequisites (the ash->lye
-chain, plus render-fat for tallow). Every supply is a REPEATING order held at a target by its
-own conditions -- soap runs a batch of 30 whenever soap bars drop under 10.
+soap, plaster powder, and TRACTION BENCHES. Thread/cloth here are the GENERAL orders
+(process/weave any plant, keep a target stock). Soap comes as tallow or oil and queues its
+prerequisites (the ash->lye chain, plus render-fat for tallow). Most supplies are a REPEATING
+order held at a target by its own conditions -- soap runs a batch of 30 whenever soap bars
+drop under 10.
+
+TRACTION BENCHES come as FOUR asks: the bench itself (a no-material "assemble" order, as
+above) and one each for its table, mechanism and chain, so the parts actually get made. The
+fort is held at 3 benches, counting ones already BUILT into the hospital -- those are the
+point, not spare stock. The part asks appear only while benches are still wanted and you are
+short of LOOSE parts (a table built into the dining hall is not a part you can use), and a
+part is skipped when a planned building has already raised its own ask for the same job.
+
+Table and mechanism are ONE-TIME batches for exactly the shortfall -- a "keep N tables in
+stock" order would read the fort's existing dining tables as satisfying it and never make
+anything. The CHAIN is the exception and is KEPT STOCKED, because restraints and wells spend
+chains too: its condition counts only chains ON THE GROUND (the `on_ground` item flag), so
+chains already bolted into a bench, well or restraint don't hold the order shut. It also
+offers an UNTYPED choice alongside the metals -- a bench takes a rope or a chain, and pinning
+no material lets DF weave or forge whichever it has.
 
 The FIBRE CLOTH CHAINS (yarn and silk) offer one weave order PER KIND of thread (each
 creature's wool and each spider's silk is its own material): Daily x1 WeaveCloth pinned to that
@@ -77,7 +93,9 @@ accepting creates it (all conditioned so they only run when sensible):
     reserve (extract at a Craftsdwarf's Workshop). Thread feeds the other two, so capping it
     last is what halts the chain: everything beyond 3/3/3 stays as raw adamantine instead of
     being extracted "just in case". Each targets adamantine specifically and only runs while
-    its input is on hand.
+    its input is on hand. Each order is amount 1 (it reads 1/1, not 3/3): the cap is what the
+    condition holds, so a batch of one per trigger walks up to it instead of queueing three
+    jobs against material that may not be extracted yet.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
 Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
@@ -155,6 +173,7 @@ local BREW_AMOUNT = 30            -- brew jobs queued per cycle while under targ
 local COAL_MAT = 7                -- builtin material for coal bars (charcoal AND coke = fuel)
 local FUEL_TARGET = 20            -- make fuel (charcoal/coke) while under this many bars
 local SOAP_CAP = 10               -- keep this many soap bars (the standing soap order's gate)
+local TRACTION_TARGET = 3         -- traction benches a hospital wants (and hence parts to build them)
 local SMELT_CAP = 10              -- stop smelting an ORE once the metal has this many bars
 local METAL_CAP = 100             -- steel cap (steel isn't ore-smelted, so kept higher)
 local PIG_IRON_CAP = 10           -- pig iron is an intermediate -- keep only a few
@@ -237,16 +256,82 @@ local function tool_classes(subtype)
     return nil
 end
 
+-- items of `type_name` in the fort. `free_only` skips anything already installed as a
+-- building: a table in the dining hall and a chain on a restraint are not parts you can
+-- assemble anything from. Typed vectors, so this stays cheap.
+local function item_stock(type_name, free_only)
+    local vec = df.global.world.items.other[type_name]
+    if not vec then return 0 end
+    local n = 0
+    for _, it in ipairs(vec) do
+        if not (it.flags.garbage_collect or it.flags.removed)
+            and not (free_only and it.flags.in_building) then n = n + 1 end
+    end
+    return n
+end
+
+-- How many more traction benches the hospital wants. Installed benches COUNT here (unlike
+-- the parts above) -- a bench built into the hospital is the thing we were trying to get,
+-- not a spare part sitting in a stockpile.
+local function traction_shortfall()
+    return math.max(0, TRACTION_TARGET - item_stock('TRACTION_BENCH', false))
+end
+
+-- A bench-part ask: offered only while benches are still wanted AND you don't have enough
+-- LOOSE parts to assemble them, and it asks for exactly the shortfall. Returns nil (= don't
+-- offer) rather than 0, so a fort with 30 dining tables is never nagged about tables.
+local function traction_part(type_name)
+    return function()
+        local want = traction_shortfall()
+        if want == 0 then return nil end
+        local short = want - item_stock(type_name, true)
+        return short > 0 and short or nil
+    end
+end
+
 -- Supplies a hospital wants kept stocked. When the fort has a hospital, planner-orders
--- offers an order for each of these that has none yet. Three kinds:
---   item     -- pick a material (wood/metal), keep `target` in stock
+-- offers an order for each of these that has none yet. Four kinds:
+--   item     -- pick a material (wood/metal), keep `target` in stock (or a one-off batch
+--               with `once`, for parts you want N of exactly once)
 --   job      -- one production method, no material choice, keep `target` in stock
+--   assemble -- built out of other ITEMS rather than a material (traction bench); the
+--               components come from JOB_COMPONENTS and gate the order
 --   reaction -- a workshop reaction; choose among `options`. Soap and plaster get REPEATING
 --               orders held at a target by their own conditions. `also` queues the
 --               prerequisite orders an option needs.
+-- `plan` (optional) computes the amount at scan time and returns nil to withhold the ask.
 local HOSPITAL_SUPPLIES = {
     {supply = 'Splints',  kind = 'item', job = 'ConstructSplint', cond_item = 'SPLINT', target = 5},
     {supply = 'Crutches', kind = 'item', job = 'ConstructCrutch', cond_item = 'CRUTCH', target = 5},
+    -- Traction benches, then their three parts. The bench is ASSEMBLED from items, so its
+    -- ask carries no material; each part is a normal material-picked order for exactly the
+    -- shortfall, offered only while benches are still wanted and the loose parts are short.
+    {supply = 'Traction benches', kind = 'assemble', job = 'ConstructTractionBench',
+        cond_item = 'TRACTION_BENCH', plan = traction_shortfall,
+        note = 'Immobilises a patient with a broken bone so a doctor can set it -- without\n'
+            .. 'one, compound fractures never heal properly. Assembled at a Mechanic\'s\n'
+            .. 'Workshop from a table + a mechanism + a rope or chain; the three parts are\n'
+            .. 'offered as their own asks straight after this one.'},
+    {supply = 'Traction bench table', kind = 'item', job = 'ConstructTable', cond_item = 'TABLE',
+        once = true, plan = traction_part('TABLE'),
+        note = 'A LOOSE table for the traction bench (a table already built into a dining\n'
+            .. 'hall cannot be used).'},
+    {supply = 'Traction bench mechanism', kind = 'item', job = 'ConstructMechanisms',
+        cond_item = 'TRAPPARTS', once = true, plan = traction_part('TRAPPARTS'),
+        note = 'A mechanism for the traction bench, made at a Mechanic\'s Workshop.'},
+    -- The chain is the one part kept STOCKED rather than made once: chains are spent by
+    -- restraints and wells as well as benches, so a standing reserve is what stops the bench
+    -- orders stalling. It counts only chains ON THE GROUND (flags3.on_ground) -- a chain bolted
+    -- into a restraint or an assembled bench is not one you can build with, and counting those
+    -- is exactly what would leave the order permanently satisfied and idle.
+    {supply = 'Traction bench chain', kind = 'item', job = 'MakeChain', cond_item = 'CHAIN',
+        target = TRACTION_TARGET, plan = traction_part('CHAIN'), cond_flags3 = {'on_ground'},
+        any_material = 'Rope or chain, any material',
+        note = 'The bench takes a chain OR a rope, so this offers both: a specific metal forges\n'
+            .. 'a chain, and the untyped choice pins no material at all -- DF fills it with\n'
+            .. 'whatever is to hand, cloth rope or metal chain alike.\n\n'
+            .. ('Keeps %d LOOSE chains in stock (ones already built into a restraint, well or\n'):format(TRACTION_TARGET)
+            .. 'bench do not count towards it).'},
     -- buckets are handled by the general container asks (carpenter-gated material picker)
     -- Thread/Cloth here are the GENERAL orders (process/weave any plant, keep target in stock);
     -- exists_fn ignores the pig-tail-specific orders so both can coexist (see order_targets_pigtail)
@@ -495,6 +580,13 @@ local function material_choices(gap)
         out[#out + 1] = {text = gap.name .. ': ' .. label .. (safe and ' [magma-safe]' or ''),
                          mat_type = mt, mat_index = mi, wood = wood}
     end
+    -- an UNTYPED choice, offered first where the gap asks for one: no material pinned at all,
+    -- so DF fills the order from whatever it has. For a traction bench chain that is the whole
+    -- point -- a woven rope and a forged chain both fit, and neither is a material "class" the
+    -- picker below can express.
+    if gap.any_material and not gap.magma_required then
+        out[#out + 1] = {text = gap.name .. ': ' .. gap.any_material, mat_type = -1, mat_index = -1}
+    end
     -- a job restricted to specific materials (e.g. anvils = iron/steel only): offer just
     -- those, nothing else.
     local specific = JOB_MATERIALS[jobname]
@@ -559,6 +651,7 @@ local FIXED_WS = {
                              ws2 = df.workshop_type.Millstone},
     PrepareMeal           = {label = 'a Kitchen',              ws = df.workshop_type.Kitchen},
     ConstructMechanisms   = {label = "a Mechanic's Workshop",  ws = df.workshop_type.Mechanics},
+    ConstructTractionBench= {label = "a Mechanic's Workshop",  ws = df.workshop_type.Mechanics},
     RENDER_FAT            = {label = 'a Kitchen',              ws = df.workshop_type.Kitchen},
     MAKE_SOAP_FROM_TALLOW = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
     MAKE_SOAP_FROM_OIL    = {label = "a Soap Maker's Workshop", def = 'SOAP_MAKER'},
@@ -703,19 +796,46 @@ local function item_label(item_type)
     return n:sub(1, 1):upper() .. n:sub(2)
 end
 
+-- the tool subtypes this fort's civ knows how to make, as a set. nil = no civ to ask, which
+-- means "don't filter" rather than "nothing is allowed".
+local permitted_tools_cache, permitted_tools_civ
+local function permitted_tools()
+    local civ = df.global.plotinfo.civ_id
+    if permitted_tools_cache ~= nil and permitted_tools_civ == civ then return permitted_tools_cache end
+    local ent = df.historical_entity.find(civ)
+    local set = nil
+    if ent then
+        local ok, vec = pcall(function() return ent.resources.tool_type end)
+        if ok and vec and #vec > 0 then
+            set = {}
+            for _, st in ipairs(vec) do set[st] = true end
+        end
+    end
+    permitted_tools_cache, permitted_tools_civ = set or false, civ
+    return set
+end
+
 -- a TOOL filter (nest box, jug, pot, hive, ...) identifies its tool by item_subtype or,
 -- more often, by a required tool_use. Resolve to (tooldef_idx, display name).
+-- The tool_use scan takes the first def in the raws with that use, which is not necessarily
+-- one this civ can make -- several races define their own jug or pot. Prefer a def the civ
+-- actually knows, so the ask never offers an order no workshop here can fill.
 local function resolve_tool(f)
     local tools = df.global.world.raws.itemdefs.tools
     if f.item_subtype and f.item_subtype >= 0 and tools[f.item_subtype] then
         return f.item_subtype, tools[f.item_subtype].name
     end
     if f.has_tool_use and f.has_tool_use >= 0 then
+        local allowed, fallback_i, fallback_n = permitted_tools(), nil, nil
         for i = 0, #tools - 1 do
             for _, u in ipairs(tools[i].tool_use) do
-                if u == f.has_tool_use then return i, tools[i].name end
+                if u == f.has_tool_use then
+                    if not allowed or allowed[tools[i].subtype] then return i, tools[i].name end
+                    if not fallback_i then fallback_i, fallback_n = i, tools[i].name end
+                end
             end
         end
+        return fallback_i, fallback_n   -- nothing permitted matched: name it anyway, as before
     end
 end
 
@@ -754,12 +874,13 @@ local function reaction_stock(spec)
 end
 
 -- turn a supply spec (hospital or textile) into a gap the dialog understands
-local function make_hospital_gap(spec)
-    local g = {name = spec.supply, kind = spec.kind, note = spec.note, amount = spec.target,
-               title = spec.title or 'Hospital supply'}
+local function make_hospital_gap(spec, amount)
+    local g = {name = spec.supply, kind = spec.kind, note = spec.note,
+               amount = amount or spec.target, title = spec.title or 'Hospital supply'}
     if spec.kind == 'reaction' then
         g.options, g.chain = spec.options, spec.chain
     else
+        g.once = spec.once                                  -- one-off batch, not keep-stocked
         g.job_type = df.job_type[spec.job]
         g.order_subtype = -1
         g.cond_item_type = df.item_type[spec.cond_item]
@@ -768,6 +889,8 @@ local function make_hospital_gap(spec)
         g.cond_val = spec.target
         g.leather = spec.leather                            -- make it from leather
         g.cond_empty = spec.cond_empty                      -- count only EMPTY items (bags)
+        g.cond_flags3 = spec.cond_flags3                    -- item-state match (on_ground: loose only)
+        g.any_material = spec.any_material                  -- offer an untyped "any material" choice
     end
     return g
 end
@@ -825,12 +948,20 @@ local function scan()
     table.sort(gaps, function(a, b) return a.name < b.name end)
     -- when the fort has a hospital, also offer orders for the supplies it needs
     if hospital_exists() then
+        -- a planned building may already have raised a gap for the same job (a table, a
+        -- mechanism); one ask for it is enough, so don't stack a hospital one on top
+        local planned_jobs = {}
+        for _, g in ipairs(gaps) do if g.job_type then planned_jobs[g.job_type] = true end end
         for _, spec in ipairs(HOSPITAL_SUPPLIES) do
+            -- `plan` supplies both the amount and the decision to offer at all (traction
+            -- benches and their parts); everything else uses its fixed target.
+            local amount = spec.plan and spec.plan() or spec.target
             -- offer the supply when there's no order pending AND -- for soap/plaster, whose
             -- stock is counted here in Lua rather than by the ask itself -- you're low on it.
-            if not hospital_has_order(spec)
+            if amount and amount > 0 and not hospital_has_order(spec)
+                and not (spec.job and planned_jobs[df.job_type[spec.job]])
                 and (not spec.count or reaction_stock(spec) < spec.target) then
-                gaps[#gaps + 1] = make_hospital_gap(spec)
+                gaps[#gaps + 1] = make_hospital_gap(spec, amount)
             end
         end
     end
@@ -940,6 +1071,13 @@ local function add_order(p)
             local cond = o.item_conditions[#o.item_conditions - 1]
             for _, fl in ipairs(c.flags2) do cond.flags2[fl] = true end
         end
+        -- flags3 item-state match. `on_ground` is the one that matters here: it counts only
+        -- items lying loose (a stockpile counts, a fitting bolted into a building does not),
+        -- which is the difference between "3 chains in stock" and "3 chains already spent".
+        if c.flags3 then
+            local cond = o.item_conditions[#o.item_conditions - 1]
+            for _, fl in ipairs(c.flags3) do cond.flags3[fl] = true end
+        end
     end
     mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
@@ -960,10 +1098,17 @@ local function create_order(gap, choice)
         for _, c in ipairs(comp.conds) do conds[#conds + 1] = C(c[1], c[2], df.item_type[c[3]]) end
         amount = gap.count or gap.amount or ORDER_AMOUNT
         freq = df.workquota_frequency_type.OneTime
+    elseif gap.once then
+        -- a one-off batch (traction bench parts): make exactly this many, then stop. A
+        -- keep-stocked condition is wrong for these -- the fort's existing dining tables
+        -- would satisfy it and nothing would ever be made.
+        conds = {}
+        amount = gap.amount or ORDER_AMOUNT
+        freq = df.workquota_frequency_type.OneTime
     else
         conds = {{compare = gap.cond_compare or df.logic_condition_type.Exactly,
                   val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype,
-                  empty = gap.cond_empty}}
+                  empty = gap.cond_empty, flags3 = gap.cond_flags3}}
         amount = gap.amount or ORDER_AMOUNT
         freq = df.workquota_frequency_type.Daily
     end
@@ -1206,6 +1351,7 @@ local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
 local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
 local ROUGH_GEM_MIN = 10   -- start cutting once the rough pile is bigger than this
 local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then cloth, then thread
+local ADAM_BATCH = 1       -- ...one job at a time, so an order reads 1/1, not 3/3
 
 -- Every bag-consuming order must leave a FLOOR of empty bags behind, or whichever job runs
 -- first eats the last bag and starves the rest -- this fort hit 0 empty bags because milling
@@ -1827,6 +1973,10 @@ STANDING = {
         -- gate never opens. Its cap alone does the job: extraction stops at 3 thread, the other
         -- two consume it, extraction tops it back up, and everything halts at 3/3/3 with the
         -- remaining boulders untouched.
+        --
+        -- Every order is a batch of ONE (ADAM_BATCH) against a cap of 3: the amount is how many
+        -- jobs each trigger queues, not the target, so 1/1 walks up to the cap a job at a time
+        -- rather than committing three jobs to material that isn't extracted yet.
         if not reaction_ordered('ADAMANTINE_WAFERS') then
             out[#out + 1] = {name = 'Adamantine wafers', shops = {'ADAMANTINE_WAFERS'},
                 note = ('Smelts adamantine thread into wafers at a Smelter -- keeps %d in stock,\n'):format(ADAM_KEEP)
@@ -1834,7 +1984,7 @@ STANDING = {
                     .. 'chain: wafers are what adamantine is actually worth forging.',
                 build = function()
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'ADAMANTINE_WAFERS',
-                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                        amount = ADAM_BATCH, frequency = Daily, conds = {
                             C('LessThan', ADAM_KEEP, BAR, 0, ADAM),  -- wafers are bars
                             C('GreaterThan', 0, THREAD, 0, ADAM)}}   -- while thread is on hand
                     return missing_shops({'ADAMANTINE_WAFERS'})
@@ -1847,7 +1997,7 @@ STANDING = {
                     .. 'is finished before any thread goes to cloth.',
                 build = function()
                     add_order{job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
-                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                        amount = ADAM_BATCH, frequency = Daily, conds = {
                             C('LessThan', ADAM_KEEP, CLOTH, 0, ADAM),
                             -- the wafer step must be FINISHED first: no cloth until 3 wafers exist
                             C('AtLeast', ADAM_KEEP, BAR, 0, ADAM),
@@ -1863,7 +2013,7 @@ STANDING = {
                     .. 'Whatever is left over stays as raw adamantine.',
                 build = function()
                     add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
-                        amount = ADAM_KEEP, frequency = Daily, conds = {
+                        amount = ADAM_BATCH, frequency = Daily, conds = {
                             C('LessThan', ADAM_KEEP, THREAD, 0, ADAM),
                             C('AtLeast', 1, BOULDER, 0, RAW)}}       -- while RAW adamantine is on hand
                     return missing_shops({'ExtractMetalStrands'})
@@ -1984,9 +2134,19 @@ local function gap_prompt(gap, i, total)
         local warn = (req and not ws_exists(req)) and ('\n\n!! Not built yet: ' .. req.label) or ''
         return {{text = ('Make %s: keep ~%d in stock'):format(gap.name:lower(), gap.amount), mat_type = -1, mat_index = -1}},
             ('%s: %s  (%d/%d)'):format(gap.title or 'Hospital supply', gap.name, i, total), (gap.note or '') .. warn
+    elseif kind == 'assemble' then  -- built from other ITEMS, so there is no material to pick
+        local comp = JOB_COMPONENTS[df.job_type[gap.job_type]]
+        local req = FIXED_WS[df.job_type[gap.job_type]]
+        local warn = (req and not ws_exists(req)) and ('\n\n!! Not built yet: ' .. req.label) or ''
+        return {{text = ('Assemble %d from %s'):format(gap.amount, comp.desc), mat_type = -1, mat_index = -1}},
+            ('%s: %s  (%d/%d)'):format(gap.title or 'Hospital supply', gap.name, i, total),
+            (gap.note or '') .. warn
     elseif kind == 'item' then  -- material-picked stock item (hospital supply, container, ...)
+        local body = gap.once
+            and ('Makes %d; pick a material.'):format(gap.amount)
+            or ('Makes %s; pick a material; keeps ~%d in stock.'):format(gap.name:lower(), gap.amount)
         return material_choices(gap), ('%s: %s  (%d/%d)'):format(gap.title or 'Make', gap.name, i, total),
-            ('Makes %s; pick a material; keeps ~%d in stock.'):format(gap.name:lower(), gap.amount)
+            (gap.note and (gap.note .. '\n\n') or '') .. body
     elseif kind == 'standing' then  -- a standing-order producer (brewing/fuel/smelting/melting)
         local miss = missing_shops(gap.producer.shops or {})
         local warn = #miss > 0 and ('\n\n!! Not built yet: ' .. table.concat(miss, ', ')) or ''
