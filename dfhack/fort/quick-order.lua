@@ -25,7 +25,12 @@ Grammar:
       - reactions the fort is allowed (make soap from tallow, brew drink from plant,
         make steel bars, make X dye, instruments...) -> a CustomReaction order
       - fixed-material items (bed, coffin, mechanism, statue, crafts...)
-      - weapons/armor/ammo/tools/trapcomps (by subtype, e.g. "short sword")
+      - weapons/armor/ammo/tools/trapcomps (by subtype, e.g. "short sword") -- ONLY the
+        subtypes YOUR CIV knows how to make: a dwarf fort will not accept "long sword" or
+        "scimitar", since no workshop here could ever fill that order. Read from the civ's
+        entity resources (weapon_type + digger_type + training_weapon_type, armor_type,
+        helm/pants/gloves/shoes/shield/ammo/tool/trapcomp_type), so picks and training
+        weapons stay available and a modded civ gets its own list.
       - processing/gathering jobs (collect sand, milk, shear, melt, cut gems, meal)
   Matching is a subsequence scorer, so partials and dropped words work
   ("soap" -> make soap from tallow, "steel bars" -> make steel bars, not barrels).
@@ -66,20 +71,49 @@ local FIXED = {
     {'mug', 'GOBLET', 'MakeGoblet'}, {'cup', 'GOBLET', 'MakeGoblet'},   -- mug/cup are goblet items
     {'toy', 'TOY', 'MakeToy'}, {'flask', 'FLASK', 'MakeFlask'}, {'totem', 'TOTEM', 'MakeTotem'},
     {'quern', 'QUERN', 'ConstructQuern'}, {'millstone', 'MILLSTONE', 'ConstructMillstone'},
+    -- chain and rope are one item type: metal at the forge is a chain, cloth/silk/yarn at the
+    -- clothier's is a rope. "chain" takes the usual default material (metal); "rope" is left
+    -- UNTYPED (needs_mat false) so a bare "rope" pins no material at all and DF fills it from
+    -- whatever is to hand -- which is also what leaves room for a mod's own rope reaction to
+    -- stay in the suggestion list beside it. Naming a material still works on either word.
+    {'chain', 'CHAIN', 'MakeChain'}, {'rope', 'CHAIN', 'MakeChain', false},
     {'slab', 'SLAB', 'ConstructSlab'}, {'splint', 'SPLINT', 'ConstructSplint'},
     {'crutch', 'CRUTCH', 'ConstructCrutch'}, {'traction bench', 'TRACTION_BENCH', 'ConstructTractionBench'},
     {'pipe section', 'PIPE_SECTION', 'MakePipeSection'}, {'anvil', 'ANVIL', 'ForgeAnvil'},
     {'window', 'WINDOW', 'MakeWindow'}, {'animal trap', 'ANIMALTRAP', 'MakeAnimalTrap'},
 }
 
--- subtype-bearing item classes: itemdef vector -> {job, item_type}
+-- subtype-bearing item classes: itemdef vector -> {job, item_type, permission vectors}
+-- The third field lists the `historical_entity.resources.*_type` vectors that say which
+-- subtypes THIS CIVILISATION knows how to make. Without it the vocabulary is every itemdef in
+-- the raws, so a dwarf fort would cheerfully accept "long sword" or "scimitar" and queue an
+-- order no workshop can ever fill. Weapons need three vectors, not one: picks live in
+-- `digger_type` and the wooden training gear in `training_weapon_type`.
 local SUBTYPED = {
-    weapons = {'MakeWeapon', 'WEAPON'}, armor = {'MakeArmor', 'ARMOR'},
-    helms = {'MakeHelm', 'HELM'}, pants = {'MakePants', 'PANTS'},
-    gloves = {'MakeGloves', 'GLOVES'}, shoes = {'MakeShoes', 'SHOES'},
-    shields = {'MakeShield', 'SHIELD'}, ammo = {'MakeAmmo', 'AMMO'},
-    tools = {'MakeTool', 'TOOL'}, trapcomps = {'MakeTrapComponent', 'TRAPCOMP'},
+    weapons = {'MakeWeapon', 'WEAPON', {'weapon_type', 'digger_type', 'training_weapon_type'}},
+    armor = {'MakeArmor', 'ARMOR', {'armor_type'}},
+    helms = {'MakeHelm', 'HELM', {'helm_type'}}, pants = {'MakePants', 'PANTS', {'pants_type'}},
+    gloves = {'MakeGloves', 'GLOVES', {'gloves_type'}}, shoes = {'MakeShoes', 'SHOES', {'shoes_type'}},
+    shields = {'MakeShield', 'SHIELD', {'shield_type'}}, ammo = {'MakeAmmo', 'AMMO', {'ammo_type'}},
+    tools = {'MakeTool', 'TOOL', {'tool_type'}},
+    trapcomps = {'MakeTrapComponent', 'TRAPCOMP', {'trapcomp_type'}},
 }
+
+-- the subtypes this fort's civ is allowed to make from `vectors`, as a set; nil means "no
+-- civ to ask" (worldless or a broken entity), which leaves the vocabulary unfiltered rather
+-- than silently emptying it
+local function permitted_subtypes(vectors)
+    local ent = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not ent then return nil end
+    local set, any = {}, false
+    for _, vname in ipairs(vectors) do
+        local ok, vec = pcall(function() return ent.resources[vname] end)
+        if ok and vec then
+            for _, st in ipairs(vec) do set[st] = true; any = true end
+        end
+    end
+    return any and set or nil
+end
 
 -- processing / gathering jobs (no makeable "item"; the job IS the order). Each may
 -- carry several natural-language aliases. Material handling mirrors DF's own work-order
@@ -125,7 +159,7 @@ local SPECIAL = {
     {job = 'CatchLiveFish', nomat = true,   names = {'catch live fish', 'catch fish'}},
 }
 
-local vocab  -- built once: list of entries
+local vocab, vocab_civ  -- built once PER CIV: the permitted-subtype filter is civ-specific
 -- entry = {name, kind='job'|'reaction', job, item_type=-1, item_subtype=-1,
 --          reaction_name=nil, mat=nil, needs_mat=bool}
 
@@ -141,18 +175,23 @@ local function add_job(v, name, job, itype, sub, needs_mat)
 end
 
 local function build_vocab()
-    if vocab then return vocab end
+    if vocab and vocab_civ == df.global.plotinfo.civ_id then return vocab end
     local v = {}
-    for _, e in ipairs(FIXED) do add_job(v, e[1], e[3], e[2], -1, true) end
+    -- e[4] == false marks an entry that needs NO material (an untyped order); anything else
+    -- (including a missing 4th field) takes the usual default-material treatment
+    for _, e in ipairs(FIXED) do add_job(v, e[1], e[3], e[2], -1, e[4] ~= false) end
     for vecname, spec in pairs(SUBTYPED) do
         local vec = df.global.world.raws.itemdefs[vecname]
+        local allowed = permitted_subtypes(spec[3])
         for i = 0, #vec - 1 do
             local def = vec[i]
             -- skip procedurally-generated, entity-sourced itemdefs (source_enid ~= -1) -- these are
             -- instrument parts etc. ("zurko block", "ispig blocks") whose random names otherwise
             -- pollute matching with un-orderable junk that outscores the real item.
             local ok, senid = pcall(function() return def.source_enid end)
-            if not ok or senid == -1 then
+            -- ...and skip anything this civ has no knowledge of: a subtype outside its entity
+            -- resources can be named but never made, and an order for one just sits there
+            if (not ok or senid == -1) and (not allowed or allowed[def.subtype]) then
                 add_job(v, def.name, spec[1], spec[2], def.subtype, true)   -- singular only (scorer handles plurals)
             end
         end
@@ -217,7 +256,7 @@ local function build_vocab()
             e.ntoks[#e.ntoks + 1] = w; e.nsings[#e.nsings + 1] = singular(w)
         end
     end
-    vocab = v
+    vocab, vocab_civ = v, df.global.plotinfo.civ_id
     return v
 end
 
@@ -480,6 +519,10 @@ end
 local WEAPONISH = {}   -- forged, metal-only goods
 for _, t in ipairs({'WEAPON', 'AMMO'}) do if df.item_type[t] then WEAPONISH[df.item_type[t]] = true end end
 local SHIELD_T = df.item_type.SHIELD
+-- CHAIN covers both chains (forged metal) and ropes (woven cloth/silk/yarn). Nothing else makes
+-- one: no stone chains, no wooden or bone ones.
+local CHAIN_T = df.item_type.CHAIN
+local CHAIN_SOFT = {cloth = true, silk = true, yarn = true}
 
 -- weapons with the CAN_STONE flag (short sword, dagger, spear...) can be KNAPPED from
 -- stone at the craftsdwarf's -- so "obsidian short sword" is legal even though obsidian
@@ -512,6 +555,8 @@ local function can_make_inorganic(item, mi)
         return true
     elseif it == SHIELD_T then
         return f.IS_METAL or false                                    -- shields: metal (wood via category)
+    elseif it == CHAIN_T then
+        return (f.IS_METAL and f.ITEMS_HARD) or false                 -- chains are forged; stone can't
     end
     -- everything else (furniture, crafts, containers, tools...): a METAL must be forgeable into
     -- hard items (ITEMS_HARD). Pure alloy-ingredient metals like bismuth (no ITEMS_HARD) can't --
@@ -527,7 +572,7 @@ end
 -- any class.
 local function legal_material(item, m)
     local it = item.item_type
-    local policed = WEAPONISH[it] or ARMOR_DEFVEC[it] or it == SHIELD_T
+    local policed = WEAPONISH[it] or ARMOR_DEFVEC[it] or it == SHIELD_T or it == CHAIN_T
     if m.kind == 'specific' or (m.kind == 'class' and m.picked) then
         local mt = m.kind == 'specific' and m.mat_type or m.picked.mat_type
         local mi = m.kind == 'specific' and m.mat_index or m.picked.mat_index
@@ -555,6 +600,12 @@ local function legal_material(item, m)
         end
     elseif m.kind == 'category' then             -- wood / leather / cloth / silk / yarn
         if WEAPONISH[it] then return false, item.name .. ' must be metal or stone' end
+        if it == CHAIN_T then                    -- a woven rope: thread goods only
+            if not CHAIN_SOFT[m.category] then
+                return false, item.name .. ' can only be metal, cloth, silk or yarn'
+            end
+            return true
+        end
         if it == SHIELD_T then
             if m.category ~= 'wood' then return false, item.name .. ' can only be metal or wood' end
             return true
@@ -633,7 +684,7 @@ for _, n in ipairs({'bed', 'barrel', 'bucket', 'bin', 'cage', 'weapon rack', 'ar
     DEFAULT_WOOD[n] = true
 end
 local METAL_ITEMS = {}
-for _, t in ipairs({'WEAPON', 'AMMO', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD'}) do
+for _, t in ipairs({'WEAPON', 'AMMO', 'ARMOR', 'HELM', 'PANTS', 'GLOVES', 'SHOES', 'SHIELD', 'CHAIN'}) do
     METAL_ITEMS[df.item_type[t]] = true
 end
 
@@ -734,16 +785,20 @@ local function rank(tokens)
         for _, sp in ipairs(splits) do
             local s = item_score(sp, it)
             if s > 0 then
+                -- score the SPLIT, legal or not, so the illegal note is comparable with the
+                -- legal plans: a one-word exact hit that leaves three words to the material
+                -- ("rope" out of "rope from braided leather") must not outrank a reaction whose
+                -- name covers the whole phrase, and only `total` accounts for that coverage
+                local total = s + #sp.toks * 3 - #sp.mat
+                if #sp.mat == 0 and s >= 60 then total = total + 14 end   -- favour whole-phrase
                 local plan, why = build_plan(it, sp.mat)
                 if plan then
-                    local total = s + #sp.toks * 3 - #sp.mat
-                    if #sp.mat == 0 and s >= 60 then total = total + 14 end   -- favour whole-phrase
                     local key = plan_sig(plan)
                     if not acc[key] or total > acc[key].score then
                         acc[key] = {plan = plan, score = total, s = s}
                     end
-                elseif why and (not illegal or s > illegal.s) then
-                    illegal = {s = s, why = why}
+                elseif why and (not illegal or total > illegal.total) then
+                    illegal = {s = s, total = total, why = why}
                 end
             end
         end
@@ -761,7 +816,7 @@ end
 -- the best legal plan, that illegal item is what the user meant -> surface its reason instead
 -- of a tangential legal match ("obsidian war hammer" -> the reason, not an obsidian instrument)
 local function illegal_wins(ranked, illegal)
-    return illegal and (#ranked == 0 or illegal.s > ranked[1].s)
+    return illegal and (#ranked == 0 or illegal.total > ranked[1].score)
 end
 
 -- returns the best resolved plan {amount, repeating, item, mat, matname, iscore, ranked} or nil,err

@@ -83,7 +83,7 @@ a shop's "Add new task" list so the jobs you can actually do come before the one
 
 ### **`fort/quick-order`**
 Type plain text on the Work Orders screen to create a legal manager order, with "keep N in
-stock" repeats.
+stock" repeats. Only offers subtypes your civilization actually knows how to make.
 
 ### **`fort/planner-orders`**
 Warns of planned buildings nothing produces and offers the orders to make them.
