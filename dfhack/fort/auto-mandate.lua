@@ -9,6 +9,10 @@ cheapest / most renewable material the item can be made from:
     * furniture & wooden goods                  -> wood
     * metal gear (weapons, armor, ...)          -> copper
     * coins (minted from a metal bar)           -> copper (else any metal bar)
+    * cages                                     -> copper (else any metal bar, else wood):
+                                                   a metal cage is worth far more to the
+                                                   noble and cannot burn, but a fort with
+                                                   no bars must still be able to comply
     * stone goods (mechanisms, statues, querns,
       millstones, slabs)                        -> obsidian if the fort has usable
                                                    boulders of it, else unconstrained
@@ -38,7 +42,11 @@ local CYCLE_DAYS = 1
 -- item_type token -> { job token, material policy, kind }
 --   kind 'sub'   : set order.item_subtype (forge jobs pick the specific gear)
 --   kind 'fixed' : the job implies the item; set neither
-local W, C, A, S = 'wood', 'copper', 'any', 'stone'
+-- CW = copper if there is any, else any metal, else WOOD. For goods a carpenter and a
+-- metalsmith can both make: the metal one is worth far more to the noble who mandated it and
+-- will not burn, but a fort with no bars must still be able to fulfil the mandate, and an
+-- unmade mandate is a punished mandate.
+local W, C, A, S, CW = 'wood', 'copper', 'any', 'stone', 'copper_else_wood'
 local RAW = {
     -- jewelry/craft goods: use the SPECIFIC make-job (NOT generic "make crafts",
     -- which makes a random item and would not satisfy the mandate)
@@ -47,7 +55,7 @@ local RAW = {
     {'CROWN', 'MakeCrown', W, 'fixed'}, {'SCEPTER', 'MakeScepter', W, 'fixed'},
     {'FIGURINE', 'MakeFigurine', W, 'fixed'},
     {'TOY', 'MakeToy', W, 'fixed'}, {'GOBLET', 'MakeGoblet', W, 'fixed'},
-    {'FLASK', 'MakeFlask', W, 'fixed'}, {'CAGE', 'MakeCage', W, 'fixed'},
+    {'FLASK', 'MakeFlask', W, 'fixed'}, {'CAGE', 'MakeCage', CW, 'fixed'},
     {'BARREL', 'MakeBarrel', W, 'fixed'}, {'BUCKET', 'MakeBucket', W, 'fixed'},
     {'ANIMALTRAP', 'MakeAnimalTrap', W, 'fixed'}, {'TOTEM', 'MakeTotem', A, 'fixed'},
     {'DOOR', 'ConstructDoor', W, 'fixed'}, {'FLOODGATE', 'ConstructFloodgate', W, 'fixed'},
@@ -193,6 +201,25 @@ local function choose_material(o, policy, m)
             return info and info:toString() or 'metal'
         end
         return nil   -- no metal at all: cannot fulfil
+    elseif policy == CW then
+        -- copper first, then any metal, then wood: a metal cage is the better mandate good
+        -- (higher value, fireproof) but must never make the mandate impossible
+        local cu = dfhack.matinfo.find('COPPER')
+        if cu and bars_of(cu.type, cu.index) then
+            o.mat_type, o.mat_index = cu.type, cu.index
+            return 'copper'
+        end
+        local mt, mi = any_metal_bar()
+        if mt then
+            o.mat_type, o.mat_index = mt, mi
+            local info = dfhack.matinfo.decode(mt, mi)
+            return info and info:toString() or 'metal'
+        end
+        if wood_logs() > 0 then
+            o.material_category.wood = true
+            return 'wood (no metal bars)'
+        end
+        return 'any material'
     elseif policy == S then
         local ob, why = usable_obsidian()
         if ob then
