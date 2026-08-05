@@ -1,5 +1,29 @@
 # Changes — HA High Elves
 
+## v0.23 addendum -- twinkling is SPECIAL (deployed over 0.23 and bundle v17, version deliberately not bumped)
+
+Shipped by overwriting the deployed 0.23 mod and the `HIGH_ADVENTURE (17)` snapshot in
+place, rather than minting a new version. DF keys its per-world snapshot by version, so a
+bump would have orphaned the fort that is being played against v17 — and because DF 50
+saves carry no `raw/` of their own and read the snapshot directly, overwriting it is also
+the only way the token reaches any world at all, new or existing.
+
+- **Both twinkling materials now carry `[SPECIAL]`.** The token stops AI-controlled
+  entities making items from a material and stops it travelling in caravans, while
+  leaving the player free to use it exactly as normal — so a high-elf fort still catches
+  starlight at the Shaping Tree and forges bars at the smelter.
+- This matches how the suite already works: `high-adventure/war-gear` hands elves their
+  twinkling gear directly, so worldgen's equipment spread has no business minting it, and
+  an elf caravan has no business selling divine, fireproof, indestructible cloaks to a
+  dwarf fort for a few barrels of ale. Adamantine is protected the same way — `DEEP_SPECIAL`
+  implies `SPECIAL`, which is why no AI civ ever trades it. Twinkling is grown rather than
+  mined, so it takes the plain token and not the adamantine one.
+- Vanilla ships no raw that uses `[SPECIAL]` directly, but DF's own procedural generators
+  read the flag: `get_random_inorganic(nil, "IS_METAL", "SPECIAL")` in
+  `vanilla_procedural/scripts/generators/creatures/shared_info.lua` passes it as the
+  EXCLUDE argument when picking a metal for a generated creature's weapon, so a
+  procedurally generated beast can no longer turn up carrying twinkling either.
+
 ## v0.23 -- twinkling gear moved to the shared war-gear engine
 - The re-gear pass left high-elves.lua for high-adventure/war-gear in the
   HA_adventure_hostility mod, which now does the same job for drow, dark dwarves

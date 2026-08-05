@@ -20,6 +20,17 @@ Name/colour = the STARS-sphere divine metal actually named "twinkling metal" in
 divine.lua. It is grown at the Shaping Tree ("catch starlight"), never mined, so
 no DEEP_SPECIAL.
 
+Both twinkling materials carry the SPECIAL token (written in brackets in the
+definitions below, never in this prose -- see the warning in
+reaction_ha_high_elf.txt). SPECIAL stops AI-controlled entities making items from
+the material and stops it travelling in caravans; the player uses it exactly as
+normal, so a high-elf fort still catches starlight and forges bars. That is the
+division of labour this suite already runs on: elves get their twinkling gear from
+war-gear.lua, which hands it to them directly, so worldgen's equipment spread has no
+business minting it and an elf caravan has no business hauling divine fireproof
+cloaks to a dwarf fort in exchange for ale. Adamantine gets the same protection
+implicitly -- DEEP_SPECIAL implies SPECIAL -- which is why AI civs never trade it.
+
 [INORGANIC:HA_TWINKLING_METAL]
 	[USE_MATERIAL_TEMPLATE:METAL_TEMPLATE]
 	[STATE_COLOR:ALL_SOLID:WHITE]
@@ -61,6 +72,7 @@ no DEEP_SPECIAL.
 	[BENDING_STRAIN_AT_YIELD:0]
 	[MAX_EDGE:12000]
 	[STOCKPILE_THREAD_METAL]
+	[SPECIAL]
 
 TWINKLING FABRIC: what a caught strand becomes if it is WOVEN instead of smelted.
 Same divine stuff as the metal, but soft: only the soft-item tokens are present, so
@@ -106,3 +118,4 @@ keeps the divine strength values, which is the point of a divine fabric.
 	[BENDING_FRACTURE:2000000]
 	[BENDING_STRAIN_AT_YIELD:0]
 	[STOCKPILE_THREAD_METAL]
+	[SPECIAL]
