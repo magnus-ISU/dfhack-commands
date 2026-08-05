@@ -61,7 +61,7 @@ CMAKE_BUILD := $(DFHACK_SRC)/build-rel
 PERL5_LOCAL := $(BUILDDIR)/perl5
 PLUGIN_SRC  := $(ROOT)/other-authors/df-smooth-movement
 # Git tag of the DFHack source to build against. Must match the installed DFHack (ABI).
-DFHACK_TAG  ?= 53.15-r2
+DFHACK_TAG  ?= 53.15-r3
 JOBS        ?= $(shell nproc)
 
 # --- README composition (make readme) ---
