@@ -11,7 +11,7 @@ sits in a dining room, and any legendary craftsdwarf pulled onto hauling for a
 season. This scrubs skill rust off both -- and nothing else.
 
     rusty-legends            clear rust now, and report who was scrubbed
-    enable rusty-legends     keep it clear (swept once a game year; persists with
+    enable rusty-legends     keep it clear (swept once a game season; persists with
                              the fort and re-arms on load)
     disable rusty-legends    stop
     rusty-legends list       who qualifies, and how rusty they are
@@ -35,10 +35,10 @@ skill and drags the effective rating down), `rust_counter` and `demotion_counter
 -- this removes decay, it does not grant skill, and it cannot give back levels a
 unit was already demoted out of before you turned it on.
 
-Rust does still appear between yearly sweeps: a skill left unused for a season or
-two shows as rusty until the next check wipes it, rather than never appearing at
-all. Nothing is actually lost, because `demotion_counter` is cleared long before it
-can mature into a lost level.
+Rust can still appear between seasonal sweeps: a skill left unused long enough shows
+as rusty until the next check wipes it, rather than never appearing at all. Nothing
+is actually lost, because `demotion_counter` is cleared long before it can mature
+into a lost level.
 
 There is no stock DFHack tool for any of this: `gui/gm-unit`'s `remove_rust` is an
 empty `--TODO` stub and `modtools/skill-change` says `--TODO: skill rust?` at the
@@ -58,11 +58,13 @@ local ACTIVE_ADVENTURER = df.nemesis_flags.ACTIVE_ADVENTURER
 local LEGENDARY = df.skill_rating.Legendary
 
 local TICKS_PER_YEAR = 403200
+local TICKS_PER_SEASON = TICKS_PER_YEAR // 4
 
--- One game year. Rust accrues over seasons; sweeping yearly keeps the skills
--- themselves safe (demotion_counter never matures) at a fraction of the scan cost of
--- a daily pass, at the price of rust being briefly visible in between.
-local CYCLE_TICKS = TICKS_PER_YEAR
+-- One game season. Rust accrues over seasons, so a seasonal sweep catches it about
+-- as soon as it shows, and still costs a fraction of a daily pass. The skills
+-- themselves were never at risk at either cadence -- demotion_counter is cleared long
+-- before it can mature -- this just shortens how long rust is visible.
+local CYCLE_TICKS = TICKS_PER_SEASON
 
 -- ---------------------------------------------------------------------------
 -- who qualifies
@@ -173,7 +175,15 @@ end
 
 enabled = enabled or false
 local last_run = nil
-local hb_gen = 0            -- generation guard so only the newest heartbeat survives
+
+-- Generation guard so only the newest heartbeat survives. Parked in dfhack.internal
+-- rather than a local: a `reqscript` reload builds fresh locals, so a local counter
+-- leaves the PREVIOUS chunk's heartbeat closure holding a generation nobody can bump
+-- any more, still ticking on the old schedule beside the new one.
+local function hb_gen(set)
+    if set ~= nil then dfhack.internal.rusty_legends_hb_gen = set end
+    return dfhack.internal.rusty_legends_hb_gen or 0
+end
 
 function isEnabled() return enabled end
 
@@ -183,7 +193,7 @@ end
 
 -- Driven off a heartbeat gated on the game calendar rather than repeat-util's
 -- day/tick timeouts: on this build those count rendered frames and fire far off
--- schedule. A yearly cycle needs no precision, so the heartbeat is coarse -- a few
+-- schedule. A seasonal cycle needs no precision, so the heartbeat is coarse -- a few
 -- seconds of real time between calendar checks, rather than the every-frame beat a
 -- daily service would need. cur_year_tick also runs BACKWARDS under timestream, so a
 -- negative delta counts as "the clock moved" and re-arms instead of wedging.
@@ -192,10 +202,10 @@ local HEARTBEAT_FRAMES = 500
 local function start()
     enabled = true
     last_run = nil          -- sweep on the very next heartbeat
-    hb_gen = hb_gen + 1
-    local my_gen = hb_gen
+    local my_gen = hb_gen() + 1
+    hb_gen(my_gen)
     local function heartbeat()
-        if not enabled or my_gen ~= hb_gen then return end
+        if not enabled or my_gen ~= hb_gen() then return end
         local now = now_abs()
         if not last_run or now < last_run or now - last_run >= CYCLE_TICKS then
             last_run = now
@@ -208,7 +218,7 @@ end
 
 local function stop()
     enabled = false
-    hb_gen = hb_gen + 1     -- invalidate any running heartbeat loop
+    hb_gen(hb_gen() + 1)    -- invalidate any running heartbeat loop
 end
 
 -- exported so it can be driven via reqscript (the `enable` command goes through
@@ -290,7 +300,7 @@ end
 if dfhack_flags.enable ~= nil then
     set_enabled(dfhack_flags.enable_state)
     print(('rusty-legends: %s'):format(enabled and
-        'ON -- rust cleared once a game year' or 'OFF'))
+        'ON -- rust cleared once a game season' or 'OFF'))
     return
 end
 

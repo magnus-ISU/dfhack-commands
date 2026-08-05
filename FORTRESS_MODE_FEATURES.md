@@ -115,7 +115,7 @@ Frees a soldier broker to trade, then puts their squad back on duty afterward.
 ### **`fort/rusty-legends`**
 Keeps skill rust off a retired adventurer's every skill — matched on the nemesis
 `ADVENTURER` flag, never a name or a skill count — and off any citizen's legendary
-skills. Everything else rusts as normal. Swept once a game year. There is no stock
+skills. Everything else rusts as normal. Swept once a game season. There is no stock
 DFHack tool for this.
 
 ## Information
