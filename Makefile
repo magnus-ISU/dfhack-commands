@@ -61,7 +61,10 @@ CMAKE_BUILD := $(DFHACK_SRC)/build-rel
 PERL5_LOCAL := $(BUILDDIR)/perl5
 PLUGIN_SRC  := $(ROOT)/other-authors/df-smooth-movement
 # Git tag of the DFHack source to build against. Must match the installed DFHack (ABI).
-DFHACK_TAG  ?= 53.15-r3
+DFHACK_TAG  ?= 53.16-r1
+# DFHack refuses to configure under GCC 16+. Prefer a versioned gcc-15 when the default is newer.
+CC_PIN      ?= $(shell if [ "$$(cc -dumpversion | cut -d. -f1)" -ge 16 ] && command -v gcc-15 >/dev/null; then command -v gcc-15; else command -v cc; fi)
+CXX_PIN     ?= $(shell if [ "$$(c++ -dumpversion | cut -d. -f1)" -ge 16 ] && command -v g++-15 >/dev/null; then command -v g++-15; else command -v c++; fi)
 JOBS        ?= $(shell nproc)
 
 # --- README composition (make readme) ---
@@ -413,21 +416,25 @@ build:
 	if [ ! -f "$(CMAKE_BUILD)/CMakeCache.txt" ]; then
 	  # -Wno-error goes in the per-config flags: they land AFTER DFHack's hardcoded -Werror on the
 	  # compile line, neutralizing it (newer gcc releases add warnings the pinned tree predates).
+	  # DFHack hard-refuses GCC 16+ (its CMakeLists check_gcc), so the compiler is pinned rather
+	  # than left to /usr/bin/cc. Changing it needs a fresh build dir: the cache bakes it in.
 	  cmake -S "$(DFHACK_SRC)" -B "$(CMAKE_BUILD)" -G Ninja \
 	    -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF -DBUILD_TESTS=OFF \
+	    -DCMAKE_C_COMPILER="$(CC_PIN)" -DCMAKE_CXX_COMPILER="$(CXX_PIN)" \
 	    -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG -Wno-error" \
 	    -DCMAKE_C_FLAGS_RELEASE="-O2 -DNDEBUG -Wno-error"
 	fi
 	cmake --build "$(CMAKE_BUILD)" --target $(PLUGIN) -j"$(JOBS)"
 	built="$$(find "$(CMAKE_BUILD)" -name '$(PLUGIN).plug.so' | head -1)"
 	[ -n "$$built" ] || { echo "build produced no $(PLUGIN).plug.so"; exit 1; }
-	# Swap the binary in. If DF is running, unload the old plugin first so the file isn't in use;
-	# a RESTART of Dwarf Fortress is still the reliable way to pick up the new code.
-	if [ -x "$(DFRUN)" ] && "$(DFRUN)" lua 'print(1)' >/dev/null 2>&1; then
-	  "$(DFRUN)" disable $(PLUGIN) >/dev/null 2>&1 || true
-	  "$(DFRUN)" unload $(PLUGIN) >/dev/null 2>&1 || true
-	fi
-	cp -f "$$built" "$(SO)"
+	# Swap the binary in by ATOMIC RENAME, never `cp` onto the live path: cp truncates and
+	# rewrites the existing inode, and if DF has that .so mapped it is executing the bytes being
+	# overwritten -- an instant crash (hit twice). A rename leaves the old inode intact for the
+	# running process and publishes the new file for the next load. Do NOT disable/unload first
+	# either: dlclose races DF's render thread. A RESTART picks up the new code.
+	tmp="$(SO).new.$$$$"
+	cp "$$built" "$$tmp"
+	mv -f "$$tmp" "$(SO)"
 	echo "Installed freshly-built plugin: $(SO)"
 	echo "RESTART Dwarf Fortress now (or: dfhack-run load $(PLUGIN) && dfhack-run enable $(PLUGIN)"
 	echo "for a hot reload, then verify with 'make status')."
