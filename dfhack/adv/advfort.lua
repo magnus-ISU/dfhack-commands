@@ -1334,6 +1334,65 @@ local function FortificationChooser(args)
     makeJob(args)
     return true
 end
+-- Gather Webs cannot go through the job system: CollectWebs is a LOOM job -- DF validates
+-- the queued-by building and deletes a free-standing one on its first tick (measured live:
+-- job gone after one wait, with or without item refs / in_job marking). A web on the map is
+-- simply a thread item with flags.spider_web set; DF's own collection amounts to clearing
+-- that flag and taking the thread -- so do exactly that, through the inventory API.
+local function IsWebAt(args)
+    for _,v in ipairs(df.global.world.items.other.ANY_WEBS) do
+        if same_xyz(v.pos,args.pos) then return true end
+    end
+    return false,"No web there"
+end
+-- weaving skill helpers: fort web collection is Weaver work -- it takes work time scaled
+-- by skill and awards the standard ~30xp per completed job. DF's advancement costs are
+-- 500+100*level per rating.
+local function weaving_rating(unit)
+    local soul=unit.status.current_soul
+    if not soul then return 0 end
+    for _,sk in ipairs(soul.skills) do
+        if sk.id==df.job_skill.WEAVING then return sk.rating end
+    end
+    return 0
+end
+local function add_skill_exp(unit,skill,amount)
+    local soul=unit.status.current_soul
+    if not soul then return end
+    for _,sk in ipairs(soul.skills) do
+        if sk.id==skill then
+            sk.experience=sk.experience+amount
+            while sk.experience>=500+sk.rating*100 do
+                sk.experience=sk.experience-(500+sk.rating*100)
+                sk.rating=sk.rating+1
+            end
+            return
+        end
+    end
+    soul.skills:insert("#",{new=true,id=skill,rating=0,experience=amount})
+end
+-- Web gathering takes AS LONG AS MINING and displays on the same scale: the job pump
+-- records the peak completion_timer of every Dig it works (dig_peak -- measured 5 on this
+-- build: adv digs count whole WORK ACTIONS, not ticks), and a web counts down from that
+-- same small number. Each step costs game ticks like a dig's work action does (~10,
+-- shortened by Weaving skill), so the wall-time matches too.
+dig_peak=dig_peak or nil
+local function GatherWebsChooser(args)
+    local web
+    for _,v in ipairs(df.global.world.items.other.ANY_WEBS) do
+        if same_xyz(v.pos,args.pos) then web=v break end
+    end
+    if not web then return false,"No web there" end
+    args.screen.web_work={
+        web_id=web.id,
+        pos=copyall(args.pos),
+        left=dig_peak or 5,
+        step_ticks=math.max(2,10-weaving_rating(args.unit)),
+        last_tick=df.global.cur_year_tick_advmode,
+    }
+    return true
+end
+
 -- Predicates ABOUT THE CLICKED TILE, as opposed to readiness ones ("Equip a pick"). When a
 -- tile predicate fails on a MOUSE click, the click clearly was not meant for the current job
 -- (Dig on a floor, Smooth on a distant floor...) -- it passes through to the game untouched,
@@ -1344,7 +1403,7 @@ local TARGET_PREDS={
     [IsStairs]=true,[IsBuilding]=true,[IsUnit]=true,[IsWater]=true,
     [NotConstruct]=true,[NoConstructedBuilding]=true,[SameSquare]=true,
     [IsHardMaterial]=true,[IsFortification]=true,[IsSmoothableTarget]=true,
-    [IsRough]=true,[IsSmoothed]=true,[IsDiggableTarget]=true,
+    [IsRough]=true,[IsSmoothed]=true,[IsDiggableTarget]=true,[IsWebAt]=true,
 }
 local actions={
     {"Dig"                ,DigChooser,{MakePredicateWieldsItem(df.job_skill.MINING),IsDiggableTarget}},
@@ -1359,7 +1418,7 @@ local actions={
     {"CarveTrack"         ,df.job_type.CarveTrack,{},{SetCarveDir}},
     {"Fell Tree"          ,df.job_type.FellTree,{MakePredicateWieldsItem(df.job_skill.AXE),IsTree}},
     {"Gather Plants"      ,df.job_type.GatherPlants,{IsPlant,SameSquare},{PlantGatherFix}},
-    {"Gather Webs"        ,df.job_type.CollectWebs,{},{SetWebRef}},
+    {"Gather Webs"        ,GatherWebsChooser,{IsWebAt}},
     {"Fish"               ,df.job_type.Fish,{IsWater}},
     {"Tame Animal"        ,df.job_type.TameAnimal,{IsUnit},{SetCreatureRef}},
     {"Clean"              ,df.job_type.Clean,{}},
@@ -1375,6 +1434,17 @@ local actions={
 -- once something was built). {} is a blank separator line. Segments record their drawn
 -- x-range each render for click hit-testing.
 local function last_build_available() return last_building and last_building.type~=nil end
+local function last_build_label()
+    if not last_build_available() then return ' [Last]' end
+    local t=last_building.type
+    local name
+    if t==df.building_type.Workshop then name=df.workshop_type[last_building.subtype]
+    elseif t==df.building_type.Furnace then name=df.furnace_type[last_building.subtype]
+    elseif t==df.building_type.Trap then name=df.trap_type[last_building.subtype]
+    end
+    name=name or df.building_type[t] or 'Last'
+    return ' ['..tostring(name):sub(1,14)..']'
+end
 local LAYOUT={
     {{1,'Dig'},{2,' [Ramp]'},{3,' [Channel]'}},
     {{4,'[Up]'},{5,' [Down]'},{6,' [Bi]'},{label=' Staircase',click=6}},
@@ -1391,7 +1461,7 @@ local LAYOUT={
     {{15}},
     {{16}},
     {},
-    {{17,'Build'},{18,' [Last]',avail=last_build_available}},
+    {{17,'Build'},{18,last_build_label,avail=last_build_available}},
     {{19}},
     {{20}},
 }
@@ -1924,6 +1994,7 @@ function usetool:draw_job_window(dc)
                 if seg.click then seg._x1,seg._x2=x,x+#txt-1 end
             elseif seg[1] and (not seg.avail or seg.avail()) then
                 txt=seg[2] or actions[seg[1]][1]
+                if type(txt)=='function' then txt=txt() end
                 local sel=(seg[1]==(mode or 0)+1)
                 pen=sel and COLOR_LIGHTGREEN or COLOR_GREY
                 if sel then line_selected=true end
@@ -1945,6 +2016,8 @@ function usetool:draw_job_window(dc)
         msg,pen=self.status_msg,COLOR_LIGHTRED
     elseif cj then
         msg,pen=('working(%d)'):format(cj.completion_timer),COLOR_LIGHTGREEN
+    elseif self.web_work then
+        msg,pen=('working(%d)'):format(self.web_work.left),COLOR_LIGHTGREEN
     else
         msg,pen='Click to do jobs',COLOR_DARKGREY
     end
@@ -2272,6 +2345,78 @@ function usetool:onIdle()
         end
     end
 
+    -- web gathering work (jobless -- see GatherWebsChooser): pump the timer with waits,
+    -- watch position like any job, then collect the thread and award Weaver exp
+    if self.web_work then
+        local ww=self.web_work
+        local web=df.item.find(ww.web_id)
+        local d=math.max(math.abs(adv.pos.x-ww.pos.x),
+                         math.abs(adv.pos.y-ww.pos.y),
+                         math.abs(adv.pos.z-ww.pos.z))
+        if not web or not web.flags.spider_web or not same_xyz(web.pos,ww.pos) then
+            self:set_status("canceled: the web is gone")
+            self.web_work=nil
+        elseif d>1 then
+            dfhack.gui.showAnnouncement("Job canceled: you were moved away.",5,1)
+            self:set_status("canceled: moved away")
+            self.web_work=nil
+        else
+            -- one step per work-action's worth of game ticks, like a dig swing
+            local t=df.global.cur_year_tick_advmode
+            if t<ww.last_tick then ww.last_tick=t end          -- clock wrapped/loaded
+            if t-ww.last_tick>=ww.step_ticks then
+                ww.last_tick=t
+                ww.left=ww.left-1
+            end
+            if ww.left<=0 then
+                self.web_work=nil
+                web.flags.spider_web=false
+                if dfhack.items.moveToInventory(web,adv,0,0) then
+                    dfhack.gui.showAnnouncement("You gather the web.",7,true)
+                    add_skill_exp(adv,df.job_skill.WEAVING,30)
+                else
+                    web.flags.spider_web=true
+                    self:set_status("Could not take the web")
+                end
+            else
+                self:sendInputToParent("A_SHORT_WAIT")
+            end
+        end
+        self._native.parent:logic()
+        return
+    end
+
+    -- Position watchdog: working requires staying put, and the game can MOVE you mid-job
+    -- (water currents, knockback). A worker carried out of reach leaves a job that can
+    -- never finish -- the wait loop would just spin. Track where the current job started;
+    -- a nudge that keeps you within 1 tile of the job re-anchors and keeps working, but
+    -- ending up farther away cancels the job (and any queued chain) cleanly.
+    if job_ptr and self.long_wait then
+        if self.work_job~=job_ptr.id then
+            self.work_job=job_ptr.id
+            self.work_pos=copyall(adv.pos)
+        elseif not same_xyz(adv.pos,self.work_pos) then
+            local d=math.max(math.abs(adv.pos.x-job_ptr.pos.x),
+                             math.abs(adv.pos.y-job_ptr.pos.y),
+                             math.abs(adv.pos.z-job_ptr.pos.z))
+            if d>1 then
+                dfhack.gui.showAnnouncement("Job canceled: you were moved away.",5,1)
+                self:set_status("canceled: moved away")
+                local j=job_ptr
+                CancelJob(adv)
+                pcall(smart_job_delete,j)
+                self:cancel_wait()
+                self.work_job=nil
+                self.queued_job,self.queued_go=nil,nil
+                return
+            else
+                self.work_pos=copyall(adv.pos)   -- nudged but still in reach: keep going
+            end
+        end
+    elseif not job_ptr then
+        self.work_job=nil
+    end
+
     if self.long_wait and self.long_wait_timer==nil then
         self.long_wait_timer=1000 --TODO tweak this
     end
@@ -2285,6 +2430,11 @@ function usetool:onIdle()
             self.long_wait_timer=self.long_wait_timer-1
         end
 
+        -- learn how long mining takes from the digs actually worked (web gathering copies it)
+        if adv.job.current_job.job_type==df.job_type.Dig
+                and adv.job.current_job.completion_timer>(dig_peak or 0) then
+            dig_peak=adv.job.current_job.completion_timer
+        end
         if adv.job.current_job.completion_timer==-1  then
             local jt=adv.job.current_job.job_type
             local jpos=adv.job.current_job.pos
