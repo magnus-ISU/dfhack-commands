@@ -1971,41 +1971,6 @@ function usetool:try_job(state,cur_mode)
     return true
 end
 
--- Is the mouse over another visible OVERLAY widget registered for the native screen
--- (dig-shapes-style tools, click-cancel buttons...)? Those handle their own clicks, but
--- only when this Screen is not sitting on top of them -- so advfort minimizes out of
--- their way. Adapted from fort/dig-building's yield logic, inverted. Our own pick icon
--- is excluded (its widget frame exists even while the window is up).
-local function over_other_overlay(mx,my)
-    local ok,db=pcall(function() return overlay.get_state().db end)
-    if not ok or not db then return false end
-    local vs=dfhack.gui.getDFViewscreen(true)
-    local fullw,fullh=df.global.gps.dimx-1,df.global.gps.dimy-1
-    for name,e in pairs(db) do
-        if name~='adv/advfort.icon' and e.widget then
-            local w=e.widget
-            local r=w.frame_rect
-            local vis=w.visible
-            if type(vis)=='function' then local _;_,vis=pcall(vis,w) end
-            if r and vis and r.x2>=r.x1 and r.y2>=r.y1
-                and not (r.x1<=0 and r.y1<=0 and r.x2>=fullw and r.y2>=fullh)
-                and mx>=r.x1 and mx<=r.x2 and my>=r.y1 and my<=r.y2 then
-                local vss=w.viewscreens
-                if type(vss)=='string' then vss={vss} end
-                if type(vss)=='table' then
-                    for _,fs in ipairs(vss) do
-                        if type(fs)=='string' then
-                            local okm,m=pcall(dfhack.gui.matchFocusString,fs,vs)
-                            if okm and m then return true end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return false
-end
-
 -- left-click on the map = do the current job AT THAT TILE (the old SELECT-at-cursor flow,
 -- driven by the mouse); getMousePos() is nil over side UI, so those clicks fall through
 function usetool:map_click_job()
@@ -2124,17 +2089,19 @@ function usetool:onInput(keys)
             end
             return                          -- consume every click on the window
         end
-        -- clicks on another overlay's territory: minimize out of its way (auto-restoring
-        -- after the interaction), exactly like right-clicks -- the overlay only sees
-        -- hardware clicks when no Screen covers it
-        if over_other_overlay(mx,my) then
+        if self:map_click_job() then return end
+        -- Not the window, not an overlay, not a job click: if the click is not on the MAP
+        -- VIEWPORT at all, it aims at native UI chrome (the inventory button and the rest of
+        -- the toolbar) -- and those are hover-gated: DF does not even track current_hover
+        -- while a Screen covers it (measured: hover=-1 with the mouse parked on the
+        -- toolbar). Minimize unswallowed like the right-click path; the icon auto-restores.
+        if not dfhack.gui.getMousePos() then
             auto_restore={stage='start',at=dfhack.getTickCount()}
             icon_active=true
             self:dismiss()
             return
         end
-        if self:map_click_job() then return end
-        -- neither window nor map (side UI): fall through so the parent still gets it
+        -- a plain far-away map click: fall through so the parent walks there
     end
     if keys.LEAVESCREEN  then
         --get focus string of our parent (i.e. dungeonmode screen)
