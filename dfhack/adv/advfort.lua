@@ -1,4 +1,5 @@
 -- allows to do jobs in adv. mode. (community rework of stock gui/advfort, plus local fixes)
+--@module = true
 
 --[====[
 
@@ -13,6 +14,14 @@ Detail* means ENGRAVE and silently no-ops on rough stone), carrying two local fi
   parent screen (adv/im-sure cannot reach it while this screen is on top).
 * Smooth/Detail jobs designate their tile at job creation and, if DF's adv-mode completion
   still leaves the tile untouched, the smooth tiletype is applied directly on completion.
+* The job list shows in a vertically-centered clickable window (styled after
+  fort/dig-building), titled with the current site's name: click a row to select a job,
+  Shift+R/T still cycle, LEFT-CLICK AN ADJACENT TILE to do the current job there (farther
+  clicks stay normal game input, i.e. walking), and refusals ("Correct tool not equiped")
+  land on the window's bottom status line, which shows the work countdown while a job runs.
+  Right-click the window to dismiss the tool back to completely normal play (the click is
+  fully swallowed, not passed to the game); a pick-icon OVERLAY centered on the left screen
+  edge -- one inert glyph on the base UI -- relaunches it.
 
 This script allows performing jobs in adventure mode. For more complete help
 press :kbd:`?` while the script is running. It's most comfortable to use this as a
@@ -80,6 +89,7 @@ build_filter.HUMANish={
 for k,v in ipairs(df.global.plotinfo.economic_stone) do df.global.plotinfo.economic_stone[k]=0 end
 
 local gui = require('gui')
+local overlay = require('plugins.overlay')
 local guidm = require('gui.dwarfmode')
 local wid = require('gui.widgets')
 local dialog = require('gui.dialogs')
@@ -374,6 +384,9 @@ function makeJob(args)
         else
             if not args.no_job_delete then
                 smart_job_delete(args.job)
+            end
+            if args.screen and args.screen.set_status then
+                pcall(function() args.screen:set_status(failed) end)
             end
             dfhack.gui.showAnnouncement("Job failed:"..failed,5,1)
         end
@@ -1175,12 +1188,49 @@ local function DesignateDetail(args)
     block.flags.designated=true
     return true
 end
+-- Combined Smooth / Engrave actions: one list entry each, the wall-vs-floor job type chosen
+-- from the tile actually targeted. Floors keep the old stand-on-it rule; engraving demands the
+-- tile is already smooth (DF's Detail jobs silently no-op on rough stone), smoothing demands
+-- it is not.
+local function IsSmoothableTarget(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    if not tt then return false,"No tile there" end
+    local shape=tile_attrs[tt].shape
+    if shape==df.tiletype_shape.WALL then return true end
+    local okf=IsFloor(args)
+    if not okf then return false,"Only walls and floors" end
+    return SameSquare(args)   -- floors: stand on the tile you work
+end
+local function IsRough(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    if tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH then
+        return false,"Already smooth"
+    end
+    return true
+end
+local function IsSmoothed(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    if tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH then return true end
+    return false,"Smooth it first"
+end
+local function SmoothChooser(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    local wall=tt and tile_attrs[tt].shape==df.tiletype_shape.WALL
+    args.job_type=wall and df.job_type.SmoothWall or df.job_type.SmoothFloor
+    makeJob(args)
+    return true
+end
+local function EngraveChooser(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    local wall=tt and tile_attrs[tt].shape==df.tiletype_shape.WALL
+    args.job_type=wall and df.job_type.DetailWall or df.job_type.DetailFloor
+    makeJob(args)
+    return true
+end
 local actions={ --as:{1:string,2:df.job_type,3:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]',4:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]',5:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]'}[]
     {"CarveFortification"   ,df.job_type.CarveFortification,{IsWall,IsHardMaterial}},
-    {"SmoothWall"           ,df.job_type.SmoothWall,{IsWall,IsHardMaterial},nil,{DesignateDetail}},
-    {"DetailWall"           ,df.job_type.DetailWall,{IsWall,IsHardMaterial},nil,{DesignateDetail}},--engrave: needs smooth wall
-    {"SmoothFloor"          ,df.job_type.SmoothFloor,{IsFloor,IsHardMaterial,SameSquare},nil,{DesignateDetail}},
-    {"DetailFloor"          ,df.job_type.DetailFloor,{IsFloor,IsHardMaterial,SameSquare},nil,{DesignateDetail}},--engrave: needs smooth floor
+    {"Smooth"               ,SmoothChooser,{IsSmoothableTarget,IsHardMaterial,IsRough},nil,{DesignateDetail}},
+    {"Engrave"              ,EngraveChooser,{IsSmoothableTarget,IsHardMaterial,IsSmoothed},nil,{DesignateDetail}},
     {"CarveTrack"           ,df.job_type.CarveTrack,{} --TODO: check this- carving modifies standing tile but depends on direction!
                             ,{SetCarveDir}},
     {"Dig"                  ,df.job_type.Dig,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
@@ -1231,30 +1281,11 @@ function usetool:getModeName()
 end
 
 function usetool:update_site()
-    local site=inSite()
-    self.current_site=site
-    local site_label=self.subviews.siteLabel --as:wid.Label
-    if site then
-
-        site_label:itemById("site").text=dfhack.translation.translateName(site.name)
-    else
-        if settings.safe then
-            site_label:itemById("site").text="<none, advfort disabled>"
-        else
-            site_label:itemById("site").text="<none, changes will not persist>"
-        end
-    end
+    self.current_site=inSite()
 end
 
 function usetool:init(args)
     self:addviews{
-        wid.Label{
-            view_id="mainLabel",
-            frame = {xalign=0,yalign=0},
-            text={{key=keybinds.prevJob.key},{gap=1,text=self:callback("getModeName")},{gap=1,key=keybinds.nextJob.key},
-                  }
-                  },
-
         wid.Label{
             view_id="shopLabel",
             frame = {l=35,xalign=0,yalign=0},
@@ -1262,14 +1293,6 @@ function usetool:init(args)
             text={
                 {id="text1",gap=1,key=keybinds.workshop.key,key_sep="()", text="Workshop menu",pen=dfhack.pen.parse{fg=COLOR_YELLOW,bg=0}},{id="clutter"}}
                   },
-
-        wid.Label{
-            view_id="siteLabel",
-            frame = {t=1,xalign=-1,yalign=0},
-            text={
-                {id="text1", text="Site:"},{id="site", text="name"}
-                  }
-            }
             }
     local labors=dfhack.world.getAdventurer().status.labors
     for i,v in ipairs(labors) do
@@ -1716,6 +1739,102 @@ function usetool:siteCheck()
     end
     return false, "You are not on site"
 end
+-- ---- job list window (styled after fort/dig-building) -----------------------
+-- Every job in a bordered, clickable window on the left instead of blind R/T cycling; the
+-- current job is highlighted, Shift+R/T still seek through it (warmist's original binds --
+-- kept because nearly every unshifted key is a DF adventure command). The bottom row is a
+-- STATUS LINE: any reason a job cannot start ("Correct tool not equiped", "Can only do it on
+-- walls"...) lands there instead of only flashing past as an announcement.
+local JOBWIN_W=26
+function usetool:job_win_geom()
+    local n=#actions
+    local h=n+4                 -- border+jobs+separator+status+border
+    local top=math.max(0,math.floor((df.global.gps.dimy-h)/2))   -- centered vertically
+    return 0,top,JOBWIN_W,h,n
+end
+function usetool:set_status(msg)
+    self.status_msg=msg
+end
+function usetool:draw_job_window(dc)
+    local l,t,w,h,n=self:job_win_geom()
+    local BG={fg=COLOR_GREY,bg=COLOR_BLACK}
+    for r=0,h-1 do dc:seek(l,t+r):pen(BG):string(string.rep(' ',w)) end
+    local hbar=string.rep(string.char(196),w-2)
+    dc:seek(l,t):pen(BG):string(string.char(218)..hbar..string.char(191))
+    dc:seek(l,t+h-1):pen(BG):string(string.char(192)..hbar..string.char(217))
+    for r=1,h-2 do
+        dc:seek(l,t+r):pen(BG):string(string.char(179))
+        dc:seek(l+w-1,t+r):pen(BG):string(string.char(179))
+    end
+    local site=self.current_site
+    local title
+    if site then title=dfhack.translation.translateName(site.name)
+    elseif settings.safe then title='<no site: disabled>'
+    else title='<no site: won\'t persist>' end
+    dc:seek(l+2,t):pen(site and COLOR_WHITE or COLOR_YELLOW):string((' '..title..' '):sub(1,w-4))
+    for i=1,n do
+        local sel=(i==(mode or 0)+1)
+        local pen=sel and COLOR_LIGHTGREEN or COLOR_GREY
+        local marker=sel and (string.char(26)..' ') or '  '
+        dc:seek(l+1,t+i):pen(pen):string((marker..actions[i][1]):sub(1,w-2))
+    end
+    dc:seek(l+1,t+n+1):pen(BG):string(string.rep(string.char(196),w-2))
+    local msg,pen
+    local cj=dfhack.world.getAdventurer().job.current_job
+    if self.status_msg then
+        msg,pen=self.status_msg,COLOR_LIGHTRED
+    elseif cj then
+        msg,pen=('working(%d)'):format(cj.completion_timer),COLOR_LIGHTGREEN
+    else
+        msg,pen='Click to do jobs',COLOR_DARKGREY
+    end
+    dc:seek(l+1,t+n+2):pen(pen):string(msg:sub(1,w-2))
+end
+
+-- run the current job with full checks; every refusal message goes to the status line
+function usetool:try_job(state,cur_mode)
+    self.status_msg=nil
+    local ok,msg=self:siteCheck()
+    if not ok then self:set_status(msg) return false end
+    for _,p in pairs(cur_mode[3] or {}) do
+        local ok2,msg2=p(state)
+        if not ok2 then self:set_status(msg2 or 'Cannot do that there') return false end
+    end
+    if type(cur_mode[2])=="function" then
+        local ok3,msg3=cur_mode[2](state)
+        if msg3 then self:set_status(msg3) end
+    else
+        makeJob(state)
+    end
+    self:wait_long_start()
+    return true
+end
+
+-- left-click on the map = do the current job AT THAT TILE (the old SELECT-at-cursor flow,
+-- driven by the mouse); getMousePos() is nil over side UI, so those clicks fall through
+function usetool:map_click_job()
+    local pos=dfhack.gui.getMousePos()
+    if not pos then return false end
+    local adv=dfhack.world.getAdventurer()
+    -- only adjacent (or own) tiles are job clicks; anything farther is normal game input
+    -- (walk there), so return unconsumed and let onInput fall through to the parent
+    if math.max(math.abs(pos.x-adv.pos.x),math.abs(pos.y-adv.pos.y),math.abs(pos.z-adv.pos.z))>1 then
+        return false
+    end
+    local cur_mode=actions[(mode or 0)+1]
+    local state={
+        unit=adv,
+        pos={x=pos.x,y=pos.y,z=pos.z},
+        dir={0,0,0},
+        from_pos=copyall(adv.pos),
+        post_actions=cur_mode[4],
+        pre_actions=cur_mode[5],
+        job_type=cur_mode[2],
+        screen=self}
+    self:try_job(state,cur_mode)
+    return true
+end
+
 --movement and co... Also passes on allowed keys
 function usetool:fieldInput(keys)
     local adv=dfhack.world.getAdventurer()
@@ -1744,35 +1863,11 @@ function usetool:fieldInput(keys)
                 end
             end
 
-            --First check site
-            local ok,msg=self:siteCheck() --TODO: some jobs might be possible without a site?
-            if not ok then
-                dfhack.gui.showAnnouncement(msg,5,1)
-                failed=true
-            else
-                for _,p in pairs(cur_mode[3] or {}) do --then check predicates
-                    local ok,msg=p(state)
-                    if not ok then
-                        dfhack.gui.showAnnouncement(msg,5,1)
-                        failed=true
-                    end
-                end
-            end
-
-            if not failed then
-                local ok,msg
-                if type(cur_mode[2])=="function" then
-                    ok,msg=cur_mode[2](state)
-                else
-                    makeJob(state)
-                    --(adv,moddedpos(adv.pos,MOVEMENT_KEYS[code]),cur_mode[2],adv.pos,cur_mode[4])
-
-                end
-
+            -- checks + refusal messages all live in try_job (they land on the status line)
+            if self:try_job(state,cur_mode) then
                 if code=="SELECT" then
                     self:sendInputToParent("LEAVESCREEN")
                 end
-                self:wait_long_start()
             end
             return code
         end
@@ -1788,6 +1883,33 @@ end
 function usetool:onInput(keys)
     self:update_site()
     local adv=dfhack.world.getAdventurer()
+    if self.dismiss_pending then return end   -- swallow everything while the dismissal drains
+    if keys._MOUSE_R or keys._MOUSE_R_DOWN then
+        -- right-click ON the window dismisses the whole tool back to normal play (the pick
+        -- icon overlay on the left edge relaunches it). The actual dismiss waits in onIdle
+        -- for the physical button RELEASE -- dismissing on the press event handed the still-
+        -- held button straight to DF, which dispatched its own right-click action.
+        local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
+        local l,t,w,h=self:job_win_geom()
+        if mx>=l and mx<l+w and my>=t and my<t+h then
+            self.dismiss_pending=true
+            return
+        end
+    end
+    if keys._MOUSE_L then
+        local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
+        local l,t,w,h,n=self:job_win_geom()
+        if mx>=l and mx<l+w and my>=t and my<t+h then
+            local row=my-t
+            if row>=1 and row<=n then       -- click a job row: select it
+                mode=row-1
+                self.status_msg=nil
+            end
+            return                          -- consume every click on the window
+        end
+        if self:map_click_job() then return end
+        -- neither window nor map (side UI): fall through so the parent still gets it
+    end
     if keys.LEAVESCREEN  then
         --get focus string of our parent (i.e. dungeonmode screen)
         local dm_screen=dfhack.gui.getCurViewscreen().parent
@@ -1871,6 +1993,15 @@ function usetool:cancel_wait()
     self.long_wait=false
 end
 function usetool:onIdle()
+    if self.dismiss_pending then
+        local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
+        self.dismiss_grace=(self.dismiss_grace or 30)-1     -- frame fallback if the read fails
+        if (ok and held==0) or self.dismiss_grace<=0 then
+            icon_active=true
+            self:dismiss()                                   -- job (if any) stays; icon relaunches us
+        end
+        return
+    end
     local adv=dfhack.world.getAdventurer()
     local job_ptr=adv.job.current_job
     local job_action=findAction(adv,df.unit_action_type.Job)
@@ -1907,6 +2038,7 @@ function usetool:onIdle()
         for k,v in pairs(checked_counters) do
             if counters[k]>0 then
                 dfhack.gui.showAnnouncement("Job: canceled waiting because unsafe -"..k,5,1)
+                self:set_status("stopped waiting: "..k)
                 self:cancel_wait()
                 return
             end
@@ -1950,7 +2082,57 @@ end
 function usetool:onRenderBody(dc)
     self:shopMode(self:isOnBuilding())
     self:renderParent()
+    self:draw_job_window(dc)
 end
+-- ---- base-game pick icon ----------------------------------------------------
+-- Lives as a real OVERLAY on the dungeonmode screen, so while the advfort window is
+-- dismissed the game plays completely normally -- the advfort Screen is gone, nothing
+-- intercepts input -- except this one glyph, centered on the left edge, which relaunches
+-- the tool. Invisible (and inert) unless a window was dismissed this session.
+icon_active=icon_active or false   -- script env survives; the icon outlives the Screen
+
+AdvfortIcon=defclass(AdvfortIcon,overlay.OverlayWidget)
+AdvfortIcon.ATTRS{
+    desc='Pick icon that reopens the dismissed adv/advfort window.',
+    default_pos={x=1,y=30},
+    default_enabled=true,
+    viewscreens='dungeonmode/Default',
+    frame={w=1,h=1},
+    overlay_onupdate_max_freq_seconds=0,
+}
+
+function AdvfortIcon:overlay_onupdate()
+    -- keep the icon completely centered on the left screen edge
+    local ir=gui.get_interface_rect()
+    local t=math.floor((df.global.gps.dimy-1)/2)-ir.y1
+    if self.frame.t~=t or self.frame.l~=0 then
+        self.frame={w=1,h=1,l=0,t=t}
+        self:updateLayout(gui.ViewRect{rect=ir})
+    end
+end
+
+function AdvfortIcon:onRenderBody(dc)
+    if not icon_active or not dfhack.world.isAdventureMode() then return end
+    dc:seek(0,0):pen{fg=COLOR_YELLOW,bg=COLOR_BLACK}:string(string.char(207))
+end
+
+function AdvfortIcon:onInput(keys)
+    if not icon_active or not dfhack.world.isAdventureMode() then return false end
+    if keys._MOUSE_L and self:getMousePos() then
+        if dfhack.gui.matchFocusString('dungeonmode/Default')
+                or dfhack.gui.matchFocusString('dungeonmode/Look') then
+            icon_active=false
+            pcall(function() usetool():show() end)
+        end
+        return true
+    end
+    return false
+end
+
+OVERLAY_WIDGETS={icon=AdvfortIcon}
+
+if dfhack_flags and dfhack_flags.module then return end
+
 if not (dfhack.gui.matchFocusString('dungeonmode/Look') or dfhack.gui.matchFocusString('dungeonmode/Default')) then
     qerror("This script requires an adventurer mode with (l)ook or default mode.")
 end
