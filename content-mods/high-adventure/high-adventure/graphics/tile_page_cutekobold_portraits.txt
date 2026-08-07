@@ -46,3 +46,12 @@ tile_page_cutekobold_portraits
 	[FILE:images/portraits/kobold_portrait_skeleton.png]
 	[TILE_DIM:96:96]
 	[PAGE_DIM_PIXELS:384:192]
+
+Ancient dragon portrait -- one tile, DF's own dragon portrait art re-keyed into this mod so
+the draconic castes and the HA_ANCIENT_DRAGON megabeast stop borrowing the kobold face.
+PAGE_DIM_PIXELS is the REAL size of the png (96x96): a page that claims more than the image
+holds walks DF's compositor off the end of the buffer and corrupts the heap.
+[TILE_PAGE:HA_PORTRAIT_ANCIENT_DRAGON]
+	[FILE:images/portraits/ha_ancient_dragon_portrait.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:96:96]

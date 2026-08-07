@@ -1,0 +1,18 @@
+graphics_ha_ancient_dragon_portrait
+
+[OBJECT:GRAPHICS]
+
+Portrait for the wild megabeast. Kept in its own file and its own CREATURE_GRAPHICS block, the
+way vanilla splits DRAGON across graphics_creatures_megabeast.txt (DEFAULT) and
+graphics_creatures_portraits.txt (PORTRAIT) -- separate blocks for the same creature are
+additive as long as each one defines a DIFFERENT layer set.
+
+The map sprite is a palette-recoloured composite, but the portrait is a single flat tile: that
+is what vanilla dragons get too, and the palette rows only line up with Naut's sprite regions,
+not with hand-drawn portrait art.
+
+[CREATURE_GRAPHICS:HA_ANCIENT_DRAGON]
+	[LAYER_SET:PORTRAIT]
+		[LAYER_GROUP]
+		[LAYER:MAIN:HA_PORTRAIT_ANCIENT_DRAGON:0:0]
+		[END_LAYER_GROUP]

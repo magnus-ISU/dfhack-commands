@@ -210,6 +210,16 @@ read as a challenge: every other ancient dragon turns on a dragon adventurer, an
 kobolds standing with that rival, even though the civ would otherwise greet a dragon as an
 overlord. Kobold gear is left untouched.
 
+### Scripts
+The kobold script brings idle dragons down. A flier in Dwarf Fortress has no reason to land, so
+a dragon that finishes a flight parks itself a dozen z-levels up — unreachable in adventure
+mode, and in fortress mode a permanent "there is a dragon here" that nothing can resolve. Any
+airborne ancient dragon, wild megabeast or Dread Wyrm alike, glides down a z-level at a time
+until it is standing on the ground. It only does this while nothing is fighting the dragon: one
+that is jumped halfway down stops descending and is handed back to the game's own AI, so an air
+attack is never turned into a free kill. Magma, deep water, the adventurer, and caged, ridden,
+stunned or unconscious dragons are all left alone.
+
 ## Second Humans
 
 These exist to balance populations; humans expand across the whole map, while other

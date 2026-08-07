@@ -1,5 +1,37 @@
 # ha-kobolds — build notes
 
+## v0.26 -- ancient dragons get their own portrait, and land when nothing is fighting them
+- **Dragons wore a kobold face.** The portrait layer set in
+  `graphics_creatures_portrait_cutekobold.txt` is declared once for the whole
+  `HA_KOBOLD` creature, and 198 of its 352 layers carried no `CONDITION_CASTE` at all --
+  an unconditioned layer renders on EVERY caste, so the kobold tail, body and arm
+  layers were painting a half-kobold portrait onto the six draconic castes (the ones
+  that were gated read `MALE`/`FEMALE`, which is why the result was a partial kobold
+  rather than a whole one). All 198 are now `MALE`/`FEMALE`-gated, exactly the way the
+  map sprite's layers already were.
+- Added a dragon portrait: DF's own dragon portrait tile, re-keyed into this mod as
+  `images/portraits/ha_ancient_dragon_portrait.png` on the new
+  `HA_PORTRAIT_ANCIENT_DRAGON` tile page, caste-gated to the six draconic castes. The
+  wild `HA_ANCIENT_DRAGON` megabeast gets the same tile through its own
+  `graphics_ha_ancient_dragon_portrait.txt` -- it had no portrait at all before.
+- One flat tile, no palette recolour. That is what a vanilla dragon gets too: the
+  `DRAGONBODY` palette rows index Naut's sprite regions and mean nothing to hand-drawn
+  portrait art.
+- **New script `high-adventure/kobolds`: idle dragons land.** A flier in DF has no
+  reason to come down, so a dragon that finishes a flight parks itself a dozen
+  z-levels up -- unreachable in adventure mode, an unresolvable "there is a dragon
+  here" in fortress mode. The script walks any airborne ancient dragon down one
+  z-level per 10 ticks, and only while nothing is fighting it: a dragon jumped
+  halfway down stops descending and is handed back to the game's AI, so this never
+  turns a real air attack into a free kill.
+- "Enemy" is DF's own answer where DF has one -- a Conflict activity listing both units
+  on opposing sides at `conflict_level > 0`, the same structure `adventure-hostility`
+  writes -- plus, in fortress mode, anything on the other side of the fort line that
+  would actually come at the dragon. Everything within 20 tiles and 8 z counts.
+- Refuses to set a dragon down in magma or deep water, and skips the adventurer,
+  caged/chained/ridden dragons, and stunned or unconscious ones (DF drops those itself).
+- Graphics change: applies on save reload. The script hot-loads into a running game.
+
 ## v0.25 -- fix six portrait tile pages declaring a canvas wider than the image
 - The six `HA_PORTRAIT_CUTEKOBOLD_CLOTHING_*` pages declared
   `[PAGE_DIM_PIXELS:679:...]` against images that are 672px wide (7 tiles of 96px;
