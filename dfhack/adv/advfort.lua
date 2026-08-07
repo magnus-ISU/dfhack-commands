@@ -454,6 +454,9 @@ function is_grasping_item( item_bp,unit )
     return bpart.flags.GRASP
 end
 function MakePredicateWieldsItem(item_skill)
+    -- only two tools are ever demanded (pick for the dig family, axe for felling)
+    local tool_msg={[df.job_skill.MINING]="Equip a pick",[df.job_skill.AXE]="Equip an axe"}
+    local msg=tool_msg[item_skill] or "Equip the right tool"
     local pred=function(args)
         local inv=args.unit.inventory
         for k,v in pairs(inv) do
@@ -461,7 +464,7 @@ function MakePredicateWieldsItem(item_skill)
                 return true
             end
         end
-        return false,"Correct tool not equiped"
+        return false,msg
     end
     return pred
 end
@@ -649,18 +652,35 @@ end
 
 function RemoveBuilding(args)
     local bld=dfhack.buildings.findAtTile(args.pos)
-    if bld~=nil then
-        bld:queueDestroy()
-        for k,v in ipairs(bld.jobs) do
-            if v.job_type==df.job_type.DestroyBuilding then
-                AssignUnitToJob(v,args.unit,args.from_pos)
-                return true
-            end
+    if bld==nil then return false,"No building to remove" end
+    -- An UNFINISHED building (planned or failed placement) must not go the job route:
+    -- queueDestroy happily creates a DestroyBuilding job for it, but DF's adv-mode job pump
+    -- never works that job -- its completion_timer sits at -1, which the wait loop reads as
+    -- "done", so it showed working(-1) for a tick and nothing happened. There is no work to
+    -- undo on an unbuilt building anyway: drop any stale destroy job and remove it directly.
+    local ok,unbuilt=pcall(function() return bld:getBuildStage()<bld:getMaxBuildStage() end)
+    if ok and unbuilt then
+        local cj=args.unit.job.current_job
+        if cj and cj.job_type==df.job_type.DestroyBuilding then
+            CancelJob(args.unit)               -- a stuck earlier attempt; unhook it first
         end
-        return false,"Building removal job failed to be created"
-    else
-        return false,"No building to remove"
+        if pcall(dfhack.buildings.deconstruct,bld) then
+            dfhack.gui.showAnnouncement("Building removed.",7,1)
+            return true
+        end
     end
+    bld:queueDestroy()
+    for k,v in ipairs(bld.jobs) do
+        if v.job_type==df.job_type.DestroyBuilding then
+            AssignUnitToJob(v,args.unit,args.from_pos)
+            return true
+        end
+    end
+    if pcall(dfhack.buildings.deconstruct,bld) then
+        dfhack.gui.showAnnouncement("Building removed.",7,1)
+        return true
+    end
+    return false,"Building removal job failed to be created"
 end
 
 function isSuitableItem(job_item,item)
@@ -1177,6 +1197,22 @@ local function smooth_variant(tt)
         end
     end
 end
+-- the plain floor tiletype for a tile's material (fortification removal digs to FLOOR, but
+-- DF's adv-mode Dig completion turns the fortification into a WALL instead -- measured live)
+local function floor_variant(tt)
+    local cur=df.tiletype.attrs[tt]
+    if cur.shape==df.tiletype_shape.FLOOR then return nil end
+    local best
+    for i=df.tiletype._first_item,df.tiletype._last_item do
+        local a=df.tiletype.attrs[i]
+        if a.material==cur.material and a.shape==df.tiletype_shape.FLOOR
+            and a.special==df.tiletype_special.NORMAL then
+            best=best or i
+            if a.variant==df.tiletype_variant.VAR_1 then return i end
+        end
+    end
+    return best
+end
 local function DesignateDetail(args)
     local pos=args.pos
     local block=dfhack.maps.getTileBlock(pos)
@@ -1213,6 +1249,18 @@ local function IsSmoothed(args)
     if tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH then return true end
     return false,"Smooth it first"
 end
+-- a carved fortification digs out like rock (needs a pick); a CONSTRUCTED one must go
+-- through RemoveConstruction instead, so point there rather than making a doomed Dig job
+local function IsFortification(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    if not tt or tile_attrs[tt].shape~=df.tiletype_shape.FORTIFICATION then
+        return false,"Only fortifications"
+    end
+    if tile_attrs[tt].material==df.tiletype_material.CONSTRUCTION then
+        return false,"Use RemoveConstruction"
+    end
+    return true
+end
 local function SmoothChooser(args)
     local tt=dfhack.maps.getTileType(args.pos)
     local wall=tt and tile_attrs[tt].shape==df.tiletype_shape.WALL
@@ -1220,40 +1268,132 @@ local function SmoothChooser(args)
     makeJob(args)
     return true
 end
-local function EngraveChooser(args)
+local function MarkFortRemoval(args)
+    args.screen.fort_pos=copyall(args.pos)
+    return true
+end
+-- Engrave and CarveFortification require SMOOTH stone (as fort mode does) -- but instead of
+-- refusing on rough stone, they enqueue the smoothing first and remember the real job; the
+-- chain continues in onIdle the moment the smooth job completes.
+-- One "Dig" action for everything a pick removes: natural walls dig, constructions
+-- deconstruct, fortifications dig to floor (with the tiletype fallback), stairs/ramps
+-- get RemoveStairs -- chosen from the targeted tile.
+local function IsDiggableTarget(args)
     local tt=dfhack.maps.getTileType(args.pos)
-    local wall=tt and tile_attrs[tt].shape==df.tiletype_shape.WALL
-    args.job_type=wall and df.job_type.DetailWall or df.job_type.DetailFloor
+    if not tt then return false,"No tile there" end
+    local a=tile_attrs[tt]
+    if a.material==df.tiletype_material.CONSTRUCTION then return true end
+    local sh=a.shape
+    if sh==df.tiletype_shape.WALL or sh==df.tiletype_shape.FORTIFICATION
+        or sh==df.tiletype_shape.STAIR_UP or sh==df.tiletype_shape.STAIR_DOWN
+        or sh==df.tiletype_shape.STAIR_UPDOWN or sh==df.tiletype_shape.RAMP then
+        return true
+    end
+    return false,"Nothing to dig there"
+end
+local function DigChooser(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    local a=tile_attrs[tt]
+    if a.material==df.tiletype_material.CONSTRUCTION then
+        args.job_type=df.job_type.RemoveConstruction
+    elseif a.shape==df.tiletype_shape.FORTIFICATION then
+        args.job_type=df.job_type.Dig
+        MarkFortRemoval(args)
+    elseif a.shape==df.tiletype_shape.WALL then
+        args.job_type=df.job_type.Dig
+    else
+        args.job_type=df.job_type.RemoveStairs
+    end
     makeJob(args)
     return true
 end
-local actions={ --as:{1:string,2:df.job_type,3:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]',4:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]',5:'{_type:function,_node:{_type:tuple,_tuple:[bool,string]},_anyfunc:true}[]'}[]
-    {"CarveFortification"   ,df.job_type.CarveFortification,{IsWall,IsHardMaterial}},
-    {"Smooth"               ,SmoothChooser,{IsSmoothableTarget,IsHardMaterial,IsRough},nil,{DesignateDetail}},
-    {"Engrave"              ,EngraveChooser,{IsSmoothableTarget,IsHardMaterial,IsSmoothed},nil,{DesignateDetail}},
-    {"CarveTrack"           ,df.job_type.CarveTrack,{} --TODO: check this- carving modifies standing tile but depends on direction!
-                            ,{SetCarveDir}},
-    {"Dig"                  ,df.job_type.Dig,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
-    {"CarveUpwardStaircase" ,df.job_type.CarveUpwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
-    {"CarveDownwardStaircase",df.job_type.CarveDownwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
-    {"CarveUpDownStaircase" ,df.job_type.CarveUpDownStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
-    {"CarveRamp"            ,df.job_type.CarveRamp,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
-    {"DigChannel"           ,df.job_type.DigChannel,{MakePredicateWieldsItem(df.job_skill.MINING)}},
-    {"FellTree"             ,df.job_type.FellTree,{MakePredicateWieldsItem(df.job_skill.AXE),IsTree}},
-    {"Fish"                 ,df.job_type.Fish,{IsWater}},
-    --{"Diagnose Patient"     ,df.job_type.DiagnosePatient,{IsUnit},{SetPatientRef}},
-    --{"Surgery"              ,df.job_type.Surgery,{IsUnit},{SetPatientRef}},
-    {"TameAnimal"           ,df.job_type.TameAnimal,{IsUnit},{SetCreatureRef}},
-    {"GatherPlants"         ,df.job_type.GatherPlants,{IsPlant,SameSquare},{PlantGatherFix}},
-    {"RemoveConstruction"   ,df.job_type.RemoveConstruction,{IsConstruct}},
-    {"RemoveBuilding"       ,RemoveBuilding,{IsBuilding}},
-    {"RemoveStairs"         ,df.job_type.RemoveStairs,{IsStairs,NotConstruct}},
-    --{"HandleLargeCreature"   ,df.job_type.HandleLargeCreature,{isUnit},{SetCreatureRef}},
-    {"Build"                ,AssignJobToBuild,{NoConstructedBuilding}},
-    {"BuildLast"                ,BuildLast,{NoConstructedBuilding}},
-    {"Clean"                ,df.job_type.Clean,{}},
-    {"GatherWebs"           ,df.job_type.CollectWebs,{--[[HasWeb]]},{SetWebRef}},
-    {"Link Buildings"       ,LinkBuilding,{IsBuilding}},
+local function EngraveChooser(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    local wall=tt and tile_attrs[tt].shape==df.tiletype_shape.WALL
+    local smooth=tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH
+    local detail_jt=wall and df.job_type.DetailWall or df.job_type.DetailFloor
+    if smooth then
+        args.job_type=detail_jt
+    else
+        args.job_type=wall and df.job_type.SmoothWall or df.job_type.SmoothFloor
+        args.screen.queued_job={job_type=detail_jt,pos=copyall(args.pos),pre_actions={DesignateDetail}}
+    end
+    makeJob(args)
+    return true
+end
+local function FortificationChooser(args)
+    local tt=dfhack.maps.getTileType(args.pos)
+    local smooth=tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH
+    if smooth then
+        args.job_type=df.job_type.CarveFortification
+    else
+        args.job_type=df.job_type.SmoothWall
+        args.pre_actions={DesignateDetail}     -- the smoothing step needs its designation
+        args.screen.queued_job={job_type=df.job_type.CarveFortification,pos=copyall(args.pos)}
+    end
+    makeJob(args)
+    return true
+end
+-- Predicates ABOUT THE CLICKED TILE, as opposed to readiness ones ("Equip a pick"). When a
+-- tile predicate fails on a MOUSE click, the click clearly was not meant for the current job
+-- (Dig on a floor, Smooth on a distant floor...) -- it passes through to the game untouched,
+-- which usually means walking there. Readiness failures on a valid tile still show on the
+-- status line. Keyboard job attempts keep showing every refusal.
+local TARGET_PREDS={
+    [IsWall]=true,[IsFloor]=true,[IsTree]=true,[IsPlant]=true,[IsConstruct]=true,
+    [IsStairs]=true,[IsBuilding]=true,[IsUnit]=true,[IsWater]=true,
+    [NotConstruct]=true,[NoConstructedBuilding]=true,[SameSquare]=true,
+    [IsHardMaterial]=true,[IsFortification]=true,[IsSmoothableTarget]=true,
+    [IsRough]=true,[IsSmoothed]=true,[IsDiggableTarget]=true,
+}
+local actions={
+    {"Dig"                ,DigChooser,{MakePredicateWieldsItem(df.job_skill.MINING),IsDiggableTarget}},
+    {"Dig Ramp"           ,df.job_type.CarveRamp,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
+    {"Dig Channel"        ,df.job_type.DigChannel,{MakePredicateWieldsItem(df.job_skill.MINING)}},
+    {"Up Staircase"       ,df.job_type.CarveUpwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
+    {"Down Staircase"     ,df.job_type.CarveDownwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
+    {"Bi Staircase"       ,df.job_type.CarveUpDownStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
+    {"Smooth"             ,SmoothChooser,{IsSmoothableTarget,IsHardMaterial,IsRough},nil,{DesignateDetail}},
+    {"Engrave"            ,EngraveChooser,{IsSmoothableTarget,IsHardMaterial},nil,{DesignateDetail}},
+    {"Carve Fortification",FortificationChooser,{IsWall,IsHardMaterial}},
+    {"CarveTrack"         ,df.job_type.CarveTrack,{},{SetCarveDir}},
+    {"Fell Tree"          ,df.job_type.FellTree,{MakePredicateWieldsItem(df.job_skill.AXE),IsTree}},
+    {"Gather Plants"      ,df.job_type.GatherPlants,{IsPlant,SameSquare},{PlantGatherFix}},
+    {"Gather Webs"        ,df.job_type.CollectWebs,{},{SetWebRef}},
+    {"Fish"               ,df.job_type.Fish,{IsWater}},
+    {"Tame Animal"        ,df.job_type.TameAnimal,{IsUnit},{SetCreatureRef}},
+    {"Clean"              ,df.job_type.Clean,{}},
+    {"Build"              ,AssignJobToBuild,{NoConstructedBuilding}},
+    {"Build Last"         ,BuildLast,{NoConstructedBuilding}},
+    {"Link Buildings"     ,LinkBuilding,{IsBuilding}},
+    {"Remove Building"    ,RemoveBuilding,{IsBuilding}},
+}
+
+-- The window layout: each entry is one LINE of segments. A segment {i} shows actions[i]'s
+-- name; {i,'text'} overrides the shown text (the stair variants and Build [Last] share
+-- lines); {label='x'} is inert text; avail=fn hides the segment (Build [Last] only exists
+-- once something was built). {} is a blank separator line. Segments record their drawn
+-- x-range each render for click hit-testing.
+local function last_build_available() return last_building and last_building.type~=nil end
+local LAYOUT={
+    {{1,'Dig'},{2,' [Ramp]'},{3,' [Channel]'}},
+    {{4,'[Up]'},{5,' [Down]'},{6,' [Bi]'},{label=' Staircase',click=6}},
+    {},
+    {{7}},
+    {{8}},
+    {{9}},
+    {{10}},
+    {},
+    {{11}},
+    {{12}},
+    {{13}},
+    {{14}},
+    {{15}},
+    {{16}},
+    {},
+    {{17,'Build'},{18,' [Last]',avail=last_build_available}},
+    {{19}},
+    {{20}},
 }
 
 for id,action in pairs(actions) do
@@ -1747,8 +1887,8 @@ end
 -- walls"...) lands there instead of only flashing past as an announcement.
 local JOBWIN_W=26
 function usetool:job_win_geom()
-    local n=#actions
-    local h=n+4                 -- border+jobs+separator+status+border
+    local n=#LAYOUT
+    local h=n+4                 -- border+lines+separator+status+border
     local top=math.max(0,math.floor((df.global.gps.dimy-h)/2))   -- centered vertically
     return 0,top,JOBWIN_W,h,n
 end
@@ -1772,11 +1912,31 @@ function usetool:draw_job_window(dc)
     elseif settings.safe then title='<no site: disabled>'
     else title='<no site: won\'t persist>' end
     dc:seek(l+2,t):pen(site and COLOR_WHITE or COLOR_YELLOW):string((' '..title..' '):sub(1,w-4))
-    for i=1,n do
-        local sel=(i==(mode or 0)+1)
-        local pen=sel and COLOR_LIGHTGREEN or COLOR_GREY
-        local marker=sel and (string.char(26)..' ') or '  '
-        dc:seek(l+1,t+i):pen(pen):string((marker..actions[i][1]):sub(1,w-2))
+    for li,line in ipairs(LAYOUT) do
+        local y=t+li
+        local x=l+3
+        local line_selected=false
+        for _,seg in ipairs(line) do
+            seg._x1,seg._x2=nil,nil
+            local txt,pen
+            if seg.label then
+                txt,pen=seg.label,COLOR_GREY
+                if seg.click then seg._x1,seg._x2=x,x+#txt-1 end
+            elseif seg[1] and (not seg.avail or seg.avail()) then
+                txt=seg[2] or actions[seg[1]][1]
+                local sel=(seg[1]==(mode or 0)+1)
+                pen=sel and COLOR_LIGHTGREEN or COLOR_GREY
+                if sel then line_selected=true end
+                seg._x1,seg._x2=x,x+#txt-1
+            end
+            if txt then
+                dc:seek(x,y):pen(pen):string(txt:sub(1,math.max(0,l+w-1-x)))
+                x=x+#txt
+            end
+        end
+        if line_selected then
+            dc:seek(l+1,y):pen(COLOR_LIGHTGREEN):string(string.char(26))
+        end
     end
     dc:seek(l+1,t+n+1):pen(BG):string(string.rep(string.char(196),w-2))
     local msg,pen
@@ -1794,6 +1954,7 @@ end
 -- run the current job with full checks; every refusal message goes to the status line
 function usetool:try_job(state,cur_mode)
     self.status_msg=nil
+    self.queued_job,self.queued_go=nil,nil
     local ok,msg=self:siteCheck()
     if not ok then self:set_status(msg) return false end
     for _,p in pairs(cur_mode[3] or {}) do
@@ -1822,6 +1983,12 @@ function usetool:map_click_job()
         return false
     end
     local cur_mode=actions[(mode or 0)+1]
+    local probe={unit=adv,pos={x=pos.x,y=pos.y,z=pos.z},from_pos=copyall(adv.pos)}
+    for _,pr in pairs(cur_mode[3] or {}) do
+        if TARGET_PREDS[pr] and not pr(probe) then
+            return false   -- tile can never suit this job: not a job click, let the game have it
+        end
+    end
     local state={
         unit=adv,
         pos={x=pos.x,y=pos.y,z=pos.z},
@@ -1895,15 +2062,36 @@ function usetool:onInput(keys)
             self.dismiss_pending=true
             return
         end
+        -- A right-click on the 3x3 around the player (not covered by the window) wants DF's
+        -- interact menu -- which ONLY opens from a HARDWARE click; the fed _MOUSE_R this
+        -- screen forwards is dead to it (measured long ago and confirmed here). Passing
+        -- through therefore cannot work while we are on top: instead MINIMIZE INSTANTLY,
+        -- unswallowed, so the click's own release -- or at worst one more right-click --
+        -- lands on the native screen and opens the menu. The pick icon brings us back.
+        local rpos=dfhack.gui.getMousePos()
+        if rpos then
+            local ap=dfhack.world.getAdventurer().pos
+            if math.max(math.abs(rpos.x-ap.x),math.abs(rpos.y-ap.y),math.abs(rpos.z-ap.z))<=1 then
+                icon_active=true
+                self:dismiss()
+                return
+            end
+        end
     end
     if keys._MOUSE_L then
         local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
         local l,t,w,h,n=self:job_win_geom()
         if mx>=l and mx<l+w and my>=t and my<t+h then
             local row=my-t
-            if row>=1 and row<=n then       -- click a job row: select it
-                mode=row-1
-                self.status_msg=nil
+            local line=row>=1 and row<=n and LAYOUT[row]
+            if line then
+                for _,seg in ipairs(line) do   -- hit the segment actually clicked
+                    if seg._x1 and mx>=seg._x1 and mx<=seg._x2 then
+                        mode=(seg.click or seg[1])-1
+                        self.status_msg=nil
+                        break
+                    end
+                end
             end
             return                          -- consume every click on the window
         end
@@ -1917,14 +2105,18 @@ function usetool:onInput(keys)
         if focus[1]~="dungeonmode/Default" then --if we are not default, e.g. look/inventory etc
             self:sendInputToParent("LEAVESCREEN") --exit
         else
-            self:dismiss() --leave the adv-tools all together
-            CancelJob(adv)
+            -- Escape MINIMIZES to the pick icon (same as right-click dismissal) instead of
+            -- quitting outright: the job and its chain keep their state and the icon brings
+            -- the window back. (The old full-quit also CancelJob'd, which threw away work.)
+            icon_active=true
+            self:dismiss()
         end
     elseif keys[keybinds.nextJob.key] then --next job with looping
-        mode=(mode+1)%#actions
+        repeat mode=(mode+1)%#actions
+        until actions[mode+1][1]~='Build Last' or last_building.type
     elseif keys[keybinds.prevJob.key] then --prev job with looping
-        mode=mode-1
-        if mode<0 then mode=#actions-1 end
+        repeat mode=(mode-1)%#actions
+        until actions[mode+1][1]~='Build Last' or last_building.type
     elseif keys["A_SHORT_WAIT"] then
         --ContinueJob(adv)
         df.global.adventure.player_control_state=1 --TODO: figure out what is "more correct here"
@@ -2017,17 +2209,47 @@ function usetool:onIdle()
         return
     end
 
-    -- FIX(detail-apply): the remembered Smooth job target, applied after DF dropped the job
+    -- FIX(detail-apply): the remembered job target, applied after DF dropped the job --
+    -- Smooth jobs get the smooth tiletype; a RemoveFortification dig gets the FLOOR its
+    -- material digs to (DF's adv completion wrongly leaves a wall there)
     if self.pending_detail and not job_ptr then
         local pd=self.pending_detail
         self.pending_detail=nil
-        local block=dfhack.maps.getTileBlock(pd)
-        local tt=block and dfhack.maps.getTileType(pd)
-        local target=tt and smooth_variant(tt)
-        if target then
-            block.tiletype[pd.x%16][pd.y%16]=target
-            local shape=df.tiletype.attrs[tt].shape==df.tiletype_shape.FLOOR and "floor" or "wall"
-            dfhack.gui.showAnnouncement("You finish smoothing the "..shape..".",7,1)
+        local block=dfhack.maps.getTileBlock(pd.pos)
+        local tt=block and dfhack.maps.getTileType(pd.pos)
+        if tt then
+            local target,note
+            if pd.want=='floor' then
+                target=floor_variant(tt)
+                note="The fortification crumbles away."
+            else
+                target=smooth_variant(tt)
+                note="You finish smoothing the "..
+                    (df.tiletype.attrs[tt].shape==df.tiletype_shape.FLOOR and "floor." or "wall.")
+            end
+            if target then
+                block.tiletype[pd.pos.x%16][pd.pos.y%16]=target
+                dfhack.gui.showAnnouncement(note,7,1)
+            end
+        end
+    end
+
+    -- Chained job (smooth -> engrave/carve): fires when the smoothing job is GONE and its
+    -- result is visible -- the target tile is actually smooth. Gating on observed completion
+    -- frames does not work: the job can finish and vanish between two onIdle observations
+    -- (that is exactly how the chain silently died in testing), while the tile state is
+    -- always readable. A gone job with a still-rough tile means canceled/failed: drop.
+    if self.queued_job and not job_ptr and not self.pending_detail then
+        local q=self.queued_job
+        local tt=dfhack.maps.getTileType(q.pos)
+        local ready=tt and tile_attrs[tt].special==df.tiletype_special.SMOOTH
+        self.queued_job,self.queued_go=nil,nil
+        if ready then
+            local u=dfhack.world.getAdventurer()
+            makeJob{unit=u,pos=q.pos,from_pos=copyall(u.pos),pre_actions=q.pre_actions,
+                    job_type=q.job_type,screen=self}
+            self:wait_long_start()
+            return
         end
     end
 
@@ -2060,8 +2282,12 @@ function usetool:onIdle()
 
         if adv.job.current_job.completion_timer==-1  then
             local jt=adv.job.current_job.job_type
+            local jpos=adv.job.current_job.pos
             if jt==df.job_type.SmoothFloor or jt==df.job_type.SmoothWall then
-                self.pending_detail=copyall(adv.job.current_job.pos)
+                self.pending_detail={pos=copyall(jpos),want='smooth'}
+            elseif jt==df.job_type.Dig and self.fort_pos and same_xyz(jpos,self.fort_pos) then
+                self.pending_detail={pos=copyall(jpos),want='floor'}
+                self.fort_pos=nil
             end
             self.long_wait=false
         end
