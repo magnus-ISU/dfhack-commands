@@ -1971,6 +1971,41 @@ function usetool:try_job(state,cur_mode)
     return true
 end
 
+-- Is the mouse over another visible OVERLAY widget registered for the native screen
+-- (dig-shapes-style tools, click-cancel buttons...)? Those handle their own clicks, but
+-- only when this Screen is not sitting on top of them -- so advfort minimizes out of
+-- their way. Adapted from fort/dig-building's yield logic, inverted. Our own pick icon
+-- is excluded (its widget frame exists even while the window is up).
+local function over_other_overlay(mx,my)
+    local ok,db=pcall(function() return overlay.get_state().db end)
+    if not ok or not db then return false end
+    local vs=dfhack.gui.getDFViewscreen(true)
+    local fullw,fullh=df.global.gps.dimx-1,df.global.gps.dimy-1
+    for name,e in pairs(db) do
+        if name~='adv/advfort.icon' and e.widget then
+            local w=e.widget
+            local r=w.frame_rect
+            local vis=w.visible
+            if type(vis)=='function' then local _;_,vis=pcall(vis,w) end
+            if r and vis and r.x2>=r.x1 and r.y2>=r.y1
+                and not (r.x1<=0 and r.y1<=0 and r.x2>=fullw and r.y2>=fullh)
+                and mx>=r.x1 and mx<=r.x2 and my>=r.y1 and my<=r.y2 then
+                local vss=w.viewscreens
+                if type(vss)=='string' then vss={vss} end
+                if type(vss)=='table' then
+                    for _,fs in ipairs(vss) do
+                        if type(fs)=='string' then
+                            local okm,m=pcall(dfhack.gui.matchFocusString,fs,vs)
+                            if okm and m then return true end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
 -- left-click on the map = do the current job AT THAT TILE (the old SELECT-at-cursor flow,
 -- driven by the mouse); getMousePos() is nil over side UI, so those clicks fall through
 function usetool:map_click_job()
@@ -2062,21 +2097,15 @@ function usetool:onInput(keys)
             self.dismiss_pending=true
             return
         end
-        -- A right-click on the 3x3 around the player (not covered by the window) wants DF's
-        -- interact menu -- which ONLY opens from a HARDWARE click; the fed _MOUSE_R this
-        -- screen forwards is dead to it (measured long ago and confirmed here). Passing
-        -- through therefore cannot work while we are on top: instead MINIMIZE INSTANTLY,
-        -- unswallowed, so the click's own release -- or at worst one more right-click --
-        -- lands on the native screen and opens the menu. The pick icon brings us back.
-        local rpos=dfhack.gui.getMousePos()
-        if rpos then
-            local ap=dfhack.world.getAdventurer().pos
-            if math.max(math.abs(rpos.x-ap.x),math.abs(rpos.y-ap.y),math.abs(rpos.z-ap.z))<=1 then
-                icon_active=true
-                self:dismiss()
-                return
-            end
-        end
+        -- EVERY other right-click wants a native response -- DF's right-click actions only
+        -- answer HARDWARE clicks; the fed _MOUSE_R this screen forwards is dead to them
+        -- (measured repeatedly). So minimize INSTANTLY, unswallowed, wherever the click
+        -- lands: the click's own release (or a repeat) reaches the native screen. The icon
+        -- overlay AUTO-RESTORES the window once the interaction it triggered has finished.
+        auto_restore={stage='start',at=dfhack.getTickCount()}
+        icon_active=true
+        self:dismiss()
+        return
     end
     if keys._MOUSE_L then
         local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
@@ -2094,6 +2123,15 @@ function usetool:onInput(keys)
                 end
             end
             return                          -- consume every click on the window
+        end
+        -- clicks on another overlay's territory: minimize out of its way (auto-restoring
+        -- after the interaction), exactly like right-clicks -- the overlay only sees
+        -- hardware clicks when no Screen covers it
+        if over_other_overlay(mx,my) then
+            auto_restore={stage='start',at=dfhack.getTickCount()}
+            icon_active=true
+            self:dismiss()
+            return
         end
         if self:map_click_job() then return end
         -- neither window nor map (side UI): fall through so the parent still gets it
@@ -2327,6 +2365,15 @@ AdvfortIcon.ATTRS{
     overlay_onupdate_max_freq_seconds=0,
 }
 
+function AdvfortIcon:relaunch()
+    auto_restore=nil
+    if dfhack.gui.matchFocusString('dungeonmode/Default')
+            or dfhack.gui.matchFocusString('dungeonmode/Look') then
+        icon_active=false
+        pcall(function() usetool():show() end)
+    end
+end
+
 function AdvfortIcon:overlay_onupdate()
     -- keep the icon completely centered on the left screen edge
     local ir=gui.get_interface_rect()
@@ -2334,6 +2381,23 @@ function AdvfortIcon:overlay_onupdate()
     if self.frame.t~=t or self.frame.l~=0 then
         self.frame={w=1,h=1,l=0,t=t}
         self:updateLayout(gui.ViewRect{rect=ir})
+    end
+    -- Auto-restore after a right-click passthrough minimize: wait for the interaction the
+    -- click triggered (a menu opening / focus leaving Default) to START and then FINISH,
+    -- and bring the window back. If nothing starts within 2s the click acted instantly
+    -- (right-click-move walking, empty tile) -- restore anyway.
+    if icon_active and auto_restore then
+        local ol=df.global.game.main_interface.adventure.option_list
+        local busy=ol.open or not dfhack.gui.matchFocusString('dungeonmode/Default')
+        if auto_restore.stage=='start' then
+            if busy then
+                auto_restore.stage='end'
+            elseif dfhack.getTickCount()-auto_restore.at>2000 then
+                self:relaunch()
+            end
+        elseif not busy then
+            self:relaunch()
+        end
     end
 end
 
