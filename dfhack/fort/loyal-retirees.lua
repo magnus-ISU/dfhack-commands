@@ -18,11 +18,16 @@ alongside the rest of your fortress news.
 How it works
 ============
 
-**At retire.** An overlay on the Esc menu watches `main_interface.options.fort_retirement_confirm`.
-The moment DF puts up "Really retire?", the citizen roster is written to this site's
-persistent data (`dfhack.persistent.saveSiteData`). The snapshot is taken when the dialog
-OPENS, not when you click Retire, so it is captured whether you confirm or cancel -- a
-cancelled retirement just leaves a harmless roster behind that the next one overwrites.
+**While you play.** The citizen roster lives in this site's persistent data
+(`dfhack.persistent.saveSiteData`) and is rebuilt whenever the fort's membership moves --
+EventManager's UNIT_NEW_ACTIVE and UNIT_DEATH. Those fire on migrant waves, births, deaths
+and departures, which is rare enough to be free, and a rebuild that finds no change writes
+nothing. Nothing depends on the player visiting a particular screen, so there is no way to
+retire with a stale roster.
+
+A seasonal sweep runs on top of that. The unit events do not fire when an ALREADY-ACTIVE unit
+becomes a citizen -- a visitor accepted as a resident, say -- so the season catches what the
+events structurally cannot. It writes nothing when the membership has not moved.
 
 Each roster member also gets `histfig.flags.never_cull` and `nemesis.flags.DO_NOT_CULL`.
 This matters more than it looks: DF culls historical figures it considers unimportant, and
@@ -80,15 +85,17 @@ on a retirement, and for deliberately headhunting a particular legend::
 
     loyal-retirees migrate 163 204 197
 
-Enable the retire hook (recommended) with::
-
-    overlay enable fort/loyal-retirees.hook
+The roster maintains itself once the script has been loaded (`magnus-scripts` does this, or
+run `loyal-retirees` once); it re-registers on every map load.
 ]]
 
 local utils = require('utils')
-local overlay = require('plugins.overlay')
+local eventful = require('plugins.eventful')
+local repeatutil = require('repeat-util')
 
 local GLOBAL_KEY = 'loyal-retirees'
+local UNIT_EVENT_FREQ = 100      -- ticks between EventManager sweeps for unit arrivals/deaths
+local SEASON_MONTHS = 3          -- seasonal safety sweep, on top of the unit events
 local MAX_PIN_FRAMES = 20000     -- frames to hold the courier on the edge before giving up
 local MAX_WAIT_FRAMES = 60000     -- frames to wait for the army to come home
 
@@ -146,6 +153,33 @@ function snapshot()
     local roster = {members = members, year = df.global.cur_year, site = df.global.plotinfo.site_id}
     save_roster(roster)
     return #members, skipped
+end
+
+-- The roster as a stable, comparable key, so a rebuild that changed nothing costs no write.
+local function roster_key(members)
+    local ids = {}
+    for _, m in ipairs(members) do ids[#ids + 1] = m.hf end
+    table.sort(ids)
+    return table.concat(ids, ',')
+end
+
+-- Rebuild from the live citizen list and store it ONLY if the membership actually moved.
+-- Cheap enough to run on every arrival and death: getCitizens is bounded by fort population,
+-- and the common case is "nothing changed", which writes nothing.
+local last_key = nil
+local function refresh(force)
+    if not dfhack.world.isFortressMode() then return end
+    local members = {}
+    for _, u in ipairs(dfhack.units.getCitizens(false)) do
+        local hf = u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
+        if hf and hf.nemesis_id >= 0 and is_person(u) then
+            members[#members + 1] = {hf = hf.id, nem = hf.nemesis_id}
+        end
+    end
+    local key = roster_key(members)
+    if not force and key == last_key then return end
+    last_key = key
+    snapshot()          -- re-derives the same list and applies the never-cull protection
 end
 
 -- ---------------------------------------------------------------------------
@@ -467,45 +501,59 @@ function migrate(ids)
 end
 
 -- ---------------------------------------------------------------------------
--- the retire hook
+-- keeping the roster current
 -- ---------------------------------------------------------------------------
+--
+-- The roster is maintained from EventManager rather than from the retire dialog. Watching the
+-- GUI meant the roster was only ever as good as the player passing through one specific
+-- screen; the events fire whenever the fort's membership actually moves, which is the thing
+-- we care about, and they cannot be bypassed.
+--
+-- Both events are cheap: they fire on migrant waves, births, deaths and departures -- not
+-- often -- and each one only rebuilds a list bounded by fort population, writing to persistent
+-- storage only when the membership actually differs from what is already stored.
+--
+-- UNIT_NEW_ACTIVE fires when a unit becomes active on the map, not when an existing unit
+-- BECOMES a citizen (a visitor accepted as a resident was already active). The seasonal sweep
+-- below exists to cover exactly that gap; `loyal-retirees snapshot` forces a rebuild on demand.
 
-RetireHook = defclass(RetireHook, overlay.OverlayWidget)
-RetireHook.ATTRS{
-    desc = 'Records the citizen roster when you retire, so loyal-retirees can summon them back.',
-    default_pos = {x = -1, y = -1},
-    default_enabled = true,
-    viewscreens = 'dwarfmode/Options',
-    frame = {w = 1, h = 1},           -- invisible; we only need the update tick
-    overlay_onupdate_max_freq_seconds = 0,
-}
-
-function RetireHook:init()
-    self.armed = false
+local function on_unit_event()
+    refresh()
 end
 
-function RetireHook:overlay_onupdate()
-    local opts = df.global.game.main_interface.options
-    local confirming = opts.open and opts.fort_retirement_confirm
-    if confirming and not self.armed then
-        self.armed = true             -- rising edge: snapshot once per time the dialog opens
-        local n = snapshot()
-        announce(('%d citizens have been recorded. Should this fortress be reclaimed, they will be sent for.')
-            :format(n), COLOR_LIGHTCYAN)
-    elseif not confirming then
-        self.armed = false
-    end
+local function register_events()
+    if not dfhack.world.isFortressMode() then return end
+    eventful.enableEvent(eventful.eventType.UNIT_NEW_ACTIVE, UNIT_EVENT_FREQ)
+    eventful.enableEvent(eventful.eventType.UNIT_DEATH, UNIT_EVENT_FREQ)
+    eventful.onUnitNewActive[GLOBAL_KEY] = on_unit_event
+    eventful.onUnitDeath[GLOBAL_KEY] = on_unit_event
+    -- Seasonal safety sweep. The unit events cover arrivals and deaths, but they do NOT fire
+    -- when an already-active unit becomes a citizen -- a visitor accepted as a resident, a
+    -- captive who joins. This catches those without anyone having to remember anything, and
+    -- still writes nothing when the membership has not moved.
+    repeatutil.scheduleEvery(GLOBAL_KEY, SEASON_MONTHS, 'months', function() refresh() end)
+    refresh(true)      -- seed the baseline for this fort
 end
 
-OVERLAY_WIDGETS = {hook = RetireHook}
+local function unregister_events()
+    eventful.onUnitNewActive[GLOBAL_KEY] = nil
+    eventful.onUnitDeath[GLOBAL_KEY] = nil
+    repeatutil.cancel(GLOBAL_KEY)
+    last_key = nil
+end
 
 -- ---------------------------------------------------------------------------
 -- unretire: summon on map load
 -- ---------------------------------------------------------------------------
 
 dfhack.onStateChange[GLOBAL_KEY] = function(ev)
+    if ev == SC_MAP_UNLOADED then
+        unregister_events()
+        return
+    end
     if ev ~= SC_MAP_LOADED then return end
     if not dfhack.world.isFortressMode() then return end
+    register_events()
     local roster = load_roster()
     if #(roster.members or {}) == 0 then return end
     local away, dead = missing_from(roster)
@@ -539,11 +587,16 @@ local function status()
     end
 end
 
+-- Start maintaining the roster as soon as the script is loaded, so it does not have to wait
+-- for the next map load to begin tracking. Idempotent: registering twice replaces the handler.
+if dfhack.isMapLoaded() then register_events() end
+
 if dfhack_flags and dfhack_flags.module then return end
 
 local cmd = ({...})[1]
 if cmd == 'snapshot' then
     local n, skipped = snapshot()
+    last_key = nil          -- force the next event-driven rebuild to re-evaluate
     print(('loyal-retirees: recorded %d citizens%s'):format(
         n, skipped > 0 and (' (%d skipped: livestock or no historical figure)'):format(skipped) or ''))
 elseif cmd == 'recover' then
