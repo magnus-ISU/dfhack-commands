@@ -142,6 +142,15 @@ Each order it queues is announced — who mandated it, and what was ordered.
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
 
+### **`fort/loyal-retirees`**
+Records your citizens when you retire a fortress, and summons the missing ones home when you
+reclaim it. Anyone still alive is fetched; the dead are reported and skipped. Because DF only
+turns an off-map historical figure back into a real unit when an army carrying them arrives,
+this fakes a diplomatic mission for a noble, lets DF mint the army, and puts the returnees
+aboard — so they come back as their original selves, with their skills, wounds and gear.
+`loyal-retirees migrate <hf_id>...` uses the same machinery to recruit anyone alive in the
+world by historical figure id.
+
 ### **`fort/adamantine-hospital`**
 Stops the hospital spending adamantine on bruises. DF gives a hospital no material filter, so
 dressings and sutures happily consume adamantine cloth and strands. This watches the job list
