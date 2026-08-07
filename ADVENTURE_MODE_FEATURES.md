@@ -38,6 +38,25 @@ Show every item's weight in the inventory list and the pick-up menu.
 
 ![adv/inventory-display-weight demo](demos/adv-inventory-display-weight.png)
 
+### **`adv/inventory-search`** 
+Search the inventory list (Alt-S) by item description, material or type.
+  Magic words: `heavy` sorts by weight, `equip`/`equipped` shows equipped items
+  (hands first, containers last), `food` shows food and drink (drinks, food,
+  healing drinks, healing food, then ethics-refused sapient flesh; containers
+  excluded), `healing` shows food/drink with beneficial syndromes. The unsearched list
+  displays in the equip order by default. keep-inventory reopens keep the filter.
+
+![adv/inventory-search demo](demos/adv-search-inventory.png)
+![adv/inventory-search sort demo](demos/adv-sort-inventory.png)
+
+### **`adv/travelling-hunger`** 
+Show how many meals and drinks you need on the fast-travel screen's top row.
+
+### **`adv/heat-ice`** 
+Sort "heat ice" / "heat snow" options to the top of interact menus.
+
+![adv/heat-ice demo](demos/adv-sort-ice.png)
+
 ### **`adv/keep-talking`** 
 Automatically reopen a conversation you are participating in.
 
