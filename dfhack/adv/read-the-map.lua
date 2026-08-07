@@ -116,7 +116,7 @@ local MAX_LEGENDS = 3      -- legendary residents shown
 local MAX_DWELLERS = 3     -- lair dwellers shown
 local MAX_ARMY_NAMES = 3   -- named army members shown
 local LEGEND_PTS = 15000   -- worldgen skill points = level x 1000; 15 = Legendary
-local MAX_WIDTH = 60       -- tooltip line clamp, in text cells
+local MAX_WIDTH = 90       -- tooltip line clamp, in text cells (full titled-dragon headlines fit)
 
 -- world_site_type -> what a player calls it ("LairShrine" is the lair marker;
 -- Monument is resolved by monument_kind below)
@@ -479,6 +479,18 @@ end
 
 -- ---- armies -----------------------------------------------------------------
 
+-- a member's kind, preferring the CASTE name: modded races hide their real nature in
+-- castes (an Ancient Dragon is a rare caste of kobold -- showing "kobold" for it is
+-- worse than wrong), while vanilla castes just repeat the race name and cost nothing
+local function member_kind(hf)
+    local cn
+    pcall(function()
+        cn = df.global.world.raws.creatures.all[hf.race].caste[hf.caste].caste_name[0]
+    end)
+    if cn and cn ~= '' then return cn end
+    return race_name(hf.race) or '?'
+end
+
 local function army_lines(a, lines)
     local counts, order, named = {}, {}, {}
     pcall(function()
@@ -486,7 +498,7 @@ local function army_lines(a, lines)
             local nr = df.nemesis_record.find(a.members[i].nemesis_id)
             local hf = nr and nr.figure
             if hf then
-                local rn = race_name(hf.race) or '?'
+                local rn = member_kind(hf)
                 if not counts[rn] then order[#order + 1] = rn; counts[rn] = 0 end
                 counts[rn] = counts[rn] + 1
                 named[#named + 1] = ('%s (%s)'):format(hf_name(hf), rn)
@@ -661,12 +673,52 @@ ReadTheMap = defclass(ReadTheMap, overlay.OverlayWidget)
 ReadTheMap.ATTRS{
     desc = 'Hover tooltips for sites on the lesser travel map.',
     default_enabled = true,
-    viewscreens = 'dungeonmode/Travel',
+    -- broad scope: the tooltip itself only paints on Travel, but the premium border art is
+    -- CAPTURED from whatever native panel happens to be on screen (menus, sheets...)
+    viewscreens = 'dungeonmode',
     frame = {w = 1, h = 1},
 }
 
 local PEN_TEXT = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
 local PEN_EDGE = dfhack.pen.parse{fg = COLOR_LIGHTCYAN, bg = COLOR_BLACK}
+local PEN_GOLD = dfhack.pen.parse{fg = COLOR_YELLOW, bg = COLOR_BLACK}
+local PEN_BLANK = dfhack.pen.parse{ch = 32, fg = COLOR_WHITE, bg = COLOR_BLACK}
+
+-- The premium (Steam graphics) menu frame, captured live: a native panel's border lives in
+-- screentexpos_lower with a beautifully regular atlas layout -- corners are the edge value
+-- +-1, and each row of the frame sits one 64-wide atlas row lower (measured on the adv
+-- OptionList: top 182879/182878/182877, fill row 182815/182814/182813 = top-64, bottom
+-- 182751/182750/182749 = top-128). So ONE anchor (the top-edge tile) derives all nine
+-- pieces. Texpos values are only stable within a session, so the anchor is captured at
+-- runtime from any bordered panel on screen and kept in the script env; without graphics
+-- (ASCII mode) capture never succeeds and the tooltip uses a golden single-bar frame.
+border_anchor = border_anchor or nil
+local border_try_at = 0
+
+local function capture_border()
+    local gps = df.global.gps
+    local dimy, dimx = gps.dimy, gps.dimx
+    local buf = gps.screentexpos_lower
+    for y = 0, dimy - 2 do
+        local run, val, x0 = 0, nil, nil
+        for x = 0, dimx do
+            local v = x < dimx and buf[x * dimy + y] or 0
+            if v ~= 0 and v == val then
+                run = run + 1
+            else
+                if run >= 8 and val then
+                    local lx, rx = x0 - 1, x
+                    if lx >= 0 and rx < dimx
+                        and buf[lx * dimy + y] == val + 1 and buf[rx * dimy + y] == val - 1
+                        and buf[x0 * dimy + y + 1] == val - 64 then
+                        return val
+                    end
+                end
+                val, run, x0 = v, (v ~= 0) and 1 or 0, x
+            end
+        end
+    end
+end
 
 local cache_key, cache_lines = nil, nil
 
@@ -698,23 +750,71 @@ local function paint()
     end
     if not cache_lines then return end
 
-    -- tooltip near the mouse, nudged to stay on screen
+    -- tooltip near the mouse, nudged to stay on screen, in a double-line UI frame
     local width = 0
     for _, l in ipairs(cache_lines) do width = math.max(width, #l) end
-    width = width + 2
+    local inner = width + 2                        -- one space of padding each side
+    local bw, bh = inner + 2, #cache_lines + 2     -- plus the border itself
     local tx = gps.mouse_x + 2
     local ty = gps.mouse_y + 1
-    if tx + width >= gps.dimx then tx = math.max(0, gps.mouse_x - width - 1) end
-    if ty + #cache_lines >= gps.dimy then ty = math.max(0, gps.mouse_y - #cache_lines - 1) end
+    if tx + bw >= gps.dimx then tx = math.max(0, gps.mouse_x - bw - 1) end
+    if ty + bh >= gps.dimy then ty = math.max(0, gps.mouse_y - bh - 1) end
+    if border_anchor then
+        -- the native premium frame: stamp the captured tiles (and the panel fill under the
+        -- text) into the lower layer; the text grid gets blanks so no glyph covers the art
+        local dimy = gps.dimy
+        local low = gps.screentexpos_lower
+        local a = border_anchor
+        local T, F, B = a, a - 64, a - 128
+        local function put(x, y, tile)
+            dfhack.screen.paintTile(PEN_BLANK, x, y)
+            low[x * dimy + y] = tile
+        end
+        put(tx, ty, T + 1)
+        put(tx + inner + 1, ty, T - 1)
+        put(tx, ty + bh - 1, B + 1)
+        put(tx + inner + 1, ty + bh - 1, B - 1)
+        for x = tx + 1, tx + inner do
+            put(x, ty, T)
+            put(x, ty + bh - 1, B)
+        end
+        for i = 1, #cache_lines do
+            put(tx, ty + i, F + 1)
+            put(tx + inner + 1, ty + i, F - 1)
+            for x = tx + 1, tx + inner do
+                low[x * dimy + ty + i] = F      -- panel fill under the text
+            end
+        end
+    else
+        -- no graphics captured (ASCII mode): golden single-bar frame
+        local ch = string.char
+        dfhack.screen.paintString(PEN_GOLD, tx, ty,
+            ch(218) .. string.rep(ch(196), inner) .. ch(191))
+        for i = 1, #cache_lines do
+            dfhack.screen.paintString(PEN_GOLD, tx, ty + i, ch(179))
+            dfhack.screen.paintString(PEN_GOLD, tx + inner + 1, ty + i, ch(179))
+        end
+        dfhack.screen.paintString(PEN_GOLD, tx, ty + bh - 1,
+            ch(192) .. string.rep(ch(196), inner) .. ch(217))
+    end
     for i, line in ipairs(cache_lines) do
         local pen = i == 1 and PEN_EDGE or PEN_TEXT
-        dfhack.screen.paintString(pen, tx, ty + i - 1,
-            ' ' .. line .. string.rep(' ', width - #line - 1))
+        dfhack.screen.paintString(pen, tx + 1, ty + i,
+            ' ' .. line .. string.rep(' ', inner - #line - 1))
     end
 end
 
 function ReadTheMap:onRenderFrame(dc, rect)
-    pcall(paint)
+    pcall(function()
+        if not border_anchor then
+            local now = dfhack.getTickCount()
+            if now >= border_try_at then
+                border_try_at = now + 2000
+                border_anchor = capture_border()
+            end
+        end
+        if dfhack.gui.matchFocusString('dungeonmode/Travel') then paint() end
+    end)
 end
 
 OVERLAY_WIDGETS = {tooltip = ReadTheMap}
