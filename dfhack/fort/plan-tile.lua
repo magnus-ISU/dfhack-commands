@@ -6,7 +6,9 @@ plan-tile
 While you're placing a building (the buildingplan placement screen), LEFT-DRAG a box on the map to
 lay down a whole GRID of that building in one gesture instead of clicking each one. The buildings are
 tiled by their FOOTPRINT: a 1x1 statue every 1 tile, a 3x3 Carpenter's every 3 tiles, a 5x5 Trade
-Depot every 5 tiles -- so they sit edge-to-edge without overlapping.
+Depot every 5 tiles -- so they sit edge-to-edge without overlapping. Screw pumps (2x1 / 1x2, the
+one fixed-footprint building with an even side) tile every 2 tiles along their long axis and are
+anchored the way DF anchors them -- see corner_offset().
 
 Placement is deferred to MOUSE-UP:
   * The mouse-down that would normally place a building is INTERCEPTED before buildingplan's
@@ -118,6 +120,26 @@ local function footprint()
         uibs.building_type, uibs.building_subtype, uibs.custom_type, uibs.direction)
     if not ok then return 1, 1 end
     return math.max(1, w or 1), math.max(1, h or 1)
+end
+
+-- offset from the cursor tile to the TOP-LEFT corner of the building DF would place there.
+-- The generic rule is cursor - footprint/2, which is what buildingplan's own
+-- get_placement_data() uses -- and it is exact for every odd footprint (1x1, 3x3, 5x5).
+-- The screw pump is the one fixed-footprint building with an EVEN side (2x1 / 1x2), and DF
+-- anchors it past the cursor for two of its four directions: pumping FromSouth (the pump
+-- faces up) or FromEast (faces left) puts the cursor on the FIRST tile, not the second.
+-- buildingplan corrects for exactly those two; without the same correction the whole grid --
+-- the first building included -- lands one tile too high / too far left.
+local function corner_offset(fw, fh)
+    local dx, dy = -(fw // 2), -(fh // 2)
+    if uibs.building_type == df.building_type.ScrewPump then
+        if uibs.direction == df.screw_pump_direction.FromSouth then
+            dy = dy + 1
+        elseif uibs.direction == df.screw_pump_direction.FromEast then
+            dx = dx + 1
+        end
+    end
+    return dx, dy
 end
 
 -- fixed-footprint building with no native area drag? (workshop / furniture / machine, NOT a
@@ -266,9 +288,12 @@ end
 -- ---- the grid ------------------------------------------------------------
 
 -- top-left corners of every building in the grid, tiled FLUSH from the first building's corner
--- (ox, oy) toward the release tile, stepping by footprint. (0,0) is the first building itself.
-local function grid_corners(ox, oy, fw, fh, rel)
-    local ocx, ocy = ox + fw // 2, oy + fh // 2          -- first building's centre (~ mouse-down)
+-- (cap.ox, cap.oy) toward the release tile, stepping by footprint. (0,0) is the first building
+-- itself. The pivot for direction/count is the mouse-DOWN tile, taken from cap.anchor -- it
+-- can't be back-derived from the corner, since corner_offset() is not always -footprint/2.
+local function grid_corners(cap, rel)
+    local ox, oy, fw, fh = cap.ox, cap.oy, cap.fw, cap.fh
+    local ocx, ocy = cap.anchor.x, cap.anchor.y          -- the mouse-down tile
     local nx = math.floor(math.abs(rel.x - ocx) / fw)
     local ny = math.floor(math.abs(rel.y - ocy) / fh)
     while (nx + 1) * (ny + 1) > MAX_BUILDINGS do
@@ -287,7 +312,7 @@ end
 local function place_grid(cap, rel)
     local fw, fh, z = cap.fw, cap.fh, cap.anchor.z
     local blds = {}
-    for _, c in ipairs(grid_corners(cap.ox, cap.oy, fw, fh, rel)) do
+    for _, c in ipairs(grid_corners(cap, rel)) do
         if cell_ok(cap, c.x, c.y) then
             local ok, bld = pcall(dfhack.buildings.constructBuilding, {pos = xyz2pos(c.x, c.y, z),
                 type = cap.type, subtype = cap.subtype, custom = cap.custom,
@@ -333,6 +358,7 @@ function PlanTile:overlay_onupdate()
         local pos = pending_press
         pending_press = nil
         local fw, fh = footprint()
+        local dx, dy = corner_offset(fw, fh)
         self.cap = {
             anchor = copyall(pos), fw = fw, fh = fh,
             need_inside = INSIDE_ONLY[uibs.building_type] or false, vcache = {},
@@ -340,8 +366,8 @@ function PlanTile:overlay_onupdate()
             custom = uibs.custom_type, direction = uibs.direction,
             filters = dfhack.buildings.getFiltersByType({},
                 uibs.building_type, uibs.building_subtype, uibs.custom_type),
-            -- the same corner math the planner itself uses (cursor - footprint/2)
-            ox = pos.x - fw // 2, oy = pos.y - fh // 2,
+            -- the same corner math the planner itself uses; frozen for the whole drag
+            dx = dx, dy = dy, ox = pos.x + dx, oy = pos.y + dy,
         }
     end
     if self.cap and df.global.enabler.mouse_lbut_down ~= 1 then   -- release: commit
@@ -391,7 +417,7 @@ function PlanTile:onRenderFrame(dc, rect)
     local gvp = df.global.gps.main_viewport
     local arr = gvp.screentexpos_interface
     local dimx, dimy = gvp.dim_x, gvp.dim_y
-    local gx, gy = cur.x - fw // 2 - vp.x1, cur.y - fh // 2 - vp.y1  -- expected corner
+    local gx, gy = cur.x + cap.dx - vp.x1, cur.y + cap.dy - vp.y1    -- expected corner
     local best, bestd
     for cx = gx - fw, gx + fw do
         for cy = gy - fh, gy + fh do
@@ -420,7 +446,7 @@ function PlanTile:onRenderFrame(dc, rect)
         end
     end
 
-    for _, c in ipairs(grid_corners(cap.ox, cap.oy, fw, fh, cur)) do
+    for _, c in ipairs(grid_corners(cap, cur)) do
         -- anchor cell included: the mouse-down building was retracted, so it's all ghosts
         local valid = cell_ok(cap, c.x, c.y)
         for i = 0, fw - 1 do
