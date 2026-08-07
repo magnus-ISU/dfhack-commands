@@ -137,6 +137,7 @@ Lets idle dwarves work the forge to satisfy their craft need, picking legal meta
 
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
+Each order it queues is announced — who mandated it, and what was ordered.
 
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
