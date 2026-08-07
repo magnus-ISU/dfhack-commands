@@ -90,6 +90,8 @@ local function item_type_words(it)
     local words = (df.item_type[it:getType()] or ''):lower():gsub('_', ' ')
     local ok, sub = pcall(function() return it.subtype.name end)
     if ok and type(sub) == 'string' then words = words .. ' ' .. sub end
+    -- scrolls are written works too: give them the "book" word so one search finds all reading
+    if words:find('scroll', 1, true) then words = words .. ' book' end
     return words
 end
 
@@ -383,7 +385,8 @@ AdvInventorySearchOverlay.ATTRS{
     desc = 'Adds a search bar to the adventure-mode inventory list.',
     default_pos = {x = 2, y = 2},   -- fallback until it snaps below the "Your inventory" header
     viewscreens = 'dungeonmode/Inventory',
-    frame = {w = 34, h = 1},
+    -- interior: 'Alt+s: ' fills cols 1-7, button labels to col 28, ']' at 29
+    frame = {w = 30, h = 1},
 }
 
 -- snap the search bar one row below the header, left-aligned (frame coords are relative to the
@@ -441,6 +444,20 @@ function AdvInventorySearchOverlay:init()
     local panel = widgets.Panel{
         visible = function() return self:get_key() ~= nil and self.header_ok == true end,
     }
+    -- preset buttons just type into the search box for you: setText fires on_change, so the
+    -- normal capture + search path runs exactly as if the word had been typed
+    local function preset(text)
+        return function() self.subviews.search:setText(text) end
+    end
+    -- The bar renders as `[Alt+s: ] [Food] [Heal] [Book]` when idle. The EditField spans
+    -- the whole banner underneath; the `]` and the three buttons are labels drawn over its
+    -- (empty) text area, hidden the moment there is text or focus -- so typed text overflows
+    -- rightward across where the buttons were, and only the banner's final `]` (the one that
+    -- closes [Book]) keeps rendering at the far edge.
+    local function buttons_visible()
+        local s = self.subviews.search
+        return s.text == '' and not s.focus
+    end
     panel:addviews{
         widgets.BannerPanel{
             frame = {l = 0, t = 0, r = 0, h = 1},
@@ -448,7 +465,6 @@ function AdvInventorySearchOverlay:init()
                 widgets.EditField{
                     view_id = 'search',
                     frame = {l = 1, t = 0, r = 1},
-                    label_text = 'Search: ',
                     key = 'CUSTOM_ALT_S',
                     -- last_text is captured HERE and not in the search handler (the handler
                     -- also runs with text='' on every reopen/context flip). But EditField's
@@ -466,6 +482,15 @@ function AdvInventorySearchOverlay:init()
                         self:do_search(text)
                     end,
                 },
+                -- 'Alt+s: ' fills interior cols 1-7; these overlays start at 8
+                widgets.Label{frame = {l = 8, t = 0, w = 1}, text = ']', visible = buttons_visible},
+                widgets.Label{frame = {l = 10, t = 0, w = 6}, text = '[Food]',
+                              on_click = preset('food'), visible = buttons_visible},
+                widgets.Label{frame = {l = 17, t = 0, w = 6}, text = '[Heal]',
+                              on_click = preset('healing'), visible = buttons_visible},
+                -- no closing bracket: the banner's own ']' at the bar's right edge finishes it
+                widgets.Label{frame = {l = 24, t = 0, w = 5}, text = '[Book',
+                              on_click = preset('book'), visible = buttons_visible},
             },
         },
     }
