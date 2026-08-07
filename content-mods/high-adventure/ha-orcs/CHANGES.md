@@ -1,5 +1,10 @@
 # ha-orcs — fork changelog
 
+## v0.30 -- no ranged weapons
+- Dropped `WEAPON:ITEM_WEAPON_CROSSBOW`/`BOW` (and their bolt/arrow `AMMO`) and
+  `PERMITTED_JOB:BOWYER`: the horde is melee-only now and has no members who know how
+  to make or use a bow or crossbow. Needs a fresh world.
+
 ## v0.25 -- population caps normalised
 - `MAX_SITE_POP_NUMBER` 80 -> 120.
 
