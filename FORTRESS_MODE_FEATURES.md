@@ -204,6 +204,22 @@ Reports raiding parties and a rough travel estimate, and retrieves stuck units.
 ### **`fort/caravan-teleport`**
 Teleports a stranded merchant caravan back onto the depot.
 
+### **`fort/loyal-retirees`**
+Brings a retired fortress's citizens home when you reclaim it. The roster is kept current as
+dwarves join and leave, so whatever the fort looked like when you retired is what gets
+summoned back — everyone still alive, however far they wandered.
+
+DF only turns an off-map historical figure back into a real unit when an army carrying them
+arrives, and armies can't be fabricated. So this fakes a diplomatic mission for one of your
+nobles, lets DF mint the army for it, and puts the returnees aboard: they come back as their
+original selves, with their skills, wounds, clothing and inventory intact. Progress is
+reported in DF's own announcement log.
+
+`loyal-retirees migrate <hf_id>...` uses the same machinery to summon anyone alive in the
+world by historical figure id, whether or not they ever lived here.
+
+![fort/loyal-retirees demo](demos/fort-loyal-retirees.webp)
+
 ### **`fort/worldgen-setup`**
 Sets up a fresh test world: selects every installed mod and maxes the civilization/site
 sliders from data, so only the Create-world click is left to you.
