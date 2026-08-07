@@ -48,7 +48,18 @@ local function ready_soon(u)
     if sqid < 0 then return true end                    -- not in a squad -> a plain civilian worker
     local sq = df.squad.find(sqid)
     if not sq then return true end
-    local routine = sq.schedule.routine[sq.cur_routine_idx]
+    -- Bounds-check BEFORE indexing: a df vector THROWS on an out-of-range index, it does not
+    -- return nil, so the `if not routine` guard below can never fire on its own. A citizen can
+    -- belong to a squad that is not the fortress's (a soldier who joined the fort keeps the
+    -- squad_id of their old civ's squad), and those foreign/worldgen squads carry an EMPTY
+    -- routine vector with cur_routine_idx 0 -- routine[0] then throws. That matters far beyond
+    -- this warning: gui/notify calls every dwarf_fn UNPROTECTED, so one throwing callback
+    -- aborts the overlay update and blanks the whole notification panel, DFHack's own
+    -- notifications included.
+    local routines = sq.schedule.routine
+    local ridx = sq.cur_routine_idx
+    if ridx < 0 or ridx >= #routines then return true end   -- no readable schedule -> don't warn
+    local routine = routines[ridx]
     if not routine then return true end                 -- can't read a schedule -> don't warn
     local pos = u.military.squad_position
     local cur = math.floor((df.global.cur_year_tick or 0) / MONTH_TICKS) % 12
