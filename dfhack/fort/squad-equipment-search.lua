@@ -46,10 +46,19 @@ local function select_item_pos()
     end
 end
 
+-- the item's type words: the type enum ("weapon", "helm") plus the subtype name where one exists
+-- ("battle axe", "breastplate"), so type words match even when the description is a bare name
+local function item_type_words(it)
+    local words = (df.item_type[it:getType()] or ''):lower():gsub('_', ' ')
+    local ok, sub = pcall(function() return it.subtype.name end)
+    if ok and type(sub) == 'string' then words = words .. ' ' .. sub end
+    return words
+end
+
 -- the searchable text for one entry: the specific item's readable description ("steel breastplate")
--- plus its material name. Plain items already name their material in the description, but artifacts
--- and other named items don't ("Onuletur, The Wayward Boulder (Short Sword)") -- appending the
--- material lets "steel" or "adamantine" find those too.
+-- plus its material and type names. Plain items already name both in the description, but artifacts
+-- and other named items don't ("Onuletur, The Wayward Boulder (Short Sword)") -- appending them
+-- lets "steel", "adamantine" or "short sword" find those too.
 local function get_item_search_key(item_id)
     local it = df.item.find(item_id)
     if not it then return '' end
@@ -57,7 +66,7 @@ local function get_item_search_key(item_id)
     local key = ok and desc or ''
     local ok2, mi = pcall(dfhack.matinfo.decode, it)
     if ok2 and mi then key = key .. ' ' .. mi:toString() end
-    return key
+    return key .. ' ' .. item_type_words(it)
 end
 
 SquadEquipmentSearchOverlay = defclass(SquadEquipmentSearchOverlay, sortoverlay.SortOverlay)

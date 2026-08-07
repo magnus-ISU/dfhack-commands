@@ -31,16 +31,27 @@ local function copy_to_lua_table(vec)
     return t
 end
 
+-- the item's type words: the type enum ("book", "crown") plus the subtype name where one exists
+-- ("scroll", "battle axe") -- written works describe as bare titles, so "book"/"scroll" would
+-- otherwise never match
+local function item_type_words(it)
+    local words = (df.item_type[it:getType()] or ''):lower():gsub('_', ' ')
+    local ok, sub = pcall(function() return it.subtype.name end)
+    if ok and type(sub) == 'string' then words = words .. ' ' .. sub end
+    return words
+end
+
 -- searchable text for a candidate: the item's readable description ("«☼steel crown☼»") plus its
--- material name -- plain descriptions already name the material, but artifacts and other named
--- items don't, so appending it lets "steel" or "adamantine" find those too
+-- material and type names -- plain descriptions already name both, but artifacts, books and
+-- other named items don't, so appending them lets "steel", "adamantine", "book" or "scroll"
+-- find those too
 local function item_key(it)
     if not it then return '' end
     local ok, d = pcall(dfhack.items.getReadableDescription, it)
     local key = ok and d or ''
     local ok2, mi = pcall(dfhack.matinfo.decode, it)
     if ok2 and mi then key = key .. ' ' .. mi:toString() end
-    return key
+    return key .. ' ' .. item_type_words(it)
 end
 
 local function symbol_search(data, text, incremental)
