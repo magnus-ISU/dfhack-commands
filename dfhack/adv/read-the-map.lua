@@ -121,7 +121,7 @@ local MAX_WIDTH = 60       -- tooltip line clamp, in text cells
 -- world_site_type -> what a player calls it ("LairShrine" is the lair marker;
 -- Monument is resolved by monument_kind below)
 local TYPE_NAMES = {
-    PlayerFortress = 'Abandoned Fortress',
+    PlayerFortress = 'Abandoned Fortress',   -- overridden to Retired when its government lives
     DarkFortress = 'Dark Fortress',
     Cave = 'Cave',
     MountainHalls = 'Mountain Halls',
@@ -167,9 +167,31 @@ local ENTITY_KIND = {
     Outcast = 'Outcast',
 }
 
+-- Retired vs abandoned player fort: both are world_site_type.PlayerFortress, and the site
+-- record itself is identical (civ_id -1, resident_count 0 -- measured on a retired fort).
+-- The difference lives in the ENTITY layer: RETIRING keeps the fort's site government as a
+-- live entity residing there (plus guild capitals, temple congregations...), while
+-- ABANDONING disbands it. So: any SiteGovernment with a residence link to the site means
+-- retired. Scanned once per hovered site (the tooltip is cached per cell).
+local function has_resident_government(site_id)
+    for _, e in ipairs(df.global.world.entities.all) do
+        if e.type == df.historical_entity_type.SiteGovernment then
+            for _, link in ipairs(e.site_links) do
+                if link.target == site_id and link.flags.residence then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 local function type_name(s)
     local raw = df.world_site_type[s.type] or tostring(s.type)
     if raw == 'Monument' then return monument_kind(s) end
+    if raw == 'PlayerFortress' and has_resident_government(s.id) then
+        return 'Retired Fortress'
+    end
     return TYPE_NAMES[raw] or raw:gsub('(%l)(%u)', '%1 %2')
 end
 
@@ -589,7 +611,6 @@ local function tile_info(mx, my)
             site_lines(s, lines)
         end
     end
-    local in_site = #lines > 0
     local player_army = df.global.adventure.player_army_id
     local armies = df.global.world.armies.all
     for i = 0, #armies - 1 do
@@ -598,8 +619,9 @@ local function tile_info(mx, my)
             army_lines(a, lines)
         end
     end
-    -- wilderness only: a hovered site keeps its card free of the region blurb
-    if not in_site then
+    -- empty wilderness only: anything that already has a card of its own -- a site, a
+    -- roaming army or creature -- keeps it free of the region blurb
+    if #lines == 0 then
         local region = region_at(mx, my)
         if region then pcall(region_lines, region, lines) end
     end
