@@ -14,8 +14,10 @@ Magic search words, combinable with each other and with normal terms:
   equip / equipped  only items you have equipped (not just hauled), ordered: things in your
                     hands, weapons and armor, clothing, rings and trinkets, everything else,
                     containers last
-  food              only food and drink (containers count if something edible is inside),
-                    drinks first
+  food              only food and drink, ordered: normal drinks, normal food, healing drinks,
+                    healing food, then food your ethics won't let you eat (sapient flesh --
+                    the same screen adv/always-be-satiated uses). Containers themselves are
+                    excluded; anything edible inside one has its own row
   healing / heal    only food/drink whose material carries a beneficial (healing) syndrome --
                     plain booze's intoxication syndrome does not count
 
@@ -95,7 +97,8 @@ end
 -- "heavy" sorts the (remaining) rows by weight, heaviest first. "equip"/"equipped" filters to
 -- items you actually have equipped -- invitem mode anything but Hauled -- with in-hand (Weapon
 -- mode) items first and containers (backpack, quiver, waterskin) last. "food" filters to food
--- and drink (a container counts if something edible/drinkable is inside), drinks first.
+-- and drink (containers excluded -- edible contents get their own rows), tiered: normal drinks,
+-- normal food, healing drinks, healing food, then ethics-refused sapient flesh last.
 -- "healing" filters to food/drink whose material carries a beneficial syndrome (the mythical
 -- healing loot; plain booze's intoxication syndrome does NOT count). Magic words combine with
 -- each other and with normal search terms.
@@ -217,21 +220,51 @@ local function item_heals(it)
     return false
 end
 
--- 'drink' | 'food' | nil for a row, looking inside containers: a waterskin with water in it is
--- a drink, a backpack with meals in it counts as food
-local function sustenance_class(row)
-    local it = row_item(row)
-    if not it then return nil end
-    if item_is_drink(it) then return 'drink' end
-    if item_is_food(it) then return 'food' end
-    local ok, contained = pcall(dfhack.items.getContainedItems, it)
-    if not ok then return nil end
-    local found
-    for _, c in ipairs(contained) do
-        if item_is_drink(c) then return 'drink' end
-        if not found and item_is_food(c) then found = 'food' end
+-- true when the material comes from a creature that can learn or speak (an illithid, an elf).
+-- DF refuses their flesh on your civ's ethics even though the raws mark it EDIBLE -- the same
+-- screen adv/always-be-satiated uses
+local function sapient_source(mi)
+    local cr = mi and mi.creature
+    if not cr then return false end
+    for _, c in ipairs(cr.caste) do
+        if c.flags.CAN_LEARN or c.flags.CAN_SPEAK then return true end
     end
-    return found
+    return false
+end
+
+-- may the adventurer eat sapients? Their civ's ethics decide (either EAT_SAPIENT ethic
+-- permitting is enough); outsiders have no civ and are refused. Mirrors always-be-satiated.
+local ER = df.ethic_response
+local function ethic_permits(v)
+    return (v >= ER.ACCEPTABLE and v <= ER.ONLY_IF_SANCTIONED) or v == ER.REQUIRED
+end
+local function may_eat_sapients()
+    local u = dfhack.world.getAdventurer()
+    local civ_id = u and u.civ_id or -1
+    if civ_id < 0 then
+        local nem = df.nemesis_record.find(df.global.adventure.player_id)
+        civ_id = nem and nem.figure and nem.figure.civ_id or -1
+    end
+    local civ = civ_id >= 0 and df.historical_entity.find(civ_id) or nil
+    local raw = civ and civ.entity_raw
+    if not raw then return false end
+    return ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_OTHER])
+        or ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_KILL])
+end
+
+-- The "food" tier of a row, nil for rows the food search excludes. Containers are excluded
+-- outright (the quiver and the jug are not food; anything edible INSIDE one gets its own row):
+--   0 normal drinks, 1 normal food, 2 healing drinks, 3 healing food,
+--   4 food/drink your ethics refuse to let you eat (illithid brains, for a dwarf)
+local function food_rank(row, allow_sapient)
+    local it = row_item(row)
+    if not it or is_container_row(row) then return nil end
+    local drink, food = item_is_drink(it), item_is_food(it)
+    if not (drink or food) then return nil end
+    if not allow_sapient and sapient_source(mat_of(it)) then return 4 end
+    local heals = item_heals(it)
+    if drink then return heals and 2 or 0 end
+    return heals and 3 or 1
 end
 
 -- the row is (or contains) food/drink whose material heals
@@ -247,15 +280,15 @@ local function row_heals(row)
     return false
 end
 
-local function make_sort(heavy, equipped, foodish)
+local function make_sort(heavy, equipped, foodish, allow_sapient)
     return function(a, b)
         if equipped then
             local ra, rb = equip_rank(a), equip_rank(b)
             if ra ~= rb then return ra < rb end
         end
         if foodish then
-            local fa = sustenance_class(a) == 'drink' and 0 or 1
-            local fb = sustenance_class(b) == 'drink' and 0 or 1
+            local fa = food_rank(a, allow_sapient) or 99
+            local fb = food_rank(b, allow_sapient) or 99
             if fa ~= fb then return fa < fb end
         end
         if heavy then
@@ -452,9 +485,11 @@ function AdvInventorySearchOverlay:init()
                 elseif t ~= '' then rest[#rest + 1] = tok end
             end
             local fns = {get_search_key_fn = get_row_search_key}
+            -- the ethics check hits entity records, so resolve it once per search, not per row
+            local allow_sapient = (food or healing) and may_eat_sapients() or false
             local filters = {}
             if equipped then filters[#filters + 1] = is_equipped end
-            if food then filters[#filters + 1] = function(row) return sustenance_class(row) ~= nil end end
+            if food then filters[#filters + 1] = function(row) return food_rank(row, allow_sapient) ~= nil end end
             if healing then filters[#filters + 1] = row_heals end
             if #filters > 0 then
                 fns.matches_filters_fn = function(row)
@@ -465,7 +500,7 @@ function AdvInventorySearchOverlay:init()
                 end
             end
             if heavy or equipped or food or healing then
-                fns.get_sort_fn = function() return make_sort(heavy, equipped, food or healing) end
+                fns.get_sort_fn = function() return make_sort(heavy, equipped, food or healing, allow_sapient) end
                 -- a magic word must act on the FULL list, but while typing one ("heav") the
                 -- previous keystroke's ordinary search already filtered the vector down --
                 -- force the non-incremental path so single_vector_search restores it first
