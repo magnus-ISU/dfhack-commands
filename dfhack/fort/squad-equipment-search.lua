@@ -23,11 +23,12 @@ local function squad_equipment()
     return df.global.game.main_interface.squad_equipment
 end
 
--- Find the "Select Item." label on the specific-item picker by reading the screen, and return the
--- SCREEN (col, row) where our search bar should sit: 2 columns to the right of that text (a trailing
--- '.' is folded into the label when drawn). Returns nil if the text isn't on screen yet so the
--- caller can retry next frame. Mirrors butcher-shop's dynamic [Butcher]-button placement.
-local SELECT_ITEM = 'Select Item'
+-- Find the "Select item." label on the specific-item picker by reading the screen, and return the
+-- SCREEN (col, row) where our search bar should sit: one row below the label, left-aligned with it.
+-- Matched case-insensitively -- DF draws it as "Select item." (lowercase i), which a literal
+-- "Select Item" find silently missed, leaving the bar stranded at default_pos. Returns nil if the
+-- text isn't on screen yet so the caller can retry next frame.
+local SELECT_ITEM = 'select item'
 local function select_item_pos()
     local sw, sh = dfhack.screen.getWindowSize()
     for y = 0, sh - 1 do
@@ -38,30 +39,34 @@ local function select_item_pos()
             chars[#chars + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
         end
         local line = table.concat(chars)
-        local c = line:find(SELECT_ITEM, 1, true)
+        local c = line:lower():find(SELECT_ITEM, 1, true)
         if c then
-            local len = #SELECT_ITEM
-            if line:sub(c + len, c + len) == '.' then len = len + 1 end   -- include the trailing period
-            return (c - 1) + len + 2, y                                    -- 0-based col, 2-column gap
+            return c - 1, y + 1   -- 0-based col of the label's first char, one row down
         end
     end
 end
 
 -- the searchable text for one entry: the specific item's readable description ("steel breastplate")
+-- plus its material name. Plain items already name their material in the description, but artifacts
+-- and other named items don't ("Onuletur, The Wayward Boulder (Short Sword)") -- appending the
+-- material lets "steel" or "adamantine" find those too.
 local function get_item_search_key(item_id)
     local it = df.item.find(item_id)
     if not it then return '' end
     local ok, desc = pcall(dfhack.items.getReadableDescription, it)
-    return ok and desc or ''
+    local key = ok and desc or ''
+    local ok2, mi = pcall(dfhack.matinfo.decode, it)
+    if ok2 and mi then key = key .. ' ' .. mi:toString() end
+    return key
 end
 
 SquadEquipmentSearchOverlay = defclass(SquadEquipmentSearchOverlay, sortoverlay.SortOverlay)
 SquadEquipmentSearchOverlay.ATTRS{
     desc = 'Adds a search bar to the squad-equipment "specific item" list.',
-    default_pos = {x = 23, y = 23},   -- fallback until it snaps 2 cols right of the "Select Item." label
+    default_pos = {x = 23, y = 23},   -- fallback until it snaps below the "Select Item." label
     viewscreens = 'dwarfmode/Squads/Equipment/Customizing',
     frame = {w = 34, h = 1},
-    version = 2,                        -- bumped: now dynamically positioned (resets any saved pos)
+    version = 4,                        -- bumped: placement moved below the label (resets any saved pos)
 }
 
 function SquadEquipmentSearchOverlay:init()
@@ -121,7 +126,7 @@ function SquadEquipmentSearchOverlay:get_key()
     end
 end
 
--- snap the search bar 2 columns right of the "Select Item." label (frame coords are relative to the
+-- snap the search bar one row below the "Select Item." label, left-aligned (frame coords are relative to the
 -- interface rect, so convert the screen position by the interface origin). False until it's drawn.
 function SquadEquipmentSearchOverlay:reposition()
     local col, row = select_item_pos()

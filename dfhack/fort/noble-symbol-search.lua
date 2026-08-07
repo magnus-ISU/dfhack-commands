@@ -31,11 +31,16 @@ local function copy_to_lua_table(vec)
     return t
 end
 
--- searchable text for a candidate: the item's readable description ("«☼steel crown☼»")
+-- searchable text for a candidate: the item's readable description ("«☼steel crown☼»") plus its
+-- material name -- plain descriptions already name the material, but artifacts and other named
+-- items don't, so appending it lets "steel" or "adamantine" find those too
 local function item_key(it)
     if not it then return '' end
     local ok, d = pcall(dfhack.items.getReadableDescription, it)
-    return ok and d or ''
+    local key = ok and d or ''
+    local ok2, mi = pcall(dfhack.matinfo.decode, it)
+    if ok2 and mi then key = key .. ' ' .. mi:toString() end
+    return key
 end
 
 local function symbol_search(data, text, incremental)
