@@ -6,7 +6,8 @@ In adventure mode the inventory panel closes the moment you act -- drop somethin
 back on the map, so emptying a pack means pressing `d`, pick, `d`, pick, `d`, pick. With
 keep-inventory ENABLED the panel is reopened for you after every action, and reopened in the
 SAME mode you were working in (drop stays drop, wear stays wear), scrolled back to where you
-were. Closing it with ESCAPE does NOT reopen it -- that's how you leave: press Esc.
+were, with adv/inventory-search's filter re-applied if one was typed. Closing it with ESCAPE
+does NOT reopen it -- that's how you leave: press Esc.
 
 SCROLL -- two things had to be true for this to work at all, both non-obvious:
 
@@ -98,6 +99,7 @@ g_feed = g_feed or 0      -- A_GROUND fed
 g_back = g_back or 0      -- pickup list confirmed back open
 g_dead = g_dead or 0      -- gave up: fed repeatedly, list never came back
 g_note = g_note or ''     -- last gate detail
+seed_note = seed_note or ''  -- last search-restore attempt result
 
 local CTX = df.adventure_interface_inventory_context_type
 local LIST = df.adventure_inventory_option_list_type
@@ -326,6 +328,16 @@ function KeepInventory:overlay_onupdate()
         if self.job and self.job.stage == 'verify' then
             reopens = reopens + 1
             self.restore_until = dfhack.getTickCount() + RESTORE_MS
+            -- bring the search filter back too: re-seed adv/inventory-search with the text
+            -- that was in its box before the action closed the panel (Esc'd closes never get
+            -- here, so a deliberate leave still opens clean next time)
+            local ok, invsearch = pcall(reqscript, 'adv/inventory-search')
+            if ok and invsearch.restore_last_search then
+                local ok2, err = pcall(invsearch.restore_last_search)
+                seed_note = ok2 and 'called' or ('restore err: ' .. tostring(err))
+            else
+                seed_note = 'reqscript failed: ' .. tostring(invsearch)
+            end
         end
         self.was_open = true
         self.escaped = false
@@ -414,6 +426,10 @@ function KeepInventory:overlay_onupdate()
         if self.escaped then                    -- Esc / right-click: that is how you leave
             self.escaped = false
             escapes = escapes + 1
+            -- a deliberate leave also forgets the search filter, so a later action-reopen
+            -- doesn't resurrect it from a previous stay in the panel
+            local ok, invsearch = pcall(reqscript, 'adv/inventory-search')
+            if ok and invsearch.clear_last_search then pcall(invsearch.clear_last_search) end
             return
         end
         -- anything else that closed it was an action -> bring it back
