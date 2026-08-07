@@ -82,7 +82,9 @@ ItemDescriptionOverlay.ATTRS{
     -- x is a RIGHT-edge inset (negative pos anchors frame.r), so narrowing w
     -- moves only the LEFT edge; the right edge stays put
     default_pos = {x = -40, y = 12},
-    viewscreens = 'dwarfmode/ViewSheets/ITEM',
+    -- the same view sheet exists in both modes (adventure focuses it as dungeonmode/...),
+    -- and main_interface.view_sheets is shared, so one overlay serves both
+    viewscreens = {'dwarfmode/ViewSheets/ITEM', 'dungeonmode/ViewSheets/ITEM'},
     frame = {w = 55, h = 34},
 }
 
@@ -177,6 +179,19 @@ local function find_geometry(vs)
     local in_row
     for _, y in ipairs(pill_rows) do
         if read_row_text(y):sub(left + 1, left + SPAN_W):match('%S') then in_row = y break end
+    end
+    if not in_row then
+        -- No View pill: UNIT-held items ("With Adventurer" in adventure mode) render a bare
+        -- text line with no button -- but WITH the same 5x3 anchored icon sprite (the
+        -- player's portrait art; measured rows 19-21 at the panel's left). Find the line by
+        -- TEXT, below DF's native description box (prose inside the box can begin with
+        -- "With"; rows below it cannot), then fall through to the SAME capture block: the
+        -- pill scan simply finds nothing, and the icon capture picks up the portrait so
+        -- move_in_line re-stamps it beside the moved line.
+        for y = remove_row + DF_VISIBLE_ROWS + 1, math.min(remove_row + 16, dimy - 1) do
+            local t = read_row_text(y):sub(left + 1, left + SPAN_W)
+            if t:match('^%s*With%s%S') then in_row = y break end
+        end
     end
     if in_row then
         g.in_row = in_row
