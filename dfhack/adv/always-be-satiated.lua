@@ -448,18 +448,26 @@ AlwaysSatiated.ATTRS{
     overlay_onupdate_max_freq_seconds = 0,
 }
 
+-- The mute marker is a MODULE global, not an instance field: `overlay rescan` replaces widget
+-- instances, and a rescan landing mid-consumption used to orphan an instance-held flag -- the
+-- new instance knew nothing of the mute and keep-inventory stayed off until the next map load.
+-- (That was the mysterious keep-inventory self-disabling: this adventurer is hungry nearly
+-- always, so consumptions were in flight whenever a deploy rescanned.) The module env survives
+-- rescan, and the idle watchdog in overlay_onupdate restores from it.
+ki_muted = ki_muted or false
+
 function AlwaysSatiated:mute_keep_inventory()
     local ki = keep_inventory()
-    self.ki_muted = false
+    ki_muted = false
     if ki and ki.isEnabled and ki.isEnabled() then
         ki.enabled = false
-        self.ki_muted = true
+        ki_muted = true
     end
 end
 
 function AlwaysSatiated:restore_keep_inventory()
-    if not self.ki_muted then return end
-    self.ki_muted = false
+    if not ki_muted then return end
+    ki_muted = false
     local ki = keep_inventory()
     if ki then ki.enabled = true end
 end
@@ -600,6 +608,9 @@ function AlwaysSatiated:overlay_onupdate()
     if not enabled then self:reset(); return end
     if not dfhack.world.isAdventureMode() then return end
     if self.job then self:drive(); return end
+    -- watchdog: no consumption in flight but the mute flag is set -- this instance was born
+    -- from a rescan that killed the muting instance mid-action. Give keep-inventory back.
+    if ki_muted then self:restore_keep_inventory() end
     if now() < (self.hold_until or 0) then return end
     -- the plain adventure screen only: focus rules out panels and dialogs, walking_around
     -- rules out fast travel (which the focus string looks identical to)

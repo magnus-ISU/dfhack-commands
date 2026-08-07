@@ -44,9 +44,12 @@ contexts has its own interface key, so the reopen just re-feeds the key for the 
 panel was in when it closed. If the panel does not come back after a few tries it gives up
 quietly rather than spamming input.
 
-WHAT COUNTS AS "AN ACTION" -- everything that is not a close GESTURE. Escape and right-click
-dismiss the panel and are recorded in onInput (without being consumed); any other way the panel
-closes is treated as an action and reopened.
+WHAT COUNTS AS "AN ACTION" -- everything that is not a close GESTURE. Escape, right-click and
+a click on the header's Done button dismiss the panel and are recorded in onInput (without
+being consumed); any other way the panel
+closes is treated as an action and reopened. EXCEPT reading: a read prints the book's text into
+the announcement feed -- the same screen area the reopened panel would cover -- so when the
+reports appended since the panel was open start with "You read ", the reopen is skipped.
 
 Do NOT try to detect an action by watching for the game to take a turn. `adventure`'s
 last_took_input_* stamp does not advance for inventory actions (it sat at year 100 in a year-250
@@ -89,6 +92,7 @@ closes = closes or 0      -- panel closed while we were watching
 escapes = escapes or 0    -- ...of those, closed by Esc/right-click (no reopen)
 reopens = reopens or 0    -- panel confirmed back open after our key feed
 restores = restores or 0  -- scroll offset written back
+reads = reads or 0        -- reopens skipped because the action was reading a book
 
 -- pick-up list (ground) flow, separately countable: these say WHICH gate a
 -- failed reopen died at, which is unobservable in game
@@ -166,6 +170,40 @@ local function row_count()
     return n
 end
 
+-- Was this left-click on the panel's "Done" button? Done lives on the header row (the one
+-- carrying "Your inventory ... Burden ... Done"), so a row within one tile of the click must
+-- contain "burden" AND the mouse must sit on a "done" with 3 tiles of horizontal padding
+-- (the drawn button is wider than its label). Scraped per CLICK, not per frame, so the row
+-- reads are cheap. Clicking Done is a deliberate leave, like Escape.
+local function clicked_done()
+    local mx, my = df.global.gps.mouse_x, df.global.gps.mouse_y
+    if not mx or mx < 0 or not my or my < 0 then return false end
+    local sw, sh = dfhack.screen.getWindowSize()
+    for dy = -1, 1 do                              -- one tile of vertical padding
+        local y = my + dy
+        if y >= 0 and y < sh then
+            local chars = {}
+            for x = 0, sw - 1 do
+                local ok, pen = pcall(dfhack.screen.readTile, x, y)
+                local ch = (ok and pen and pen.ch) or 0
+                chars[#chars + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+            end
+            local ll = table.concat(chars):lower()
+            if ll:find('burden', 1, true) then
+                local s = 1
+                while true do
+                    local c, e = ll:find('done', s, true)
+                    if not c then break end
+                    -- find() is 1-based, the mouse is 0-based: the word covers cols c-1..e-1
+                    if mx >= c - 4 and mx <= e + 2 then return true end
+                    s = e + 1
+                end
+            end
+        end
+    end
+    return false
+end
+
 local function on_map()
     return (dfhack.gui.getCurFocus(true)[1] or '') == 'dungeonmode/Default'
 end
@@ -202,6 +240,7 @@ local RESTORE_MS = 400
 function KeepInventory:reset()
     self.was_open = false
     self.escaped = false
+    self.report_n = nil
     self.job = nil
     self.context = CTX.MAIN
     self.scroll = 0
@@ -233,6 +272,22 @@ function KeepInventory:hold_ol_scroll()
         ol().scroll_position = math.max(0, math.min(self.ol_scroll, n - 1))
         restores = restores + 1
     end
+end
+
+-- Did the action that closed the panel READ something? Reading prints the book's text into the
+-- announcement feed ("You read An Exploration of the Farm."), in the same screen area a
+-- reopened inventory panel covers -- so a read must NOT reopen. Detected from the reports
+-- appended since the panel was last seen open; there is no screen or struct to test, the read
+-- happens entirely inline.
+function KeepInventory:read_just_happened()
+    local base = self.report_n
+    if not base then return false end
+    local reports = df.global.world.status.reports
+    for i = base, #reports - 1 do
+        local ok, txt = pcall(function() return reports[i].text end)
+        if ok and txt and txt:sub(1, 9) == 'You read ' then return true end
+    end
+    return false
 end
 
 -- Drive a pending reopen across frames (job.kind nil = inventory panel, 'ground' = pick-up list):
@@ -292,6 +347,12 @@ function KeepInventory:drive()
             g_feed = g_feed + 1
             feed('A_GROUND')
         else
+            -- checked here, after the turn resolved, so the read's reports have landed
+            if self:read_just_happened() then
+                reads = reads + 1
+                self.job = nil
+                return
+            end
             feed(CONTEXT_KEY[self.context] or 'A_INV_LOOK')
         end
         job.stage, job.tries = 'verify', 0
@@ -341,6 +402,9 @@ function KeepInventory:overlay_onupdate()
         end
         self.was_open = true
         self.escaped = false
+        -- reports high-water mark while the panel is up: anything past this at reopen time was
+        -- printed by the closing action (how read_just_happened knows the read was THIS action)
+        self.report_n = #df.global.world.status.reports
         if dfhack.getTickCount() < (self.restore_until or 0) then
             -- still re-asserting after a reopen: keep writing our value, and do NOT read
             -- DF's back over it, or the zero it just wrote becomes the new "saved" position
@@ -450,6 +514,10 @@ function KeepInventory:onInput(keys)
     -- closes it is an action, and gets reopened.
     if enabled and inv().open then
         if keys.LEAVESCREEN or keys._MOUSE_R or keys._MOUSE_R_DOWN then
+            self.escaped = true
+        end
+        -- the header's Done button is the third way to deliberately leave
+        if keys._MOUSE_L and clicked_done() then
             self.escaped = true
         end
     end
