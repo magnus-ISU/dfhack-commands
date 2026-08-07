@@ -57,6 +57,13 @@ Sort "heat ice" / "heat snow" options to the top of interact menus.
 
 ![adv/heat-ice demo](demos/adv-sort-ice.png)
 
+### **`adv/advfort`** 
+Do fort jobs as an adventurer: community rework of DFHack's paused `gui/advfort`
+  (jobs on CAREFUL move, so walking and the look cursor work; separate Smooth vs
+  Detail/engrave jobs) plus local fixes: the "you haven't acted in a while" prompt
+  no longer wedges a long wait, and Smooth jobs designate their tile and actually
+  smooth it on completion.
+
 ### **`adv/keep-talking`** 
 Automatically reopen a conversation you are participating in.
 
