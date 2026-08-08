@@ -12,8 +12,9 @@ omits them. Clearing the search (or switching context / reopening) restores the 
 Magic search words, combinable with each other and with normal terms:
   heavy             sort the rows by weight, heaviest first
   equip / equipped  only items you have equipped (not just hauled), ordered: things in your
-                    hands, weapons and armor, clothing, rings and trinkets, everything else,
-                    containers last
+                    hands (always first, even a jug), weapons and tools strapped to your body,
+                    the rest of the weapons and armor, clothing, rings and trinkets,
+                    everything else, containers last
   food              only food and drink, ordered: normal drinks, normal food, healing drinks,
                     healing food, then food your ethics won't let you eat (sapient flesh --
                     the same screen adv/always-be-satiated uses). Containers themselves are
@@ -21,9 +22,9 @@ Magic search words, combinable with each other and with normal terms:
   healing / heal    only food/drink whose material carries a beneficial (healing) syndrome --
                     plain booze's intoxication syndrome does not count
 
-With no search active, the list itself is shown in the same "equip" order (hands, weapons and
-armor, clothing, rings and trinkets, the rest, containers), moved as whole blocks so container
-contents stay under their container. Armor vs clothing is the itemdef's armorlevel: a mail
+With no search active, the list itself is shown in the same "equip" order (hands, strapped
+weapons/tools, weapons and armor, clothing, rings and trinkets, the rest, containers), moved
+as whole blocks so container contents stay under their container. Armor vs clothing is the itemdef's armorlevel: a mail
 shirt is armor, a dress is clothing.
 
 When adv/keep-inventory auto-reopens the panel after an action, it calls restore_last_search()
@@ -158,22 +159,24 @@ local JEWELRY = {
     [df.item_type.BRACELET] = true, [df.item_type.CROWN] = true,
 }
 
--- the "equip" display rank: 0 things in your hands, 1 weapons and armor, 2 clothing,
--- 3 rings and trinkets, 4 everything else, 5 containers, 6 spatter/coating rows (no
--- resolvable item) at the very bottom
+-- the "equip" display rank: 0 things in your hands (ALWAYS, even a jug or a backpack --
+-- what you're holding right now belongs at the top), 1 weapons and tools strapped to your
+-- body, 2 the rest of the weapons and armor, 3 clothing, 4 rings and trinkets, 5 everything
+-- else, 6 containers, 7 spatter/coating rows (no resolvable item) at the very bottom
 local function equip_rank(row)
-    if is_container_row(row) then return 5 end
     if in_hands(row) then return 0 end
+    if row_mode(row) == df.inv_item_role_type.Strapped then return 1 end
+    if is_container_row(row) then return 6 end
     local it = row_item(row)
-    if not it then return 6 end
+    if not it then return 7 end
     local t = it:getType()
-    if WEAPONISH[t] then return 1 end
+    if WEAPONISH[t] then return 2 end
     if WEARABLE[t] then
         local ok, lvl = pcall(function() return it.subtype.armorlevel end)
-        return (ok and lvl and lvl > 0) and 1 or 2
+        return (ok and lvl and lvl > 0) and 2 or 3
     end
-    if JEWELRY[t] then return 3 end
-    return 4
+    if JEWELRY[t] then return 4 end
+    return 5
 end
 
 -- ---- food / drink / healing classification ----------------------------------
@@ -323,7 +326,7 @@ local function default_order(vec)
         end
     end
     local out = {}
-    for rank = 0, 6 do
+    for rank = 0, 7 do
         for _, b in ipairs(blocks) do
             if b.rank == rank then
                 for _, r in ipairs(b.rows) do out[#out + 1] = r end

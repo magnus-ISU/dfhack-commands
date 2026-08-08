@@ -41,7 +41,7 @@ Show every item's weight in the inventory list and the pick-up menu.
 ### **`adv/inventory-search`** 
 Search the inventory list (Alt-S) by item description, material or type.
   Magic words: `heavy` sorts by weight, `equip`/`equipped` shows equipped items
-  (hands first, containers last), `food` shows food and drink (drinks, food,
+  (hands always first, then strapped weapons/tools, containers last), `food` shows food and drink (drinks, food,
   healing drinks, healing food, then ethics-refused sapient flesh; containers
   excluded), `healing` shows food/drink with beneficial syndromes. The unsearched list
   displays in the equip order by default. keep-inventory reopens keep the filter.
