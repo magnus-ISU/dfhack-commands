@@ -328,7 +328,7 @@ Search the inventory list (Alt-S) by item description, material or type.
 ![adv/inventory-search sort demo](demos/adv-sort-inventory.png)
 
 ### **`adv/travelling-hunger`** 
-Show how many meals and drinks you need on the fast-travel screen's top row.
+Show how many meals, drinks and 8-hour sleeps you need on the fast-travel screen's top row.
 
 ### **`adv/heat-ice`** 
 Sort "heat ice" / "heat snow" options to the top of interact menus.
