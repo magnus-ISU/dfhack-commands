@@ -17,8 +17,15 @@ off 2/tick, so a full 8-hour sleep clears 8*7200*2 = 115200 -- exactly the 16 wa
 of a balanced day, which is why one night's sleep normally resets you. "Sleep: N" is how
 many such sleeps until you're under the Drowsy line.
 
-The adventurer unit stays readable through dfhack.world.getAdventurer() while the Travel
-screen is up at the starting position, so the overlay just reads three ints per render.
+The adventurer unit is readable through dfhack.world.getAdventurer() only while the Travel
+screen sits at the starting position; the moment travel moves, the local map unloads and the
+character is abstracted into an ARMY. The army's member entry (army_nemesisst) carries its
+own hunger_timer/thirst_timer/sleepiness_timer -- the same field names -- which DF ticks
+during travel and writes back to the unit on arrival. So mid-travel we read the counters
+from the player army instead: the army in world.armies.all with flags.player set, member
+whose nemesis_id is adventure.player_id. The armies vector runs to four digits in a mature
+world, so the found army id is cached and the linear hunt is throttled to a cache miss twice
+a second.
 
 Auto-discovered by `overlay rescan` (magnus-scripts runs it); no enable needed.
 ]]
@@ -76,12 +83,45 @@ local function describe(v, threshold, per)
     return tostring(behind), severity_pen(behind)
 end
 
-function TravellingHungerOverlay:onRenderBody(dc)
+-- The struct holding the live counters: the unit's counters2 while the unit is loaded, else
+-- the player army's member entry (mid-travel the unit is offloaded and DF ticks the army's
+-- copy). Both spell the fields hunger_timer / thirst_timer / sleepiness_timer.
+--
+-- The armies vector is NOT small (1136 in the current world), and this runs every render
+-- frame, so the linear hunt for the player flag happens only on a cache miss -- and at most
+-- twice a second, for the frames between travel starting and DF minting the army. Once found,
+-- df.army.find (a binsearch) revalidates the cached id each frame.
+local cached_army_id, next_hunt
+local function player_counters()
     local u = dfhack.world.getAdventurer()
-    if u then
-        self.hunger_text, self.hunger_pen = describe(u.counters2.hunger_timer, HUNGRY, PER_ITEM)
-        self.thirst_text, self.thirst_pen = describe(u.counters2.thirst_timer, THIRSTY, PER_ITEM)
-        self.sleep_text, self.sleep_pen = describe(u.counters2.sleepiness_timer, DROWSY, PER_SLEEP)
+    if u then return u.counters2 end
+    local army = cached_army_id and df.army.find(cached_army_id)
+    if army and not army.flags.player then army = nil end
+    if not army then
+        cached_army_id = nil
+        local now = dfhack.getTickCount()
+        if now < (next_hunt or 0) then return end
+        next_hunt = now + 500
+        for _, a in ipairs(df.global.world.armies.all) do
+            if a.flags.player then
+                cached_army_id, army = a.id, a
+                break
+            end
+        end
+        if not army then return end
+    end
+    local pid = df.global.adventure.player_id
+    for _, mem in ipairs(army.members) do
+        if mem.nemesis_id == pid then return mem end
+    end
+end
+
+function TravellingHungerOverlay:onRenderBody(dc)
+    local ok, c = pcall(player_counters)
+    if ok and c then
+        self.hunger_text, self.hunger_pen = describe(c.hunger_timer, HUNGRY, PER_ITEM)
+        self.thirst_text, self.thirst_pen = describe(c.thirst_timer, THIRSTY, PER_ITEM)
+        self.sleep_text, self.sleep_pen = describe(c.sleepiness_timer, DROWSY, PER_SLEEP)
     else
         self.hunger_text, self.hunger_pen = '?', COLOR_GREY
         self.thirst_text, self.thirst_pen = '?', COLOR_GREY
