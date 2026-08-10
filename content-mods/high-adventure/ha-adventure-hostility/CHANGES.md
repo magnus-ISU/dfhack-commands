@@ -5,6 +5,15 @@ items, or entity) -- it ships a single overlay script,
 `scripts_modactive/high-adventure/adventure-hostility.lua`, auto-discovered on
 world load.
 
+## v0.19 -- prisoners are never dragged into the fight
+
+- **CHAINED and CAGED units are now exempt from the whole engine.** Local doctrine
+  reads off the ground (v0.18), so a rescue-quest captive of a friendly race held at a
+  hostile site was inheriting its captor's doctrine and could be thrown into a Conflict
+  against the very adventurer come to free them. Captives are now skipped outright,
+  everywhere: never targeted, never counted as a dragon overlord for the kobold NOFEAR/
+  Pacify signal, never counted as a dragon-challenge rival or retinue member.
+
 ## v0.18 -- town ethics decide who fights; illithid thralls get a kit
 
 - **Doctrine is territorial now, not racial.** Standing in a settlement, a creature follows

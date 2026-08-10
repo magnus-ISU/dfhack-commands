@@ -32,6 +32,12 @@ opposing the adventurer (creating one if needed) -- the same state the game buil
 when you attack someone -- so it targets the player specifically rather than using
 a blunt [CRAZED] that would also make them gut their own immigrants.
 
+PRISONERS ARE EXEMPT, OUTRIGHT. A CHAINED or CAGED unit is never touched by any rule in
+this file, in any role -- not targeted, not counted as a dragon overlord or challenger.
+Local doctrine reads off the ground, so without this a rescue target of a friendly race
+held captive at a hostile site would inherit its captor's doctrine and get thrown into a
+Conflict against the very adventurer come to free them.
+
 PACIFY WORKS TWO WAYS, and the first one matters most: an adventurer whose Pacify
 skill meets the target race's threshold AND who has NOT DRAWN A WEAPON is never made
 hostile at all. You do not have to fight anyone first -- walk in sheathed and a good
@@ -221,6 +227,16 @@ local function is_person(u)
     local caste = cr and cr.caste[u.caste]
     if not caste then return false end
     return caste.flags.CAN_SPEAK or caste.flags.CAN_LEARN
+end
+
+-- CHAINED/CAGED units are prisoners, not combatants -- the classic case being an
+-- adventure-mode rescue target held at a hostile site. Local doctrine reads off the
+-- GROUND (see site_doctrine_race above), so without this guard a captive of a friendly
+-- race would inherit their captor's hostile doctrine and get dragged into a Conflict
+-- against the very adventurer who came to free them. Exempted outright, everywhere in
+-- this engine -- never targeted, never counted as a dragon overlord/challenger.
+local function is_captive(u)
+    return u.flags1.chained or u.flags1.caged
 end
 
 -- a kobold-civ dragon OVERLORD (NOT the HA_ANCIENT_DRAGON MEGABEAST, which is a separate
@@ -463,7 +479,7 @@ local function process()
     local rival_dragons = {}
     if adv_is_dragon then
         for _, u in ipairs(df.global.world.units.active) do
-            if u.id ~= adv.id and dfhack.units.isAlive(u) and is_ancient_dragon(u) then
+            if u.id ~= adv.id and dfhack.units.isAlive(u) and not is_captive(u) and is_ancient_dragon(u) then
                 rival_dragons[#rival_dragons + 1] = u
             end
         end
@@ -477,7 +493,7 @@ local function process()
     local dragon_on_screen = false
     if kobolds_active or adv_is_dragon or #conditional_nofear > 0 then
         for _, u in ipairs(df.global.world.units.active) do
-            if u.id ~= adv.id and dfhack.units.isAlive(u)
+            if u.id ~= adv.id and dfhack.units.isAlive(u) and not is_captive(u)
                 and creature_id(u.race) == 'HA_KOBOLD' and is_dragon_caste(u) and on_screen(u) then
                 dragon_on_screen = true
                 break
@@ -492,7 +508,7 @@ local function process()
     if #active == 0 and #rival_dragons == 0 then return end
 
     for _, u in ipairs(df.global.world.units.active) do
-        if u.id ~= adv.id and dfhack.units.isAlive(u) and dist(u, adv) <= RANGE then
+        if u.id ~= adv.id and dfhack.units.isAlive(u) and not is_captive(u) and dist(u, adv) <= RANGE then
             local cid = creature_id(u.race)
             -- Members of the adventurer's OWN civilization never turn on them:
             -- civ membership beats race. A dwarf snatched and raised by the drow
