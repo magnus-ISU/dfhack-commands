@@ -97,7 +97,7 @@ MERGED_SUBDIRS := objects graphics scripts_modactive
 # "current"), so never let -j interleave these.
 .NOTPARALLEL:
 .PHONY: help install install-scripts install-mods check-bundle prune-snapshots mods-status \
-        install-plugin build enable disable status uninstall readme
+        install-plugin build enable disable status uninstall readme docs-todo
 
 help:
 	@echo "dfhack-commands — make targets:"
@@ -453,6 +453,28 @@ status:
 
 uninstall:
 	@rm -fv "$(SO)"
+
+# Which scripts lack a README section, and which sections lack a demo image.
+# Sections live in *_MODE_FEATURES.md as "### **`prefix/name`**" headings; an image is any
+# "![...](...)" line inside the section. magnus-scripts is documented in README-HEADER.md.
+docs-todo:
+	@bt=$$(printf '\140'); miss=0; noimg=0
+	for f in dfhack/fort/*.lua dfhack/adv/*.lua dfhack/embark/*.lua; do
+	  name=$${f#dfhack/}; name=$${name%.lua}
+	  case $$name in fort/*) doc=FORTRESS_MODE_FEATURES.md ;; *) doc=ADVENTURE_MODE_FEATURES.md ;; esac
+	  if grep -q "### \*\*$${bt}$$name$${bt}" "$$doc"; then
+	    if ! awk -v pat="$${bt}$$name$${bt}" \
+	        '/^### /{if(s)exit; if(index($$0,pat))s=1; next} s&&/^!\[/{found=1} END{exit found?0:1}' "$$doc"; then
+	      echo "NO IMAGE:  $$name  ($$doc)"; noimg=$$((noimg+1))
+	    fi
+	  elif grep -q "$$name" README-HEADER.md; then :
+	  else
+	    echo "NO DOCS:   $$name  (add to $$doc)"; miss=$$((miss+1))
+	  fi
+	done
+	echo ""
+	echo "$$miss script(s) undocumented, $$noimg documented without an image."
+	echo "(edit the *_MODE_FEATURES.md part files, put images in demos/, then run 'make readme')"
 
 # Concatenate the part files into README.md. Written to a temp file and moved into place, so a
 # missing part cannot leave a half-built README behind.

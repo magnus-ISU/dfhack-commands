@@ -223,6 +223,38 @@ local ENTRIES = {
 -- one fully alphabetical list (by shown label) so anything is easy to find by name
 table.sort(ENTRIES, function(a, b) return a[1] < b[1] end)
 
+-- ---- civ custom workshops ----------------------------------------------------
+-- Modded custom workshops the FORT CIV can build (its entity_raw's
+-- PERMITTED_BUILDING list) appear in DF's native build menu under Workshops by
+-- their building_def name -- exactly how the vanilla customs (Soap Maker, Screw
+-- Press) are driven above, so the same label-click navigation works. Added at
+-- runtime since they depend on the loaded fort's civ; refreshed when it changes.
+local custom_civ = nil
+local function refresh_custom_workshops()
+    if not dfhack.isMapLoaded() then return end
+    local civ_id = df.global.plotinfo.civ_id
+    if civ_id == custom_civ then return end
+    custom_civ = civ_id
+    for i = #ENTRIES, 1, -1 do
+        if ENTRIES[i][3] and ENTRIES[i][3].civ_custom then table.remove(ENTRIES, i) end
+    end
+    local civ = df.historical_entity.find(civ_id)
+    if civ then
+        local have = {}
+        for _, e in ipairs(ENTRIES) do have[e[2][#e[2]]] = true end
+        for _, bid in ipairs(civ.entity_raw.workshops.permitted_building_id) do
+            for _, bd in ipairs(df.global.world.raws.buildings.all) do
+                if bd.id == bid and not have[bd.name] then
+                    have[bd.name] = true
+                    table.insert(ENTRIES, {bd.name:sub(1, COL_W - 2), {'Workshops', bd.name},
+                                           {civ_custom = true, alias = 'custom workshop'}})
+                end
+            end
+        end
+    end
+    table.sort(ENTRIES, function(a, b) return a[1] < b[1] end)
+end
+
 -- ---- native-menu driver ------------------------------------------------------
 
 -- read one screen row as a string
@@ -473,6 +505,7 @@ function DigBuilding:max_scroll()
 end
 
 function DigBuilding:overlay_onupdate()
+    pcall(refresh_custom_workshops)
     self.search = self.search or ''
     self.visible = dig_active()
     if not self.visible then                               -- reset when the picker closes:
