@@ -19,19 +19,23 @@ plus the **Dwarf Fortress: High Adventure** content-mod suite.
 
 ## Turning it all on — `magnus-scripts`
 
-`magnus-scripts` is the switch for the whole pack. Run it once per session — or add it to
-`dfhack-config/init/dfhack.init` and forget about it — and every always-on helper below is
-enabled at once: the notification overlays, the watchdog services, the map and stockpile
-tools. Anything destructive or situational is deliberately left out and stays a command you
-run by hand.
+`magnus-scripts` is the switchboard for the whole pack. Running it opens a window with four
+individually-scrollable columns — `fort/`, `adv/`, `embark/` and vanilla DFHack tools — with
+a checkbox per helper. Click a row to toggle it; the selection is saved (to
+`dfhack-config/magnus-scripts.json`) and re-applied automatically on every map load. Column
+headers toggle a whole column, `m` toggles all the mod columns at once, and `r` is the
+recommended master switch: everything on. On a fresh install everything starts enabled.
 
 ```sh
-magnus-scripts          # enable the always-on helpers for this session
-magnus-scripts lovely   # ...plus a batch of stock DFHack tools and a few extras
+fort/magnus-scripts           # apply the saved selection, then open the GUI
+fort/magnus-scripts apply     # headless apply (what the auto-run line calls)
+fort/magnus-scripts disable   # everything off + remove the auto-run line
 ```
 
 It is safe to re-run at any time: each helper it starts is idempotent, and it disables and
-re-enables its own services rather than stacking them.
+re-enables its own services rather than stacking them. Anything destructive or situational
+(no-pausing, embark-nobles, the one-shot commands) is deliberately left out and stays a
+command you run by hand.
 
 ---
 
@@ -340,7 +344,41 @@ Do fort jobs as an adventurer: community rework of DFHack's paused `gui/advfort`
   (jobs on CAREFUL move, so walking and the look cursor work; separate Smooth vs
   Detail/engrave jobs) plus local fixes: the "you haven't acted in a while" prompt
   no longer wedges a long wait, and Smooth jobs designate their tile and actually
-  smooth it on completion.
+  smooth it on completion. Fell Tree really fells trees (DF's adventure engine
+  silently discards FellTree jobs, so advfort does the work itself: axe-skill-timed
+  chopping, then the tree comes down — one log per trunk tile at the base, Wood
+  Cutter experience awarded; neighboring trees are untouched). The window's Build
+  line shows the current building
+  selection and a map click builds exactly that, dialog-free; clicking the Build
+  line opens the picker — one flat searchable list of everything buildable in a
+  dig-building-style multi-column left-anchored panel, with a materials pane
+  alongside showing which items each slot will consume (click to swap among
+  suitable items from your inventory and the nearby ground). The workshop job
+  menu uses the same panel style (fuzzy search, columns, right-click dismiss):
+  click the window's "Use Workshop" action and the menu for the building you
+  stand on or next to opens immediately (workshops and furnaces open their
+  recipes; beds rest, chairs eat, farm plots plant/harvest, traps and siege
+  engines their menus). Recipes default to
+  your civilization's plus those of the site you are standing in (`-e` still
+  forces a specific entity); custom workshops only appear if one of those civs
+  can build them, tagged with the owning civ when unique — "Shaping Tree
+  (high elf)", "Breeding Pit (orc)".
+
+### **`adv/exhaustion-meter`** 
+Combat-exertion bar with the native blood meter's manners and placement:
+  invisible while you're fine, appearing in the blood meter's bottom-left
+  corner once exertion matters, empty = you collapse. Tracks the counter built
+  by attacking/sprinting/jumping that knocks you over mid-fight (DF shows no
+  meter for it): yellow at Tired (2,000), red at Exhausted (4,000), empty at
+  the ~6,000 falling-over point; decays when you stop exerting. Overlay
+  `adv/exhaustion-meter.meter`, enabled by default (gui/overlay moves it).
+
+### **`adv/posession`** 
+[Regain your weapon] button on the "Who will you attack?" screen while you are
+  struggling over possession of a weapon (grabbed from you, or stuck in someone
+  pulling on it): one click selects whoever shares the weapon with you and
+  initiates the native possession-struggle Wrestle attack. Dormant otherwise;
+  overlay `adv/posession.regain`, enabled by default.
 
 ### **`adv/keep-talking`** 
 Automatically reopen a conversation you are participating in.

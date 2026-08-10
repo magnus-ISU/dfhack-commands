@@ -128,25 +128,45 @@ local function press_or_click(attempt, key, needle)
     end
 end
 
--- The right-click "What do you want to do?" menu when pathing is the ONLY choice.
--- Measured live (2026-07): options render at a 3-row pitch, each prefixed by its
--- hotkey letter --
+-- The right-click "What do you want to do?" menus that are PURE MOVEMENT, i.e.
+-- every option is a way of walking to the clicked tile. Two shapes, measured
+-- live (options render at a 3-row pitch, each prefixed by its hotkey letter):
+--
+-- Pathing only (the original case; MOUNTED drops the no-climb variant):
 --   row Y   : a Path to here
---   row Y+3 : b Path to here (no climbing/jumping)
---   row Y+6 : (blank => there is no option c)
--- MOUNTED, the no-climbing variant is not offered, so the same menu is a single
--- option: row Y as above, row Y+3 blank.
--- The "a " prefix requirement guarantees plain path IS the first option, so pressing
--- `a` can never hit an Attack/Talk entry in a bigger menu; a bigger menu also fails
--- the row-Y+3 check (its option b is neither blank nor the no-climbing variant).
+--   row Y+3 : b Path to here (no climbing/jumping)   (or blank when mounted)
+--   row Y+6 : (blank)
+--
+-- Adjacent tile (2026-08): a direct one-tile move leads, then the two paths --
+--   row Y   : a Move to <tile name, varies>
+--   row Y+3 : b Path to here
+--   row Y+6 : c Path to here (no climbing/jumping)
+--   row Y+9 : (blank)
+--
+-- Option a is the move in both shapes, so pressing `a` walks. Anything else
+-- (extra options, different first entry) is a real decision: leave the menu up.
+-- Returns the CLICK-FALLBACK NEEDLE for option a (nil = not a movement menu).
 -- CALLER MUST have checked menu_on_screen() first -- this scans.
 local function path_menu_open()
     local x, y = find_text('a Path to here')
-    if not x then return false end
-    local row3 = read_row(y + 3, x, 50)
-    if row3:match('^%s*$') then return true end   -- mounted: pathing is the only option
-    return row3:find('b Path to here (no climbing/jumping)', 1, true) ~= nil
-        and read_row(y + 6, x, 50):match('^%s*$') ~= nil
+    if x then
+        local row_b = read_row(y + 3, x, 50)
+        if row_b:match('^%s*$') then return 'Path to here' end   -- mounted: single option
+        if row_b:find('b Path to here (no climbing/jumping)', 1, true)
+            and read_row(y + 6, x, 50):match('^%s*$') then
+            return 'Path to here'
+        end
+        return nil
+    end
+    x, y = find_text('a Move to ')
+    if not x then return nil end
+    if not read_row(y + 3, x, 50):find('b Path to here', 1, true) then return nil end
+    if not read_row(y + 6, x, 50):find('c Path to here (no climbing/jumping)', 1, true) then return nil end
+    if not read_row(y + 9, x, 50):match('^%s*$') then return nil end
+    -- click fallback aims at the option's own (variable) label text
+    local label = read_row(y, x + 2, 20):gsub('%s+$', '')
+    if #label < 8 then label = 'Move to ' end
+    return label
 end
 
 -- watcher state (locals, reset on script reload -- counters above persist).
@@ -174,19 +194,20 @@ local function step()
     else
         if verdict == nil and now >= verify_at then
             verify_tries = verify_tries + 1
-            if path_menu_open() then
-                verdict = true                        -- settled: cache it, no more scanning
+            local needle = path_menu_open()
+            if needle then
+                verdict = needle                      -- settled: remember option a's text
             elseif verify_tries >= VERIFY_MAX_TRIES then
                 verdict = false                       -- genuinely some other menu: stop scanning
             else
                 verify_at = now + VERIFY_RETRY_MS     -- probably just not drawn yet; look again
             end
         end
-        if verdict and now >= retry_at then
+        if verdict and verdict ~= false and now >= retry_at then
             a_attempts = a_attempts + 1
-            -- 'Path to here' matches the PLAIN option first (listed above the
-            -- no-climbing variant), so the click fallback stays correct
-            press_or_click(a_attempts, 'CUSTOM_A', 'Path to here')
+            -- option a is the move in every accepted shape; the needle targets its
+            -- own label so the click fallback lands on the right row
+            press_or_click(a_attempts, 'CUSTOM_A', verdict)
             if a_attempts == 1 then autopathed = autopathed + 1 end
             retry_at = now + RETRY_MS
             confirm_until, confirm_scan_at, c_attempts, c_last =

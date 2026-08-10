@@ -22,6 +22,20 @@ Detail* means ENGRAVE and silently no-ops on rough stone), carrying two local fi
   Right-click the window to dismiss the tool back to completely normal play (the click is
   fully swallowed, not passed to the game); a pick-icon OVERLAY centered on the left screen
   edge -- one inert glyph on the base UI -- relaunches it.
+* The window's Build line shows the CURRENT building selection (defaults to the last one
+  picked); clicking a map tile builds exactly that, with no dialogs. Clicking the Build
+  line opens the picker: ONE flat searchable list of everything buildable -- workshops,
+  furnaces, furniture, constructions, machines, traps, siege engines, custom workshops --
+  in a dig-building-style multi-column left-anchored panel, with a MATERIALS pane
+  alongside it showing which items each slot will consume (click a row to swap between
+  the suitable items in your inventory and on the nearby ground).
+* Workshops are USABLE, not just buildable: click the window's "Use Workshop" action and
+  the job menu for the finished building you stand on (or next to) opens immediately; you
+  can also click any adjacent usable building with the action selected.
+* Recipes default to YOUR CIVILIZATION plus the owner of the site you are standing in:
+  workshop menus offer the union of both entities' known jobs (site-only recipes appear
+  when you work at that site). Use ``-e`` to force a specific entity instead (the old
+  default was always MOUNTAIN, i.e. dwarven recipes everywhere).
 
 This script allows performing jobs in adventure mode. For more complete help
 press :kbd:`?` while the script is running. It's most comfortable to use this as a
@@ -34,7 +48,10 @@ keybinding (see below for the default binding). Possible arguments:
 * ``-c``, ``--cheat``:
     relaxes item requirements for buildings (e.g. walls from bones). Implies -a
 * ``-e [NAME]``, ``--entity [NAME]``:
-    uses the given civ to determine available resources (specified as an entity raw ID). Defaults to ``MOUNTAIN``; if the entity name is omitted, uses the adventurer's civ
+    uses the given civ to determine available resources (specified as an entity raw ID,
+    e.g. ``MOUNTAIN``). If the entity name is omitted, uses the adventurer's civ alone.
+    Without ``-e`` at all, resources come from the adventurer's civ PLUS the civ owning
+    the site you are standing in
 * ``job``: selects the specified job (must be a valid ``job_type``, e.g. ``Dig`` or ``FellTree``)
 
 .. warning::
@@ -69,7 +86,6 @@ down_alt2={key="CURSOR_DOWN_Z_AUX",desc="Use job down"},
 up_alt1={key="CUSTOM_CTRL_E",desc="Use job up"},
 up_alt2={key="CURSOR_UP_Z_AUX",desc="Use job up"},
 use_same={key="A_MOVE_SAME_SQUARE",desc="Use job at the tile you are standing"},
-workshop={key="CHANGETAB",desc="Show building menu"},
 quick={key="CUSTOM_Q",desc="Toggle quick item select"},
 }
 -- building filters
@@ -94,7 +110,6 @@ local guidm = require('gui.dwarfmode')
 local wid = require('gui.widgets')
 local dialog = require('gui.dialogs')
 local buildings = require('dfhack.buildings')
-local bdialog = require('gui.buildings')
 local workshopJobs = require('dfhack.workshops')
 local utils = require('utils')
 local gscript = require('gui.script')
@@ -103,7 +118,9 @@ local advfort_items = reqscript('internal/advfort/advfort_items')
 
 local tile_attrs = df.tiletype.attrs
 
-local settings={build_by_items=false,use_worn=false,check_inv=true,teleport_items=true,df_assign=false,gui_item_select=true,only_in_sites=false,set_civ="MOUNTAIN"}
+-- set_civ: nil = adventurer's civ + the current site's owner (the default),
+-- true = adventurer's civ only (-e with no name), "NAME" = that entity raw (-e NAME)
+local settings={build_by_items=false,use_worn=false,check_inv=true,teleport_items=true,df_assign=false,gui_item_select=true,only_in_sites=false,set_civ=nil}
 
 function hasValue(tbl,val)
     for k,v in pairs(tbl) do
@@ -177,6 +194,7 @@ parse_args()
 
 mode=mode or 0
 last_building=last_building or {}
+build_sel=build_sel or nil    -- {label=..., picks={item ids}} from the picker's materials pane
 
 function Disclaimer(tlb)
     local dsc={"The Gathering Against ",{text="Goblin ",pen=dfhack.pen.parse{fg=COLOR_GREEN,bg=0}}, "Oppresion ",
@@ -294,6 +312,12 @@ function make_native_job(args)
         args.unlinked=true
     end
 end
+function job_name(j)
+    local ok,nm=pcall(function() return dfhack.job.getName(j) end)
+    if ok and nm and #nm>0 then return nm end
+    local a=df.job_type.attrs[j.job_type]
+    return (a and a.caption) or df.job_type[j.job_type] or '?'
+end
 function smart_job_delete( job )
     local gref_types=df.general_ref_type
     --TODO: unmark items as in job
@@ -354,18 +378,22 @@ function makeJob(args)
         make_native_job(args)
         local failed
         for k,v in ipairs(args.pre_actions or {}) do
-            local ok,msg=v(args)
+            -- pcall: a lua ERROR in an action must surface on the status line,
+            -- not die silently inside the coroutine (console-only)
+            local okc,ok,msg=pcall(v,args)
+            if not okc then ok,msg=false,'error: '..tostring(ok):match('[^\n]+') end
             if not ok then
-                failed=msg
+                failed=msg or 'failed'
                 break
             end
         end
         if failed==nil then
             AssignUnitToJob(args.job,args.unit,args.from_pos)
             for k,v in ipairs(args.post_actions or {}) do
-                local ok,msg=v(args)
+                local okc,ok,msg=pcall(v,args)
+                if not okc then ok,msg=false,'error: '..tostring(ok):match('[^\n]+') end
                 if not ok then
-                    failed=msg
+                    failed=msg or 'failed'
                     break
                 end
             end
@@ -382,7 +410,9 @@ function makeJob(args)
             args.screen:wait_tick()
             args.screen:wait_long_start()
         else
-            if not args.no_job_delete then
+            if args.on_fail then
+                pcall(args.on_fail,args)      -- fresh-construction rollback (shell + job)
+            elseif not args.no_job_delete then
                 smart_job_delete(args.job)
             end
             if args.screen and args.screen.set_status then
@@ -645,8 +675,42 @@ function BuildingChosen(inp_args,type_id,subtype_id,custom_id)
     --if settings.build_by_items then
     --    args.items=itemsAtPos(inp_args.from_pos)
     --end
-    args.building=buildings.constructBuilding(args)
-    CheckAndFinishBuilding(args,args.building)
+    -- constructBuilding treats pos as the TOP-LEFT corner. Center multi-tile
+    -- buildings on the clicked tile instead, and refuse a footprint that covers
+    -- the builder -- completing a workshop around yourself seals you inside it.
+    local okz,rot,w,h,cx,cy=pcall(dfhack.buildings.getCorrectSize,
+        args.width,args.height,args.type,args.subtype,args.custom,args.direction or 0)
+    if okz and w and (w>1 or (h or 1)>1) then
+        local px,py=args.pos.x-(cx or 0),args.pos.y-(cy or 0)
+        local u=args.unit or dfhack.world.getAdventurer()
+        if u and u.pos.z==args.pos.z
+            and u.pos.x>=px and u.pos.x<px+w and u.pos.y>=py and u.pos.y<py+h then
+            if args.screen and args.screen.set_status then
+                pcall(function() args.screen:set_status("You are standing in the footprint") end)
+            end
+            dfhack.gui.showAnnouncement("You are standing in the footprint.",COLOR_LIGHTRED,true)
+            return
+        end
+        args.pos={x=px,y=py,z=args.pos.z}
+    end
+    local ok,bld=pcall(buildings.constructBuilding,args)
+    if not ok or not bld then
+        dfhack.gui.showAnnouncement("Cannot place that there.",COLOR_LIGHTRED,true)
+        if args.screen and args.screen.set_status then
+            pcall(function() args.screen:set_status("Cannot place that there") end)
+        end
+        return
+    end
+    args.building=bld
+    -- If the materials never make it in, ROLL THE FRESH SHELL BACK. Leaving it
+    -- (the old behavior: no_job_delete kept the job AND the planned building)
+    -- planted an invisible shell that the next build click silently RESUMED --
+    -- i.e. "a failed build built some other random building".
+    args.on_fail=function(a)
+        pcall(smart_job_delete,a.job)
+        pcall(dfhack.buildings.deconstruct,a.building)
+    end
+    CheckAndFinishBuilding(args,bld)
 end
 
 
@@ -673,6 +737,12 @@ function RemoveBuilding(args)
     for k,v in ipairs(bld.jobs) do
         if v.job_type==df.job_type.DestroyBuilding then
             AssignUnitToJob(v,args.unit,args.from_pos)
+            -- start actually working it (what makeJob does): without the unit's Job
+            -- ACTION, the wait pump reads the job's virgin completion_timer (-1) as
+            -- "already done" -- and without one fed wait the queued action is never
+            -- consumed, so the demolition never begins
+            addJobAction(v,args.unit)
+            if args.screen and args.screen.wait_tick then args.screen:wait_tick() end
             return true
         end
     end
@@ -878,14 +948,29 @@ function finish_item_assign(args)
         uncollected[1].flags.is_fetching=true
     end
 end
+-- Items on offer for any job: hauled inventory + the CONTENTS of worn containers
+-- (deep recursion; the worn backpack itself is never consumed unless -u), the
+-- ground underfoot, and every ground item within GATHER_RADIUS tiles. The old
+-- enumeration covered only the exact from_pos tile (all inventory mode flags
+-- defaulted false), which is why the item picker kept coming up empty.
+local GATHER_RADIUS=8
 function EnumItems_with_settings( args )
-    if settings.check_inv then
-        return EnumItems{pos=args.from_pos,unit=args.unit,
-                inv={[df.inv_item_role_type.Hauled]=settings.use_worn,[df.inv_item_role_type.Worn]=settings.use_worn,
-                [df.inv_item_role_type.Weapon]=settings.use_worn,},deep=true}
-    else
-        return EnumItems{pos=args.from_pos}
+    local ret=EnumItems{pos=args.from_pos,unit=args.unit,
+            inv={[df.inv_item_role_type.Hauled]=true,
+                 [df.inv_item_role_type.Worn]=settings.use_worn,
+                 [df.inv_item_role_type.Weapon]=settings.use_worn,},deep=true}
+    local upos=(args.unit and args.unit.pos) or args.from_pos
+    if upos then
+        for _,v in ipairs(df.global.world.items.other.IN_PLAY) do
+            if v.flags.on_ground and v.pos.z==upos.z
+                and math.abs(v.pos.x-upos.x)<=GATHER_RADIUS
+                and math.abs(v.pos.y-upos.y)<=GATHER_RADIUS
+                and not same_xyz(v.pos,args.from_pos) then
+                AddItem(ret,v,true)
+            end
+        end
     end
+    return ret
 end
 function find_suitable_items(job,items,job_items)
     job_items=job_items or job.job_items.elements
@@ -935,6 +1020,57 @@ function AssignJobItems(args)
     -- first find items that you want to use for the job
     local job=args.job
     local its=EnumItems_with_settings(args)
+
+    -- ConstructBuilding jobs: materials were already chosen in the build picker's
+    -- materials pane (or default to first-suitable), so NO item dialog here --
+    -- auto-fill the job, preferring the picked item ids.
+    if job.job_type==df.job_type.ConstructBuilding then
+        -- RESUMING a shell that already collected its materials (an earlier
+        -- attempt attached them and moved them into the building): those items
+        -- are invisible to the ground/inventory scan, so re-running the search
+        -- failed with "not enough materials" and left working=false forever --
+        -- the job never progressed. Count attached items as filled.
+        local covered=#job.job_items.elements>0
+        for job_id,trg in ipairs(job.job_items.elements) do
+            local need=trg.quantity
+            for _,ji in ipairs(job.items) do
+                if ji.job_item_idx==job_id then
+                    need=need-ji.item:getTotalDimension()
+                end
+            end
+            if need>0 then covered=false break end
+        end
+        if covered then
+            finish_item_assign(args)     -- sets job.flags.working
+            return true
+        end
+        if build_sel and build_sel.picks and #build_sel.picks>0 then
+            local order,seen={},{}
+            for _,id in ipairs(build_sel.picks) do
+                for _,it in ipairs(its) do
+                    if it.id==id and not seen[id] then order[#order+1]=it seen[id]=true end
+                end
+            end
+            for _,it in ipairs(its) do
+                if not seen[it.id] then order[#order+1]=it seen[it.id]=true end
+            end
+            its=order
+        end
+        local saved=settings.gui_item_select
+        settings.gui_item_select=false          -- find_suitable_items auto-inserts in order
+        local ok,suit,counts=pcall(find_suitable_items,job,its)
+        settings.gui_item_select=saved
+        if not ok then return false,"Item scan failed" end
+        if not settings.build_by_items then
+            for job_id in ipairs(job.job_items.elements) do
+                if counts[job_id]>0 then
+                    return false,"Not enough materials nearby"
+                end
+            end
+        end
+        finish_item_assign(args)
+        return true
+    end
 
     local item_suitability,item_counts=find_suitable_items(job,its)
     --[[while(#job.items>0) do --clear old job items
@@ -1000,27 +1136,880 @@ function CheckAndFinishBuilding(args,bld)
     args.no_job_delete=true
     makeJob(args)
 end
+-- The entities whose recipes (workshop jobs, permitted custom workshops) are on
+-- offer. Default (no -e): the adventurer's civ PLUS the civ owning the site you
+-- stand in (deduped); ``-e`` alone = adventurer's civ only; ``-e NAME`` = that
+-- entity. Outsider at no site falls back to the old MOUNTAIN default.
+function recipe_entities()
+    local ents={}
+    if type(settings.set_civ)=="string" then
+        local e=find_entity_civ(settings.set_civ)
+        if e then table.insert(ents,e) end
+        return ents
+    end
+    local adv=dfhack.world.getAdventurer()
+    local civ=df.historical_entity.find(adv.civ_id)
+    if civ then table.insert(ents,civ) end
+    if settings.set_civ==nil then
+        local site=inSite()
+        if site then
+            local owner=df.historical_entity.find(site.civ_id)
+            if owner and (not civ or owner.id~=civ.id) then table.insert(ents,owner) end
+        end
+    end
+    if #ents==0 then
+        local m=find_entity_civ("MOUNTAIN")
+        if m then table.insert(ents,m) end
+    end
+    return ents
+end
+
+-- ---- flat build picker -------------------------------------------------------
+-- ONE searchable list of everything buildable, with friendly names, replacing the
+-- stock nested BuildingDialog (categories of raw enum names -- near-impossible to
+-- discover "wall" under constructions>Wall). Type to filter, click/Enter to pick.
+-- Unknown enum names are skipped, not errors, so this survives struct renames.
+local function prettify(name)   -- "NestBox" -> "Nest box", "RoadPaved" -> "Road paved"
+    local s=name:gsub('(%l)(%u)','%1 %2')
+    return (s:sub(1,1):upper()..s:sub(2):lower())
+end
+local function build_picker_entries()
+    local entries={}
+    -- entry: label shown, filter name (deon_filter's allow/forbid lists match THESE,
+    -- the same enum-name strings the stock dialog passed), type/subtype/custom ids
+    local function add(label,fname,t,st,cid)
+        table.insert(entries,{label=label,fname=fname,type=t,subtype=st or -1,custom=cid or -1})
+    end
+    local NICE={MetalsmithsForge="Metalsmith's forge",MagmaForge="Magma forge",
+        Craftsdwarfs="Craftsdwarf's workshop",Masons="Mason's workshop",
+        Carpenters="Carpenter's workshop",Jewelers="Jeweler's workshop",
+        Bowyers="Bowyer's workshop",Mechanics="Mechanic's workshop",
+        Butchers="Butcher's shop",Leatherworks="Leather works",Tanners="Tanner's shop",
+        Clothiers="Clothier's shop",Dyers="Dyer's shop",Farmers="Farmer's workshop",
+        Siege="Siege workshop",Kennels="Kennels",StoneFallTrap="Stone-fall trap",
+        UpStair="Up stair",DownStair="Down stair",UpDownStair="Up/down stair",
+        RoadDirt="Dirt road",RoadPaved="Paved road",WindowGlass="Glass window",
+        WindowGem="Gem window",GrateWall="Wall grate",GrateFloor="Floor grate",
+        BarsVertical="Vertical bars",BarsFloor="Floor bars",Chain="Rope/chain",
+        Box="Chest/box",TractionBench="Traction bench",DisplayFurniture="Display case",
+        OfferingPlace="Offering place",AxleHorizontal="Horizontal axle",
+        AxleVertical="Vertical axle",GearAssembly="Gear assembly",ScrewPump="Screw pump",
+        WaterWheel="Water wheel",TradeDepot="Trade depot",FarmPlot="Farm plot"}
+    for i=0,df.workshop_type._last_item do
+        local n=df.workshop_type[i]
+        if n and n~='Custom' and n~='Tool' then
+            add(NICE[n] or prettify(n),n,df.building_type.Workshop,i)
+        end
+    end
+    for i=0,df.furnace_type._last_item do
+        local n=df.furnace_type[i]
+        if n and n~='Custom' then
+            add(NICE[n] or prettify(n),n,df.building_type.Furnace,i)
+        end
+    end
+    for _,n in ipairs({'Wall','Floor','Ramp','UpStair','DownStair','UpDownStair','Fortification'}) do
+        local i=df.construction_type[n]
+        if i then add(NICE[n] or prettify(n),n,df.building_type.Construction,i) end
+    end
+    for i=0,df.trap_type._last_item do
+        local n=df.trap_type[i]
+        if n then add(NICE[n] or prettify(n),n,df.building_type.Trap,i) end
+    end
+    for i=0,df.siegeengine_type._last_item do
+        local n=df.siegeengine_type[i]
+        if n then add(NICE[n] or prettify(n),n,df.building_type.SiegeEngine,i) end
+    end
+    -- plain buildings (the useful subset of building_type, with sane names)
+    for _,n in ipairs({'Bed','Chair','Table','Door','Floodgate','Hatch','Box','Cabinet',
+        'Coffin','Statue','Slab','Weaponrack','Armorstand','Cage','Chain','AnimalTrap',
+        'NestBox','Hive','Bookcase','DisplayFurniture','OfferingPlace','TractionBench',
+        'ArcheryTarget','WindowGlass','WindowGem','GrateWall','GrateFloor','BarsVertical',
+        'BarsFloor','Support','Well','Bridge','RoadDirt','RoadPaved','FarmPlot',
+        'TradeDepot','ScrewPump','WaterWheel','Windmill','GearAssembly','AxleHorizontal',
+        'AxleVertical','Rollers','Instrument'}) do
+        local i=df.building_type[n]
+        if i then add(NICE[n] or prettify(n),n,i) end
+    end
+    -- Custom workshops: only the ones OUR recipe civs have PERMITTED_BUILDING for
+    -- (cheat mode -c shows all). When exactly one civ definition knows the plan,
+    -- tag it with that civ's creature -- "Shaping Tree  (high elf)" -- instead of
+    -- the generic "(custom)".
+    local owners={}
+    for _,er in ipairs(df.global.world.raws.entities.all) do
+        for _,bid in ipairs(er.workshops.permitted_building_id) do
+            owners[bid]=owners[bid] or {}
+            table.insert(owners[bid],er)
+        end
+    end
+    local myperm={}
+    for _,ent in ipairs(recipe_entities()) do
+        for _,bid in ipairs(ent.entity_raw.workshops.permitted_building_id) do
+            myperm[bid]=true
+        end
+    end
+    for _,v in ipairs(df.global.world.raws.buildings.all) do
+        if myperm[v.id] or settings.build_by_items then
+            local tag='custom'
+            local own=owners[v.id]
+            if own and #own==1 and #own[1].creature_ids>0 then
+                local cr=df.global.world.raws.creatures.all[own[1].creature_ids[0]]
+                if cr then tag=cr.name[0] end
+            end
+            add(tag~='custom' and (v.name..'  ('..tag..')') or v.name,v.name,df.building_type.Workshop,df.workshop_type.Custom,v.id)
+        end
+    end
+    table.sort(entries,function(a,b) return a.label:lower()<b.label:lower() end)
+    return entries
+end
+-- The picker window itself is styled after fort/dig-building: a bordered panel
+-- anchored at the LEFT of the screen, entries in multiple vertically-scrollable
+-- columns, with a fuzzy type-to-filter search box on the title border. Click an
+-- entry (or Enter for the best match) to pick; Esc clears the filter then
+-- cancels; right-click cancels.
+local BP_COL_W=32                       -- one column's cell width
+local BP_LEFT=27                        -- right of the job window (JOBWIN_W+1) so they never overlap
+local BP_PANE_W=40                      -- the materials pane docked to the picker's right
+local BP_MIN_TOP,BP_MAX_TOP,BP_BOT=5,12,6
+BuildPicker=defclass(BuildPicker,gui.Screen)
+BuildPicker.focus_path='advfort/build-picker'
+
+function BuildPicker:init(args)
+    self.entries=args.entries
+    self.search=''
+    self.scroll=0
+    -- show the current selection's materials pane right away
+    if last_building and last_building.type then
+        for i,e in ipairs(self.entries) do
+            if e.type==last_building.type and e.subtype==(last_building.subtype or -1)
+                and e.custom==(last_building.custom or -1) then
+                self:select_entry(i)
+                break
+            end
+        end
+    end
+end
+
+-- getFiltersByType returns SPARSE tables (often just {flags2=...}); isSuitableItem
+-- expects job_item-struct semantics where absent means -1/''. The job path never
+-- notices (inserting into job.job_items fills struct defaults) -- direct table use
+-- must normalize first or every item fails the very first `item_type~=-1` check.
+local filter_defaults={item_type=-1,item_subtype=-1,mat_type=-1,mat_index=-1,
+    flags1={},flags2={},flags3={},reaction_class='',has_material_reaction_product='',
+    metal_ore=-1,min_dimension=-1,has_tool_use=-1,quantity=1}
+local function normalize_filter(f)
+    local out=copyall(filter_defaults)
+    for k,v in pairs(f) do if k~='new' then out[k]=v end end
+    return out
+end
+
+-- the materials each slot of this building can take, gathered from inventory +
+-- nearby ground (the same enumeration jobs use)
+local function compute_slots(e)
+    local slots={}
+    local adv=dfhack.world.getAdventurer()
+    if not adv then return slots end
+    local ok,filters=pcall(buildings.getFiltersByType,{},e.type,e.subtype,e.custom)
+    if not ok or not filters then return slots end
+    local its=EnumItems_with_settings{unit=adv,from_pos=adv.pos}
+    for _,f in ipairs(filters) do
+        local nf=normalize_filter(f)
+        local cands,seen={},{}
+        for _,it in pairs(its) do
+            if not seen[it.id] then
+                seen[it.id]=true
+                local ok2,suit=pcall(isSuitableItem,nf,it)
+                if ok2 and (suit or settings.build_by_items) then cands[#cands+1]=it end
+            end
+        end
+        slots[#slots+1]={cands=cands,pick=(#cands>0) and 1 or 0,qty=f.quantity or 1,
+                         what=filter_desc(nf)}
+    end
+    return slots
+end
+
+function BuildPicker:update_picks()
+    build_sel.picks={}
+    for _,s in ipairs(self.slots or {}) do
+        local it=s.cands[s.pick]
+        if it then table.insert(build_sel.picks,it.id) end
+    end
+end
+
+-- selecting an entry = the picker's whole point: it becomes what Build builds
+-- (the window's Build line shows it), and the materials pane fills in
+function BuildPicker:select_entry(idx)
+    local e=self.entries[idx]
+    if not e then return end
+    self.sel_idx=idx
+    last_building.type,last_building.subtype,last_building.custom=e.type,e.subtype,e.custom
+    build_sel={label=e.label,picks={}}
+    self.slots=compute_slots(e)
+    self:update_picks()
+end
+
+-- fuzzy subsequence match (dig-building's): every char of needle in order
+local function bp_fuzzy(needle,hay)
+    if needle=='' then return true end
+    local j=1
+    for i=1,#hay do
+        if hay:byte(i)==needle:byte(j) then
+            j=j+1
+            if j>#needle then return true end
+        end
+    end
+    return false
+end
+-- rank: 0 exact, 1 prefix, 2 substring, 3 fuzzy, nil no match (on the label)
+local function bp_rank(label,needle)
+    local t=label:lower()
+    if t==needle then return 0 end
+    if t:sub(1,#needle)==needle then return 1 end
+    if t:find(needle,1,true) then return 2 end
+    if bp_fuzzy(needle,t) then return 3 end
+end
+
+function BuildPicker:matches()
+    local set,best,best_rank={},nil,nil
+    if self.search~='' then
+        local needle=self.search:lower()
+        for i,e in ipairs(self.entries) do
+            local r=bp_rank(e.label,needle)
+            if r then
+                set[i]=true
+                if not best_rank or r<best_rank then best,best_rank=i,r end
+            end
+        end
+    end
+    return set,best
+end
+
+function BuildPicker:geom()
+    local gps=df.global.gps
+    local n=#self.entries
+    -- keep room for the materials pane on the right
+    local max_cols=math.max(1,math.floor((gps.dimx-BP_LEFT-BP_PANE_W-3)/BP_COL_W))
+    local function cols_for(top)
+        local ar=math.max(1,gps.dimy-top-BP_BOT-2)
+        return math.min(max_cols,math.max(2,math.ceil(n/ar))),ar
+    end
+    local best_cols=cols_for(BP_MIN_TOP)
+    local top=BP_MIN_TOP
+    for t=BP_MAX_TOP,BP_MIN_TOP+1,-1 do
+        if (cols_for(t))<=best_cols then top=t break end
+    end
+    local cols,avail=cols_for(top)
+    local rows=math.min(math.ceil(n/cols),avail)
+    return BP_LEFT,top,cols*BP_COL_W+2,rows+2,cols,rows
+end
+
+function BuildPicker:max_scroll(cols,rows)
+    return math.max(0,math.ceil(#self.entries/cols)-rows)
+end
+
+function BuildPicker:onRenderBody(dc)
+    self:renderParent()
+    local l,t,w,h,cols,rows=self:geom()
+    if self.scroll>self:max_scroll(cols,rows) then self.scroll=self:max_scroll(cols,rows) end
+    local BG={fg=COLOR_GREY,bg=COLOR_BLACK}
+    for r=0,h-1 do dc:seek(l,t+r):pen(BG):string(string.rep(' ',w)) end
+    local hbar=string.rep(string.char(196),w-2)
+    dc:seek(l,t):pen(BG):string(string.char(218)..hbar..string.char(191))
+    dc:seek(l,t+h-1):pen(BG):string(string.char(192)..hbar..string.char(217))
+    for r=1,h-2 do
+        dc:seek(l,t+r):pen(BG):string(string.char(179))
+        dc:seek(l+w-1,t+r):pen(BG):string(string.char(179))
+    end
+    dc:seek(l+2,t):pen(COLOR_WHITE):string(' Build what? ')
+    local ms=self:max_scroll(cols,rows)
+    if ms>0 then
+        dc:seek(l+w-10,t):pen(self.scroll>0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
+        dc:seek(l+w-5,t):pen(self.scroll<ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
+    end
+    -- search box on the title border, dig-building style
+    local mset,mbest=self:matches()
+    local fx1,fx2=l+16,(ms>0) and (l+w-11) or (l+w-2)
+    if fx2>=fx1 then
+        local fw=fx2-fx1+1
+        if self.search=='' then
+            dc:seek(fx1,t):pen(COLOR_DARKGREY):string(('type to filter'):sub(1,fw))
+        else
+            local pen=mbest and COLOR_GREEN or COLOR_LIGHTRED
+            dc:seek(fx1,t):pen(pen):string((self.search..'_'):sub(1,fw))
+        end
+    end
+    for r=0,rows-1 do
+        local line=self.scroll+r
+        for c=0,cols-1 do
+            local idx=line*cols+c+1
+            local e=self.entries[idx]
+            if e then
+                local pen
+                if idx==self.sel_idx then pen=COLOR_LIGHTGREEN
+                elseif self.search=='' then pen=COLOR_WHITE
+                elseif idx==mbest then pen=COLOR_GREEN
+                elseif mset[idx] then pen=COLOR_LIGHTGREEN
+                else pen=COLOR_DARKGREY end
+                dc:seek(l+1+c*BP_COL_W,t+1+r):pen(pen):string(e.label:sub(1,BP_COL_W-1))
+            end
+        end
+    end
+    self:draw_materials_pane(dc,l+w+1,t)
+end
+
+-- the materials pane, shown NEXT TO the building columns: one row per required
+-- item slot with the item that will be used; click a row to cycle through the
+-- other suitable items in your inventory / on the nearby ground
+function BuildPicker:draw_materials_pane(dc,pl,pt)
+    self._pane=nil
+    if not self.sel_idx then return end
+    local slots=self.slots or {}
+    local pw=40
+    local ph=math.max(1,#slots)+3
+    local BG={fg=COLOR_GREY,bg=COLOR_BLACK}
+    for r=0,ph-1 do dc:seek(pl,pt+r):pen(BG):string(string.rep(' ',pw)) end
+    local hbar=string.rep(string.char(196),pw-2)
+    dc:seek(pl,pt):pen(BG):string(string.char(218)..hbar..string.char(191))
+    dc:seek(pl,pt+ph-1):pen(BG):string(string.char(192)..hbar..string.char(217))
+    for r=1,ph-2 do
+        dc:seek(pl,pt+r):pen(BG):string(string.char(179))
+        dc:seek(pl+pw-1,pt+r):pen(BG):string(string.char(179))
+    end
+    local e=self.entries[self.sel_idx]
+    dc:seek(pl+2,pt):pen(COLOR_WHITE):string((' '..e.label..' '):sub(1,pw-4))
+    if #slots==0 then
+        dc:seek(pl+1,pt+1):pen(COLOR_DARKGREY):string('no materials needed')
+    end
+    for i,s in ipairs(slots) do
+        local it=s.cands[s.pick]
+        local txt,pen
+        -- [available/required] for the slot; red when there is not enough
+        local tag=(' [%d/%d]'):format(#s.cands,s.qty)
+        if it then
+            local ok,desc=pcall(dfhack.items.getDescription,it,0)
+            txt=('%d) %s'):format(i,ok and desc or '?')
+            pen=(#s.cands<s.qty) and COLOR_LIGHTRED or COLOR_WHITE
+        else
+            txt=('%d) needs %s'):format(i,s.what or 'an item')
+            pen=COLOR_LIGHTRED
+        end
+        txt=txt:sub(1,pw-2-#tag)..tag
+        dc:seek(pl+1,pt+i):pen(pen):string(txt:sub(1,pw-2))
+    end
+    dc:seek(pl+1,pt+ph-2):pen(COLOR_DARKGREY):string(('click a row to choose items'):sub(1,pw-2))
+    self._pane={l=pl,t=pt,w=pw,h=ph,n=#slots}
+end
+
+-- Right-click dismisses like the job window does: the actual dismissal waits in
+-- onIdle for the physical button RELEASE. Dismissing on the press event handed
+-- the still-held button to the advfort screen beneath, which read it as its own
+-- right-click (dismissing/minimizing the whole tool).
+function BuildPicker:onIdle()
+    if self.dismiss_pending then
+        local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
+        self.dismiss_grace=(self.dismiss_grace or 30)-1
+        if (ok and held==0) or self.dismiss_grace<=0 then
+            self:dismiss()
+        end
+    end
+end
+
+function BuildPicker:onInput(keys)
+    if self.dismiss_pending then return end   -- swallow everything while draining
+    local l,t,w,h,cols,rows=self:geom()
+    if keys.LEAVESCREEN then
+        if self.search~='' then self.search='' else self:dismiss() end
+        return
+    end
+    if keys._MOUSE_R or keys._MOUSE_R_DOWN then
+        self.dismiss_pending=true
+        return
+    end
+    if keys._STRING==0 then
+        self.search=self.search:sub(1,-2)
+        return
+    elseif keys._STRING and keys._STRING>=33 then
+        self.search=self.search..string.char(keys._STRING)
+        return
+    end
+    if keys.SELECT then
+        local _,best=self:matches()
+        if best then
+            self:select_entry(best)
+            self.search=''
+        end
+        return
+    end
+    if keys.CONTEXT_SCROLL_UP then
+        self.scroll=math.max(0,self.scroll-1)
+        return
+    elseif keys.CONTEXT_SCROLL_DOWN then
+        self.scroll=math.min(self:max_scroll(cols,rows),self.scroll+1)
+        return
+    end
+    if keys._MOUSE_L then
+        local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
+        -- the materials pane: click a slot row to see ALL suitable items and pick one
+        local p=self._pane
+        if p and mx>=p.l and mx<p.l+p.w and my>=p.t and my<p.t+p.h then
+            local r=my-p.t
+            local s=self.slots and self.slots[r]
+            if s and #s.cands>1 then
+                local me=self
+                pick_slot_material(s,('Slot %d: choose material'):format(r),
+                    function() me:update_picks() end)
+            end
+            return
+        end
+        if mx>=l and mx<l+w and my>=t and my<t+h then
+            if my==t and self:max_scroll(cols,rows)>0 then   -- scroll controls
+                if mx>=l+w-10 and mx<=l+w-6 then self.scroll=math.max(0,self.scroll-1)
+                elseif mx>=l+w-5 and mx<=l+w-2 then
+                    self.scroll=math.min(self:max_scroll(cols,rows),self.scroll+1)
+                end
+                return
+            end
+            local r,cx=my-t-1,mx-l-1
+            if r>=0 and r<rows and cx>=0 and cx<cols*BP_COL_W then
+                local idx=(self.scroll+r)*cols+(cx//BP_COL_W)+1
+                if self.entries[idx] then
+                    self:select_entry(idx)
+                    self.search=''
+                end
+            end
+            return                       -- consume clicks on the panel
+        end
+        -- click outside both panels: done choosing, back to the game
+        self:dismiss()
+        return
+    end
+end
+
+-- Generic dig-building-style list picker (the Build panel's look and manners --
+-- left-anchored columns, fuzzy type-to-filter, click/Enter picks, right-click's
+-- dismissal drains the held button): used for the workshop job menu.
+JobPicker=defclass(JobPicker,gui.Screen)
+JobPicker.focus_path='advfort/job-picker'
+
+function JobPicker:init(args)
+    self.title=args.title or 'Choose'
+    self.entries=args.entries      -- {{label=..., data=...},...}
+    self.on_pick=args.on_pick      -- fn(data)
+    self.search=''
+    self.scroll=0
+end
+
+function JobPicker:matches()
+    local set,best,best_rank={},nil,nil
+    if self.search~='' then
+        local needle=self.search:lower()
+        for i,e in ipairs(self.entries) do
+            local r=bp_rank(e.label,needle)
+            if r then
+                set[i]=true
+                if not best_rank or r<best_rank then best,best_rank=i,r end
+            end
+        end
+    end
+    return set,best
+end
+
+function JobPicker:geom()
+    local gps=df.global.gps
+    local n=math.max(1,#self.entries)
+    local max_cols=math.max(1,math.floor((gps.dimx-BP_LEFT-3)/BP_COL_W))
+    local function cols_for(top)
+        local ar=math.max(1,gps.dimy-top-BP_BOT-2)
+        return math.min(max_cols,math.max(1,math.ceil(n/ar))),ar
+    end
+    local best_cols=cols_for(BP_MIN_TOP)
+    local top=BP_MIN_TOP
+    for t=BP_MAX_TOP,BP_MIN_TOP+1,-1 do
+        if (cols_for(t))<=best_cols then top=t break end
+    end
+    local cols,avail=cols_for(top)
+    local rows=math.min(math.ceil(n/cols),avail)
+    return BP_LEFT,top,cols*BP_COL_W+2,rows+2,cols,rows
+end
+
+function JobPicker:max_scroll(cols,rows)
+    return math.max(0,math.ceil(#self.entries/cols)-rows)
+end
+
+function JobPicker:onRenderBody(dc)
+    self:renderParent()
+    local l,t,w,h,cols,rows=self:geom()
+    if self.scroll>self:max_scroll(cols,rows) then self.scroll=self:max_scroll(cols,rows) end
+    local BG={fg=COLOR_GREY,bg=COLOR_BLACK}
+    for r=0,h-1 do dc:seek(l,t+r):pen(BG):string(string.rep(' ',w)) end
+    local hbar=string.rep(string.char(196),w-2)
+    dc:seek(l,t):pen(BG):string(string.char(218)..hbar..string.char(191))
+    dc:seek(l,t+h-1):pen(BG):string(string.char(192)..hbar..string.char(217))
+    for r=1,h-2 do
+        dc:seek(l,t+r):pen(BG):string(string.char(179))
+        dc:seek(l+w-1,t+r):pen(BG):string(string.char(179))
+    end
+    local title=(' '..self.title..' '):sub(1,math.max(0,w-18))
+    dc:seek(l+2,t):pen(COLOR_WHITE):string(title)
+    local ms=self:max_scroll(cols,rows)
+    if ms>0 then
+        dc:seek(l+w-10,t):pen(self.scroll>0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
+        dc:seek(l+w-5,t):pen(self.scroll<ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
+    end
+    local mset,mbest=self:matches()
+    local fx1,fx2=l+2+#title+1,(ms>0) and (l+w-11) or (l+w-2)
+    if fx2>=fx1 then
+        local fw=fx2-fx1+1
+        if self.search=='' then
+            dc:seek(fx1,t):pen(COLOR_DARKGREY):string(('type to filter'):sub(1,fw))
+        else
+            local pen=mbest and COLOR_GREEN or COLOR_LIGHTRED
+            dc:seek(fx1,t):pen(pen):string((self.search..'_'):sub(1,fw))
+        end
+    end
+    if #self.entries==0 then
+        dc:seek(l+1,t+1):pen(COLOR_DARKGREY):string('nothing on offer')
+    end
+    for r=0,rows-1 do
+        local line=self.scroll+r
+        for c=0,cols-1 do
+            local idx=line*cols+c+1
+            local e=self.entries[idx]
+            if e then
+                local pen
+                if self.search=='' then pen=COLOR_WHITE
+                elseif idx==mbest then pen=COLOR_GREEN
+                elseif mset[idx] then pen=COLOR_LIGHTGREEN
+                else pen=COLOR_DARKGREY end
+                dc:seek(l+1+c*BP_COL_W,t+1+r):pen(pen):string(e.label:sub(1,BP_COL_W-1))
+            end
+        end
+    end
+end
+
+function JobPicker:pick(e)
+    self:dismiss()
+    self.on_pick(e.data)
+end
+
+function JobPicker:onIdle()
+    if self.dismiss_pending then
+        local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
+        self.dismiss_grace=(self.dismiss_grace or 30)-1
+        if (ok and held==0) or self.dismiss_grace<=0 then
+            self:dismiss()
+        end
+    end
+end
+
+function JobPicker:onInput(keys)
+    if self.dismiss_pending then return end
+    local l,t,w,h,cols,rows=self:geom()
+    if keys.LEAVESCREEN then
+        if self.search~='' then self.search='' else self:dismiss() end
+        return
+    end
+    if keys._MOUSE_R or keys._MOUSE_R_DOWN then
+        self.dismiss_pending=true
+        return
+    end
+    if keys._STRING==0 then
+        self.search=self.search:sub(1,-2)
+        return
+    elseif keys._STRING and keys._STRING>=33 then
+        self.search=self.search..string.char(keys._STRING)
+        return
+    end
+    if keys.SELECT then
+        local _,best=self:matches()
+        if best then self:pick(self.entries[best]) end
+        return
+    end
+    if keys.CONTEXT_SCROLL_UP then
+        self.scroll=math.max(0,self.scroll-1)
+        return
+    elseif keys.CONTEXT_SCROLL_DOWN then
+        self.scroll=math.min(self:max_scroll(cols,rows),self.scroll+1)
+        return
+    end
+    if keys._MOUSE_L then
+        local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
+        if mx>=l and mx<l+w and my>=t and my<t+h then
+            if my==t and self:max_scroll(cols,rows)>0 then
+                if mx>=l+w-10 and mx<=l+w-6 then self.scroll=math.max(0,self.scroll-1)
+                elseif mx>=l+w-5 and mx<=l+w-2 then
+                    self.scroll=math.min(self:max_scroll(cols,rows),self.scroll+1)
+                end
+                return
+            end
+            local r,cx=my-t-1,mx-l-1
+            if r>=0 and r<rows and cx>=0 and cx<cols*BP_COL_W then
+                local idx=(self.scroll+r)*cols+(cx//BP_COL_W)+1
+                local e=self.entries[idx]
+                if e then self:pick(e) end
+            end
+            return
+        end
+        self:dismiss()
+        return
+    end
+end
+
+-- ---- shared materials picker -------------------------------------------------
+-- ONE materials UI for everything that consumes items: the Build flow's pane and
+-- workshop jobs. A left-anchored panel with a row per required slot showing
+-- available/required; CLICKING A ROW OPENS THE FULL OPTION LIST for that slot (a
+-- JobPicker of every suitable item -- searchable, multi-column), click an option
+-- to take it. Enter starts the job, Esc/right-click cancels.
+-- "what does this slot want" in words, for slots with no matching item around:
+-- material constraint + item type/subtype, plus the meaningful filter extras
+function filter_desc(f)
+    local parts={}
+    pcall(function()
+        if f.mat_type and f.mat_type~=-1 then
+            local mi=dfhack.matinfo.decode(f.mat_type,f.mat_index or -1)
+            if mi then parts[#parts+1]=mi:toString() end
+        end
+        if f.item_type and f.item_type~=-1 then
+            local nm
+            if f.item_subtype and f.item_subtype~=-1 then
+                local ok,d=pcall(dfhack.items.getSubtypeDef,f.item_type,f.item_subtype)
+                if ok and d then nm=d.name end
+            end
+            nm=nm or (df.item_type[f.item_type] or 'item'):lower():gsub('_',' ')
+            parts[#parts+1]=nm
+        end
+        local fl2=f.flags2
+        if fl2 and (type(fl2)=='table' and fl2.building_material
+                or type(fl2)~='table' and fl2.building_material) then
+            parts[#parts+1]='(building material)'
+        end
+        if f.reaction_class and f.reaction_class~='' then
+            parts[#parts+1]='('..f.reaction_class..')'
+        end
+    end)
+    if #parts==0 then return 'any item' end
+    return table.concat(parts,' ')
+end
+
+function item_label(it)
+    local ok,desc=pcall(dfhack.items.getDescription,it,0)
+    return ok and desc or '?'
+end
+
+-- open the full option list for one slot; on_done fires after a pick (or not at all)
+function pick_slot_material(slot,title,on_done)
+    if #slot.cands<1 then return end
+    local entries={}
+    for i,it in ipairs(slot.cands) do
+        local lab=item_label(it)
+        if i==slot.pick then lab=string.char(26)..' '..lab end   -- mark the current pick
+        entries[#entries+1]={label=lab,data=i}
+    end
+    dfhack.timeout(2,'frames',function()
+        JobPicker{
+            title=title or 'Choose material',
+            entries=entries,
+            on_pick=function(i)
+                slot.pick=i
+                if on_done then on_done() end
+            end,
+        }:show()
+    end)
+end
+
+MaterialsPicker=defclass(MaterialsPicker,gui.Screen)
+MaterialsPicker.focus_path='advfort/materials'
+
+function MaterialsPicker:init(args)
+    self.title=args.title or 'Materials'
+    self.slots=args.slots
+    self.on_confirm=args.on_confirm
+    self.on_cancel=args.on_cancel
+end
+
+function MaterialsPicker:geom()
+    local w=46
+    local h=math.max(1,#self.slots)+3
+    local top=math.min(BP_MAX_TOP,math.max(0,df.global.gps.dimy-h-BP_BOT))
+    return BP_LEFT,top,w,h
+end
+
+function MaterialsPicker:onRenderBody(dc)
+    self:renderParent()
+    local l,t,w,h=self:geom()
+    local BG={fg=COLOR_GREY,bg=COLOR_BLACK}
+    for r=0,h-1 do dc:seek(l,t+r):pen(BG):string(string.rep(' ',w)) end
+    local hbar=string.rep(string.char(196),w-2)
+    dc:seek(l,t):pen(BG):string(string.char(218)..hbar..string.char(191))
+    dc:seek(l,t+h-1):pen(BG):string(string.char(192)..hbar..string.char(217))
+    for r=1,h-2 do
+        dc:seek(l,t+r):pen(BG):string(string.char(179))
+        dc:seek(l+w-1,t+r):pen(BG):string(string.char(179))
+    end
+    dc:seek(l+2,t):pen(COLOR_WHITE):string((' '..self.title..' '):sub(1,w-4))
+    if #self.slots==0 then
+        dc:seek(l+1,t+1):pen(COLOR_DARKGREY):string('no materials needed')
+    end
+    for i,s in ipairs(self.slots) do
+        local it=s.cands[s.pick]
+        local tag=(' [%d/%d]'):format(#s.cands,s.qty)
+        local txt,pen
+        if it then
+            txt=('%d) %s'):format(i,item_label(it))
+            pen=(#s.cands<s.qty) and COLOR_LIGHTRED or COLOR_WHITE
+        else
+            txt=('%d) needs %s'):format(i,s.what or 'an item')
+            pen=COLOR_LIGHTRED
+        end
+        txt=txt:sub(1,w-2-#tag)..tag
+        dc:seek(l+1,t+i):pen(pen):string(txt:sub(1,w-2))
+    end
+    dc:seek(l+1,t+h-2):pen(COLOR_LIGHTGREEN):string('[ Start ]')
+    dc:seek(l+11,t+h-2):pen(COLOR_DARKGREY)
+        :string(('click a row: choose   Esc: cancel'):sub(1,w-12))
+end
+
+function MaterialsPicker:onIdle()
+    if self.dismiss_pending then
+        local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
+        self.dismiss_grace=(self.dismiss_grace or 30)-1
+        if (ok and held==0) or self.dismiss_grace<=0 then
+            self:dismiss()
+            if self.on_cancel then self.on_cancel() end
+        end
+    end
+end
+
+function MaterialsPicker:onInput(keys)
+    if self.dismiss_pending then return end
+    local l,t,w,h=self:geom()
+    if keys.LEAVESCREEN then
+        self:dismiss()
+        if self.on_cancel then self.on_cancel() end
+        return
+    end
+    if keys._MOUSE_R or keys._MOUSE_R_DOWN then
+        self.dismiss_pending=true
+        return
+    end
+    if keys.SELECT then
+        self:dismiss()
+        if self.on_confirm then self.on_confirm(self.slots) end
+        return
+    end
+    if keys._MOUSE_L then
+        local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
+        if mx>=l and mx<l+w and my>=t and my<t+h then
+            local i=my-t
+            if i==h-2 and mx<=l+10 then      -- the [ Start ] button
+                self:dismiss()
+                if self.on_confirm then self.on_confirm(self.slots) end
+                return
+            end
+            local s=self.slots[i]
+            if s then
+                pick_slot_material(s,('Slot %d: choose material'):format(i))
+            end
+            return
+        end
+        return   -- modal while choosing materials
+    end
+end
+
+-- fill args.job's items from confirmed slots (picked item first, then the other
+-- candidates until each slot's quantity is covered), then hand the items over
+local function fill_job_from_slots(args,slots)
+    local job=args.job
+    local used={}
+    for job_id,trg in ipairs(job.job_items.elements) do
+        local s=slots[job_id+1]           -- ipairs on df vectors is 0-based
+        local need=trg.quantity
+        if s then
+            local order={}
+            if s.cands[s.pick] then order[1]=s.cands[s.pick] end
+            for _,it in ipairs(s.cands) do
+                if it~=s.cands[s.pick] then order[#order+1]=it end
+            end
+            for _,it in ipairs(order) do
+                if need<=0 then break end
+                if not used[it.id] and df.item.find(it.id) then
+                    used[it.id]=true
+                    job.items:insert("#",{new=true,item=it,role=df.job_role_type.Reagent,job_item_idx=job_id})
+                    need=need-it:getTotalDimension()
+                end
+            end
+        end
+        if need>0 and not settings.build_by_items then
+            return false,"Not enough materials"
+        end
+    end
+    finish_item_assign(args)
+    return true
+end
+
+-- our picker screens must never STACK: a second open buries the first, which
+-- keeps consuming clicks over its old area -- entries of the buried menu look
+-- "unclickable". Close any picker already up before showing a new one.
+function close_open_pickers()
+    for _=1,6 do
+        local vs=dfhack.gui.getCurViewscreen(true)
+        local f=dfhack.gui.getFocusStrings(vs)[1] or ''
+        if f:find('build%-picker') or f:find('job%-picker') or f:find('advfort/materials') then
+            dfhack.screen.dismiss(vs)
+        else
+            break
+        end
+    end
+end
+
+function showBuildPicker()
+    local entries={}
+    for _,e in ipairs(build_picker_entries()) do
+        if deon_filter(e.fname,e.type,e.subtype,e.custom,nil) then
+            table.insert(entries,e)
+        end
+    end
+    -- DEFERRED by 2 frames: the picker can be opened from inside a click's own
+    -- input handling, and opening it in that same frame let the very click that
+    -- opened it land on whatever entry sits under the cursor -- i.e. it silently
+    -- "picked" a random building. Two frames later the press is history.
+    dfhack.timeout(2,'frames',function()
+        close_open_pickers()
+        BuildPicker{entries=entries}:show()
+    end)
+end
+
+-- Build: clicking a tile builds WHAT THE WINDOW SHOWS (the current selection,
+-- which defaults to the last one picked); with nothing selected yet it opens the
+-- picker instead. Clicking the "Build" row in the job window also opens the
+-- picker (see the window click handler).
 function AssignJobToBuild(args)
     local bld=args.building or dfhack.buildings.findAtTile(args.pos)
     args.building=bld
     args.job_type=df.job_type.ConstructBuilding
+    local sel=last_building
     if bld~=nil then
-        CheckAndFinishBuilding(args,bld)
-    else
-        bdialog.BuildingDialog{on_select=dfhack.curry(BuildingChosen,args),hide_none=true,building_filter=deon_filter}:show()
-    end
-    return true
-end
-function BuildLast(args)
-    local bld=dfhack.buildings.findAtTile(args.pos)
-    args.job_type=df.job_type.ConstructBuilding
-    if bld~=nil then
-        CheckAndFinishBuilding(args,bld)
-    else
-        --bdialog.BuildingDialog{on_select=dfhack.curry(BuildingChosen,args),hide_none=true}:show()
-        if last_building and last_building.type then
-            BuildingChosen(args,last_building.type,last_building.subtype,last_building.custom)
+        -- a planned shell already sits here. If it matches the current selection,
+        -- resume it; if it is a LEFTOVER of something else (e.g. from an old failed
+        -- attempt), clear it and build what the window shows instead of silently
+        -- resuming the wrong building.
+        local same=sel and sel.type==bld:getType()
+            and (sel.subtype or -1)==bld:getSubtype()
+            and (sel.custom or -1)==bld:getCustomType()
+        local ok,unbuilt=pcall(function() return bld:getBuildStage()<bld:getMaxBuildStage() end)
+        if not same and sel and sel.type and ok and unbuilt
+            and select(1,pcall(dfhack.buildings.deconstruct,bld)) then
+            dfhack.gui.showAnnouncement("Cleared a leftover planned building.",7,1)
+            args.building=nil
+            BuildingChosen(args,sel.type,sel.subtype,sel.custom)
+        else
+            CheckAndFinishBuilding(args,bld)
         end
+    elseif sel and sel.type then
+        BuildingChosen(args,sel.type,sel.subtype,sel.custom)
+    else
+        showBuildPicker()
+        return false,"Pick what to build first"
     end
     return true
 end
@@ -1345,20 +2334,22 @@ local function IsWebAt(args)
     end
     return false,"No web there"
 end
--- weaving skill helpers: fort web collection is Weaver work -- it takes work time scaled
--- by skill and awards the standard ~30xp per completed job. DF's advancement costs are
--- 500+100*level per rating.
-local function weaving_rating(unit)
+-- skill helpers: manual jobs (webs, tree felling) take work time scaled by the
+-- relevant skill and award the standard ~30xp per completed job. DF's
+-- advancement costs are 500+100*level per rating.
+local function skill_rating(unit,skill)
     local soul=unit.status.current_soul
     if not soul then return 0 end
     for _,sk in ipairs(soul.skills) do
-        if sk.id==df.job_skill.WEAVING then return sk.rating end
+        if sk.id==skill then return sk.rating end
     end
     return 0
 end
+local function weaving_rating(unit) return skill_rating(unit,df.job_skill.WEAVING) end
 local function add_skill_exp(unit,skill,amount)
     local soul=unit.status.current_soul
     if not soul then return end
+    local rating,exp
     for _,sk in ipairs(soul.skills) do
         if sk.id==skill then
             sk.experience=sk.experience+amount
@@ -1366,10 +2357,44 @@ local function add_skill_exp(unit,skill,amount)
                 sk.experience=sk.experience-(500+sk.rating*100)
                 sk.rating=sk.rating+1
             end
-            return
+            rating,exp=sk.rating,sk.experience
+            break
         end
     end
-    soul.skills:insert("#",{new=true,id=skill,rating=0,experience=amount})
+    if not rating then
+        -- INSERT SORTED by skill id: DF keeps these vectors ordered and finds
+        -- entries by binary search -- an appended out-of-order entry works for
+        -- everything that scans linearly but is INVISIBLE to the skill sheet's
+        -- exp lookup (and DF may re-add its own copy, leaving duplicates)
+        local at='#'
+        for i,sk in ipairs(soul.skills) do
+            if sk.id>skill then at=i break end
+        end
+        soul.skills:insert(at,{new=true,id=skill,rating=0,experience=amount})
+        rating,exp=0,amount
+    end
+    -- Mirror into the historical figure's skill profile (points = CUMULATIVE
+    -- lifetime exp: 500+100*level per rating climbed, plus current progress),
+    -- sorted for the same reason.
+    local hf=df.historical_figure.find(unit.hist_figure_id)
+    local sp=hf and hf.info and hf.info.skills
+    if sp then
+        local total=500*rating+100*(rating*(rating-1))//2+exp
+        local idx
+        for i,sid in ipairs(sp.skills) do
+            if sid==skill then idx=i break end
+        end
+        if idx then
+            sp.points[idx]=math.max(sp.points[idx],total)
+        else
+            local at='#'
+            for i,sid in ipairs(sp.skills) do
+                if sid>skill then at=i break end
+            end
+            sp.skills:insert(at,skill)
+            sp.points:insert(at,total)
+        end
+    end
 end
 -- Web gathering takes AS LONG AS MINING and displays on the same scale: the job pump
 -- records the peak completion_timer of every Dig it works (dig_peak -- measured 5 on this
@@ -1390,6 +2415,130 @@ local function GatherWebsChooser(args)
         step_ticks=math.max(2,10-weaving_rating(args.unit)),
         last_tick=df.global.cur_year_tick_advmode,
     }
+    return true
+end
+
+-- Tree felling cannot go through the job system: DF's adventure job pump has NO
+-- FellTree handler -- the job survives creation, is consumed by the first work
+-- action and vanishes with the tree untouched (measured live; a manual chop
+-- designation changes nothing, and even DFHack's plant plugin says grown-tree
+-- removal is unsupported). So fell by hand, on the Gather Webs model: timed work
+-- scaled by AXE skill, then spawn the logs and remove the tree ourselves.
+-- LAYOUT (df.veg.xml): tree_info.body = array[body_height] of POINTERS, each to
+-- a dim_x*dim_y array of plant_tree_tile bitfields -- index layers with [z] and
+-- tiles with :_displace(i). A flat body[i] scan dereferences garbage pointers
+-- past body_height and CRASHES DF (measured the hard way).
+local function tree_tile(ti,z,i)
+    local ok,layer=pcall(function() return ti.body[z] end)
+    if not ok or not layer then return nil end
+    local ok2,t=pcall(function() return layer:_displace(i) end)
+    return ok2 and t or nil
+end
+local function count_trunks(ti)
+    local n,area=0,ti.dim_x*ti.dim_y
+    for z=0,ti.body_height-1 do
+        for i=0,area-1 do
+            local t=tree_tile(ti,z,i)
+            if t and t.trunk then n=n+1 end
+        end
+    end
+    return n
+end
+local function spawn_logs(adv,plant,count)
+    local raw=df.global.world.raws.plants.all[plant.material]
+    if not raw then return 0 end
+    local mi=dfhack.matinfo.find("PLANT_MAT:"..raw.id..":WOOD")
+    if not mi then return 0 end
+    local made=0
+    for _=1,count do
+        local ok,res=pcall(dfhack.items.createItem,adv,df.item_type.WOOD,-1,mi.type,mi.index)
+        if ok and res then
+            local items=(type(res)=="table") and res or {res}
+            for _,it in ipairs(items) do
+                if type(it)=="number" then it=df.item.find(it) end
+                if it and pcall(dfhack.items.moveToGround,it,copyall(plant.pos)) then
+                    made=made+1
+                end
+            end
+        end
+    end
+    return made
+end
+local function do_fell(adv,plant)
+    local ti=plant.tree_info
+    if not ti then return 0 end
+    local logs=math.max(1,math.min(count_trunks(ti),12))
+    local r_x,r_y=math.floor(ti.dim_x/2),math.floor(ti.dim_y/2)
+    local base_z=plant.pos.z
+    local attrs=df.tiletype.attrs
+    -- the floor left under the removed trunk: copy a neighboring ground tile
+    local floor_tt=df.tiletype.SoilFloor1
+    for _,d in ipairs({{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{1,-1},{-1,1},{1,1}}) do
+        local tt=dfhack.maps.getTileType({x=plant.pos.x+d[1],y=plant.pos.y+d[2],z=base_z})
+        if tt and attrs[tt].shape==df.tiletype_shape.FLOOR
+            and attrs[tt].material~=df.tiletype_material.TREE then
+            floor_tt=tt
+            break
+        end
+    end
+    -- clear only THIS tree's map tiles (getPlantAtTile ownership check keeps
+    -- overlapping neighbor trees intact)
+    for z=base_z,base_z+ti.body_height-1 do
+        for y=plant.pos.y-r_y,plant.pos.y+r_y do
+            for x=plant.pos.x-r_x,plant.pos.x+r_x do
+                local pos={x=x,y=y,z=z}
+                local blk=dfhack.maps.getTileBlock(pos)
+                if blk then
+                    local tt=blk.tiletype[x%16][y%16]
+                    if attrs[tt].material==df.tiletype_material.TREE
+                        and dfhack.maps.getPlantAtTile(pos)==plant then
+                        blk.tiletype[x%16][y%16]=(z==base_z) and floor_tt or df.tiletype.OpenSpace
+                    end
+                end
+            end
+        end
+    end
+    -- zero the tree body so nothing re-renders the removed tiles, and mark the
+    -- plant dead (the object itself is left in place -- deleting it risks
+    -- dangling pointers in the map's plant vectors)
+    local area=ti.dim_x*ti.dim_y
+    for z=0,ti.body_height-1 do
+        for i=0,area-1 do
+            local t=tree_tile(ti,z,i)
+            if t then
+                t.trunk=false t.branches=false t.leaves=false
+                t.branch_w=false t.branch_n=false t.branch_e=false t.branch_s=false
+                t.trunk_is_thick=false
+            end
+        end
+    end
+    pcall(function() plant.damage_flags.dead=true end)
+    return spawn_logs(adv,plant,logs)
+end
+local function FellTreeChooser(args)
+    local plant=dfhack.maps.getPlantAtTile(args.pos)
+    if not plant or not plant.tree_info then return false,"No tree there" end
+    args.screen.fell_work={
+        ppos=copyall(plant.pos),
+        pos=copyall(args.pos),
+        left=(dig_peak or 5)*2,   -- felling takes about twice a dig
+        step_ticks=math.max(2,10-skill_rating(args.unit,df.job_skill.AXE)),
+        last_tick=df.global.cur_year_tick_advmode,
+    }
+    return true
+end
+
+-- Use Workshop: click a FINISHED building to use it -- workshops/furnaces open
+-- the job menu (the same one Tab opens while standing on the shop), and the
+-- other usable buildings do their thing (beds rest, chairs eat, farm plots
+-- plant/harvest, traps/siege engines their menus...).
+function UseWorkshopChooser(args)
+    local bld=dfhack.buildings.findAtTile(args.pos)
+    if not bld then return false,"No building there" end
+    if bld:getBuildStage()<bld:getMaxBuildStage() then return false,"Not finished yet" end
+    local m=MODES[bld:getType()]
+    if not m then return false,"Nothing to use there" end
+    m.input(args.screen,bld)
     return true
 end
 
@@ -1416,34 +2565,40 @@ local actions={
     {"Engrave"            ,EngraveChooser,{IsSmoothableTarget,IsHardMaterial},nil,{DesignateDetail}},
     {"Carve Fortification",FortificationChooser,{IsWall,IsHardMaterial}},
     {"CarveTrack"         ,df.job_type.CarveTrack,{},{SetCarveDir}},
-    {"Fell Tree"          ,df.job_type.FellTree,{MakePredicateWieldsItem(df.job_skill.AXE),IsTree}},
+    {"Fell Tree"          ,FellTreeChooser,{MakePredicateWieldsItem(df.job_skill.AXE),IsTree}},
     {"Gather Plants"      ,df.job_type.GatherPlants,{IsPlant,SameSquare},{PlantGatherFix}},
     {"Gather Webs"        ,GatherWebsChooser,{IsWebAt}},
     {"Fish"               ,df.job_type.Fish,{IsWater}},
     {"Tame Animal"        ,df.job_type.TameAnimal,{IsUnit},{SetCreatureRef}},
     {"Clean"              ,df.job_type.Clean,{}},
     {"Build"              ,AssignJobToBuild,{NoConstructedBuilding}},
-    {"Build Last"         ,BuildLast,{NoConstructedBuilding}},
     {"Link Buildings"     ,LinkBuilding,{IsBuilding}},
     {"Remove Building"    ,RemoveBuilding,{IsBuilding}},
+    {"Use Workshop"       ,UseWorkshopChooser,{IsBuilding}},
 }
 
 -- The window layout: each entry is one LINE of segments. A segment {i} shows actions[i]'s
--- name; {i,'text'} overrides the shown text (the stair variants and Build [Last] share
--- lines); {label='x'} is inert text; avail=fn hides the segment (Build [Last] only exists
--- once something was built). {} is a blank separator line. Segments record their drawn
--- x-range each render for click hit-testing.
-local function last_build_available() return last_building and last_building.type~=nil end
-local function last_build_label()
-    if not last_build_available() then return ' [Last]' end
+-- name; {i,'text'} overrides the shown text (the stair variants share lines);
+-- {label='x'} is inert text. {} is a blank separator line. Segments record their
+-- drawn x-range each render for click hit-testing. The Build line shows the
+-- CURRENT building selection (what a map click will build); clicking it opens
+-- the picker to change it.
+local function build_label()
+    if not (last_building and last_building.type) then return 'Build...' end
     local t=last_building.type
     local name
-    if t==df.building_type.Workshop then name=df.workshop_type[last_building.subtype]
+    if t==df.building_type.Workshop then
+        if last_building.subtype==df.workshop_type.Custom then
+            for _,v in ipairs(df.global.world.raws.buildings.all) do
+                if v.id==last_building.custom then name=v.name break end
+            end
+        else name=df.workshop_type[last_building.subtype] end
     elseif t==df.building_type.Furnace then name=df.furnace_type[last_building.subtype]
     elseif t==df.building_type.Trap then name=df.trap_type[last_building.subtype]
+    elseif t==df.building_type.Construction then name=df.construction_type[last_building.subtype]
     end
-    name=name or df.building_type[t] or 'Last'
-    return ' ['..tostring(name):sub(1,14)..']'
+    name=name or df.building_type[t] or '?'
+    return 'Build: '..tostring(name):sub(1,16)
 end
 local LAYOUT={
     {{1,'Dig'},{2,' [Ramp]'},{3,' [Channel]'}},
@@ -1461,7 +2616,8 @@ local LAYOUT={
     {{15}},
     {{16}},
     {},
-    {{17,'Build'},{18,last_build_label,avail=last_build_available}},
+    {{17,build_label}},
+    {{18}},
     {{19}},
     {{20}},
 }
@@ -1495,15 +2651,6 @@ function usetool:update_site()
 end
 
 function usetool:init(args)
-    self:addviews{
-        wid.Label{
-            view_id="shopLabel",
-            frame = {l=35,xalign=0,yalign=0},
-            visible=false,
-            text={
-                {id="text1",gap=1,key=keybinds.workshop.key,key_sep="()", text="Workshop menu",pen=dfhack.pen.parse{fg=COLOR_YELLOW,bg=0}},{id="clutter"}}
-                  },
-            }
     local labors=dfhack.world.getAdventurer().status.labors
     for i,v in ipairs(labors) do
         labors[i]=true
@@ -1619,16 +2766,105 @@ end
 function usetool:onWorkShopButtonClicked(building,index,choice)
     local adv=dfhack.world.getAdventurer()
     local args={unit=adv,building=building}
+    if choice.resume then
+        local bj=choice.resume
+        if adv.job.current_job then
+            self:set_status(("Busy: %s"):format(job_name(adv.job.current_job)))
+            return
+        end
+        local okf,found=pcall(df.job.find,bj.id)
+        if not okf or not found then
+            self:set_status("That job is gone")
+            return
+        end
+        for ri=#bj.general_refs-1,0,-1 do
+            local r=bj.general_refs[ri]
+            if r:getType()==df.general_ref_type.UNIT_WORKER then
+                r:delete()
+                bj.general_refs:erase(ri)
+            end
+        end
+        AssignUnitToJob(bj,adv,copyall(adv.pos))
+        self:wait_long_start()
+        return
+    end
+    -- ALWAYS re-resolve the button by its LABEL at press time. Stored pointers
+    -- go stale whenever DF refills the sidebar between menu-open and click --
+    -- pressing one then triggers whatever recipe now occupies that slot ("I
+    -- clicked shield, it made a training sword"). A fill done RIGHT HERE yields
+    -- pointers that are valid for the immediate press.
+    self:setupFields(choice.entity or nil)
+    building:fillSidebarMenu()
+    choice.button=nil
+    for _,btn in pairs(df.global.game.main_interface.building.button) do
+        if utils.call_with_string(btn,"text")==choice.text then
+            choice.button=btn
+            break
+        end
+    end
+    if not choice.button then
+        self:set_status("That job is no longer offered")
+        return
+    end
+    self.menu_entity=choice.entity   -- category browsing stays on this entity
     if df.interface_button_building_new_jobst:is_instance(choice.button) then
+        -- one task at a time: silently replacing the current job ORPHANS it
+        -- mid-progress, and the abandoned job then blocks the whole workshop
+        if adv.job.current_job then
+            self:set_status(("Busy: %s"):format(job_name(adv.job.current_job)))
+            dfhack.gui.showAnnouncement("You are already working on something -- click the status line to cancel it.",COLOR_LIGHTRED,true)
+            return
+        end
+        local before=#building.jobs
         choice.button:press()
-        if #building.jobs>0 then
+        -- CUSTOM-REACTION recipes (display cases, altars, modded recipes...):
+        -- press() silently creates NOTHING in adventure mode. Hand-build the
+        -- CustomReaction job from the reaction raws instead -- the reaction
+        -- code is the button's mstring verbatim.
+        if #building.jobs==before
+            and choice.button.jobtype==df.job_type.CustomReaction
+            and choice.button.mstring~='' then
+            local reaction
+            for _,r in ipairs(df.global.world.raws.reactions.reactions) do
+                if r.code==choice.button.mstring then reaction=r break end
+            end
+            if reaction then
+                local nj=df.job:new()
+                nj.id=df.global.job_next_id
+                df.global.job_next_id=df.global.job_next_id+1
+                nj.job_type=df.job_type.CustomReaction
+                nj.reaction_name=reaction.code
+                nj.completion_timer=-1
+                nj.pos:assign({x=building.centerx,y=building.centery,z=building.z})
+                dfhack.job.linkIntoWorld(nj,true)
+                building.jobs:insert('#',nj)
+                nj.general_refs:insert('#',{new=df.general_ref_building_holderst,building_id=building.id})
+                for _,re in ipairs(reaction.reagents) do
+                    local ok,f=pcall(function()
+                        return {new=true,quantity=re.quantity or 1,
+                            item_type=re.item_type,item_subtype=re.item_subtype,
+                            mat_type=re.mat_type,mat_index=re.mat_index,
+                            reaction_class=re.reaction_class,
+                            has_material_reaction_product=re.has_material_reaction_product,
+                            metal_ore=re.metal_ore}
+                    end)
+                    if ok then nj.job_items.elements:insert('#',f) end
+                end
+            end
+        end
+        if #building.jobs>before then
             local job=building.jobs[#building.jobs-1]
             args.job=job
             args.pos=adv.pos
             args.from_pos=adv.pos
-            args.pre_actions={AssignJobItems}
             args.screen=self
-            makeJob(args)
+            if settings.df_assign then
+                makeJob(args)
+            else
+                self:openJobMaterials(args)   -- the shared materials picker
+            end
+        else
+            self:set_status(("Cannot start: %s"):format(choice.text or 'that recipe'))
         end
     elseif df.interface_button_building_category_selectorst:is_instance(choice.button) or
         df.interface_button_building_material_selectorst:is_instance(choice.button) then
@@ -1638,23 +2874,92 @@ function usetool:onWorkShopButtonClicked(building,index,choice)
 end
 
 function usetool:openShopWindowButtoned(building,no_reset)
-    self:setupFields()
-    -- TODO: category stuff
-    --[[
-    local wui=df.global.game.workshop_job
-    if not no_reset then
-        -- [[ manual reset incase the df-one does not exist?
-        wui:assign{category_id=-1,mat_type=-1,mat_index=-1}
-        for k,v in pairs(wui.material_category) do
-            wui.material_category[k]=false
-        end
-    end
-    --]]
-    building:fillSidebarMenu()
-
     local list={}
-    for id,choice in pairs(df.global.game.main_interface.building.button) do
-        table.insert(list,{text=utils.call_with_string(choice,"text"),button=choice})
+    if no_reset then
+        -- mid-category browsing (a category/material selector was pressed): stay on
+        -- the entity whose button was pressed; the sidebar state carries the category
+        self:setupFields(self.menu_entity or nil)
+        building:fillSidebarMenu()
+        for id,choice in pairs(df.global.game.main_interface.building.button) do
+            table.insert(list,{text=utils.call_with_string(choice,"text"),
+                               button=choice,entity=self.menu_entity})
+        end
+    else
+        -- WORKSHOP HYGIENE, one job at a time: junk jobs (no worker, no items,
+        -- never started) are deleted silently; ORPHANED unfinished jobs (their
+        -- worker wandered off or got reassigned) are offered at the TOP of the
+        -- menu as explicit "Resume:" entries -- never auto-resumed, that made
+        -- mystery jobs start with no visible cause.
+        local function job_is_active(bj)
+            for _,r in ipairs(bj.general_refs) do
+                if r:getType()==df.general_ref_type.UNIT_WORKER then
+                    local ok,u=pcall(function() return r:getUnit() end)
+                    if ok and u and u.job.current_job==bj then return true end
+                end
+            end
+            return false
+        end
+        -- COMPLETED leftovers: DF sometimes leaves the job object queued after
+        -- the product was made. A finished job's INGREDIENTS were consumed, so
+        -- "none of the attached items exist any more" = done, delete -- never
+        -- offer a Resume on it. (timer alone cannot tell: -1 means both
+        -- never-started and finished.)
+        local function job_seems_done(bj)
+            if bj.completion_timer>=0 then return false end
+            if #bj.items==0 then return false end
+            local any_alive=false
+            pcall(function()
+                for _,ji in ipairs(bj.items) do
+                    local it=ji.item
+                    if it and df.item.find(it.id)==it then any_alive=true end
+                end
+            end)
+            return not any_alive
+        end
+        self._resumables={}
+        for i=#building.jobs-1,0,-1 do
+            local bj=building.jobs[i]
+            if not job_is_active(bj) then
+                if (#bj.items==0 and bj.completion_timer<0) or job_seems_done(bj) then
+                    pcall(smart_job_delete,bj)
+                else
+                    table.insert(self._resumables,bj)
+                end
+            end
+        end
+        -- fresh open: the union of every menu entity's offered jobs (your civ first,
+        -- then site-only recipes). Button POINTERS survive only the LAST fill --
+        -- earlier entities' rows keep just their label + entity and are re-resolved
+        -- by a fresh fill when clicked (see onWorkShopButtonClicked).
+        self.menu_entity=nil
+        local ents=self:menuEntities()
+        local seen={}
+        for i,ent in ipairs(ents) do
+            self:setupFields(ent or nil)
+            building:fillSidebarMenu()
+            local last=(i==#ents)
+            for id,choice in pairs(df.global.game.main_interface.building.button) do
+                local label=utils.call_with_string(choice,"text")
+                if not seen[label] then
+                    seen[label]=true
+                    table.insert(list,{text=label,button=last and choice or nil,entity=ent})
+                end
+            end
+        end
+        -- rows collected from earlier fills may alias labels the LAST fill also has;
+        -- those can reuse the (fresh) last-fill pointers
+        if #ents>1 then
+            local fresh={}
+            for id,choice in pairs(df.global.game.main_interface.building.button) do
+                fresh[utils.call_with_string(choice,"text")]=choice
+            end
+            for _,row in ipairs(list) do
+                if not row.button and fresh[row.text] then
+                    row.button=fresh[row.text]
+                    row.entity=ents[#ents]
+                end
+            end
+        end
     end
     if #list ==0 and not no_reset then
         print("Fallback")
@@ -1664,8 +2969,23 @@ function usetool:openShopWindowButtoned(building,no_reset)
     end
     local building_name=utils.call_with_string(building,"getName") or "Workshop"
 
-    dialog.showListPrompt(building_name.." job choice", "Choose what to make",COLOR_WHITE,list,self:callback("onWorkShopButtonClicked",building)
-            ,nil, nil,true)
+    -- the job menu is a dig-building-style panel like the Build picker (fuzzy
+    -- search, columns, left-anchored). Deferred 2 frames so the click that
+    -- opened it can never also select an entry.
+    local entries={}
+    for _,bj in ipairs(self._resumables or {}) do
+        table.insert(entries,{label=('Resume: %s'):format(job_name(bj)),data={resume=bj}})
+    end
+    self._resumables=nil
+    for _,c in ipairs(list) do table.insert(entries,{label=c.text,data=c}) end
+    dfhack.timeout(2,'frames',function()
+        close_open_pickers()
+        JobPicker{
+            title=building_name,
+            entries=entries,
+            on_pick=function(choice) self:onWorkShopButtonClicked(building,0,choice) end,
+        }:show()
+    end)
 end
 function usetool:openShopWindow(building)
     local adv=dfhack.world.getAdventurer()
@@ -1881,28 +3201,79 @@ MODES={
         input=usetool.chairActions,
     },
 }
-function usetool:shopMode(enable,mode,building)
-    local shopLabel = self.subviews.shopLabel --as:wid.Label
-    shopLabel.visible=enable
-    if mode then
-        shopLabel:itemById("text1").text=mode.name
-        if building:getClutterLevel()<=1 then
-            shopLabel:itemById("clutter").text=""
-        else
-            shopLabel:itemById("clutter").text=" Clutter:"..tostring(building:getClutterLevel())
-        end
-        self.building=building
-    end
-    self.mode=mode
-end
---luacheck: in=bool[] out=none
-function usetool:shopInput(keys)
-    if keys[keybinds.workshop.key] then
-        self:openShopWindowButtoned(self.in_shop)
-    end
-end
 function usetool:wait_tick()
     self:sendInputToParent("A_SHORT_WAIT")
+end
+-- Workshop-job materials: the SHARED MaterialsPicker (same one the Build flow
+-- uses), replacing the old jobitemEditor. Slots come from the freshly-created
+-- job's item filters; confirming fills the job and starts it, cancelling
+-- deletes the job again.
+function usetool:openJobMaterials(args)
+    local job=args.job
+    local its=EnumItems_with_settings(args)
+    local ok,suitability=pcall(find_suitable_items,job,its)
+    if not ok then
+        pcall(smart_job_delete,job)
+        self:set_status("Item scan failed")
+        return
+    end
+    local slots={}
+    for job_id,trg in ipairs(job.job_items.elements) do
+        local cands,seen={},{}
+        for _,it in pairs(suitability[job_id] or {}) do
+            if not seen[it.id] then
+                seen[it.id]=true
+                cands[#cands+1]=it
+            end
+        end
+        slots[#slots+1]={cands=cands,pick=(#cands>0) and 1 or 0,qty=trg.quantity or 1,
+                         what=filter_desc(trg)}
+    end
+    if #slots==0 then    -- no reagents at all: just run it
+        makeJob(args)
+        return
+    end
+    local scr=self
+    local title=(utils.call_with_string(args.building,"getName") or 'Job')..' materials'
+    dfhack.timeout(2,'frames',function()
+        close_open_pickers()
+        MaterialsPicker{
+            title=title,
+            slots=slots,
+            on_confirm=function(slots2)
+                args.pre_actions={function(a) return fill_job_from_slots(a,slots2) end}
+                makeJob(args)
+            end,
+            on_cancel=function()
+                pcall(smart_job_delete,job)
+                scr:set_status("Job canceled")
+            end,
+        }:show()
+    end)
+end
+
+-- clicking the window's Use Workshop row: use the finished building you stand on
+-- (or the first one adjacent) immediately -- no tile click needed
+function usetool:use_nearby_workshop()
+    local adv=dfhack.world.getAdventurer()
+    local function usable(p)
+        local bld=dfhack.buildings.findAtTile(p)
+        if bld and MODES[bld:getType()] and bld:getBuildStage()==bld:getMaxBuildStage() then
+            return bld
+        end
+    end
+    local bld=usable(adv.pos)
+    if not bld then
+        for _,d in ipairs({{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{1,-1},{-1,1},{1,1}}) do
+            bld=usable({x=adv.pos.x+d[1],y=adv.pos.y+d[2],z=adv.pos.z})
+            if bld then break end
+        end
+    end
+    if not bld then
+        self:set_status("No usable building nearby")
+        return
+    end
+    MODES[bld:getType()].input(self,bld)
 end
 function find_entity_civ( raw_code )
     for i,v in ipairs(df.global.world.entities.all) do
@@ -1912,16 +3283,26 @@ function find_entity_civ( raw_code )
         end
     end
 end
-function usetool:setupFields()
+function usetool:menuEntities()
+    return recipe_entities()
+end
+function usetool:setupFields(entity)
     local ui=df.global.plotinfo
 
     local adv=dfhack.world.getAdventurer()
-    if settings.set_civ==true then
-        ui.civ_id=adv.civ_id
-        ui.race_id=adv.race
-        ui.main.fortress_entity=df.historical_entity.find(adv.civ_id)
+    if entity then
+        ui.civ_id=entity.id
+        ui.race_id=entity.race
+        ui.main.fortress_entity=entity
+    elseif settings.set_civ==true or settings.set_civ==nil then
+        -- adventurer's civ (the civ+site default resolves per-entity via the
+        -- `entity` argument; this branch also covers -e with no name)
+        local civ=df.historical_entity.find(adv.civ_id) or find_entity_civ("MOUNTAIN")
+        ui.civ_id=civ and civ.id or adv.civ_id
+        ui.race_id=civ and civ.race or adv.race
+        ui.main.fortress_entity=civ
     else
-        local civ_entity=find_entity_civ(settings.set_civ or "MOUNTAIN")
+        local civ_entity=find_entity_civ(settings.set_civ)
         ui.civ_id=civ_entity.id
         ui.race_id=civ_entity.race
         ui.main.fortress_entity=civ_entity
@@ -2012,12 +3393,21 @@ function usetool:draw_job_window(dc)
     dc:seek(l+1,t+n+1):pen(BG):string(string.rep(string.char(196),w-2))
     local msg,pen
     local cj=dfhack.world.getAdventurer().job.current_job
-    if self.status_msg then
-        msg,pen=self.status_msg,COLOR_LIGHTRED
-    elseif cj then
-        msg,pen=('working(%d)'):format(cj.completion_timer),COLOR_LIGHTGREEN
+    -- PROGRESS OWNS THE STATUS LINE: while anything is being worked, the
+    -- "(N)" counter always shows -- the job NAME truncates around it, and any
+    -- pending status text waits until the work is over
+    local function fit(name,left)
+        local prog=(' (%d)'):format(left)
+        return name:sub(1,math.max(1,w-2-#prog))..prog
+    end
+    if cj then
+        msg,pen=fit(job_name(cj),math.max(0,cj.completion_timer)),COLOR_LIGHTGREEN
     elseif self.web_work then
-        msg,pen=('working(%d)'):format(self.web_work.left),COLOR_LIGHTGREEN
+        msg,pen=fit('gather webs',self.web_work.left),COLOR_LIGHTGREEN
+    elseif self.fell_work then
+        msg,pen=fit('fell tree',self.fell_work.left),COLOR_LIGHTGREEN
+    elseif self.status_msg then
+        msg,pen=self.status_msg,COLOR_LIGHTRED
     else
         msg,pen='Click to do jobs',COLOR_DARKGREY
     end
@@ -2050,12 +3440,20 @@ function usetool:map_click_job()
     local pos=dfhack.gui.getMousePos()
     if not pos then return false end
     local adv=dfhack.world.getAdventurer()
+    local cur_mode=actions[(mode or 0)+1]
     -- only adjacent (or own) tiles are job clicks; anything farther is normal game input
-    -- (walk there), so return unconsumed and let onInput fall through to the parent
-    if math.max(math.abs(pos.x-adv.pos.x),math.abs(pos.y-adv.pos.y),math.abs(pos.z-adv.pos.z))>1 then
+    -- (walk there). EXCEPT Build with a multi-tile selection: its CENTER goes on the
+    -- clicked tile, so the click may be up to 1+center-offset away -- the footprint
+    -- edge is what must touch you.
+    local reach=1
+    if cur_mode[1]=='Build' and last_building and last_building.type then
+        local okz,rot,w,h,cx,cy=pcall(dfhack.buildings.getCorrectSize,nil,nil,
+            last_building.type,last_building.subtype,last_building.custom,0)
+        if okz and cx then reach=1+math.max(cx,cy or 0) end
+    end
+    if math.max(math.abs(pos.x-adv.pos.x),math.abs(pos.y-adv.pos.y),math.abs(pos.z-adv.pos.z))>reach then
         return false
     end
-    local cur_mode=actions[(mode or 0)+1]
     local probe={unit=adv,pos={x=pos.x,y=pos.y,z=pos.z},from_pos=copyall(adv.pos)}
     for _,pr in pairs(cur_mode[3] or {}) do
         if TARGET_PREDS[pr] and not pr(probe) then
@@ -2150,12 +3548,32 @@ function usetool:onInput(keys)
         local l,t,w,h,n=self:job_win_geom()
         if mx>=l and mx<l+w and my>=t and my<t+h then
             local row=my-t
+            -- clicking the STATUS LINE cancels the current task
+            if row==n+2 then
+                local u=dfhack.world.getAdventurer()
+                local cj2=u and u.job.current_job
+                if cj2 then
+                    local nm=job_name(cj2)
+                    CancelJob(u)
+                    pcall(smart_job_delete,cj2)
+                    self:cancel_wait()
+                    self:set_status(("Canceled: %s"):format(nm))
+                    dfhack.gui.showAnnouncement(("You stop working on the %s."):format(nm),7,1)
+                end
+                return
+            end
             local line=row>=1 and row<=n and LAYOUT[row]
             if line then
                 for _,seg in ipairs(line) do   -- hit the segment actually clicked
                     if seg._x1 and mx>=seg._x1 and mx<=seg._x2 then
-                        mode=(seg.click or seg[1])-1
+                        local id=seg.click or seg[1]
+                        mode=id-1
                         self.status_msg=nil
+                        -- clicking the Build row also opens the building picker,
+                        -- and Use Workshop opens the menu for the building you
+                        -- are standing on / next to right away
+                        if actions[id][1]=='Build' then showBuildPicker()
+                        elseif actions[id][1]=='Use Workshop' then self:use_nearby_workshop() end
                         break
                     end
                 end
@@ -2190,11 +3608,9 @@ function usetool:onInput(keys)
             self:dismiss()
         end
     elseif keys[keybinds.nextJob.key] then --next job with looping
-        repeat mode=(mode+1)%#actions
-        until actions[mode+1][1]~='Build Last' or last_building.type
+        mode=(mode+1)%#actions
     elseif keys[keybinds.prevJob.key] then --prev job with looping
-        repeat mode=(mode-1)%#actions
-        until actions[mode+1][1]~='Build Last' or last_building.type
+        mode=(mode-1)%#actions
     elseif keys["A_SHORT_WAIT"] then
         --ContinueJob(adv)
         df.global.adventure.player_control_state=1 --TODO: figure out what is "more correct here"
@@ -2204,14 +3620,7 @@ function usetool:onInput(keys)
     elseif keys[keybinds.continue.key] then
         self:wait_long_start()
     else
-        if self.mode~=nil then
-            if keys[keybinds.workshop.key] then
-                self.mode.input(self,self.building)
-            end
-            self:fieldInput(keys)
-        else
-            self:fieldInput(keys)
-        end
+        self:fieldInput(keys)
     end
 
 end
@@ -2276,6 +3685,36 @@ function usetool:onIdle()
     local job_ptr=adv.job.current_job
     local job_action=findAction(adv,df.unit_action_type.Job)
 
+    -- post-completion unstick: a finished building whose impassable tile you are
+    -- standing on would trap you -- step one tile to the nearest open spot
+    if self.unstick_until then
+        if dfhack.getTickCount()>self.unstick_until then
+            self.unstick_until=nil
+        else
+            local function blocked(p)
+                local blk=dfhack.maps.getTileBlock(p)
+                if not blk then return true end
+                local bo=blk.occupancy[p.x%16][p.y%16].building
+                return bo==df.tile_building_occ.Impassable or bo==df.tile_building_occ.Obstacle
+            end
+            if blocked(adv.pos) then
+                for _,dd in ipairs({{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{1,-1},{-1,1},{1,1}}) do
+                    local p={x=adv.pos.x+dd[1],y=adv.pos.y+dd[2],z=adv.pos.z}
+                    local tt=dfhack.maps.getTileType(p)
+                    local sh=tt and tile_attrs[tt].shape
+                    if (sh==df.tiletype_shape.FLOOR or sh==df.tiletype_shape.RAMP
+                        or sh==df.tiletype_shape.STAIR_UP or sh==df.tiletype_shape.STAIR_DOWN
+                        or sh==df.tiletype_shape.STAIR_UPDOWN) and not blocked(p)
+                        and pcall(dfhack.units.teleport,adv,copyall(p)) then
+                        dfhack.gui.showAnnouncement("You step off the finished building.",7,1)
+                        self.unstick_until=nil
+                        break
+                    end
+                end
+            end
+        end
+    end
+
     -- FIX(too-long prompt): handle it FIRST, gated on nothing but the prompt state itself --
     -- when it fires mid-job the unit still has its queued Job action (measured live), so any
     -- job/action-based gate never passes. Freeze the deadlock countdown, click the button,
@@ -2334,7 +3773,12 @@ function usetool:onIdle()
     --some heuristics for unsafe conditions
     if self.long_wait and not settings.unsafe then --check if player wants for canceling to happen
         local counters=adv.counters
-        local checked_counters={pain=true,winded=true,stunned=true,unconscious=true,suffocation=true,webbed=true,nausea=true,dizziness=true}
+        -- 'winded' is deliberately NOT here: it is the routine post-sprint/-fight
+        -- state, decays on its own, and cancelling on it froze EVERY long job for
+        -- an over-exerted adventurer ("stopped waiting: winded" forever). Small
+        -- suffocation values tag along with winded, so only a genuinely rising
+        -- can't-breathe count (drowning, strangling) cancels.
+        local checked_counters={pain=true,stunned=true,unconscious=true,webbed=true,nausea=true,dizziness=true}
         for k,v in pairs(checked_counters) do
             if counters[k]>0 then
                 dfhack.gui.showAnnouncement("Job: canceled waiting because unsafe -"..k,5,1)
@@ -2342,6 +3786,12 @@ function usetool:onIdle()
                 self:cancel_wait()
                 return
             end
+        end
+        if counters.suffocation>50 then
+            dfhack.gui.showAnnouncement("Job: canceled waiting because unsafe -suffocation",5,1)
+            self:set_status("stopped waiting: suffocation")
+            self:cancel_wait()
+            return
         end
     end
 
@@ -2386,6 +3836,47 @@ function usetool:onIdle()
         return
     end
 
+    -- tree felling work (jobless -- see FellTreeChooser): pump the timer with
+    -- waits like a dig, then fell the tree by hand and award Wood Cutter exp
+    if self.fell_work then
+        local fw=self.fell_work
+        local plant=dfhack.maps.getPlantAtTile(fw.ppos)
+        local d=math.max(math.abs(adv.pos.x-fw.pos.x),
+                         math.abs(adv.pos.y-fw.pos.y),
+                         math.abs(adv.pos.z-fw.pos.z))
+        if not plant or not plant.tree_info then
+            self:set_status("canceled: the tree is gone")
+            self.fell_work=nil
+        elseif d>1 then
+            dfhack.gui.showAnnouncement("Job canceled: you were moved away.",5,1)
+            self:set_status("canceled: moved away")
+            self.fell_work=nil
+        else
+            local t=df.global.cur_year_tick_advmode
+            if t<fw.last_tick then fw.last_tick=t end          -- clock wrapped/loaded
+            if t-fw.last_tick>=fw.step_ticks then
+                fw.last_tick=t
+                fw.left=fw.left-1
+            end
+            if fw.left<=0 then
+                self.fell_work=nil
+                local ok,logs=pcall(do_fell,adv,plant)
+                if ok then
+                    dfhack.gui.showAnnouncement(
+                        ('The tree falls! You cut %d log%s.'):format(logs,logs==1 and '' or 's'),7,true)
+                    add_skill_exp(adv,df.job_skill.WOODCUTTING,30)
+                else
+                    self:set_status("felling failed")
+                    print("advfort fell error:",logs)
+                end
+            else
+                self:sendInputToParent("A_SHORT_WAIT")
+            end
+        end
+        self._native.parent:logic()
+        return
+    end
+
     -- Position watchdog: working requires staying put, and the game can MOVE you mid-job
     -- (water currents, knockback). A worker carried out of reach leaves a job that can
     -- never finish -- the wait loop would just spin. Track where the current job started;
@@ -2395,11 +3886,16 @@ function usetool:onIdle()
         if self.work_job~=job_ptr.id then
             self.work_job=job_ptr.id
             self.work_pos=copyall(adv.pos)
+            self.job_started=nil
         elseif not same_xyz(adv.pos,self.work_pos) then
             local d=math.max(math.abs(adv.pos.x-job_ptr.pos.x),
                              math.abs(adv.pos.y-job_ptr.pos.y),
                              math.abs(adv.pos.z-job_ptr.pos.z))
-            if d>1 then
+            -- construct jobs anchor at the building CENTER and you legitimately
+            -- walk around a multi-tile site (or toward it) mid-job -- only treat
+            -- clearly leaving as "moved away"
+            local limit=job_ptr.job_type==df.job_type.ConstructBuilding and 3 or 1
+            if d>limit then
                 dfhack.gui.showAnnouncement("Job canceled: you were moved away.",5,1)
                 self:set_status("canceled: moved away")
                 local j=job_ptr
@@ -2423,6 +3919,30 @@ function usetool:onIdle()
 
     if job_ptr and self.long_wait and not job_action then
 
+        -- Building-anchored jobs (construction AND workshop tasks): DF only works
+        -- them -- and otherwise silently CULLS them -- while you are within 1
+        -- tile of the job anchor, the building's CENTER (measured live: a shield
+        -- job from 2 tiles away vanished with no product; from 1 tile it
+        -- completed). Pause with guidance instead of letting the job be eaten.
+        do
+            local anchored=job_ptr.job_type==df.job_type.ConstructBuilding
+            if not anchored then
+                for _,r in ipairs(job_ptr.general_refs) do
+                    if r:getType()==df.general_ref_type.BUILDING_HOLDER then anchored=true end
+                end
+            end
+            if anchored then
+                local d=math.max(math.abs(adv.pos.x-job_ptr.pos.x),
+                                 math.abs(adv.pos.y-job_ptr.pos.y),
+                                 math.abs(adv.pos.z-job_ptr.pos.z))
+                if d>1 then
+                    self:set_status("Stand by the building's center to work")
+                    self._native.parent:logic()
+                    return
+                end
+            end
+        end
+
         if self.long_wait_timer<=0 then --fix deadlocks with force-canceling of waiting
             self:cancel_wait()
             return
@@ -2431,11 +3951,18 @@ function usetool:onIdle()
         end
 
         -- learn how long mining takes from the digs actually worked (web gathering copies it)
+        if adv.job.current_job.completion_timer>0 then
+            self.job_started=true          -- reset when work_job changes (watchdog)
+        end
         if adv.job.current_job.job_type==df.job_type.Dig
                 and adv.job.current_job.completion_timer>(dig_peak or 0) then
             dig_peak=adv.job.current_job.completion_timer
         end
-        if adv.job.current_job.completion_timer==-1  then
+        -- -1 is BOTH "finished" and "never started": a virgin workshop job sits
+        -- at -1 until its first work action lands, and reading that as done
+        -- stalled every workshop task one kick in. Only a job we have SEEN
+        -- running (timer>0) is done at -1; a virgin one keeps getting kicked.
+        if adv.job.current_job.completion_timer==-1 and self.job_started then
             local jt=adv.job.current_job.job_type
             local jpos=adv.job.current_job.pos
             if jt==df.job_type.SmoothFloor or jt==df.job_type.SmoothWall then
@@ -2443,8 +3970,33 @@ function usetool:onIdle()
             elseif jt==df.job_type.Dig and self.fort_pos and same_xyz(jpos,self.fort_pos) then
                 self.pending_detail={pos=copyall(jpos),want='floor'}
                 self.fort_pos=nil
+            elseif jt==df.job_type.ConstructBuilding then
+                -- watch for a couple seconds after completion: if the finished
+                -- building's impassable tiles seal the adventurer in, step off
+                self.unstick_until=dfhack.getTickCount()+3000
             end
             self.long_wait=false
+            -- Workshop tasks: DF leaves the COMPLETED job attached as your
+            -- current job and queued at the shop -- the status line froze at
+            -- "(0)" forever and the husk clogged the queue. Ingredients all
+            -- consumed = truly done: announce, unhook, delete the husk.
+            local cj2=adv.job.current_job
+            if cj2 and #cj2.items>0 then
+                local any_alive=false
+                pcall(function()
+                    for _,ji in ipairs(cj2.items) do
+                        local it=ji.item
+                        if it and df.item.find(it.id)==it then any_alive=true end
+                    end
+                end)
+                if not any_alive then
+                    local nm=job_name(cj2)
+                    CancelJob(adv)
+                    pcall(smart_job_delete,cj2)
+                    self:set_status(("Finished: %s"):format(nm))
+                    dfhack.gui.showAnnouncement(("Finished: %s."):format(nm),7,true)
+                end
+            end
         end
         ContinueJob(adv)
         self:sendInputToParent("A_SHORT_WAIT") --todo continue till finished
@@ -2461,7 +4013,6 @@ function usetool:isOnBuilding()
     end
 end
 function usetool:onRenderBody(dc)
-    self:shopMode(self:isOnBuilding())
     self:renderParent()
     self:draw_job_window(dc)
 end

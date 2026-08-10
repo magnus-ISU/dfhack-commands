@@ -19,18 +19,22 @@ plus the **Dwarf Fortress: High Adventure** content-mod suite.
 
 ## Turning it all on — `magnus-scripts`
 
-`magnus-scripts` is the switch for the whole pack. Run it once per session — or add it to
-`dfhack-config/init/dfhack.init` and forget about it — and every always-on helper below is
-enabled at once: the notification overlays, the watchdog services, the map and stockpile
-tools. Anything destructive or situational is deliberately left out and stays a command you
-run by hand.
+`magnus-scripts` is the switchboard for the whole pack. Running it opens a window with four
+individually-scrollable columns — `fort/`, `adv/`, `embark/` and vanilla DFHack tools — with
+a checkbox per helper. Click a row to toggle it; the selection is saved (to
+`dfhack-config/magnus-scripts.json`) and re-applied automatically on every map load. Column
+headers toggle a whole column, `m` toggles all the mod columns at once, and `r` is the
+recommended master switch: everything on. On a fresh install everything starts enabled.
 
 ```sh
-magnus-scripts          # enable the always-on helpers for this session
-magnus-scripts lovely   # ...plus a batch of stock DFHack tools and a few extras
+fort/magnus-scripts           # apply the saved selection, then open the GUI
+fort/magnus-scripts apply     # headless apply (what the auto-run line calls)
+fort/magnus-scripts disable   # everything off + remove the auto-run line
 ```
 
 It is safe to re-run at any time: each helper it starts is idempotent, and it disables and
-re-enables its own services rather than stacking them.
+re-enables its own services rather than stacking them. Anything destructive or situational
+(no-pausing, embark-nobles, the one-shot commands) is deliberately left out and stays a
+command you run by hand.
 
 ---

@@ -379,7 +379,7 @@ install-plugin:
 	  "$(DFRUN)" enable $(PLUGIN) || true
 	  echo "Loaded and enabled in the running game."
 	else
-	  echo "Start Dwarf Fortress to load it. 'magnus-scripts lovely' enables it automatically,"
+	  echo "Start Dwarf Fortress to load it. 'magnus-scripts' enables it automatically,"
 	  echo "or run 'make enable' while the game is running."
 	fi
 
