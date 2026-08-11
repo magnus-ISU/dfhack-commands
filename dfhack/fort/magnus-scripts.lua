@@ -200,6 +200,22 @@ local COLUMNS = {
          disable = notify_off({'agitated_typed'}, {'agitated_count', 'hostile_count'})},
     }},
     {id = 'adv', title = 'adv/', mode = 'adv', items = {
+        -- enable reloads the script (fresh code if the file changed), re-registers
+        -- its overlay from the new env, and shows the yellow launcher icon --
+        -- clicking THAT opens the window, so map loads never pop it unasked.
+        -- An advfort window already open keeps running its old code: close it,
+        -- then toggle here. disable hides the icon; an open window is left alone.
+        {key = 'adv-advfort', label = 'advfort',
+         enable = function()
+            reqscript('adv/advfort')
+            require('plugins.overlay').rescan()
+            dfhack.run_command('overlay', 'enable', 'adv/advfort.icon')
+            reqscript('adv/advfort').icon_active = true
+         end,
+         disable = function()
+            pcall(function() reqscript('adv/advfort').icon_active = false end)
+            dfhack.run_command('overlay', 'disable', 'adv/advfort.icon')
+         end},
         {key = 'adv-auto-save', label = 'auto-save (20 min)',
          enable = script('adv/auto-save', 'enable', '20'),
          disable = script('adv/auto-save', 'disable')},
@@ -543,6 +559,28 @@ function MagnusWindow:init()
     end
     self:addviews(views)
     self:refresh()
+end
+
+-- Mouse-wheel scrolling for whichever column the pointer is over. This
+-- build's widgets.List scrolls only via keyboard on the (invisibly) focused
+-- list -- with four lists that reads as "not scrollable at all". Wheel events
+-- arrive as CONTEXT_SCROLL_* keys; route them to the hovered list's cursor
+-- (the page follows the cursor).
+function MagnusWindow:onInput(keys)
+    local delta = (keys.CONTEXT_SCROLL_UP and -3) or (keys.CONTEXT_SCROLL_DOWN and 3)
+        or (keys.CONTEXT_SCROLL_PAGEUP and '-page') or (keys.CONTEXT_SCROLL_PAGEDOWN and '+page')
+    if delta then
+        for _, col in ipairs(COLUMNS) do
+            local list = self.subviews['list_' .. col.id]
+            if list:getMousePos() then
+                if delta == '-page' then delta = -list.page_size
+                elseif delta == '+page' then delta = list.page_size end
+                list:moveCursor(delta)
+                return true
+            end
+        end
+    end
+    return MagnusWindow.super.onInput(self, keys)
 end
 
 function MagnusWindow:refresh()
