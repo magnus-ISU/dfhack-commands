@@ -76,9 +76,13 @@ local function foe_matters(uid, me)
 end
 
 -- The units that make the adventurer's fights real: every foe_matters
--- participant of every Conflict activity the adventurer is listed in.
--- world.activities is small (tens); sides/unit_ids a handful each.
--- EXPORTED: adv/enemy-recenter points its button at these.
+-- participant on an OPPOSING side of every Conflict activity the adventurer
+-- is listed in. Sidedness matters: your companions are listed on YOUR side of
+-- the same conflict, and counting them made a tame ally 2 tiles away pin
+-- "combat" forever (measured live: the player's own draltha, side 1 next to
+-- the player, reported as a foe). world.activities is small (tens);
+-- sides/unit_ids a handful each. EXPORTED: adv/enemy-recenter points its
+-- button at these.
 function combat_foes()
     local out = {}
     local me = dfhack.world.getAdventurer()
@@ -88,20 +92,23 @@ function combat_foes()
         if act.type == df.activity_entry_type.Conflict then
             for _, ev in ipairs(act.events) do
                 if df.activity_event_conflictst:is_instance(ev) then
-                    local mine, foes = false, {}
-                    for _, side in ipairs(ev.sides) do
+                    local my_side
+                    for si, side in ipairs(ev.sides) do
                         for _, uid in ipairs(side.unit_ids) do
-                            if uid == id then
-                                mine = true
-                            elseif not seen[uid] and foe_matters(uid, me) then
-                                foes[#foes + 1] = uid
-                            end
+                            if uid == id then my_side = si break end
                         end
+                        if my_side then break end
                     end
-                    if mine then
-                        for _, uid in ipairs(foes) do
-                            seen[uid] = true
-                            out[#out + 1] = df.unit.find(uid)
+                    if my_side then
+                        for si, side in ipairs(ev.sides) do
+                            if si ~= my_side then
+                                for _, uid in ipairs(side.unit_ids) do
+                                    if not seen[uid] and foe_matters(uid, me) then
+                                        seen[uid] = true
+                                        out[#out + 1] = df.unit.find(uid)
+                                    end
+                                end
+                            end
                         end
                     end
                 end
