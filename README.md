@@ -332,10 +332,12 @@ Automatically reopen the inventory and scroll to the last position
 ### **`adv/appraiser`** 
 Item values appear directly below each item's weight in the inventory and pick-up lists, at
   the precision an equally skilled fortress broker would get: no Appraiser skill shows only
-  `?`, low levels show values rounded to the nearest 100 then 10, and 11+ is exact. The skill
-  trains as an adventurer plausibly would: +200 xp for trading with a partner you haven't
-  traded with before, +10 xp for handling a coin minting you haven't seen — judged against
-  rolling last-20 lists (persisted in the save) so the checks stay cheap.
+  `?`, ratings 1–5 show one significant figure (`~300`, `~30`, `~9`), 6–10 two (`~340`), and
+  11+ is exact — proportional uncertainty, so cheap trinkets never read `~0`. The skill
+  trains as an adventurer plausibly would: +200 xp for a *completed purchase* with a partner
+  you haven't traded with before (goods must actually reach your hands), +10 xp for handling
+  a coin minting you haven't seen, checked once per in-game day — judged against rolling
+  last-20 lists (persisted in the save) so the checks stay cheap.
 
 ### **`adv/inventory-display-weight`** 
 Show every item's weight in the inventory list and the pick-up menu.

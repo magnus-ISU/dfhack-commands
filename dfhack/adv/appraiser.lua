@@ -6,20 +6,24 @@ adv/appraiser
 Shows what things are WORTH, and teaches you to judge it. Item values appear
 directly below each item's weight in the inventory list and the pick-up menu
 (painted by adv/inventory-display-weight, which asks this module for the
-label), at the precision an equivalently skilled fortress broker would get:
+label), at the precision an equivalently skilled fortress broker would get.
+Precision is PROPORTIONAL (significant figures), never a fixed step -- a flat
+"nearest 100" called every trinket "~0", which no appraiser would say:
 
-    Appraiser rating 0      ?           (no appraiser, no numbers -- as a fort
-                                         with no broker sees its depot)
-    rating 1-5              ~300        (nearest 100)
-    rating 6-10             ~340        (nearest 10)
-    rating 11+              347         (exact -- a master broker's eye)
+    Appraiser rating 0      ?             (no appraiser, no numbers -- as a
+                                           fort with no broker sees its depot)
+    rating 1-5              ~300 ~30 ~9   (1 significant figure)
+    rating 6-10             ~340          (2 significant figures)
+    rating 11+              347           (exact -- a master broker's eye)
 
 And it trains the skill the way an adventurer plausibly would:
 
-    +200 xp  trading with an NPC you haven't traded with before (the barter
-             screen opening on a new merchant/partner)
+    +200 xp  completing a PURCHASE with a partner you haven't traded with
+             before -- the barter screen must actually hand you something
+             (demand-only shakedowns and window shopping teach nothing)
     +10 xp   acquiring a coin MINTING you haven't handled before (coins are
-             keyed by their mint batch -- entity + year -- not per coin)
+             keyed by their mint batch -- entity + year -- not per coin);
+             the pack is scanned once per in-game day
 
 "New" is judged against rolling lists of the last 20 trade partners and the
 last 20 coin mintings -- a ring, not a full history, so the check is O(20) and
@@ -41,7 +45,7 @@ if running == nil then running = true end
 xp_awarded = xp_awarded or 0
 GLOBAL_KEY = 'appraiser'
 RING_MAX = 20
-local SCAN_MS = 1000
+local SCAN_MS = 1000           -- barter watcher cadence (sessions are short)
 local COIN_XP, TRADE_XP = 10, 200
 local VALUE_CH = string.char(15)   -- CP437 sun, DF's value glyph
 
@@ -114,6 +118,14 @@ end
 
 -- ---- the label (exported: inventory-display-weight paints it) -----------------
 -- value below the weight, at the precision a fort broker of this skill gets
+-- round to n significant figures: proportional uncertainty, like a real eye
+local function sigfig(v, n)
+    if v <= 0 then return 0 end
+    local mag = math.floor(math.log(v, 10))
+    local step = 10 ^ math.max(0, mag - n + 1)
+    return math.floor(v / step + 0.5) * step
+end
+
 function appraise_label(item)
     if not running then return nil end
     local ok, v = pcall(dfhack.items.getValue, item)
@@ -121,9 +133,9 @@ function appraise_label(item)
     local r = rating()
     if r == 0 then return '?' .. VALUE_CH end
     if r <= 5 then
-        return ('~%d%s'):format(math.floor(v / 100 + 0.5) * 100, VALUE_CH)
+        return ('~%d%s'):format(sigfig(v, 1), VALUE_CH)
     elseif r <= 10 then
-        return ('~%d%s'):format(math.floor(v / 10 + 0.5) * 10, VALUE_CH)
+        return ('~%d%s'):format(sigfig(v, 2), VALUE_CH)
     end
     return ('%d%s'):format(v, VALUE_CH)
 end
@@ -135,16 +147,53 @@ local function partner_key(u)
     return 'u' .. u.id
 end
 
+-- A trade must actually COMPLETE: the award fires only after something new
+-- lands in your possession during the barter session (a purchase, or change
+-- from a sale). Session state: partner + the item-id set when it opened;
+-- goods received flips `traded`; the award lands when the screen closes.
+local session = nil
+
+local function my_item_ids()
+    local u = dfhack.world.getAdventurer()
+    if not u then return nil end
+    local set = {}
+    for _, iv in ipairs(u.inventory) do
+        set[iv.item.id] = true
+        local ok, contained = pcall(dfhack.items.getContainedItems, iv.item)
+        if ok and contained then
+            for _, it in ipairs(contained) do set[it.id] = true end
+        end
+    end
+    return set
+end
+
 local function check_barter()
     local b = df.global.game.main_interface.adventure.barter
-    if not b.open then return end
-    local m = b.merchant
-    if not m then return end
-    local key = partner_key(m)
-    local r = load_rings()
-    if ring_has(r.npcs, key) then return end
-    ring_push(r.npcs, key)
-    add_xp(TRADE_XP, ('You size up %s\'s goods.'):format(dfhack.units.getReadableName(m)))
+    if b.open and b.merchant and not b.demand_only then
+        local key = partner_key(b.merchant)
+        if not session or session.key ~= key then
+            session = {key = key, had = my_item_ids(), traded = false,
+                       name = dfhack.units.getReadableName(b.merchant)}
+        elseif not session.traded and session.had then
+            local now_ids = my_item_ids()
+            if now_ids then
+                for id in pairs(now_ids) do
+                    if not session.had[id] then session.traded = true break end
+                end
+            end
+        end
+    elseif session then
+        -- session over: award if goods changed hands and the partner is new
+        local s = session
+        session = nil
+        if s.traded then
+            local r = load_rings()
+            if not ring_has(r.npcs, s.key) then
+                ring_push(r.npcs, s.key)
+                add_xp(TRADE_XP, ('You size up %s\'s wares.'):format(s.name))
+            end
+        end
+    end
 end
 
 -- every coin carried (containers included, one level -- pickups auto-stow),
@@ -176,6 +225,7 @@ end
 
 -- ---- overlay driver -----------------------------------------------------------
 local next_scan = 0
+local last_coin_day = nil
 
 local function step()
     if not running or not dfhack.world.isAdventureMode() then return end
@@ -183,7 +233,13 @@ local function step()
     if now < next_scan then return end
     next_scan = now + SCAN_MS
     pcall(check_barter)
-    pcall(check_coins)
+    -- coins once per IN-GAME day. Compared with ~=, not >: cur_year_tick is
+    -- non-monotonic under timestream and wraps at new year.
+    local day = math.floor(df.global.cur_year_tick / 1200)
+    if day ~= last_coin_day then
+        last_coin_day = day
+        pcall(check_coins)
+    end
 end
 
 AppraiserWatch = defclass(AppraiserWatch, overlay.OverlayWidget)
