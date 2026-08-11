@@ -518,6 +518,72 @@ function MakePredicateWieldsItem(item_skill)
     return pred
 end
 
+-- Ensure the needed tool sits in a grasp before a DF-pumped job starts: DF's
+-- own work handler refuses to progress the dig family without a WIELDED pick
+-- (the relaxed carry-check alone left digs frozen at their first pulse). If
+-- the tool is strapped or bagged, wield it -- through a free hand, or by
+-- temporarily strapping one held item to make room -- and record the exact
+-- moves on the screen (tool_swap) so everything goes back once the job ends.
+function MakeEnsureToolWielded(item_skill)
+    return function(args)
+        local unit=args.unit
+        for _,v in ipairs(unit.inventory) do
+            if v.mode==1 and v.item:getMeleeSkill()==item_skill
+                and is_grasping_item(v.body_part_id,unit) then
+                return true                      -- already in hand
+            end
+        end
+        local tool,tool_old
+        for _,v in ipairs(unit.inventory) do
+            if v.mode==10 and v.item:getMeleeSkill()==item_skill then
+                tool,tool_old=v.item,{mode=v.mode,bp=v.body_part_id}
+            else
+                local ok,c=pcall(dfhack.items.getContainedItems,v.item)
+                if ok and c then
+                    for _,it in ipairs(c) do
+                        if it:getMeleeSkill()==item_skill then tool=it end
+                    end
+                end
+            end
+            if tool then break end
+        end
+        if not tool then return false,"Carry the right tool" end
+        -- find a grasp for it: a free hand, else displace one held item
+        local held_by_bp={}
+        for _,v in ipairs(unit.inventory) do
+            if v.mode==1 then held_by_bp[v.body_part_id]=v.item end
+        end
+        local parts=unit.body.body_plan.body_parts
+        local target,displaced
+        for i=0,#parts-1 do
+            if parts[i].flags.GRASP and not held_by_bp[i] then target=i break end
+        end
+        if not target then
+            for i=0,#parts-1 do
+                if parts[i].flags.GRASP and held_by_bp[i] then
+                    target,displaced=i,held_by_bp[i]
+                    break
+                end
+            end
+        end
+        if not target then return false,"No grasp to hold the tool" end
+        if displaced and not dfhack.items.moveToInventory(displaced,unit,10,0) then
+            return false,"No free hand for the tool"
+        end
+        if not dfhack.items.moveToInventory(tool,unit,1,target) then
+            if displaced then pcall(dfhack.items.moveToInventory,displaced,unit,1,target) end
+            return false,"Could not ready the tool"
+        end
+        if args.screen then
+            args.screen.tool_swap={tool_id=tool.id,old=tool_old,
+                displaced_id=displaced and displaced.id or nil,grasp=target}
+        end
+        dfhack.gui.showAnnouncement(
+            "You ready your "..dfhack.items.getDescription(tool,0)..".",7,1)
+        return true
+    end
+end
+
 function makeset(args)
     local tbl={}
     for k,v in pairs(args) do
@@ -1148,6 +1214,14 @@ function CheckAndFinishBuilding(args,bld)
         if job.job_type==df.job_type.ConstructBuilding then
             args.job=job
             args.no_job_delete=true
+            -- Re-anchor the job at the tile that was CLICKED. The attached job
+            -- keeps the pos it was created with (the placement click -- usually
+            -- the center), and DF only works a job while the adventurer is
+            -- within 1 tile of job.pos: continuing a 3x3 workshop from beside a
+            -- side tile got exactly one work pulse (the initial action) and then
+            -- froze. The clicked tile is part of this building and the player
+            -- stands next to it, so it is always a valid anchor.
+            if args.pos then job.pos:assign(args.pos) end
             break
         end
     end
@@ -2580,12 +2654,12 @@ local TARGET_PREDS={
     [IsRough]=true,[IsSmoothed]=true,[IsDiggableTarget]=true,[IsWebAt]=true,
 }
 local actions={
-    {"Dig"                ,DigChooser,{MakePredicateWieldsItem(df.job_skill.MINING),IsDiggableTarget}},
-    {"Dig Ramp"           ,df.job_type.CarveRamp,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
-    {"Dig Channel"        ,df.job_type.DigChannel,{MakePredicateWieldsItem(df.job_skill.MINING)}},
-    {"Up Staircase"       ,df.job_type.CarveUpwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),IsWall}},
-    {"Down Staircase"     ,df.job_type.CarveDownwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
-    {"Bi Staircase"       ,df.job_type.CarveUpDownStaircase,{MakePredicateWieldsItem(df.job_skill.MINING)}},
+    {"Dig"                ,DigChooser,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING),IsDiggableTarget}},
+    {"Dig Ramp"           ,df.job_type.CarveRamp,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING),IsWall}},
+    {"Dig Channel"        ,df.job_type.DigChannel,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING)}},
+    {"Up Staircase"       ,df.job_type.CarveUpwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING),IsWall}},
+    {"Down Staircase"     ,df.job_type.CarveDownwardStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING)}},
+    {"Bi Staircase"       ,df.job_type.CarveUpDownStaircase,{MakePredicateWieldsItem(df.job_skill.MINING),MakeEnsureToolWielded(df.job_skill.MINING)}},
     {"Smooth"             ,SmoothChooser,{IsSmoothableTarget,IsHardMaterial,IsRough},nil,{DesignateDetail}},
     {"Engrave"            ,EngraveChooser,{IsSmoothableTarget,IsHardMaterial},nil,{DesignateDetail}},
     {"Carve Fortification",FortificationChooser,{IsWall,IsHardMaterial}},
@@ -3696,12 +3770,36 @@ function usetool:cancel_wait()
     self.long_wait_timer=nil
     self.long_wait=false
 end
+
+-- put a wielded-for-the-job tool (and whatever it displaced) back where it was
+function usetool:restore_tool_swap()
+    local sw=self.tool_swap
+    if not sw then return end
+    self.tool_swap=nil
+    local unit=dfhack.world.getAdventurer()
+    if not unit then return end
+    local tool=df.item.find(sw.tool_id)
+    if tool then
+        if sw.old then
+            pcall(dfhack.items.moveToInventory,tool,unit,sw.old.mode,sw.old.bp)
+        else
+            -- came out of a container: strapping it to the body is the safe,
+            -- always-valid place (re-bagging can fail on a full container)
+            pcall(dfhack.items.moveToInventory,tool,unit,10,0)
+        end
+    end
+    local disp=sw.displaced_id and df.item.find(sw.displaced_id)
+    if disp then pcall(dfhack.items.moveToInventory,disp,unit,1,sw.grasp) end
+end
 function usetool:onIdle()
     if self.dismiss_pending then
         local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
         self.dismiss_grace=(self.dismiss_grace or 30)-1     -- frame fallback if the read fails
         if (ok and held==0) or self.dismiss_grace<=0 then
             icon_active=true
+            if not dfhack.world.getAdventurer().job.current_job then
+                self:restore_tool_swap()  -- no job to serve anymore; unwield now
+            end
             self:dismiss()                                   -- job (if any) stays; icon relaunches us
         end
         return
@@ -3709,6 +3807,11 @@ function usetool:onIdle()
     local adv=dfhack.world.getAdventurer()
     local job_ptr=adv.job.current_job
     local job_action=findAction(adv,df.unit_action_type.Job)
+
+    -- the job the tool was wielded for is over (done or canceled): put it back
+    if self.tool_swap and not job_ptr then
+        self:restore_tool_swap()
+    end
 
     -- post-completion unstick: a finished building whose impassable tile you are
     -- standing on would trap you -- step one tile to the nearest open spot
