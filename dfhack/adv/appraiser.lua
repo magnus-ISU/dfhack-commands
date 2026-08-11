@@ -14,8 +14,9 @@ round the value of items UP" (their example: 140-dwarfbuck gems shown as
 
     Appraiser rating 0      ?         (no appraiser, no numbers -- as a fort
                                        with no broker sees its depot)
-    rating 1-5              ~200      (one significant figure, rounded UP:
-                                       140 -> 200, 347 -> 400, 9 -> 9)
+    rating 1-5              ~200      (rounded UP the 1-2-5 ladder:
+                                       140 -> 200, 347 -> 500, 6 -> 10,
+                                       51 -> 100, 501 -> 1000)
     rating 6-10             ~350      (two significant figures: 347 -> 350)
     rating 11-14            ~347      (three significant figures)
     rating 15+ (Legendary)  347       (exact)
@@ -125,12 +126,24 @@ end
 
 -- ---- the label (exported: inventory-display-weight paints it) -----------------
 -- value below the weight, at the precision a fort broker of this skill gets
--- n significant figures, rounded UP (the fort-broker estimate direction:
--- 140 -> 200 at one figure, 347 -> 350 at two, 1001 -> 2000 at one)
+-- n significant figures, rounded UP (347 -> 350 at two figures)
 local function sigfig_up(v, n)
     if v <= 0 then return 0 end
     local step = 10 ^ math.max(0, math.floor(math.log(v, 10)) - n + 1)
     return math.ceil(v / step) * step
+end
+
+-- the roughest eye rounds UP the 1-2-5 ladder: past the half-boundary the
+-- estimate jumps a whole magnitude (501 -> 1000, 51 -> 100, 6 -> 10; and
+-- 140 -> 200, 42 -> 50)
+local function round_125_up(v)
+    if v <= 0 then return 0 end
+    local k = 10 ^ math.floor(math.log(v, 10))
+    local m = v / k
+    if m <= 1 then return k
+    elseif m <= 2 then return 2 * k
+    elseif m <= 5 then return 5 * k
+    else return 10 * k end
 end
 
 function appraise_label(item)
@@ -140,7 +153,7 @@ function appraise_label(item)
     local r = rating()
     if r == 0 then return '?' .. VALUE_CH end
     if r <= 5 then
-        return ('~%d%s'):format(sigfig_up(v, 1), VALUE_CH)
+        return ('~%d%s'):format(round_125_up(v), VALUE_CH)
     elseif r <= 10 then
         return ('~%d%s'):format(sigfig_up(v, 2), VALUE_CH)
     elseif r <= 14 then
