@@ -281,20 +281,21 @@ local COLUMNS = {
     }},
     {id = 'adv', title = 'adv/', mode = 'adv', items = {
         -- enable reloads the script (fresh code if the file changed), re-registers
-        -- its overlay from the new env, and shows the yellow launcher icon --
-        -- clicking THAT opens the window, so map loads never pop it unasked.
-        -- An advfort window already open keeps running its old code: close it,
-        -- then toggle here. disable hides the icon; an open window is left alone.
-        {key = 'adv-advfort', label = 'advfort',
+        -- its overlay from the new env, runs `adv/fort show` (arms the tool, sets
+        -- all labors, sweeps stuck leftover jobs), then collapses it to the
+        -- left-edge launcher icon -- clicking THAT opens the menu, so map loads
+        -- never pop the window unasked. disable = `adv/fort hide` (a job in
+        -- progress keeps running).
+        {key = 'adv-fort', label = 'fort (jobs)',
          enable = function()
-            reqscript('adv/advfort')
+            reqscript('adv/fort')
             require('plugins.overlay').rescan()
-            dfhack.run_command('overlay', 'enable', 'adv/advfort.icon')
-            reqscript('adv/advfort').icon_active = true
+            dfhack.run_command('overlay', 'enable', 'adv/fort.panel')
+            pcall(dfhack.run_script, 'adv/fort', 'show')
+            reqscript('adv/fort').collapsed = true
          end,
          disable = function()
-            pcall(function() reqscript('adv/advfort').icon_active = false end)
-            dfhack.run_command('overlay', 'disable', 'adv/advfort.icon')
+            pcall(dfhack.run_script, 'adv/fort', 'hide')
          end},
         {key = 'adv-auto-save', label = 'auto-save (20 min)',
          enable = script('adv/auto-save', 'enable', '20'),

@@ -364,30 +364,32 @@ Sort "heat ice" / "heat snow" options to the top of interact menus.
 
 ![adv/heat-ice demo](demos/adv-sort-ice.png)
 
-### **`adv/advfort`** 
-Do fort jobs as an adventurer: community rework of DFHack's paused `gui/advfort`
-  (jobs on CAREFUL move, so walking and the look cursor work; separate Smooth vs
-  Detail/engrave jobs) plus local fixes: the "you haven't acted in a while" prompt
-  no longer wedges a long wait, and Smooth jobs designate their tile and actually
-  smooth it on completion. Fell Tree really fells trees (DF's adventure engine
-  silently discards FellTree jobs, so advfort does the work itself: axe-skill-timed
-  chopping, then the tree comes down — one log per trunk tile at the base, Wood
-  Cutter experience awarded; neighboring trees are untouched). The window's Build
-  line shows the current building
-  selection and a map click builds exactly that, dialog-free; clicking the Build
-  line opens the picker — one flat searchable list of everything buildable in a
-  dig-building-style multi-column left-anchored panel, with a materials pane
-  alongside showing which items each slot will consume (click to swap among
-  suitable items from your inventory and the nearby ground). The workshop job
-  menu uses the same panel style (fuzzy search, columns, right-click dismiss):
-  click the window's "Use Workshop" action and the menu for the building you
-  stand on or next to opens immediately (workshops and furnaces open their
-  recipes; beds rest, chairs eat, farm plots plant/harvest, traps and siege
-  engines their menus). Recipes default to
-  your civilization's plus those of the site you are standing in (`-e` still
-  forces a specific entity); custom workshops only appear if one of those civs
-  can build them, tagged with the owning civ when unique — "Shaping Tree
-  (high elf)", "Breeding Pit (orc)".
+### **`adv/fort`** 
+Do fort jobs in adventure mode — the self-contained, overlay-based successor to
+  the retired `adv/advfort` (a community rework of DFHack's `gui/advfort`): jobs
+  trigger on CAREFUL move or an adjacent click; Smooth/Engrave really smooth
+  (designation + tiletype fallback); Fell Tree really fells trees (axe-skill-timed
+  work, one log per trunk tile, Wood Cutter exp); recipes default to your civ plus
+  the site owner's, with permitted custom workshops tagged by owning civ; the
+  "you haven't acted in a while" prompt is auto-dismissed. The menu lives on the left border as
+  a real overlay: nothing else is intercepted, so right-clicks and the native
+  toolbar work directly and the window never blinks closed and reopens. At most
+  ONE auxiliary panel opens to the menu's right at a time — the build picker
+  (with its materials section built into its bottom), the workshop job menu, or
+  a job's materials list — each searchable like fort/dig-building; picking a
+  specific item for a slot opens a modal picker that takes complete focus until
+  chosen or canceled (Esc/right-click). A job engine pumps work automatically
+  (jobs can't start and silently stall), cancels the job if you leave its reach
+  instead of orphaning it, auto-resumes interrupted-but-valid jobs, and sweeps
+  stuck leftovers when the tool opens. Mouse job clicks are same-z only — the
+  floor seen through a channel is walked to, not channeled (Ctrl+D/E for jobs
+  below/above); standing inside a planned building's footprint is fine (the job
+  anchors at your tile and you're stepped off a finished building that would
+  seal you in); Use Workshop never captures a click or opens its menu unless
+  you stand within 1 tile of the building's center, where jobs can actually
+  run. On the map, Enter does the selected action at the look cursor, opening
+  look mode first if it isn't up. Ctrl+Q quick mode, Shift+R/T cycle jobs.
+  `adv/fort` shows, `adv/fort hide` hides, jobs keep running.
 
 ### **`adv/exhaustion-meter`** 
 Combat-exertion bar with the native blood meter's manners and placement:
