@@ -1208,6 +1208,24 @@ function AssignJobItems(args)
 
 end
 
+-- Anchor a fresh construction job at the building tile NEAREST the worker.
+-- A multi-tile placement click targets the CENTER (that is where the footprint
+-- anchors), so the new job's pos could sit 2 tiles from the adjacent player --
+-- and DF only works within 1 of job.pos: starting a 3x3 workshop got one pulse
+-- and froze until a second click re-attached the job anchored at the clicked
+-- edge tile. Clamping the anchor into the footprint toward the player makes
+-- the first click work from any side.
+function AnchorJobAtWorker(args)
+    local bld=args.building or (args.pos and dfhack.buildings.findAtTile(args.pos))
+    local j,u=args.job,args.unit
+    if bld and j and u then
+        j.pos.x=math.max(bld.x1,math.min(u.pos.x,bld.x2))
+        j.pos.y=math.max(bld.y1,math.min(u.pos.y,bld.y2))
+        j.pos.z=bld.z
+    end
+    return true
+end
+
 function CheckAndFinishBuilding(args,bld)
     args.building=args.building or bld
     for idx,job in pairs(bld.jobs) do
@@ -1230,7 +1248,7 @@ function CheckAndFinishBuilding(args,bld)
         args.pre_actions={AssignJobItems}
     else
         local t={items=buildings.getFiltersByType({},bld:getType(),bld:getSubtype(),bld:getCustomType())}
-        args.pre_actions={dfhack.curry(setFiltersUp,t),AssignBuildingRef}--,AssignJobItems
+        args.pre_actions={dfhack.curry(setFiltersUp,t),AssignBuildingRef,AnchorJobAtWorker}--,AssignJobItems
     end
     args.no_job_delete=true
     makeJob(args)
