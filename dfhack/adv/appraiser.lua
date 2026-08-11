@@ -14,9 +14,11 @@ round the value of items UP" (their example: 140-dwarfbuck gems shown as
 
     Appraiser rating 0      ?         (no appraiser, no numbers -- as a fort
                                        with no broker sees its depot)
-    rating 1-9              ~200      (one significant figure, rounded UP:
+    rating 1-5              ~200      (one significant figure, rounded UP:
                                        140 -> 200, 347 -> 400, 9 -> 9)
-    rating 10+              347       (exact)
+    rating 6-10             ~350      (two significant figures: 347 -> 350)
+    rating 11-14            ~347      (three significant figures)
+    rating 15+ (Legendary)  347       (exact)
 
 (The fort version's rounding is also "rather erratic depending on the type of
 item" -- that part is DF jank, not precision, and is not reproduced.)
@@ -123,11 +125,11 @@ end
 
 -- ---- the label (exported: inventory-display-weight paints it) -----------------
 -- value below the weight, at the precision a fort broker of this skill gets
--- one significant figure, rounded UP -- the documented fort-broker estimate
--- (140 -> 200, 347 -> 400, 1001 -> 2000, 9 -> 9)
-local function sigfig_up(v)
+-- n significant figures, rounded UP (the fort-broker estimate direction:
+-- 140 -> 200 at one figure, 347 -> 350 at two, 1001 -> 2000 at one)
+local function sigfig_up(v, n)
     if v <= 0 then return 0 end
-    local step = 10 ^ math.floor(math.log(v, 10))
+    local step = 10 ^ math.max(0, math.floor(math.log(v, 10)) - n + 1)
     return math.ceil(v / step) * step
 end
 
@@ -137,8 +139,12 @@ function appraise_label(item)
     if not ok or not v then return nil end
     local r = rating()
     if r == 0 then return '?' .. VALUE_CH end
-    if r < 10 then
-        return ('~%d%s'):format(sigfig_up(v), VALUE_CH)
+    if r <= 5 then
+        return ('~%d%s'):format(sigfig_up(v, 1), VALUE_CH)
+    elseif r <= 10 then
+        return ('~%d%s'):format(sigfig_up(v, 2), VALUE_CH)
+    elseif r <= 14 then
+        return ('~%d%s'):format(sigfig_up(v, 3), VALUE_CH)
     end
     return ('%d%s'):format(v, VALUE_CH)
 end

@@ -35,9 +35,9 @@ Automatically reopen the inventory and scroll to the last position
 
 ### **`adv/appraiser`** 
 Item values appear directly below each item's weight in the inventory and pick-up lists, at
-  the precision a fortress broker gets (per the wiki's documented mechanic): no Appraiser
-  skill shows only `?`, ratings below 10 show one significant figure rounded *up* (140☼ →
-  `~200`, 347☼ → `~400`), and 10+ is exact. The skill
+  the precision a fortress broker gets: no Appraiser skill shows only `?`, ratings 1–5 show
+  one significant figure rounded *up* (140☼ → `~200`), 6–10 two (`~350`), 11–14 three
+  (`~347`), and Legendary (15+) is exact. The skill
   trains as an adventurer plausibly would: +200 xp for a *completed purchase* with a partner
   you haven't traded with before (goods must actually reach your hands), +10 xp for handling
   a coin minting you haven't seen, checked once per in-game day — judged against rolling
