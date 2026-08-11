@@ -226,14 +226,6 @@ sliders from data, so only the Create-world click is left to you.
 
 ## Miscellaneous
 
-### **`fort/old-saves`**
-Marks old-game-version saves on the title screen's Continue Game lists: every save last
-written by an *older* game version than the one running gets its "Files" button repainted as
-a red "OLD!!" — DF itself only tells you after you load. The version is read from each save's
-`world.sav` header (DF's title-screen data doesn't carry it), and rows are identified by the
-save's folder name so same-named copies of a world can't be confused. Run the command bare at
-the title screen to print every save and its version.
-
 ### **`fort/gen-world`**
 Drives world creation from the title screen, writing the mod list and all five sliders as
 data and clicking only the buttons that have no data equivalent.
@@ -241,3 +233,16 @@ data and clicking only the buttons that have no data equivalent.
 ### **`fort/ha-census`**
 Reports a freshly generated world's population at years 1/25/50/75/100, civ counts, sites and
 castles, and the terrain each civ settled. Run it straight after generation, before saving.
+
+### **`fix/old-saves`**
+Marks old-game-version saves on the title screen's Continue Game lists — DF itself only tells
+you after you load. Every save last written by an *older* game version than the one running
+gets its "Files" button repainted: a red **CRASH** when loading would cross a known
+backwards-incompatible build (3600, 3602 — hover the stamp for the workaround: procedurally
+generated syndromes may crash, exterminate/full-heal the carriers), or a yellow **!OLD!**
+when it's merely older and expected to load fine. The version is read from each save's
+`world.sav` header (DF's title-screen data doesn't carry it), and rows are identified by the
+save's folder name so same-named copies of a world can't be confused. Run the command bare at
+the title screen to print every save and its version.
+
+![fix/old-saves demo](demos/fix-old-saves.png)
