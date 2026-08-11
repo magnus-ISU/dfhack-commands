@@ -198,6 +198,86 @@ local COLUMNS = {
         {key = 'agitated-animals-notification', label = 'agitated-animals-notif.',
          enable = script('fort/agitated-animals-notification'),
          disable = notify_off({'agitated_typed'}, {'agitated_count', 'hostile_count'})},
+        -- ---- rows below reconcile the registry with FORTRESS_MODE_FEATURES ----
+        {key = 'stockpile-place', label = 'stockpile-place',
+         enable = overlay_set('enable', 'fort/stockpile-place.watcher'),
+         disable = overlay_set('disable', 'fort/stockpile-place.watcher')},
+        {key = 'binnable-stockpile', label = 'binnable-stockpile',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/binnable-stockpile.button')
+            dfhack.run_command('overlay', 'enable', 'fort/binnable-stockpile.category_toggle')
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/binnable-stockpile.button')
+            dfhack.run_command('overlay', 'disable', 'fort/binnable-stockpile.category_toggle')
+         end},
+        {key = 'workshop-tools', label = 'workshop-tools',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/workshop-tools.dupe')
+            dfhack.run_command('overlay', 'enable', 'fort/workshop-tools.sort')
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/workshop-tools.dupe')
+            dfhack.run_command('overlay', 'disable', 'fort/workshop-tools.sort')
+         end},
+        {key = 'quick-order', label = 'quick-order',
+         enable = overlay_set('enable', 'fort/quick-order.entry'),
+         disable = overlay_set('disable', 'fort/quick-order.entry')},
+        {key = 'training-barracks', label = 'training-barracks',
+         enable = cmd('enable', 'fort/training-barracks'),
+         disable = cmd('disable', 'fort/training-barracks')},
+        {key = 'squad-buttons', label = 'squad-buttons',
+         enable = overlay_set('enable', 'fort/squad-buttons.killtargets'),
+         disable = overlay_set('disable', 'fort/squad-buttons.killtargets')},
+        {key = 'auto-pasture', label = 'auto-pasture',
+         enable = cmd('enable', 'fort/auto-pasture'),
+         disable = cmd('disable', 'fort/auto-pasture')},
+        {key = 'butcher-shop', label = 'butcher-shop',
+         enable = overlay_set('enable', 'fort/butcher-shop.butcher'),
+         disable = overlay_set('disable', 'fort/butcher-shop.butcher')},
+        {key = 'animal-training', label = 'animal-training',
+         enable = overlay_set('enable', 'fort/animal-training.config'),
+         disable = overlay_set('disable', 'fort/animal-training.config')},
+        {key = 'wild-animal-train', label = 'wild-animal-train',
+         enable = overlay_set('enable', 'fort/wild-animal-train.train'),
+         disable = overlay_set('disable', 'fort/wild-animal-train.train')},
+        {key = 'idle-smiths', label = 'idle-smiths',
+         enable = cmd('enable', 'fort/idle-smiths'),
+         disable = cmd('disable', 'fort/idle-smiths')},
+        {key = 'noble-symbol-search', label = 'noble-symbol-search',
+         enable = overlay_set('enable', 'fort/noble-symbol-search.search'),
+         disable = overlay_set('disable', 'fort/noble-symbol-search.search')},
+        {key = 'squad-equipment-search', label = 'squad-equipment-search',
+         enable = overlay_set('enable', 'fort/squad-equipment-search.search'),
+         disable = overlay_set('disable', 'fort/squad-equipment-search.search')},
+        {key = 'announcement-search', label = 'announcement-search',
+         enable = overlay_set('enable', 'fort/announcement-search.search'),
+         disable = overlay_set('disable', 'fort/announcement-search.search')},
+        {key = 'agitated-animals-notification', label = 'agitated-animals-notification',
+         enable = script('fort/agitated-animals-notification'),
+         disable = notify_off({'agitated_typed'})},
+        {key = 'enemies-inside-notification', label = 'enemies-inside-notification',
+         enable = script('fort/enemies-inside-notification'),
+         disable = notify_off({'enemies_inside'})},
+        -- the embark-preparation screen exists outside fort mode: apply always
+        {key = 'embark-prep', label = 'embark-prep', mode = 'any',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/embark-prep.loadout')
+            dfhack.run_command('overlay', 'enable', 'fort/embark-prep.prefs')
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/embark-prep.loadout')
+            dfhack.run_command('overlay', 'disable', 'fort/embark-prep.prefs')
+         end},
+        -- loading the script registers its retire/unretire event hooks; there is
+        -- no off switch by design (the roster must never silently lapse), so
+        -- disable only says so
+        {key = 'loyal-retirees', label = 'loyal-retirees',
+         enable = script('fort/loyal-retirees'),
+         disable = function()
+            print('loyal-retirees: no off switch -- its roster protection stays'
+                .. ' registered for this session (by design).')
+         end},
     }},
     {id = 'adv', title = 'adv/', mode = 'adv', items = {
         -- enable reloads the script (fresh code if the file changed), re-registers
@@ -268,6 +348,26 @@ local COLUMNS = {
             dfhack.run_command('overlay', 'enable', 'fort/creature-description.desc')
          end,
          disable = overlay_set('disable', 'fort/creature-description.desc')},
+        {key = 'adv-map-travel', label = 'map-travel',
+         enable = script('adv/map-travel'), disable = script('adv/map-travel', 'stop')},
+        {key = 'adv-inventory-display-weight', label = 'inventory-display-weight',
+         enable = script('adv/inventory-display-weight'),
+         disable = script('adv/inventory-display-weight', 'stop')},
+        {key = 'adv-inventory-search', label = 'inventory-search',
+         enable = overlay_set('enable', 'adv/inventory-search.search'),
+         disable = overlay_set('disable', 'adv/inventory-search.search')},
+        {key = 'adv-travelling-hunger', label = 'travelling-hunger',
+         enable = overlay_set('enable', 'adv/travelling-hunger.status'),
+         disable = overlay_set('disable', 'adv/travelling-hunger.status')},
+        {key = 'adv-heat-ice', label = 'heat-ice',
+         enable = overlay_set('enable', 'adv/heat-ice.sorter'),
+         disable = overlay_set('disable', 'adv/heat-ice.sorter')},
+        {key = 'adv-read-the-map', label = 'read-the-map',
+         enable = overlay_set('enable', 'adv/read-the-map.tooltip'),
+         disable = overlay_set('disable', 'adv/read-the-map.tooltip')},
+        {key = 'adv-watch-their-blade', label = 'watch-their-blade',
+         enable = script('adv/watch-their-blade'),
+         disable = script('adv/watch-their-blade', 'stop')},
     }},
     {id = 'embark', title = 'embark/', mode = 'any', items = {
         {key = 'embark-default-items', label = 'adventurer-default-items',
@@ -567,15 +667,19 @@ end
 -- arrive as CONTEXT_SCROLL_* keys; route them to the hovered list's cursor
 -- (the page follows the cursor).
 function MagnusWindow:onInput(keys)
-    local delta = (keys.CONTEXT_SCROLL_UP and -3) or (keys.CONTEXT_SCROLL_DOWN and 3)
-        or (keys.CONTEXT_SCROLL_PAGEUP and '-page') or (keys.CONTEXT_SCROLL_PAGEDOWN and '+page')
-    if delta then
+    -- on_scrollbar moves the PAGE (page_top); moveCursor only moves the
+    -- invisible selection, which reads as "the wheel does nothing" until the
+    -- cursor happens to walk off-screen (measured: three wheel-downs, page
+    -- unmoved)
+    local spec = (keys.CONTEXT_SCROLL_UP and 'up_small')
+        or (keys.CONTEXT_SCROLL_DOWN and 'down_small')
+        or (keys.CONTEXT_SCROLL_PAGEUP and 'up_large')
+        or (keys.CONTEXT_SCROLL_PAGEDOWN and 'down_large')
+    if spec then
         for _, col in ipairs(COLUMNS) do
             local list = self.subviews['list_' .. col.id]
             if list:getMousePos() then
-                if delta == '-page' then delta = -list.page_size
-                elseif delta == '+page' then delta = list.page_size end
-                list:moveCursor(delta)
+                list:on_scrollbar(spec)
                 return true
             end
         end

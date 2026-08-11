@@ -109,9 +109,6 @@ order a group.
 ### **`fort/military-labor`**
 Keeps the "Military" work detail matched to your standing squads.
 
-### **`fort/civilian-militia`**
-Packs office-holder civilian squads into ready and reserve squads on command.
-
 ### **`fort/training-barracks`**
 Marks one barracks as the fort's training barracks and assigns every squad to train there.
 
@@ -152,6 +149,22 @@ dressings and sutures happily consume adamantine cloth and strands. This watches
 and, the moment a treatment job has claimed adamantine cloth or thread, forbids that item and
 cancels the job — the hospital re-issues the treatment and reaches for ordinary cloth, and
 nothing is consumed. `adamantine-hospital release` hands the thread back to your smelter.
+
+### **`fort/loyal-retirees`**
+Brings a retired fortress's citizens home when you reclaim it. The roster is kept current as
+dwarves join and leave, so whatever the fort looked like when you retired is what gets
+summoned back — everyone still alive, however far they wandered.
+
+DF only turns an off-map historical figure back into a real unit when an army carrying them
+arrives, and armies can't be fabricated. So this fakes a diplomatic mission for one of your
+nobles, lets DF mint the army for it, and puts the returnees aboard: they come back as their
+original selves, with their skills, wounds, clothing and inventory intact. Progress is
+reported in DF's own announcement log.
+
+`loyal-retirees migrate <hf_id>...` uses the same machinery to summon anyone alive in the
+world by historical figure id, whether or not they ever lived here.
+
+![fort/loyal-retirees demo](demos/fort-loyal-retirees.webp)
 
 ### **`fort/broker-ready`**
 Frees a soldier broker to trade, then puts their squad back on duty afterward.
@@ -226,6 +239,9 @@ Prepare-carefully buttons that give a dwarf the office skills, plus a preference
 
 ## One-time-commands
 
+### **`fort/civilian-militia`**
+Packs office-holder civilian squads into ready and reserve squads on command.
+
 ### **`fort/cheatmine`**
 Instantly finishes all designated digging and any planned staircases (cheat).
 
@@ -247,21 +263,6 @@ Reports raiding parties and a rough travel estimate, and retrieves stuck units.
 ### **`fort/caravan-teleport`**
 Teleports a stranded merchant caravan back onto the depot.
 
-### **`fort/loyal-retirees`**
-Brings a retired fortress's citizens home when you reclaim it. The roster is kept current as
-dwarves join and leave, so whatever the fort looked like when you retired is what gets
-summoned back — everyone still alive, however far they wandered.
-
-DF only turns an off-map historical figure back into a real unit when an army carrying them
-arrives, and armies can't be fabricated. So this fakes a diplomatic mission for one of your
-nobles, lets DF mint the army for it, and puts the returnees aboard: they come back as their
-original selves, with their skills, wounds, clothing and inventory intact. Progress is
-reported in DF's own announcement log.
-
-`loyal-retirees migrate <hf_id>...` uses the same machinery to summon anyone alive in the
-world by historical figure id, whether or not they ever lived here.
-
-![fort/loyal-retirees demo](demos/fort-loyal-retirees.webp)
 
 ### **`fort/worldgen-setup`**
 Sets up a fresh test world: selects every installed mod and maxes the civilization/site
