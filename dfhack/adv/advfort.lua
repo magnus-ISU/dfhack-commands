@@ -1756,12 +1756,10 @@ function BuildPicker:onInput(keys)
             end
             return                       -- consume clicks on the panel
         end
-        -- click outside both panels: done choosing, back to the game -- and
-        -- the click ACTS there (placing the building on the clicked tile is
-        -- the whole documented flow; spending it on dismissal forced a second
-        -- identical click)
+        -- click outside both panels: done choosing, back to the game. The
+        -- click is SPENT on the dismissal, deliberately -- forwarding it acted
+        -- on whatever lay beneath, which read as ghost clicks.
         self:dismiss()
-        self:sendInputToParent(keys)
         return
     end
 end
@@ -1950,10 +1948,7 @@ function JobPicker:onInput(keys)
             end
             return
         end
-        -- outside the panel: done here -- and the click ACTS (walk/job on the
-        -- ground) instead of being spent on mere dismissal
         self:dismiss()
-        self:sendInputToParent(keys)
         return
     end
 end
@@ -2119,11 +2114,7 @@ function MaterialsPicker:onInput(keys)
             end
             return
         end
-        -- outside: cancel the setup and let the click act on the ground
-        self:dismiss()
-        if self.on_cancel then self.on_cancel() end
-        self:sendInputToParent(keys)
-        return
+        return   -- modal while choosing materials
     end
 end
 

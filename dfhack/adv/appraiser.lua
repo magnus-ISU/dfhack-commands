@@ -6,15 +6,20 @@ adv/appraiser
 Shows what things are WORTH, and teaches you to judge it. Item values appear
 directly below each item's weight in the inventory list and the pick-up menu
 (painted by adv/inventory-display-weight, which asks this module for the
-label), at the precision an equivalently skilled fortress broker would get.
-Precision is PROPORTIONAL (significant figures), never a fixed step -- a flat
-"nearest 100" called every trinket "~0", which no appraiser would say:
+label), at the precision a fortress broker gets. The wiki documents the fort
+mechanic: "with only middling appraisers (or worse), the listed value of your
+items will be rounded to ONE SIGNIFICANT FIGURE", and the rounding "tends to
+round the value of items UP" (their example: 140-dwarfbuck gems shown as
+1000). So:
 
-    Appraiser rating 0      ?             (no appraiser, no numbers -- as a
-                                           fort with no broker sees its depot)
-    rating 1-5              ~300 ~30 ~9   (1 significant figure)
-    rating 6-10             ~340          (2 significant figures)
-    rating 11+              347           (exact -- a master broker's eye)
+    Appraiser rating 0      ?         (no appraiser, no numbers -- as a fort
+                                       with no broker sees its depot)
+    rating 1-9              ~200      (one significant figure, rounded UP:
+                                       140 -> 200, 347 -> 400, 9 -> 9)
+    rating 10+              347       (exact)
+
+(The fort version's rounding is also "rather erratic depending on the type of
+item" -- that part is DF jank, not precision, and is not reproduced.)
 
 And it trains the skill the way an adventurer plausibly would:
 
@@ -118,12 +123,12 @@ end
 
 -- ---- the label (exported: inventory-display-weight paints it) -----------------
 -- value below the weight, at the precision a fort broker of this skill gets
--- round to n significant figures: proportional uncertainty, like a real eye
-local function sigfig(v, n)
+-- one significant figure, rounded UP -- the documented fort-broker estimate
+-- (140 -> 200, 347 -> 400, 1001 -> 2000, 9 -> 9)
+local function sigfig_up(v)
     if v <= 0 then return 0 end
-    local mag = math.floor(math.log(v, 10))
-    local step = 10 ^ math.max(0, mag - n + 1)
-    return math.floor(v / step + 0.5) * step
+    local step = 10 ^ math.floor(math.log(v, 10))
+    return math.ceil(v / step) * step
 end
 
 function appraise_label(item)
@@ -132,10 +137,8 @@ function appraise_label(item)
     if not ok or not v then return nil end
     local r = rating()
     if r == 0 then return '?' .. VALUE_CH end
-    if r <= 5 then
-        return ('~%d%s'):format(sigfig(v, 1), VALUE_CH)
-    elseif r <= 10 then
-        return ('~%d%s'):format(sigfig(v, 2), VALUE_CH)
+    if r < 10 then
+        return ('~%d%s'):format(sigfig_up(v), VALUE_CH)
     end
     return ('%d%s'):format(v, VALUE_CH)
 end
