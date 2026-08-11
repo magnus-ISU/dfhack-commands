@@ -1870,11 +1870,28 @@ function JobPicker:onRenderBody(dc)
 end
 
 function JobPicker:pick(e)
-    self:dismiss()
+    -- act now, dismiss on button RELEASE (the right-click drain lesson, but for
+    -- the left button): dismissing on the press handed the still-held click to
+    -- the screen beneath -- the materials panel read it as its own row click,
+    -- so picking an item for slot 1 instantly popped slot 2's material list.
     self.on_pick(e.data)
+    local ok,held=pcall(function() return df.global.enabler.mouse_lbut end)
+    if ok and held==1 then
+        self.picked_pending=true
+    else
+        self:dismiss()
+    end
 end
 
 function JobPicker:onIdle()
+    if self.picked_pending then
+        local ok,held=pcall(function() return df.global.enabler.mouse_lbut end)
+        self.pick_grace=(self.pick_grace or 30)-1
+        if (ok and held==0) or self.pick_grace<=0 then
+            self:dismiss()
+        end
+        return
+    end
     if self.dismiss_pending then
         local ok,held=pcall(function() return df.global.enabler.mouse_rbut end)
         self.dismiss_grace=(self.dismiss_grace or 30)-1
@@ -1885,7 +1902,7 @@ function JobPicker:onIdle()
 end
 
 function JobPicker:onInput(keys)
-    if self.dismiss_pending then return end
+    if self.dismiss_pending or self.picked_pending then return end
     local l,t,w,h,cols,rows=self:geom()
     if keys.LEAVESCREEN then
         if self.search~='' then self.search='' else self:dismiss() end
