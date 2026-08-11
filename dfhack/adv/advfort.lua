@@ -736,6 +736,12 @@ function RemoveBuilding(args)
     bld:queueDestroy()
     for k,v in ipairs(bld.jobs) do
         if v.job_type==df.job_type.DestroyBuilding then
+            -- queueDestroy leaves job.pos unset (-30000): the building-anchored
+            -- wait-pump guard measures your distance to job.pos and blocked
+            -- every work pulse -- invisibly, since the progress counter owns
+            -- the status line -- so the timer froze at (10) forever (measured
+            -- live on a slade BarsVertical). Anchor the job at the building.
+            v.pos:assign(xyz2pos(bld.centerx,bld.centery,bld.z))
             AssignUnitToJob(v,args.unit,args.from_pos)
             -- start actually working it (what makeJob does): without the unit's Job
             -- ACTION, the wait pump reads the job's virgin completion_timer (-1) as
@@ -3932,9 +3938,20 @@ function usetool:onIdle()
                 end
             end
             if anchored then
-                local d=math.max(math.abs(adv.pos.x-job_ptr.pos.x),
-                                 math.abs(adv.pos.y-job_ptr.pos.y),
-                                 math.abs(adv.pos.z-job_ptr.pos.z))
+                -- a job whose pos was never set (-30000 -- DestroyBuilding via
+                -- queueDestroy) anchors at its building's center instead
+                local ax,ay,az=job_ptr.pos.x,job_ptr.pos.y,job_ptr.pos.z
+                if ax<0 then
+                    for _,r in ipairs(job_ptr.general_refs) do
+                        if r:getType()==df.general_ref_type.BUILDING_HOLDER then
+                            local b=df.building.find(r.building_id)
+                            if b then ax,ay,az=b.centerx,b.centery,b.z end
+                        end
+                    end
+                end
+                local d=math.max(math.abs(adv.pos.x-ax),
+                                 math.abs(adv.pos.y-ay),
+                                 math.abs(adv.pos.z-az))
                 if d>1 then
                     self:set_status("Stand by the building's center to work")
                     self._native.parent:logic()
