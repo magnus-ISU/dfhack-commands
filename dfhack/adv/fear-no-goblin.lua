@@ -10,8 +10,9 @@ Dark pits."). Both checks read one field: `world_site.type`. Nothing else about
 the site matters -- verified live, a dark pit presented as a Town lets the
 travel check pass.
 
-So this presents nearby dark pits as towns: every pit within RANGE world
-tiles, for only as long as it stays in range. Distant pits are left alone, so
+So this presents nearby dark pits as towns: every pit whose world-tile
+footprint is within EMB_RANGE embark tiles, for only as long as it stays in
+range. Distant pits are left alone, so
 the blast radius is the sites around you -- and a WALL of adjacent pits (they
 cluster) is crossable, where patching only the closest one dead-ends you one
 tile in (measured: a 4-pit cluster at world 46-48,2-5 refused entry to pit
@@ -86,7 +87,17 @@ local overlay = require('plugins.overlay')
 local BAN_TYPE = df.world_site_type.DarkFortress
 local SAFE_TYPE = df.world_site_type.Town
 
-local RANGE = 1          -- world tiles: how close a pit must be to get patched
+-- How close a pit must be to get patched, in EMBARK tiles (16 per world
+-- tile) from the pit's WORLD-ALIGNED footprint. The bump check fires when a
+-- travel step ENTERS a world tile the site occupies, so the patch must land
+-- before the player can cross that boundary -- but the old "within 1 world
+-- tile" trigger flipped a pit's map icon to a town while the player was
+-- still up to ~31 embark tiles (dozens of travel steps) away, which reads as
+-- "it changed from across the map" (reported live: Yellowplagues at world
+-- 45-46, player at embark 704, boundary at 720, buildings at 730). 8 embark
+-- tiles = ~24 travel steps of margin ahead of the boundary, ample for the
+-- 500ms evaluation cadence.
+local EMB_RANGE = 8
 local EVAL_MS = 500      -- wall-clock gap between target re-evaluations
 local LIFT_AFTER_MS = 250 -- how long off-play must persist before the patch drops
                           -- (debounced so a transient frame mid-travel cannot trip it)
@@ -125,41 +136,41 @@ local function in_play()
     return not (ok and options_open)
 end
 
--- adventurer's world tile. Walking around: the loaded map (region_x/y are
--- embark tiles, 48 map tiles per embark tile, 16 embark tiles per world
--- tile). Fast travelling: no unit and no loaded map -- the player ARMY
--- carries the position, in embark tiles x3 (army.pos//48 = world tile).
-local function player_world_tile()
+-- adventurer's EMBARK tile. Walking around: the loaded map (region_x/y are
+-- embark tiles, 48 map tiles per embark tile). Fast travelling: no unit and
+-- no loaded map -- the player ARMY carries the position, in embark tiles x3.
+local function player_embark_tile()
     local u = dfhack.world.getAdventurer()
     if u and dfhack.isMapLoaded() then
         local map = df.global.world.map
-        local ex = map.region_x + u.pos.x // 48
-        local ey = map.region_y + u.pos.y // 48
-        return ex // 16, ey // 16
+        return map.region_x + u.pos.x // 48, map.region_y + u.pos.y // 48
     end
     local army = df.army.find(df.global.adventure.player_army_id)
     if army then
-        return army.pos.x // 48, army.pos.y // 48
+        return army.pos.x // 3, army.pos.y // 3
     end
 end
 
--- a site's footprint in world tiles (global_min/max are embark tiles)
-local function site_world_rect(site)
-    return site.global_min_x // 16, site.global_min_y // 16,
-           (site.global_max_x - 1) // 16, (site.global_max_y - 1) // 16
+-- the site's WORLD-ALIGNED footprint in embark tiles: the bump check owns
+-- whole world tiles, so expand the site's embark rect to the world tiles it
+-- occupies (global_min/max are embark tiles, 16 per world tile)
+local function site_world_emb_rect(site)
+    return (site.global_min_x // 16) * 16, (site.global_min_y // 16) * 16,
+           ((site.global_max_x - 1) // 16) * 16 + 15,
+           ((site.global_max_y - 1) // 16) * 16 + 15
 end
 
--- every dark pit within RANGE world tiles of the adventurer
+-- every dark pit whose world-tile footprint is within EMB_RANGE embark tiles
 local function pits_in_range()
-    local wx, wy = player_world_tile()
-    if not wx then return {} end
+    local ex, ey = player_embark_tile()
+    if not ex then return {} end
     local out = {}
     for _, site in ipairs(df.global.world.world_data.sites) do
         if site.type == BAN_TYPE or patched[site.id] then
-            local x0, y0, x1, y1 = site_world_rect(site)
-            local dx = math.max(x0 - wx, 0, wx - x1)
-            local dy = math.max(y0 - wy, 0, wy - y1)
-            if math.max(dx, dy) <= RANGE then out[#out + 1] = site end
+            local x0, y0, x1, y1 = site_world_emb_rect(site)
+            local dx = math.max(x0 - ex, 0, ex - x1)
+            local dy = math.max(y0 - ey, 0, ey - y1)
+            if math.max(dx, dy) <= EMB_RANGE then out[#out + 1] = site end
         end
     end
     return out
@@ -387,7 +398,7 @@ if #near > 0 then
         :format(table.concat(labels, ', ')))
     print('  Fast travel in, out and past them now works.')
 else
-    print('adv/fear-no-goblin: armed -- no dark pit within 1 tile, nothing patched yet.')
+    print('adv/fear-no-goblin: armed -- no dark pit nearby, nothing patched yet.')
     print('  It will patch every pit in range as soon as you are next to one.')
 end
 if once_mode then
