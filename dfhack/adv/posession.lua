@@ -16,8 +16,25 @@ TWO `UNIT_HOLDER` general refs, yours and the other gripper's. That second
 holder ref IS the tug-of-war state. (`adventure.attack.shared_it`, the
 original gate, is EMPTY on the "Who will you attack?" chooser -- DF only
 fills it after a target is picked -- so a button gated on it never appeared.)
-The click then drives DF's own UI -- selects the holder's row, then picks the
-possession-struggle wrestle move -- so the resulting attack is 100% native.
+
+The click walks DF's own WRESTLE path, replayed from the flow that actually
+works in play (the attack menu is a dead end: with both grasps full the move
+list is STRIKE/BLOCK only, allow_wrestle=false, and no strike screen offers a
+possession move):
+
+    1. LEAVESCREEN until the attack UI is closed
+    2. feed A_WRESTLE -- the same interface reopens as "Who will you
+       wrestle?" with allow_wrestle=true (that bool is the wrestle-flavor
+       marker; the strike-flavored chooser has it false)
+    3. select the holder's row (letter key, computed from their index in
+       unit_choice minus scroll; click fallback on the row text)
+    4. mode WRESTLE_GRASP lists the moves; the possession row is cl_type
+       StruggleForItem with cl_index = the ITEM ID -- click its rendered
+       "Gain possession of ..." text (combat_list rows only act on native
+       clicks)
+
+Verified end to end live: the full chain closed the attack UI and printed
+"You struggle for / You gain possession of the Astodshasar Udistam."
 
 Registered automatically as overlay `adv/posession.regain` (enabled by
 default). Nothing to run; it is dormant except on the attack screen during a
@@ -103,12 +120,11 @@ end
 
 local function start_driver(item, holder_idx, holder)
     driver = {
-        stage = 'select',
+        stage = 'close',
         item_id = item.id,
         holder_id = holder.id,
-        holder_idx = holder_idx,          -- 0-based index in unit_choice
-        tried = {},
-        deadline = dfhack.getTickCount() + 6000,
+        tries = 0,
+        deadline = dfhack.getTickCount() + 8000,
         next_at = 0,
     }
 end
@@ -124,103 +140,102 @@ local function drive()
         return
     end
     local a = attack_iface()
-    if not a.open then
-        driver = nil
-        return
-    end
-    if d.stage == 'select' then
-        -- click the row we believe is the holder's; verified next step, wrong
-        -- picks back out (mode=0) and try the remaining rows one by one
-        if a.mode ~= 0 then a.mode = 0 d.next_at = now + 200 return end
-        local _, ty = find_text('Who will you attack?')
-        if not ty then d.next_at = now + 200 return end
-        local rows = option_rows(ty)
-        local pick
-        -- best guess first: the holder's position in the visible list
-        local guess = d.holder_idx - a.scroll_position_unit_choice
-        if rows[guess + 1] and not d.tried[guess + 1] then pick = guess + 1 end
-        if not pick then
-            for i in ipairs(rows) do
-                if not d.tried[i] then pick = i break end
-            end
+    local vs = dfhack.gui.getDFViewscreen(true)
+    if d.stage == 'close' then
+        -- step 1: whatever attack screen is up, back all the way out
+        if a.open then
+            gui.simulateInput(vs, 'LEAVESCREEN')
+            d.next_at = now + 250
+        else
+            d.stage = 'wrestle_cmd'
+            d.next_at = now + 150
         end
-        if not pick then
+    elseif d.stage == 'wrestle_cmd' then
+        -- step 2: open the wrestle-flavored chooser ("Who will you wrestle?")
+        if not a.open then
+            gui.simulateInput(vs, 'A_WRESTLE')
+            d.next_at = now + 350
+        elseif a.allow_wrestle then
+            d.stage = 'select'
+            d.next_at = now + 150
+        else
+            -- an attack-flavored screen opened instead; close and retry
+            d.stage = 'close'
+            d.next_at = now + 250
+        end
+    elseif d.stage == 'select' then
+        -- step 3: pick the holder. Their letter = position in unit_choice
+        -- (visual order; first visible row = unit_choice[scroll]).
+        if a.mode ~= 0 then d.stage = 'verify' return end
+        local holder_pos
+        for idx, u in ipairs(a.unit_choice) do   -- 0-based over df vectors
+            if u.id == d.holder_id then holder_pos = idx end
+        end
+        if not holder_pos then
             driver = nil
-            announce('Regain weapon: could not find their row on screen.')
+            announce('Regain weapon: they are no longer on the wrestle list.')
             return
         end
-        d.tried[pick] = true
-        click_at(rows[pick].x + 3, rows[pick].y)
+        local vis = holder_pos - a.scroll_position_unit_choice
+        d.tries = d.tries + 1
+        if d.tries > 8 then
+            driver = nil
+            announce('Regain weapon: could not select their row.')
+            return
+        end
+        if vis >= 0 and vis < 26 and d.tries % 2 == 1 then
+            -- letter keys select chooser rows (the right-click-move pattern);
+            -- fall back to clicking the row text on even tries
+            gui.simulateInput(vs, 'CUSTOM_' .. string.char(65 + vis))
+        else
+            local _, ty = find_text('Who will you wrestle?')
+            if ty then
+                local x, y = find_text(string.char(97 + math.max(vis, 0)) .. ' Lethal', ty)
+                if x then click_at(x + 2, y) end
+            end
+        end
         d.stage = 'verify'
         d.next_at = now + 400
     elseif d.stage == 'verify' then
         if a.mode == 0 then d.stage = 'select' d.next_at = now + 100 return end
-        local target = a.attack_unit
-        if not target or target.id ~= d.holder_id then
-            a.mode = 0                    -- wrong unit: back out, try the next row
-            d.stage = 'select'
-            d.next_at = now + 300
-            return
-        end
         if a.mode == 1 then
-            -- the "Really attack the ...?" confirm (they are not hostile to you).
+            -- the "Really attack?" confirm (they are not hostile to you).
             -- Leave the decision to the player rather than auto-confirming.
             driver = nil
-            announce('Confirm the attack, then pick the possession move.', true)
+            announce('Confirm the wrestle, then click "Gain possession of".', true)
             return
         end
-        d.stage = 'wrestle'
+        local target = a.attack_unit
+        if not target or target.id ~= d.holder_id then
+            -- wrong unit: back out to the chooser and try again
+            gui.simulateInput(vs, 'LEAVESCREEN')
+            d.stage = 'select'
+            d.next_at = now + 350
+            return
+        end
+        d.stage = 'grasp'
         d.next_at = now + 200
-    elseif d.stage == 'wrestle' then
-        -- the move menu is up for the holder. Read the DATA first: DF only
-        -- offers wrestling when allow_wrestle is set (measured live: with
-        -- both grasps full -- shield + the contested weapon -- the move list
-        -- is STRIKE/BLOCK only and no menu contains a possession move).
-        -- Announce that honestly instead of timing out on a fruitless scan.
-        if a.mode == df.adventure_interface_attack_mode_type.MOVE_CHOICE
-            and not a.allow_wrestle
-        then
+    elseif d.stage == 'grasp' then
+        -- step 4: the WRESTLE_GRASP move list; click the possession row
+        if not a.open then
             driver = nil
-            announce('DF offers no wrestle move against them right now'
-                .. ' (a free grasp may be needed) -- strike them instead.')
+            announce('You struggle for your weapon!', true)
             return
         end
-        -- pick the possession struggle: most specific label first, then the
-        -- wrestle submenu
-        for _, needle in ipairs({'possession', 'Possession', 'Struggle', 'Wrestle'}) do
-            local x, y = find_text(needle)
-            if x then
-                click_at(x + 2, y)
-                d.clicked = needle
-                d.stage = 'confirm_move'
-                d.next_at = now + 400
-                return
-            end
-        end
-        d.next_at = now + 300             -- menu may still be rendering
-    elseif d.stage == 'confirm_move' then
-        -- if picking "Wrestle" opened a submenu, click the possession entry there
-        local x, y = find_text('possession')
-        if not x then x, y = find_text('Possession') end
-        if x and d.clicked == 'Wrestle' then
-            click_at(x + 2, y)
+        local x, y = find_text('Gain possession of')
+        if x then
+            click_at(x + 5, y)
+            d.stage = 'done'
             d.next_at = now + 400
-            d.clicked = 'possession'
-            return
+        else
+            d.next_at = now + 250         -- list may still be rendering
         end
-        -- success check: the attack screen closed or our unit queued an attack
-        local me = dfhack.world.getAdventurer()
-        local queued = false
-        if me then
-            for _, act in ipairs(me.actions) do
-                if act.type == df.unit_action_type.Attack then queued = true end
-            end
-        end
-        if queued or not a.open then
+    elseif d.stage == 'done' then
+        if not a.open then
             driver = nil
             announce('You struggle for your weapon!', true)
         else
-            d.next_at = now + 300         -- keep watching until the deadline
+            d.next_at = now + 250         -- keep watching until the deadline
         end
     end
 end
@@ -256,9 +271,10 @@ function PosessionButton:overlay_onupdate()
     -- attack screen (the watch-their-blade performance lesson)
     if not attack_iface().open then return end
     pcall(drive)
-    -- park the frame right below the "Who will you attack?" title
+    -- park the frame right below the chooser title (attack- or wrestle-flavored)
     local ok, tx, ty = pcall(function()
         local x, y = find_text('Who will you attack?')
+        if not x then x, y = find_text('Who will you wrestle?') end
         return x, y
     end)
     if not ok or not ty then return end
