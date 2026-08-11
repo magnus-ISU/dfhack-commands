@@ -28,7 +28,7 @@ is carried inside this file; advfort itself is retired).
   sweeps stuck leftovers when the tool opens.
 * **Click routing.** A mouse job click must target your own z-level -- clicking
   the exposed floor one level down through a channel WALKS there instead of
-  channeling it (jobs above/below keep Ctrl+D/E). Standing inside a planned
+  channeling it (other z-levels via the look cursor). Standing inside a planned
   building's footprint is fine: the job anchors at your own tile and the engine
   steps you off the finished building if it would seal you in. Use Workshop
   never captures a click (or opens its menu) unless you stand within 1 tile of
@@ -37,8 +37,9 @@ is carried inside this file; advfort itself is retired).
 * **Keyboard.** Panels are searchable (type to filter, Enter picks the best
   match, Esc clears then closes) like fort/dig-building. On the map, Enter
   does the selected action at the look cursor -- and opens look mode first if
-  it is not up, so Enter/Enter-and-pick chooses where to act. Ctrl+Q toggles
-  quick item select, Shift+R/T cycle jobs, Ctrl+D/E job below/above.
+  it is not up, so Enter/Enter-and-pick chooses where to act. Shift+R/T cycle
+  jobs; Ctrl+F minimizes/maximizes the window.
+  Every other key passes to the game untouched.
 
 Usage::
 
@@ -247,6 +248,7 @@ end
 local mode_name
 local args={...}
 function parse_args(  )
+    cli_cmd=nil     -- a global: stale values from a prior invocation must not linger
     --NOTE(warmist): this duplicates most of stuff in utils, but i don't want to change some functionality
     local i=1
     while i<=#args do
@@ -277,7 +279,7 @@ function parse_args(  )
             settings.help=true
         elseif v=="--clear_jobs" then
             settings.clear_jobs=true
-        elseif v=="show" or v=="hide" or v=="toggle" then
+        elseif v=="show" or v=="hide" or v=="toggle" or v=="toggle-window" then
             cli_cmd=v
         else
             mode_name=v
@@ -2097,12 +2099,12 @@ function add_skill_exp(unit,skill,amount)
         end
     end
 end
--- Web gathering takes AS LONG AS MINING and displays on the same scale: the job pump
--- records the peak completion_timer of every Dig it works (dig_peak -- measured 5 on this
--- build: adv digs count whole WORK ACTIONS, not ticks), and a web counts down from that
--- same small number. Each step costs game ticks like a dig's work action does (~10,
--- shortened by Weaving skill), so the wall-time matches too.
-dig_peak=dig_peak or nil
+-- Jobless work is counted in WORK PULSES on the same scale adv digs use (a dig
+-- runs 5 whole work actions on this build, not ticks): webs take a dig's worth,
+-- felling 5x that. Each pulse costs game ticks like a dig's work action (~10,
+-- shortened by the relevant skill), so the wall-time matches too.
+WEB_PULSES=5
+FELL_PULSES=WEB_PULSES*5
 local function GatherWebsChooser(args)
     local web
     for _,v in ipairs(df.global.world.items.other.ANY_WEBS) do
@@ -2112,7 +2114,7 @@ local function GatherWebsChooser(args)
     args.screen.web_work={
         web_id=web.id,
         pos=copyall(args.pos),
-        left=dig_peak or 5,
+        left=WEB_PULSES,
         step_ticks=math.max(2,10-weaving_rating(args.unit)),
         last_tick=df.global.cur_year_tick_advmode,
     }
@@ -2222,7 +2224,7 @@ local function FellTreeChooser(args)
     args.screen.fell_work={
         ppos=copyall(plant.pos),
         pos=copyall(args.pos),
-        left=(dig_peak or 5)*2,   -- felling takes about twice a dig
+        left=FELL_PULSES,   -- felling takes 5x a web gather
         step_ticks=math.max(2,10-skill_rating(args.unit,df.job_skill.AXE)),
         last_tick=df.global.cur_year_tick_advmode,
     }
@@ -3069,8 +3071,10 @@ function AdvFort:draw_menu(dc)
     if cj then
         stat = ('%s (%d)'):format(job_name(cj), cj.completion_timer)
         pen = COLOR_YELLOW
-    elseif self.web_work then stat, pen = 'gathering web...', COLOR_YELLOW
-    elseif self.fell_work then stat, pen = 'felling tree...', COLOR_YELLOW
+    elseif self.web_work then
+        stat, pen = ('Gather Webs working (%d)'):format(self.web_work.left), COLOR_YELLOW
+    elseif self.fell_work then
+        stat, pen = ('Fell Tree working (%d)'):format(self.fell_work.left), COLOR_YELLOW
     else
         stat, pen = self.status_msg or '', COLOR_LIGHTRED
     end
@@ -3602,7 +3606,6 @@ function AdvFort:map_click_job()
     -- Z RULE: a mouse job click must target the adventurer's own z-level. The
     -- tile seen through a channel is one z DOWN -- clicking it means WALK there,
     -- not "channel that spot" (the old Chebyshev-with-z reach test claimed it).
-    -- Jobs above/below keep their explicit keys (Ctrl+D / Ctrl+E).
     if pos.z ~= adv.pos.z then return false end
     local cur_mode = actions[MODE_IDX+1]
     local reach = 1
@@ -3645,45 +3648,40 @@ function AdvFort:map_click_job()
     return true
 end
 
-function AdvFort:field_move(keys)
+-- Enter is the ONLY job key on the map: with the look cursor up it does the
+-- selected action there; without it, Build opens its picker, Use Workshop its
+-- menu, and everything else opens look mode. Every other key -- movement,
+-- careful move, the <> camera keys -- passes to the game untouched (the look
+-- cursor's own <> reach other z-levels).
+function AdvFort:enter_action(keys)
+    if not keys.SELECT then return false end
     local adv = dfhack.world.getAdventurer()
     local cur_mode = actions[MODE_IDX+1]
-    for code, delta in pairs(MOVEMENT_KEYS) do
-        if keys[code] then
-            local state = {unit=adv, pos=moddedpos(adv.pos, delta), dir=delta,
-                from_pos=copyall(adv.pos), post_actions=cur_mode[4],
-                pre_actions=cur_mode[5], job_type=cur_mode[2], screen=self}
-            if code == 'SELECT' then
-                local cursor = guidm.getCursorPos()
-                if not cursor then
-                    if cur_mode[1] == 'Build' then
-                        -- Enter on Build opens the picker; Enter IN the picker
-                        -- closes it and opens look mode to place the building
-                        self:open_build_panel()
-                    elseif cur_mode[1] == 'Use Workshop' then
-                        -- never via look mode: the workshop you stand on/by, or
-                        -- a message saying you are not at one
-                        self:use_nearby_workshop()
-                    else
-                        feed('A_LOOK')   -- open look mode to choose where to act
-                    end
-                    return true
-                end
-                state.pos = cursor
-            end
-            if cur_mode[1] == 'Build' then
-                if not (last_building and last_building.type) then
-                    self:open_build_panel()
-                    return true
-                end
-            end
-            if self:try_job(state, cur_mode) and code == 'SELECT' then
-                feed('LEAVESCREEN')
-            end
-            return true
+    local cursor = guidm.getCursorPos()
+    if not cursor then
+        if cur_mode[1] == 'Build' then
+            -- Enter on Build opens the picker; Enter IN the picker closes it
+            -- and opens look mode to place the building
+            self:open_build_panel()
+        elseif cur_mode[1] == 'Use Workshop' then
+            -- never via look mode: the workshop you stand at, or a message
+            self:use_nearby_workshop()
+        else
+            feed('A_LOOK')   -- open look mode to choose where to act
         end
+        return true
     end
-    return false
+    if cur_mode[1] == 'Build' and not (last_building and last_building.type) then
+        self:open_build_panel()
+        return true
+    end
+    local state = {unit=adv, pos={x=cursor.x, y=cursor.y, z=cursor.z}, dir={0,0,0},
+        from_pos=copyall(adv.pos), post_actions=cur_mode[4],
+        pre_actions=cur_mode[5], job_type=cur_mode[2], screen=self}
+    if self:try_job(state, cur_mode) then
+        feed('LEAVESCREEN')
+    end
+    return true
 end
 
 function AdvFort:cancel_current_job()
@@ -3728,7 +3726,20 @@ end
 -- ---- input -------------------------------------------------------------------
 
 function AdvFort:onInput(keys)
-    if not ctx_ok() or not shown then return false end
+    if not ctx_ok() then return false end
+    -- Ctrl+F minimizes/maximizes the window (and arms the tool if it is
+    -- hidden entirely)
+    if keys.CUSTOM_CTRL_F then
+        if not shown then
+            shown = true
+            collapsed = false
+            on_enable()
+        else
+            collapsed = not collapsed
+        end
+        return true
+    end
+    if not shown then return false end
     -- engine-fed waits must ALWAYS reach the game -- an open panel would
     -- otherwise swallow them and freeze the job it is waiting on
     if keys.A_SHORT_WAIT then return false end
@@ -3769,16 +3780,8 @@ function AdvFort:onInput(keys)
     elseif keys.CUSTOM_SHIFT_R then
         MODE_IDX = (MODE_IDX-1)%#actions
         return true
-    elseif keys.CUSTOM_CTRL_Q then
-        settings.quick = not settings.quick
-        return true
     end
-    if keys.A_WAIT and self.hold_resume
-        and dfhack.world.getAdventurer().job.current_job then
-        self:wait_long_start()
-        return true
-    end
-    return self:field_move(keys)
+    return self:enter_action(keys)
 end
 
 -- ---- the job engine ----------------------------------------------------------
@@ -4117,10 +4120,6 @@ function AdvFort:run_engine()
         if job_ptr.completion_timer > 0 then
             self.job_started = true
         end
-        if job_ptr.job_type == df.job_type.Dig
-                and job_ptr.completion_timer > (dig_peak or 0) then
-            dig_peak = job_ptr.completion_timer
-        end
         -- -1 is both "finished" and "never started": only a job SEEN running is done
         if job_ptr.completion_timer == -1 and self.job_started then
             local jt = job_ptr.job_type
@@ -4248,7 +4247,7 @@ local function sweep_orphans(adv)
     end
 end
 
-local function on_enable()
+function on_enable()   -- global: the Ctrl+F arm path calls it by name
     local adv = dfhack.world.getAdventurer()
     if not adv then return end
     local labors = adv.status.labors
@@ -4268,6 +4267,17 @@ if mode_name then
     for id, action in ipairs(actions) do
         if action[1] == mode_name then MODE_IDX = id-1 break end
     end
+end
+if cli_cmd == 'toggle-window' then
+    if not shown then
+        shown = true
+        collapsed = false
+        on_enable()
+    else
+        collapsed = not collapsed
+        if collapsed and WIDGET then WIDGET.aux = nil end
+    end
+    return
 end
 if cli_cmd == 'hide' then
     shown = false

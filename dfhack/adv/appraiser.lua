@@ -42,6 +42,12 @@ ancient partners eventually count as new again. Both rings persist in the save
     adv/appraiser stop       pause for this session
     adv/appraiser help       this text
 
+Awarded xp is written everywhere DF keeps it: the soul's `unit_skill` entry
+(inserted in skill-id order -- DF binary-searches that vector, so an appended
+entry is invisible to the skill sheet and never levels) and the historical
+figure's cumulative skill profile, which is what legends and the adventurer
+log read. A misordered entry left by an older version is re-seated on sight.
+
 DF's level curve is 500+100*rating xp per rating, so fresh-off-the-boat:
 levels 1..5 cost 500,600,700,800,900 -- about 18 new trade partners (or a lot
 of coin variety) to Adequate, then a new town's worth of partners per level.
@@ -89,15 +95,74 @@ local function adv_soul()
     return u and u.status.current_soul, u
 end
 
+-- Saves trained by the version that appended out of order carry a misplaced
+-- entry; re-seat it once so DF's binary search can see it again.
+local function reseat(soul, idx)
+    local sk = soul.skills[idx]
+    local rat, exp = sk.rating, sk.experience
+    local at = '#'
+    for i, s in ipairs(soul.skills) do
+        if s.id > SKILL and i ~= idx then at = i break end
+    end
+    if at ~= '#' and at > idx then at = at - 1 end
+    soul.skills:erase(idx)
+    soul.skills:insert(at, {new = df.unit_skill, id = SKILL, rating = rat, experience = exp})
+    for _, s in ipairs(soul.skills) do
+        if s.id == SKILL then return s end
+    end
+end
+
 local function skill_entry(soul, create)
     if not soul then return nil end
-    for _, sk in ipairs(soul.skills) do
-        if sk.id == SKILL then return sk end
+    for i, sk in ipairs(soul.skills) do
+        if sk.id == SKILL then
+            -- ipairs on a df vector is 0-based; guard both ends by hand
+            local before = i > 0 and soul.skills[i - 1] or nil
+            local after = i + 1 < #soul.skills and soul.skills[i + 1] or nil
+            if (before and before.id > SKILL) or (after and after.id < SKILL) then
+                return reseat(soul, i)
+            end
+            return sk
+        end
     end
     if create then
-        soul.skills:insert('#', {new = df.unit_skill, id = SKILL, rating = 0, experience = 0})
-        return soul.skills[#soul.skills - 1]
+        -- INSERT SORTED by skill id: DF keeps this vector ordered and finds
+        -- entries by binary search -- an appended out-of-order entry works for
+        -- everything that scans linearly but is INVISIBLE to the skill sheet's
+        -- exp lookup (and DF may re-add its own copy, leaving duplicates).
+        local at = '#'
+        for i, sk in ipairs(soul.skills) do
+            if sk.id > SKILL then at = i break end
+        end
+        soul.skills:insert(at, {new = df.unit_skill, id = SKILL, rating = 0, experience = 0})
+        for _, sk in ipairs(soul.skills) do
+            if sk.id == SKILL then return sk end
+        end
     end
+end
+
+-- The skill lives in TWO places. The soul entry above is what the game runs on;
+-- the historical figure's skill profile is the lifetime record legends and the
+-- adventurer log read, and it is CUMULATIVE (every level's cost plus current
+-- progress), not the current level's remainder. Mirror it on every award, or
+-- the numbers the UI shows never move.
+local function mirror_to_histfig(unit, rating, exp)
+    local hf = unit and df.historical_figure.find(unit.hist_figure_id)
+    local sp = hf and hf.info and hf.info.skills
+    if not sp then return end
+    local total = 500 * rating + 100 * (rating * (rating - 1)) // 2 + exp
+    for i, sid in ipairs(sp.skills) do
+        if sid == SKILL then
+            sp.points[i] = math.max(sp.points[i], total)
+            return
+        end
+    end
+    local at = '#'
+    for i, sid in ipairs(sp.skills) do
+        if sid > SKILL then at = i break end
+    end
+    sp.skills:insert(at, SKILL)
+    sp.points:insert(at, total)
 end
 
 function rating()
@@ -108,7 +173,7 @@ end
 
 -- DF's curve: the next rating costs 500+100*rating xp
 local function add_xp(n, why)
-    local soul = adv_soul()
+    local soul, unit = adv_soul()
     local sk = skill_entry(soul, true)
     if not sk then return end
     sk.experience = sk.experience + n
@@ -118,6 +183,7 @@ local function add_xp(n, why)
         sk.rating = sk.rating + 1
         leveled = true
     end
+    mirror_to_histfig(unit, sk.rating, sk.experience)
     xp_awarded = xp_awarded + n
     local msg = ('%s (+%d Appraiser xp%s)'):format(why, n,
         leveled and (' -- now %s'):format(df.skill_rating[math.min(sk.rating, 19)] or sk.rating) or '')
@@ -302,12 +368,20 @@ else
     running = true
     overlay.rescan()
     local r = load_rings()
-    local soul = adv_soul()
+    local soul, unit = adv_soul()
     local sk = soul and skill_entry(soul, false)
-    print(('adv/appraiser: %s | Appraiser %s (%d xp into the level) |'
+    local lifetime = 0
+    local hf = unit and df.historical_figure.find(unit.hist_figure_id)
+    local sp = hf and hf.info and hf.info.skills
+    if sp then
+        for i, sid in ipairs(sp.skills) do
+            if sid == SKILL then lifetime = sp.points[i] break end
+        end
+    end
+    print(('adv/appraiser: %s | Appraiser %s (%d xp into the level, %d lifetime) |'
         .. ' %d/%d partners, %d/%d coin mintings remembered | %d xp awarded')
         :format(running and 'WATCHING' or 'stopped',
             sk and (df.skill_rating[math.min(sk.rating, 19)] or sk.rating) or 'none',
-            sk and sk.experience or 0,
+            sk and sk.experience or 0, lifetime,
             #r.npcs, RING_MAX, #r.coins, RING_MAX, xp_awarded))
 end
