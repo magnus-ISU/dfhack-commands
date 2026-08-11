@@ -10,12 +10,14 @@ title. Clicking it selects whoever shares the weapon with you and initiates the
 Wrestle attack that struggles for possession -- no hunting through the target
 list and wrestle submenus.
 
-How it detects a struggle: the attack interface keeps the contested items in
-`adventure.attack.shared_it`; the button shows only when one of those items is
-in YOUR inventory AND in an attackable unit's inventory at the same time (the
-tug-of-war state). The click then drives DF's own UI -- selects the holder's
-row, then picks the possession-struggle wrestle move -- so the resulting attack
-is 100% native.
+How it detects a struggle -- measured live (2026-08, an orc gripping the
+player's artifact short sword): the contested item sits in YOUR inventory with
+TWO `UNIT_HOLDER` general refs, yours and the other gripper's. That second
+holder ref IS the tug-of-war state. (`adventure.attack.shared_it`, the
+original gate, is EMPTY on the "Who will you attack?" chooser -- DF only
+fills it after a target is picked -- so a button gated on it never appeared.)
+The click then drives DF's own UI -- selects the holder's row, then picks the
+possession-struggle wrestle move -- so the resulting attack is 100% native.
 
 Registered automatically as overlay `adv/posession.regain` (enabled by
 default). Nothing to run; it is dormant except on the attack screen during a
@@ -27,19 +29,20 @@ local gui = require('gui')
 
 local function attack_iface() return df.global.game.main_interface.adventure.attack end
 
--- the contested item + the OTHER unit gripping it, if a struggle is live
+-- the contested item + the OTHER unit gripping it, if a struggle is live:
+-- an item of MINE with a second UNIT_HOLDER ref naming an attackable unit
 local function find_struggle()
     local a = attack_iface()
     local me = dfhack.world.getAdventurer()
     if not me or not a.open then return end
-    local mine = {}
-    for _, iv in ipairs(me.inventory) do mine[iv.item.id] = true end
-    for _, it in ipairs(a.shared_it) do
-        if mine[it.id] then
-            for idx, u in ipairs(a.unit_choice) do
-                if u.id ~= me.id then
-                    for _, iv in ipairs(u.inventory) do
-                        if iv.item.id == it.id then return it, idx, u end
+    for _, iv in ipairs(me.inventory) do
+        local it = iv.item
+        for _, r in ipairs(it.general_refs) do
+            if r:getType() == df.general_ref_type.UNIT_HOLDER then
+                local ok, uid = pcall(function() return r.unit_id end)
+                if ok and uid and uid ~= me.id then
+                    for idx, u in ipairs(a.unit_choice) do
+                        if u.id == uid then return it, idx, u end
                     end
                 end
             end

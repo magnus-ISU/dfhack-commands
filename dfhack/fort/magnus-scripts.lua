@@ -242,6 +242,10 @@ local COLUMNS = {
             dfhack.run_command('overlay', 'enable', 'adv/exhaustion-meter.meter')
          end,
          disable = overlay_set('disable', 'adv/exhaustion-meter.meter')},
+        -- pure overlay button, no running flag -- overlay state is the whole switch
+        {key = 'adv-posession', label = 'posession',
+         enable = overlay_set('enable', 'adv/posession.regain'),
+         disable = overlay_set('disable', 'adv/posession.regain')},
         {key = 'adv-creature-description', label = 'creature-description',
          enable = function()
             dfhack.run_script('fort/creature-description')
