@@ -95,12 +95,9 @@ local SAFE_TYPE = df.world_site_type.Town
 -- still up to ~31 embark tiles (dozens of travel steps) away, which reads as
 -- "it changed from across the map" (reported live: Yellowplagues at world
 -- 45-46, player at embark 704, boundary at 720, buildings at 730). 2 embark
--- tiles = ~6 travel steps of margin ahead of the boundary; the evaluation
--- cadence is tightened to match (EVAL_MS below), since 6 steps of held-key
--- travel can pass in well under a second.
+-- tiles = ~6 travel steps of margin ahead of the boundary.
 local EMB_RANGE = 2
-local EVAL_MS = 150      -- wall-clock gap between target re-evaluations (must out-pace
-                         -- held-key travel across the narrow EMB_RANGE margin)
+local EVAL_MS = 500      -- wall-clock gap between target re-evaluations
 local LIFT_AFTER_MS = 250 -- how long off-play must persist before the patch drops
                           -- (debounced so a transient frame mid-travel cannot trip it)
 
