@@ -2316,6 +2316,9 @@ local LAYOUT = {
 -- Takes COMPLETE focus: nothing else can be interacted with until an item is
 -- chosen or it is canceled with Esc or right-click. Outside clicks are consumed.
 
+-- hotkeys for the first 36 material rows: letters, then numbers
+local IP_HOTKEYS = 'abcdefghijklmnopqrstuvwxyz1234567890'
+
 ItemPicker = defclass(ItemPicker, gui.Screen)
 ItemPicker.focus_path = 'advfort2/item-picker'
 
@@ -2324,7 +2327,6 @@ function ItemPicker:init(iargs)
     self.title = iargs.title or 'Choose'
     self.entries = iargs.entries
     self.on_pick = iargs.on_pick
-    self.search = ''
     self.scroll = 0
 end
 
@@ -2353,29 +2355,17 @@ function ItemPicker:onRenderBody(dc)
         dc:seek(l+w-10, t):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
         dc:seek(l+w-5, t):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
     end
-    local mset, mbest = list_matches(self)
-    local fx1 = l+2+#self.title+3
-    local fx2 = (ms > 0) and (l+w-11) or (l+w-2)
-    if fx2 >= fx1 then
-        local fw = fx2-fx1+1
-        if self.search == '' then
-            dc:seek(fx1, t):pen(COLOR_DARKGREY):string(('type to filter'):sub(1, fw))
-        else
-            dc:seek(fx1, t):pen(mbest and COLOR_GREEN or COLOR_LIGHTRED)
-                :string((self.search..'_'):sub(1, fw))
-        end
-    end
     for r = 0, rows-1 do
         for c = 0, cols-1 do
             local idx = (self.scroll+r)*cols+c+1
             local e = self.entries[idx]
             if e then
-                local pen
-                if self.search == '' then pen = COLOR_WHITE
-                elseif idx == mbest then pen = COLOR_GREEN
-                elseif mset[idx] then pen = COLOR_LIGHTGREEN
-                else pen = COLOR_DARKGREY end
-                dc:seek(l+1+c*ITEM_COL_W, t+1+r):pen(pen):string(e.label:sub(1, ITEM_COL_W-1))
+                local hk = (idx <= #IP_HOTKEYS) and (IP_HOTKEYS:sub(idx, idx)..': ') or '   '
+                local pen = e.current and COLOR_LIGHTGREEN or COLOR_WHITE
+                dc:seek(l+1+c*ITEM_COL_W, t+1+r):pen(e.current and COLOR_LIGHTGREEN or COLOR_LIGHTCYAN)
+                    :string(hk)
+                dc:seek(l+1+c*ITEM_COL_W+#hk, t+1+r):pen(pen)
+                    :string(e.label:sub(1, ITEM_COL_W-1-#hk))
             end
         end
     end
@@ -2408,24 +2398,26 @@ end
 function ItemPicker:onInput(keys)
     if self.done_pending or self.cancel_pending then return end
     if keys.LEAVESCREEN then
-        if self.search ~= '' then self.search = '' else self:dismiss() end
+        self:dismiss()
         return
     end
     if keys._MOUSE_R or keys._MOUSE_R_DOWN then
         self.cancel_pending = true
         return
     end
-    if keys._STRING == 0 then
-        self.search = self.search:sub(1, -2)
-        return
-    elseif keys._STRING and keys._STRING >= 33 then
-        self.search = self.search..string.char(keys._STRING)
+    -- the first 36 rows answer to their hotkey (letters, then numbers)
+    if keys._STRING and keys._STRING >= 33 then
+        local pos = IP_HOTKEYS:find(string.char(keys._STRING):lower(), 1, true)
+        if pos and pos <= #self.entries then self:pick(pos) end
         return
     end
     local l, t, w, h, cols, rows = self:geom()
     if keys.SELECT then
-        local _, best = list_matches(self)
-        if best then self:pick(best) end
+        -- Enter keeps the current pick (or takes the first row)
+        for i, e in ipairs(self.entries) do
+            if e.current then self:pick(i) return end
+        end
+        self:pick(1)
         return
     end
     if keys.CONTEXT_SCROLL_UP then
@@ -3187,7 +3179,8 @@ function AdvFort:build_select(idx)
 end
 
 function AdvFort:update_picks()
-    if not build_sel then return end
+    -- only the BUILD panel's slots feed build_sel; a mats panel must not
+    if not (build_sel and self.aux and self.aux.kind == 'build') then return end
     build_sel.picks = {}
     for _, s in ipairs((self.aux and self.aux.slots) or {}) do
         local it = s.cands[s.pick]
@@ -3197,11 +3190,25 @@ end
 
 function AdvFort:open_item_picker(slot, title, after)
     if #slot.cands < 1 then return end
-    local entries = {}
+    -- deduplicate: one row per distinct item description, with a count --
+    -- "3x slade bars", "8x birch logs"; picking a row picks its first item
+    local groups, order = {}, {}
     for i, it in ipairs(slot.cands) do
         local lab = item_label(it)
-        if i == slot.pick then lab = string.char(26)..' '..lab end
-        entries[#entries+1] = {label=lab, data=i}
+        local g = groups[lab]
+        if not g then
+            g = {first=i, count=0}
+            groups[lab] = g
+            order[#order+1] = lab
+        end
+        g.count = g.count+1
+        if i == slot.pick then g.current = true end
+    end
+    local entries = {}
+    for _, lab in ipairs(order) do
+        local g = groups[lab]
+        entries[#entries+1] = {label=('%dx %s'):format(g.count, lab),
+                               data=g.first, current=g.current}
     end
     ItemPicker{title=title, entries=entries, on_pick=function(i)
         slot.pick = i
@@ -3234,6 +3241,20 @@ function AdvFort:aux_input(keys, mx, my)
         self:close_aux(true)
         return true
     end
+    -- a DIGIT edits that slot's material (slots are numbered "1) ...") instead
+    -- of going into the filter search
+    if (a.kind == 'build' or a.kind == 'mats') and keys._STRING
+        and keys._STRING >= 48 and keys._STRING <= 57 then
+        local i = keys._STRING-48
+        if i == 0 then i = 10 end
+        local s = a.slots and a.slots[i]
+        if s and #s.cands > 1 then
+            local me = self
+            self:open_item_picker(s, ('Slot %d: choose material'):format(i),
+                function() me:update_picks() end)
+        end
+        return true
+    end
     if a.kind ~= 'mats' then
         if keys._STRING == 0 then
             a.search = a.search:sub(1, -2)
@@ -3248,9 +3269,12 @@ function AdvFort:aux_input(keys, mx, my)
             self:mats_confirm()
         elseif a.kind == 'build' then
             local _, best = list_matches(a)
-            if best then
-                self:build_select(best)
+            if a.search ~= '' and best and best ~= a.sel_idx then
+                self:build_select(best)         -- first Enter: adopt the match
                 a.search = ''
+            elseif a.sel_idx then
+                self:close_aux()                -- Enter again: done choosing --
+                feed('A_LOOK')                  -- pick WHERE with the look cursor
             end
         else
             local _, best = list_matches(a)
@@ -3316,8 +3340,14 @@ function AdvFort:aux_input(keys, mx, my)
             local idx = (a.scroll+r)*cols+(cx//COL_W)+1
             if a.entries[idx] then
                 if a.kind == 'build' then
-                    self:build_select(idx)
-                    a.search = ''
+                    if idx == a.sel_idx then
+                        -- clicking the selected entry confirms and closes;
+                        -- with the mouse you then just click a tile to build
+                        self:close_aux()
+                    else
+                        self:build_select(idx)
+                        a.search = ''
+                    end
                 else
                     self:list_pick(idx)
                 end
@@ -3486,7 +3516,7 @@ function AdvFort:use_nearby_workshop()
         end
     end
     if not bld then
-        self:set_status('No usable building nearby')
+        self:set_status('You are not standing at a workshop')
         return
     end
     MODES[bld:getType()].input(self, bld)
@@ -3579,7 +3609,17 @@ function AdvFort:field_move(keys)
             if code == 'SELECT' then
                 local cursor = guidm.getCursorPos()
                 if not cursor then
-                    feed('A_LOOK')   -- open look mode to choose where to act
+                    if cur_mode[1] == 'Build' then
+                        -- Enter on Build opens the picker; Enter IN the picker
+                        -- closes it and opens look mode to place the building
+                        self:open_build_panel()
+                    elseif cur_mode[1] == 'Use Workshop' then
+                        -- never via look mode: the workshop you stand on/by, or
+                        -- a message saying you are not at one
+                        self:use_nearby_workshop()
+                    else
+                        feed('A_LOOK')   -- open look mode to choose where to act
+                    end
                     return true
                 end
                 state.pos = cursor
