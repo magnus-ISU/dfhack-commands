@@ -484,14 +484,33 @@ function is_grasping_item( item_bp,unit )
     return bpart.flags.GRASP
 end
 function MakePredicateWieldsItem(item_skill)
-    -- only two tools are ever demanded (pick for the dig family, axe for felling)
-    local tool_msg={[df.job_skill.MINING]="Equip a pick",[df.job_skill.AXE]="Equip an axe"}
-    local msg=tool_msg[item_skill] or "Equip the right tool"
+    -- only two tools are ever demanded (pick for the dig family, axe for felling).
+    -- "Wields" is generous: a tool STRAPPED to the body (inventory mode 10) or
+    -- carried inside a bag/backpack/quiver counts too -- an adventurer with the
+    -- pick on their back should not have to juggle hands to dig. Held-in-grasp
+    -- is still checked first (cheapest, and the common case).
+    local tool_msg={[df.job_skill.MINING]="Carry a pick (held, strapped or bagged)",
+                    [df.job_skill.AXE]="Carry an axe (held, strapped or bagged)"}
+    local msg=tool_msg[item_skill] or "Carry the right tool"
+    local function is_the_tool(item)
+        return item:getMeleeSkill()==item_skill
+    end
     local pred=function(args)
-        local inv=args.unit.inventory
-        for k,v in pairs(inv) do
-            if v.mode==1 and v.item:getMeleeSkill()==item_skill and is_grasping_item(v.body_part_id,args.unit) then
+        for k,v in pairs(args.unit.inventory) do
+            if v.mode==1 and is_the_tool(v.item) and is_grasping_item(v.body_part_id,args.unit) then
                 return true
+            end
+        end
+        for k,v in pairs(args.unit.inventory) do
+            if v.mode==10 and is_the_tool(v.item) then   -- strapped to the body
+                return true
+            end
+            -- inside a carried container (bag, backpack, quiver)
+            local ok,contained=pcall(dfhack.items.getContainedItems,v.item)
+            if ok and contained then
+                for _,it in ipairs(contained) do
+                    if is_the_tool(it) then return true end
+                end
             end
         end
         return false,msg
