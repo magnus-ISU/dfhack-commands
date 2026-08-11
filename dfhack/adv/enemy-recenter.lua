@@ -52,7 +52,10 @@ local overlay = require('plugins.overlay')
 local guidm = require('gui.dwarfmode')
 local reveal = reqscript('adv/reveal')
 
-running = running or false
+-- always-on: nil (never touched this session) counts as running, so the
+-- overlay works from the first frame of a fresh DF session; `stop` still
+-- pauses it. The overlay's enabled flag is the persistent switch.
+if running == nil then running = true end
 recenters = recenters or 0     -- button clicks that moved the camera
 foes_now = foes_now or 0       -- last scan's foe count -- a GLOBAL because the CLI
                                -- re-executes this env per invocation, resetting locals;

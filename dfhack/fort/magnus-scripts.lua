@@ -213,6 +213,27 @@ local COLUMNS = {
          enable = script('adv/reveal'), disable = script('adv/reveal', 'stop')},
         {key = 'adv-keep-inventory', label = 'keep-inventory',
          enable = cmd('enable', 'adv/keep-inventory'), disable = cmd('disable', 'adv/keep-inventory')},
+        -- enable = arm the script (sets running=true; a bare overlay enable
+        -- leaves a mid-session `stop` in force) AND enable the overlay (the
+        -- persistent switch a bare script run leaves alone)
+        {key = 'adv-grab-stacks', label = 'grab-stacks',
+         enable = function()
+            dfhack.run_script('adv/grab-stacks')
+            dfhack.run_command('overlay', 'enable', 'adv/grab-stacks.watch')
+         end,
+         disable = script('adv/grab-stacks', 'stop')},
+        {key = 'adv-enemy-recenter', label = 'enemy-recenter',
+         enable = function()
+            dfhack.run_script('adv/enemy-recenter')
+            dfhack.run_command('overlay', 'enable', 'adv/enemy-recenter.button')
+         end,
+         disable = script('adv/enemy-recenter', 'stop')},
+        {key = 'adv-fear-no-goblin', label = 'fear-no-goblin',
+         enable = function()
+            dfhack.run_script('adv/fear-no-goblin')
+            dfhack.run_command('overlay', 'enable', 'adv/fear-no-goblin.watch')
+         end,
+         disable = script('adv/fear-no-goblin', 'stop')},
         {key = 'adv-always-be-satiated', label = 'always-be-satiated',
          enable = cmd('enable', 'adv/always-be-satiated'), disable = cmd('disable', 'adv/always-be-satiated')},
         {key = 'adv-exhaustion-meter', label = 'exhaustion-meter',

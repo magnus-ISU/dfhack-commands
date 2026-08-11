@@ -445,6 +445,16 @@ Smooth camera panning in adventure mode, and smooth movement for
 
 ![smooth-movement demo](demos/adv-smooth-camera.gif)
 
+### **`adv/fear-no-goblin`** 
+Fast travel into, out of and past goblin dark pits. DF refuses travel while you stand in one
+and bumps you off the world map when your route crosses one; this presents every pit within
+one world tile (tracked even mid-travel via your army's position — pit clusters form walls,
+so all of them must open at once) as a town for exactly as long as you are playing. The patch
+lifts the moment you leave the play screen, restores on world unload, and the real site types
+are recorded in dfhack persistence *inside the save itself* before anything is touched — a
+save that catches the patch necessarily catches the recovery record, and the next load heals
+the world automatically. Always-on via its overlay; `adv/fear-no-goblin stop` pauses it.
+
 ### **`adv/im-sure`** 
 Automatically dismiss "you haven't acted in a while" for long-running move
   commands.

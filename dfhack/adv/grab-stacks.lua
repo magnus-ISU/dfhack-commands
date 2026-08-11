@@ -46,7 +46,10 @@ Driven by an OVERLAY: menus freeze frame timers, onupdate keeps firing.
 
 local overlay = require('plugins.overlay')
 
-running = running or false
+-- always-on: nil (never touched this session) counts as running, so the
+-- overlay works from the first frame of a fresh DF session; `stop` still
+-- pauses it. The overlay's enabled flag is the persistent switch.
+if running == nil then running = true end
 skipped = skipped or 0        -- amount screens auto-accepted after a row click
 key_accepts = key_accepts or 0 -- amount screens accepted via Enter/letter
 
