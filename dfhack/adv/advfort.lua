@@ -844,6 +844,37 @@ function RemoveBuilding(args)
     return false,"Building removal job failed to be created"
 end
 
+-- cooking-slot gates (flags1.cookable), matching the suite's eating rules
+-- (adv/always-be-satiated): whole corpses are never ingredients, and
+-- sapient-sourced food obeys the adventurer's civ ethics -- DF's kitchen
+-- reaches the same verdicts through code advfort's lua matcher lacks, which
+-- is how "prepare lavish meal" offered a mutilated corpse and illithid brain.
+local ER=df.ethic_response
+local function ethic_permits(v)
+    return (v>=ER.ACCEPTABLE and v<=ER.ONLY_IF_SANCTIONED) or v==ER.REQUIRED
+end
+local function may_eat_sapients()
+    local u=dfhack.world.getAdventurer()
+    local civ_id=u and u.civ_id or -1
+    if civ_id<0 then
+        local nem=df.nemesis_record.find(df.global.adventure.player_id)
+        civ_id=nem and nem.figure and nem.figure.civ_id or -1
+    end
+    local civ=civ_id>=0 and df.historical_entity.find(civ_id) or nil
+    local raw=civ and civ.entity_raw
+    if not raw then return false end
+    return ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_OTHER])
+        or ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_KILL])
+end
+local function sapient_source(mi)
+    local cr=mi and mi.creature
+    if not cr then return false end
+    for _,c in ipairs(cr.caste) do
+        if c.flags.CAN_LEARN or c.flags.CAN_SPEAK then return true end
+    end
+    return false
+end
+
 function isSuitableItem(job_item,item)
     --todo butcher test
     if job_item.item_type~=-1 then
@@ -874,8 +905,18 @@ function isSuitableItem(job_item,item)
     local matinfo=dfhack.matinfo.decode(item)
     --print(matinfo:getCraftClass())
     --print("Matching ",item," vs ",job_item)
-    if job_item.flags1.cookable and item:getType()==df.item_type.FOOD then
-        return false,"already cooked"
+    if job_item.flags1.cookable then
+        local ty=item:getType()
+        if ty==df.item_type.FOOD then
+            return false,"already cooked"
+        end
+        if ty==df.item_type.CORPSE or ty==df.item_type.CORPSEPIECE
+            or ty==df.item_type.REMAINS then
+            return false,"not an ingredient"
+        end
+        if sapient_source(matinfo) and not may_eat_sapients() then
+            return false,"sapient (your ethics forbid it)"
+        end
     end
 
     if type(job_item) ~= "table" and not matinfo:matches(job_item) then
