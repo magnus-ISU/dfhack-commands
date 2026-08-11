@@ -948,13 +948,22 @@ function isSuitableItem(job_item,item)
     end
     return true
 end
-function getItemsUncollected(job)
+-- An item counts as collected at the JOB ANCHOR or anywhere inside the
+-- BUILDING: putItemsInBuilding drops materials at the building, while job.pos
+-- may sit on the footprint tile nearest the worker (AnchorJobAtWorker) -- an
+-- anchor-only comparison read every teleported material as uncollected and
+-- flagged the job fetching, which an adventurer can never satisfy: starting a
+-- workshop froze until a lucky second click re-aligned the anchor.
+function getItemsUncollected(job,building)
     local ret={}
     for id,jitem in pairs(job.items) do
         local x,y,z=dfhack.items.getPosition(jitem.item)
-        if x~=job.pos.x or y~=job.pos.y or z~=job.pos.z then
-            table.insert(ret,jitem)
+        local collected=(x==job.pos.x and y==job.pos.y and z==job.pos.z)
+        if not collected and building then
+            collected=z==building.z and x>=building.x1 and x<=building.x2
+                and y>=building.y1 and y<=building.y2
         end
+        if not collected then table.insert(ret,jitem) end
     end
     return ret
 end
@@ -1028,7 +1037,18 @@ function finish_item_assign(args)
         putItemsInBuilding(args.building,job.items)
     end
 
-    local uncollected = getItemsUncollected(job)
+    local uncollected = getItemsUncollected(job,args.building)
+    if #uncollected > 0 and settings.teleport_items and item_mode=="teleport" then
+        -- a straggler the building-move could not take (e.g. an item chosen out
+        -- of a distant container): teleporting is this mode's whole contract,
+        -- and "fetching" is a death sentence for a worker who never hauls --
+        -- put it on the job tile directly
+        for _,jitem in ipairs(uncollected) do
+            pcall(dfhack.items.moveToGround,jitem.item,
+                xyz2pos(job.pos.x,job.pos.y,job.pos.z))
+        end
+        uncollected = getItemsUncollected(job,args.building)
+    end
     if #uncollected == 0 then
         job.flags.working=true
         if item_mode=="haul" then
