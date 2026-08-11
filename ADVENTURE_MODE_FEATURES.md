@@ -115,6 +115,24 @@ Right clicking (if it gives no other options) automatically
 
 ![adv/right-click-move demo](demos/adv-right-click-move.gif)
 
+### **`adv/grab-stacks`** 
+One click grabs a whole stack. Clicking a stack in the pickup menu
+  ("Get copper coins [512]") normally opens a mouse-only "Pick up how many?" screen — an
+  extra click for the answer that is almost always "all of them". With this running, clicking
+  a stack anywhere *except* its [N] count skips that screen and takes the full stack; click
+  the [N] itself to choose an amount as before. On the amount screen, Enter or any letter key
+  now accepts the shown number too.
+
+![adv/grab-stacks demo](demos/adv-grab-stacks.gif)
+
+### **`adv/enemy-recenter`** 
+While you're in combat (by the same judgement `adv/reveal` and
+  `adv/always-be-satiated` use), a "Recenter on enemy" button appears directly above DF's own
+  "Recenter on yourself" button, wearing the same graphic. Click it and the camera jumps to
+  the foe that put you in combat, with a selection box (`fort/dwarf-rts`'s art) flashing on
+  that unit; multiple foes cycle click by click. DF's own button right below takes you home,
+  so the pair reads as one rocker: enemy above, yourself below.
+
 ### **`adv/watch-their-blade`** 
 The attack screens show a combat summary under each name — every
   candidate on the "Who will you attack?" chooser, and your target on the attack

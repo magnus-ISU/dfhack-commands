@@ -226,6 +226,14 @@ sliders from data, so only the Create-world click is left to you.
 
 ## Miscellaneous
 
+### **`fort/old-saves`**
+Marks old-game-version saves on the title screen's Continue Game lists: every save last
+written by an *older* game version than the one running gets its "Files" button repainted as
+a red "OLD!!" — DF itself only tells you after you load. The version is read from each save's
+`world.sav` header (DF's title-screen data doesn't carry it), and rows are identified by the
+save's folder name so same-named copies of a world can't be confused. Run the command bare at
+the title screen to print every save and its version.
+
 ### **`fort/gen-world`**
 Drives world creation from the title screen, writing the mod list and all five sliders as
 data and clicking only the buttons that have no data equivalent.

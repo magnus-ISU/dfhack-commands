@@ -269,6 +269,14 @@ sliders from data, so only the Create-world click is left to you.
 
 ## Miscellaneous
 
+### **`fort/old-saves`**
+Marks old-game-version saves on the title screen's Continue Game lists: every save last
+written by an *older* game version than the one running gets its "Files" button repainted as
+a red "OLD!!" — DF itself only tells you after you load. The version is read from each save's
+`world.sav` header (DF's title-screen data doesn't carry it), and rows are identified by the
+save's folder name so same-named copies of a world can't be confused. Run the command bare at
+the title screen to print every save and its version.
+
 ### **`fort/gen-world`**
 Drives world creation from the title screen, writing the mod list and all five sliders as
 data and clicking only the buttons that have no data equivalent.
@@ -396,6 +404,24 @@ Right clicking (if it gives no other options) automatically
   mouse clicks / key presses for a basic action.
 
 ![adv/right-click-move demo](demos/adv-right-click-move.gif)
+
+### **`adv/grab-stacks`** 
+One click grabs a whole stack. Clicking a stack in the pickup menu
+  ("Get copper coins [512]") normally opens a mouse-only "Pick up how many?" screen — an
+  extra click for the answer that is almost always "all of them". With this running, clicking
+  a stack anywhere *except* its [N] count skips that screen and takes the full stack; click
+  the [N] itself to choose an amount as before. On the amount screen, Enter or any letter key
+  now accepts the shown number too.
+
+![adv/grab-stacks demo](demos/adv-grab-stacks.gif)
+
+### **`adv/enemy-recenter`** 
+While you're in combat (by the same judgement `adv/reveal` and
+  `adv/always-be-satiated` use), a "Recenter on enemy" button appears directly above DF's own
+  "Recenter on yourself" button, wearing the same graphic. Click it and the camera jumps to
+  the foe that put you in combat, with a selection box (`fort/dwarf-rts`'s art) flashing on
+  that unit; multiple foes cycle click by click. DF's own button right below takes you home,
+  so the pair reads as one rocker: enemy above, yourself below.
 
 ### **`adv/watch-their-blade`** 
 The attack screens show a combat summary under each name — every

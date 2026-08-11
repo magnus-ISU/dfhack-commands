@@ -238,6 +238,11 @@ local COLUMNS = {
         {key = 'embark-map', label = 'adventurer-map',
          enable = overlay_set('enable', 'embark/adventurer-map.map'),
          disable = overlay_set('disable', 'embark/adventurer-map.map')},
+        -- fort/-prefixed but lives here: a title-screen helper, like the rest
+        -- of this column it matters before any game is loaded
+        {key = 'old-saves', label = 'old-saves',
+         enable = overlay_set('enable', 'fort/old-saves.stamp'),
+         disable = overlay_set('disable', 'fort/old-saves.stamp')},
     }},
     {id = 'vanilla', title = 'vanilla dfhack', mode = 'mixed', items = {
         {key = 'hide-tutorials', label = 'hide-tutorials', mode = 'any',

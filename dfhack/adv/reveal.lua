@@ -75,34 +75,47 @@ local function foe_matters(uid, me)
     return dz <= HOSTILE_ZRANGE and math.max(dx, dy) <= HOSTILE_RANGE
 end
 
--- true while the adventurer shares a Conflict activity with a foe that
--- matters.  world.activities is small (tens); sides/unit_ids a handful each.
--- EXPORTED: adv/always-be-satiated gates its eating on this same judgement,
--- so "combat" means one thing across the suite.
-function in_combat()
+-- The units that make the adventurer's fights real: every foe_matters
+-- participant of every Conflict activity the adventurer is listed in.
+-- world.activities is small (tens); sides/unit_ids a handful each.
+-- EXPORTED: adv/enemy-recenter points its button at these.
+function combat_foes()
+    local out = {}
     local me = dfhack.world.getAdventurer()
-    if not me then return false end
-    local id = me.id
+    if not me then return out end
+    local id, seen = me.id, {}
     for _, act in ipairs(df.global.world.activities.all) do
         if act.type == df.activity_entry_type.Conflict then
             for _, ev in ipairs(act.events) do
                 if df.activity_event_conflictst:is_instance(ev) then
-                    local mine, real = false, false
+                    local mine, foes = false, {}
                     for _, side in ipairs(ev.sides) do
                         for _, uid in ipairs(side.unit_ids) do
                             if uid == id then
                                 mine = true
-                            elseif foe_matters(uid, me) then
-                                real = true
+                            elseif not seen[uid] and foe_matters(uid, me) then
+                                foes[#foes + 1] = uid
                             end
                         end
                     end
-                    if mine and real then return true end
+                    if mine then
+                        for _, uid in ipairs(foes) do
+                            seen[uid] = true
+                            out[#out + 1] = df.unit.find(uid)
+                        end
+                    end
                 end
             end
         end
     end
-    return false
+    return out
+end
+
+-- true while the adventurer shares a Conflict activity with a foe that
+-- matters.  EXPORTED: adv/always-be-satiated gates its eating on this same
+-- judgement, so "combat" means one thing across the suite.
+function in_combat()
+    return #combat_foes() > 0
 end
 
 -- what makes us hide the map right now; nil when safe
