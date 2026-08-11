@@ -172,8 +172,21 @@ local function drive()
         d.stage = 'wrestle'
         d.next_at = now + 200
     elseif d.stage == 'wrestle' then
-        -- the move menu is up for the holder: pick the possession struggle.
-        -- Try the most specific label first, then open the wrestle submenu.
+        -- the move menu is up for the holder. Read the DATA first: DF only
+        -- offers wrestling when allow_wrestle is set (measured live: with
+        -- both grasps full -- shield + the contested weapon -- the move list
+        -- is STRIKE/BLOCK only and no menu contains a possession move).
+        -- Announce that honestly instead of timing out on a fruitless scan.
+        if a.mode == df.adventure_interface_attack_mode_type.MOVE_CHOICE
+            and not a.allow_wrestle
+        then
+            driver = nil
+            announce('DF offers no wrestle move against them right now'
+                .. ' (a free grasp may be needed) -- strike them instead.')
+            return
+        end
+        -- pick the possession struggle: most specific label first, then the
+        -- wrestle submenu
         for _, needle in ipairs({'possession', 'Possession', 'Struggle', 'Wrestle'}) do
             local x, y = find_text(needle)
             if x then
@@ -233,8 +246,12 @@ PosessionButton.ATTRS{
 }
 
 function PosessionButton:overlay_onupdate()
-    self.active = false
-    -- cheap authoritative gate: this overlay now updates on EVERY dungeonmode
+    -- NOT self.active: `active` is a RESERVED gui.View field, and the overlay
+    -- framework's do_update skips overlay_onupdate entirely while it is falsy
+    -- (measured live: active=false -> 0 framework calls ever, a self-deadlock
+    -- since only onupdate could set it true). self.show is ours alone.
+    self.show = false
+    -- cheap authoritative gate: this overlay updates on EVERY dungeonmode
     -- frame, and the ~12k-readTile title scan must never run outside the
     -- attack screen (the watch-their-blade performance lesson)
     if not attack_iface().open then return end
@@ -246,7 +263,7 @@ function PosessionButton:overlay_onupdate()
     end)
     if not ok or not ty then return end
     if not find_struggle() then return end
-    self.active = true
+    self.show = true
     local ir = gui.get_interface_rect()
     local t, l = ty + 1 - ir.y1, tx - ir.x1
     if self.frame.t ~= t or self.frame.l ~= l then
@@ -256,13 +273,13 @@ function PosessionButton:overlay_onupdate()
 end
 
 function PosessionButton:onRenderBody(dc)
-    if not self.active then return end
+    if not self.show then return end
     dc:seek(0, 0):pen{fg = driver and COLOR_YELLOW or COLOR_LIGHTGREEN, bg = COLOR_BLACK}
         :string(LABEL)
 end
 
 function PosessionButton:onInput(keys)
-    if not self.active then return false end
+    if not self.show then return false end
     if keys._MOUSE_L and self:getMousePos() then
         if not driver then
             local item, idx, holder = find_struggle()
