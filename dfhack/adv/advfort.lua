@@ -1677,8 +1677,12 @@ function BuildPicker:onInput(keys)
             end
             return                       -- consume clicks on the panel
         end
-        -- click outside both panels: done choosing, back to the game
+        -- click outside both panels: done choosing, back to the game -- and
+        -- the click ACTS there (placing the building on the clicked tile is
+        -- the whole documented flow; spending it on dismissal forced a second
+        -- identical click)
         self:dismiss()
+        self:sendInputToParent(keys)
         return
     end
 end
@@ -1690,6 +1694,7 @@ JobPicker=defclass(JobPicker,gui.Screen)
 JobPicker.focus_path='advfort/job-picker'
 
 function JobPicker:init(args)
+    self.spawn_ms=dfhack.getTickCount()   -- brand-new-screen click guard
     self.title=args.title or 'Choose'
     self.entries=args.entries      -- {{label=..., data=...},...}
     self.on_pick=args.on_pick      -- fn(data)
@@ -1831,6 +1836,7 @@ function JobPicker:onInput(keys)
         return
     end
     if keys._MOUSE_L then
+        if dfhack.getTickCount()-(self.spawn_ms or 0)<200 then return end
         local mx,my=df.global.gps.mouse_x,df.global.gps.mouse_y
         if mx>=l and mx<l+w and my>=t and my<t+h then
             if my==t and self:max_scroll(cols,rows)>0 then
@@ -1848,7 +1854,10 @@ function JobPicker:onInput(keys)
             end
             return
         end
+        -- outside the panel: done here -- and the click ACTS (walk/job on the
+        -- ground) instead of being spent on mere dismissal
         self:dismiss()
+        self:sendInputToParent(keys)
         return
     end
 end
@@ -1904,16 +1913,19 @@ function pick_slot_material(slot,title,on_done)
         if i==slot.pick then lab=string.char(26)..' '..lab end   -- mark the current pick
         entries[#entries+1]={label=lab,data=i}
     end
-    dfhack.timeout(2,'frames',function()
-        JobPicker{
-            title=title or 'Choose material',
-            entries=entries,
-            on_pick=function(i)
-                slot.pick=i
-                if on_done then on_done() end
-            end,
-        }:show()
-    end)
+    -- shown DIRECTLY: this used to sit behind dfhack.timeout(2,'frames'), and
+    -- frame timers freeze exactly while a picker screen waits for input -- the
+    -- submenu never opened, so material clicks appeared to do nothing. The
+    -- brand-new-screen click guard in JobPicker absorbs any leak of the click
+    -- that opened it.
+    JobPicker{
+        title=title or 'Choose material',
+        entries=entries,
+        on_pick=function(i)
+            slot.pick=i
+            if on_done then on_done() end
+        end,
+    }:show()
 end
 
 MaterialsPicker=defclass(MaterialsPicker,gui.Screen)
@@ -2011,7 +2023,11 @@ function MaterialsPicker:onInput(keys)
             end
             return
         end
-        return   -- modal while choosing materials
+        -- outside: cancel the setup and let the click act on the ground
+        self:dismiss()
+        if self.on_cancel then self.on_cancel() end
+        self:sendInputToParent(keys)
+        return
     end
 end
 
