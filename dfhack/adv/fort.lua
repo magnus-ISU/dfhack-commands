@@ -1127,6 +1127,11 @@ function putItemsInBuilding(building,job_item_refs)
         --local pos=dfhack.items.getPosition(v)
         if not dfhack.items.moveToBuilding(v.item,building,0) then
             print("Could not put item:",k,v.item)
+        else
+            -- moveToBuilding leaves this flag off, and DF's adv construct
+            -- handler treats a contained-but-not-in_building material as
+            -- missing (measured live: setting it revived a frozen build)
+            v.item.flags.in_building=true
         end
         v.flags.is_fetching=false
     end
@@ -1362,6 +1367,48 @@ function AnchorJobAtWorker(args)
     return true
 end
 
+-- Stray on-ground items inside a construction footprint make DF REFUSE every
+-- work pulse in adventure mode -- the job timer freezes while the game spins,
+-- ending in endless too-long prompts (advfort's ancient "items blocking
+-- construction stuck the game"; measured live twice: sweeping the items
+-- completed the build instantly). Move them to the nearest open tile just
+-- outside the footprint; the job's own materials are left alone.
+function ClearFootprintItems(args)
+    local bld=args.building
+    if not bld or bld.x1==nil then return true end
+    local keep={}
+    for _,ji in ipairs((args.job and args.job.items) or {}) do keep[ji.item.id]=true end
+    local ta=df.tiletype.attrs
+    local function drop_ok(p)
+        local tt=dfhack.maps.getTileType(p)
+        if not tt then return false end
+        local sh=ta[tt].shape
+        if sh~=df.tiletype_shape.FLOOR and sh~=df.tiletype_shape.RAMP then return false end
+        local ob=dfhack.buildings.findAtTile(p)
+        if ob and ob:getBuildStage()<ob:getMaxBuildStage() then return false end
+        return true
+    end
+    for _,v in ipairs(df.global.world.items.other.IN_PLAY) do
+        if v.flags.on_ground and v.pos.z==bld.z
+            and v.pos.x>=bld.x1 and v.pos.x<=bld.x2
+            and v.pos.y>=bld.y1 and v.pos.y<=bld.y2
+            and not keep[v.id] then
+            local best,bestd
+            for x=bld.x1-1,bld.x2+1 do
+                for y=bld.y1-1,bld.y2+1 do
+                    if (x<bld.x1 or x>bld.x2 or y<bld.y1 or y>bld.y2)
+                        and drop_ok({x=x,y=y,z=bld.z}) then
+                        local d=math.max(math.abs(x-v.pos.x),math.abs(y-v.pos.y))
+                        if not bestd or d<bestd then best,bestd={x=x,y=y,z=bld.z},d end
+                    end
+                end
+            end
+            if best then pcall(dfhack.items.moveToGround,v,best) end
+        end
+    end
+    return true
+end
+
 function CheckAndFinishBuilding(args,bld)
     args.building=args.building or bld
     for idx,job in pairs(bld.jobs) do
@@ -1392,10 +1439,10 @@ function CheckAndFinishBuilding(args,bld)
     end
 
     if args.job~=nil then
-        args.pre_actions={AssignJobItems}
+        args.pre_actions={AssignJobItems,ClearFootprintItems}
     else
         local t={items=buildings.getFiltersByType({},bld:getType(),bld:getSubtype(),bld:getCustomType())}
-        args.pre_actions={dfhack.curry(setFiltersUp,t),AssignBuildingRef,AnchorJobAtWorker}--,AssignJobItems
+        args.pre_actions={dfhack.curry(setFiltersUp,t),AssignBuildingRef,AnchorJobAtWorker,ClearFootprintItems}
     end
     args.no_job_delete=true
     makeJob(args)
@@ -4003,6 +4050,31 @@ function AdvFort:run_engine()
 
     if self.long_wait and self.long_wait_timer == nil then
         self.long_wait_timer = 1000
+    end
+
+    -- Construct pulses being REFUSED -- the job timer frozen while the game
+    -- keeps running -- is the items-blocking wedge appearing MID-job (something
+    -- dropped onto the site): sweep the footprint and fix the material flags.
+    if job_ptr and self.long_wait and job_ptr.job_type==df.job_type.ConstructBuilding then
+        if self.pulse_job~=job_ptr.id or self.pulse_timer~=job_ptr.completion_timer then
+            self.pulse_job,self.pulse_timer=job_ptr.id,job_ptr.completion_timer
+            self.pulse_at=dfhack.getTickCount()
+        elseif dfhack.getTickCount()-(self.pulse_at or 0)>3000 then
+            self.pulse_at=dfhack.getTickCount()
+            local bld
+            for _,r in ipairs(job_ptr.general_refs) do
+                if r:getType()==df.general_ref_type.BUILDING_HOLDER then
+                    bld=df.building.find(r.building_id)
+                end
+            end
+            if bld then
+                ClearFootprintItems{job=job_ptr,building=bld}
+                for _,ji in ipairs(job_ptr.items) do
+                    pcall(function() ji.item.flags.in_building=true end)
+                end
+                dfhack.gui.showAnnouncement('You clear debris from the construction site.',7,1)
+            end
+        end
     end
 
     if job_ptr and self.long_wait and not job_action then
