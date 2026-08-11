@@ -153,6 +153,15 @@ InventoryWeight.ATTRS{
 
 local PEN = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
 
+-- adv/appraiser paints each item's VALUE under its weight; ask it politely
+-- (absent or paused appraiser = no value line, weights unaffected)
+local function value_label(item)
+    local ok, appr = pcall(reqscript, 'adv/appraiser')
+    if not ok or not appr or not appr.appraise_label then return nil end
+    local ok2, label = pcall(appr.appraise_label, item)
+    return ok2 and label or nil
+end
+
 -- cache = {entries={{row=<0-based y>, x=<paint col>, text}, ...}}
 local cache = nil
 local scan_at, tries, last_key = 0, 0, nil
@@ -193,6 +202,15 @@ local function rebuild_pickup()
                 local x = end0 - #text + 1
                 if lines[e.row + 1]:sub(x, end0 + 1):match('^%s*$') then
                     entries[#entries+1] = {row = e.row, x = x, text = text}
+                    -- adv/appraiser: the item's value directly below its weight
+                    local vt = value_label(item)
+                    local below = lines[e.row + 2]
+                    if vt and below then
+                        local vx = end0 - #vt + 1
+                        if below:sub(vx, end0 + 1):match('^%s*$') then
+                            entries[#entries+1] = {row = e.row + 1, x = vx, text = vt}
+                        end
+                    end
                 end
             end
         end
@@ -235,6 +253,15 @@ local function rebuild()
                 -- never overwrite the name: the target cells must have scanned blank
                 if lines[e.row + 1]:sub(x, anchor + 1):match('^%s*$') then
                     entries[#entries+1] = {row = e.row, x = x, text = text}
+                    -- adv/appraiser: the item's value directly below its weight
+                    local vt = value_label(item)
+                    local below = lines[e.row + 2]
+                    if vt and below then
+                        local vx = anchor - #vt + 1
+                        if below:sub(vx, anchor + 1):match('^%s*$') then
+                            entries[#entries+1] = {row = e.row + 1, x = vx, text = vt}
+                        end
+                    end
                 end
             end
         end

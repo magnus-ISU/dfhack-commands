@@ -329,6 +329,14 @@ Automatically reopen the inventory and scroll to the last position
 
 ![adv/keep-inventory demo](demos/adv-keep-inventory.gif)
 
+### **`adv/appraiser`** 
+Item values appear directly below each item's weight in the inventory and pick-up lists, at
+  the precision an equally skilled fortress broker would get: no Appraiser skill shows only
+  `?`, low levels show values rounded to the nearest 100 then 10, and 11+ is exact. The skill
+  trains as an adventurer plausibly would: +200 xp for trading with a partner you haven't
+  traded with before, +10 xp for handling a coin minting you haven't seen — judged against
+  rolling last-20 lists (persisted in the save) so the checks stay cheap.
+
 ### **`adv/inventory-display-weight`** 
 Show every item's weight in the inventory list and the pick-up menu.
 

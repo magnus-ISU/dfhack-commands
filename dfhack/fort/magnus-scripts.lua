@@ -365,6 +365,12 @@ local COLUMNS = {
         {key = 'adv-read-the-map', label = 'read-the-map',
          enable = overlay_set('enable', 'adv/read-the-map.tooltip'),
          disable = overlay_set('disable', 'adv/read-the-map.tooltip')},
+        {key = 'adv-appraiser', label = 'appraiser',
+         enable = function()
+            dfhack.run_script('adv/appraiser')
+            dfhack.run_command('overlay', 'enable', 'adv/appraiser.watch')
+         end,
+         disable = script('adv/appraiser', 'stop')},
         {key = 'adv-watch-their-blade', label = 'watch-their-blade',
          enable = script('adv/watch-their-blade'),
          disable = script('adv/watch-their-blade', 'stop')},
