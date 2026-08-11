@@ -271,11 +271,17 @@ function PosessionButton:overlay_onupdate()
     -- attack screen (the watch-their-blade performance lesson)
     if not attack_iface().open then return end
     pcall(drive)
-    -- park the frame right below the chooser title (attack- or wrestle-flavored)
+    -- park the frame right below the panel title. The choosers have readable
+    -- titles; the deeper screens (MOVE_CHOICE, aim, wrestle-grasp) render
+    -- theirs as graphics, but every attack panel puts a plain-text "Done" on
+    -- its title row -- anchor there (right-aligned under it) so the button
+    -- works from ANY attack screen; the driver escapes out first regardless.
     local ok, tx, ty = pcall(function()
         local x, y = find_text('Who will you attack?')
         if not x then x, y = find_text('Who will you wrestle?') end
-        return x, y
+        if x then return x, y end
+        x, y = find_text('Done')
+        if x then return x + 4 - #LABEL, y end
     end)
     if not ok or not ty then return end
     if not find_struggle() then return end
