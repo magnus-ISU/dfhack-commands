@@ -56,22 +56,61 @@ local function snaga_caste(race)
     return snaga
 end
 
+-- DF keeps soul.skills SORTED BY SKILL ID and finds entries by binary search, so
+-- a skill appended out of order is invisible to the skill sheet and never levels.
+-- Insert at the sorted position, and re-seat an entry an older version appended.
 local function skill_entry(unit, skill)
     local soul = unit.status.current_soul
     if not soul then return nil end
+    local at = "#"
+    for i, s in ipairs(soul.skills) do
+        if s.id == skill then
+            local before = i > 0 and soul.skills[i - 1] or nil
+            local after = i + 1 < #soul.skills and soul.skills[i + 1] or nil
+            if not ((before and before.id > skill) or (after and after.id < skill)) then return s end
+            local rating, exp = s.rating, s.experience
+            local to = "#"
+            for j, o in ipairs(soul.skills) do
+                if o.id > skill and j ~= i then to = j break end
+            end
+            if to ~= "#" and to > i then to = to - 1 end
+            soul.skills:erase(i)
+            soul.skills:insert(to, {new = df.unit_skill, id = skill, rating = rating, experience = exp})
+            return skill_entry(unit, skill)
+        end
+        if s.id > skill and at == "#" then at = i end
+    end
+    soul.skills:insert(at, {new = df.unit_skill, id = skill, rating = 0, experience = 0})
     for _, s in ipairs(soul.skills) do
         if s.id == skill then return s end
     end
-    local entry = df.unit_skill:new()
-    entry.id = skill
-    entry.rating = 0
-    entry.experience = 0
-    soul.skills:insert("#", entry)
-    return soul.skills[#soul.skills - 1]
+end
+
+-- Experience lives in a second place too: the historical figure's skill profile,
+-- the lifetime record legends and the unit description read. Its points are
+-- CUMULATIVE (every level's cost plus current progress), and sorted like the rest.
+local function mirror_to_histfig(unit, skill, rating, exp)
+    local hf = df.historical_figure.find(unit.hist_figure_id)
+    local sp = hf and hf.info and hf.info.skills
+    if not sp then return end
+    local total = 500 * rating + 100 * (rating * (rating - 1)) // 2 + exp
+    for i, sid in ipairs(sp.skills) do
+        if sid == skill then
+            sp.points[i] = math.max(sp.points[i], total)
+            return
+        end
+    end
+    local at = "#"
+    for i, sid in ipairs(sp.skills) do
+        if sid > skill then at = i break end
+    end
+    sp.skills:insert(at, skill)
+    sp.points:insert(at, total)
 end
 
 local function grant_strand_xp(unit, amount)
-    local s = skill_entry(unit, df.job_skill.EXTRACT_STRAND)
+    local skill = df.job_skill.EXTRACT_STRAND
+    local s = skill_entry(unit, skill)
     if not s then return 0 end
     local before = s.rating
     s.experience = s.experience + amount
@@ -79,6 +118,7 @@ local function grant_strand_xp(unit, amount)
         s.experience = s.experience - (500 + s.rating * 100)
         s.rating = s.rating + 1
     end
+    mirror_to_histfig(unit, skill, s.rating, s.experience)
     return before
 end
 

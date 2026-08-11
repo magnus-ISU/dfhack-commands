@@ -98,24 +98,69 @@ end
 
 local apply_levels  -- forward declaration; defined below, called by add_xp
 
+-- Find (or create) a skill entry. DF keeps soul.skills SORTED BY SKILL ID and
+-- finds entries by binary search, so a skill appended out of order is invisible
+-- to the skill sheet and never levels -- insert at the sorted position, and
+-- re-seat an entry an older version appended.
+local function find_skill(soul, sk)
+    local at = "#"
+    for i, s in ipairs(soul.skills) do
+        if s.id == sk then
+            local before = i > 0 and soul.skills[i - 1] or nil
+            local after = i + 1 < #soul.skills and soul.skills[i + 1] or nil
+            if not ((before and before.id > sk) or (after and after.id < sk)) then return s end
+            local rating, exp = s.rating, s.experience
+            local to = "#"
+            for j, o in ipairs(soul.skills) do
+                if o.id > sk and j ~= i then to = j break end
+            end
+            if to ~= "#" and to > i then to = to - 1 end
+            soul.skills:erase(i)
+            soul.skills:insert(to, {new = df.unit_skill, id = sk, rating = rating, experience = exp})
+            return find_skill(soul, sk)
+        end
+        if s.id > sk and at == "#" then at = i end
+    end
+    soul.skills:insert(at, {new = df.unit_skill, id = sk, rating = 0, experience = 0})
+    for _, s in ipairs(soul.skills) do
+        if s.id == sk then return s end
+    end
+end
+
+-- The historical figure's skill profile is the OTHER place DF keeps experience
+-- -- the lifetime record legends and the unit's description read. Its points
+-- are CUMULATIVE (every level's cost plus current progress), unlike the soul
+-- entry's per-level remainder, and its vectors are sorted too.
+local function mirror_to_histfig(u, sk, rating, exp)
+    local hf = df.historical_figure.find(u.hist_figure_id)
+    local sp = hf and hf.info and hf.info.skills
+    if not sp then return end
+    local total = 500 * rating + 100 * (rating * (rating - 1)) // 2 + exp
+    for i, sid in ipairs(sp.skills) do
+        if sid == sk then
+            sp.points[i] = math.max(sp.points[i], total)
+            return
+        end
+    end
+    local at = "#"
+    for i, sid in ipairs(sp.skills) do
+        if sid > sk then at = i break end
+    end
+    sp.skills:insert(at, sk)
+    sp.points:insert(at, total)
+end
+
 local function add_xp(u, sk, amount)
     local soul = u.status.current_soul
     if not soul then return end
-    local entry
-    for _, s in ipairs(soul.skills) do
-        if s.id == sk then entry = s break end
-    end
-    if not entry then
-        local e = df.unit_skill:new()
-        e.id = sk; e.rating = 0; e.experience = 0
-        soul.skills:insert("#", e)
-        entry = soul.skills[#soul.skills - 1]
-    end
+    local entry = find_skill(soul, sk)
+    if not entry then return end
     entry.experience = entry.experience + amount
     while entry.experience >= 500 + entry.rating * 100 do
         entry.experience = entry.experience - (500 + entry.rating * 100)
         entry.rating = entry.rating + 1
     end
+    mirror_to_histfig(u, sk, entry.rating, entry.experience)
     apply_levels(u)
 end
 

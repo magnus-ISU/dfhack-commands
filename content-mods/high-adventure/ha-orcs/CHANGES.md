@@ -1,5 +1,14 @@
 # ha-orcs — fork changelog
 
+## v0.31 -- strand-extraction xp actually counts
+- `grant_strand_xp` appended its `unit_skill` entry to the end of `soul.skills`, but DF
+  keeps that vector sorted by skill id and searches it by binary search -- an appended
+  entry is invisible to the skill sheet and never levels. Now inserted at the sorted
+  position, and an entry misplaced by an earlier version is re-seated on sight.
+- The award is also mirrored into the historical figure's skill profile
+  (`hf.info.skills` / `points`, which are CUMULATIVE), the second place DF keeps
+  experience and the one legends and the unit description read.
+
 ## v0.30 -- no ranged weapons
 - Dropped `WEAPON:ITEM_WEAPON_CROSSBOW`/`BOW` (and their bolt/arrow `AMMO`) and
   `PERMITTED_JOB:BOWYER`: the horde is melee-only now and has no members who know how

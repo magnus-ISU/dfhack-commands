@@ -1,5 +1,14 @@
 # ha-illithids — build notes (v0.1)
 
+## v0.65 -- thrall/scholar xp actually counts
+- `add_xp` appended its `unit_skill` entry to the end of `soul.skills`, but DF keeps that
+  vector sorted by skill id and searches it by binary search -- an appended entry is
+  invisible to the skill sheet and never levels. Now inserted at the sorted position, and
+  an entry misplaced by an earlier version is re-seated on sight.
+- Awards are also mirrored into the historical figure's skill profile (`hf.info.skills` /
+  `points`, which are CUMULATIVE), the second place DF keeps experience and the one
+  legends and the unit description read.
+
 ## v0.64 -- brain-burn paralysis halved again: SEV:50, END:50
 - v0.63's drop to vanilla severity (SEV:100) still suffocated victims in play, so the
   brain-burn `CE_PARALYSIS` is now `SEV:50` with duration `END:100` -> `END:50`, on all
