@@ -220,7 +220,12 @@ PosessionButton.ATTRS{
     desc = 'Adds a Regain-your-weapon button to the adventure attack screen.',
     default_pos = {x = 40, y = 20},
     default_enabled = true,
-    viewscreens = 'dungeonmode/Attack',
+    -- plain 'dungeonmode', NOT 'dungeonmode/Attack': on a subfocus spec the
+    -- overlay framework RENDERS the widget but never calls overlay_onupdate
+    -- (measured live -- manual onupdate worked, framework never fired it), so
+    -- the button could never activate. Every working overlay in this suite
+    -- matches the whole viewscreen and gates on its own cheap bool instead.
+    viewscreens = 'dungeonmode',
     frame = {w = #LABEL, h = 1},
     -- full-grid text scans are ~12k readTile calls; 4 Hz keeps the screen
     -- responsive without lagging the game (driver steps are 100-400ms anyway)
@@ -228,13 +233,17 @@ PosessionButton.ATTRS{
 }
 
 function PosessionButton:overlay_onupdate()
+    self.active = false
+    -- cheap authoritative gate: this overlay now updates on EVERY dungeonmode
+    -- frame, and the ~12k-readTile title scan must never run outside the
+    -- attack screen (the watch-their-blade performance lesson)
+    if not attack_iface().open then return end
     pcall(drive)
     -- park the frame right below the "Who will you attack?" title
     local ok, tx, ty = pcall(function()
         local x, y = find_text('Who will you attack?')
         return x, y
     end)
-    self.active = false
     if not ok or not ty then return end
     if not find_struggle() then return end
     self.active = true
