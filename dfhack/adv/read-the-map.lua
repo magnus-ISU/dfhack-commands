@@ -727,7 +727,31 @@ local function capture_border()
     end
 end
 
-local cache_key, cache_lines = nil, nil
+-- A tooltip costs ~2ms to build (it walks every world site and every army), so
+-- it is cached by hovered cell + map centre. A SINGLE-entry cache was enough
+-- until adv/world-map-features started panning: that holds DF's centre offset
+-- for the drawing half of each frame and gives it back for the other half, so
+-- the key alternates between two values and a one-entry cache misses every
+-- single frame. A handful of slots costs nothing and absorbs any such flapping.
+local CACHE_SLOTS = 4
+local tip_cache = {}               -- key -> lines (false = "nothing there")
+local tip_order = {}               -- keys, oldest first
+
+local function cache_get(key)
+    local v = tip_cache[key]
+    if v == nil then return nil end
+    return v or false
+end
+
+local function cache_put(key, lines)
+    if tip_cache[key] == nil then
+        tip_order[#tip_order + 1] = key
+        if #tip_order > CACHE_SLOTS then
+            tip_cache[table.remove(tip_order, 1)] = nil
+        end
+    end
+    tip_cache[key] = lines or false
+end
 
 -- Draw a card of `lines` beside (ax, ay), nudged to stay on screen. Exported:
 -- adv/world-map-features paints the very same card at a searched destination, so
@@ -802,20 +826,21 @@ local function paint()
     local cy = gps.precise_mouse_y // cellpx
     if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
 
-    local key = ('%d:%d:%d:%d'):format(cx, cy, ax, ay)
-    if key ~= cache_key then
-        cache_key = key
-        -- near a site the lesser map rescales to one army-unit per cell
-        local s = adv.site_level_zoom ~= 0 and 1 or 3
-        -- the player is drawn at the grid center; mp.screen_x/y is the LOCAL
-        -- map's draw cell and drifts whenever that view clamps (see header)
-        local ccx, ccy = mp.dim_x // 2, mp.dim_y // 2
-        local mx = (ax + (cx - ccx) * s) // 3
-        local my = (ay + (cy - ccy) * s) // 3
-        cache_lines = tile_info(mx, my)
+    -- near a site the lesser map rescales to one army-unit per cell
+    local s = adv.site_level_zoom ~= 0 and 1 or 3
+    -- the player is drawn at the grid center; mp.screen_x/y is the LOCAL
+    -- map's draw cell and drifts whenever that view clamps (see header)
+    local ccx, ccy = mp.dim_x // 2, mp.dim_y // 2
+    local mx = (ax + (cx - ccx) * s) // 3
+    local my = (ay + (cy - ccy) * s) // 3
+    local key = ('%d:%d'):format(mx, my)     -- the TILE, not the cell: panning
+    local lines = cache_get(key)             -- moves the cell under a still mouse
+    if lines == nil then
+        lines = tile_info(mx, my)
+        cache_put(key, lines)
     end
-    if not cache_lines then return end
-    paint_card(cache_lines, gps.mouse_x, gps.mouse_y)
+    if not lines then return end
+    paint_card(lines, gps.mouse_x, gps.mouse_y)
 end
 
 function ReadTheMap:onRenderFrame(dc, rect)

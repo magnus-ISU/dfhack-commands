@@ -144,6 +144,7 @@ end
 -- glitch. The opposite arrangement would leave a live coordinate wrong.
 pan = pan or nil                   -- {home_x=, home_y=, ox=, oy=} in army units
 local drag = nil                   -- {px=, py=} last mouse pixel during a drag
+local release_pan                  -- forward declaration; defined below
 -- exactly what we last wrote into travel_origin, or nil if we have taken it
 -- back. This is how "did the player move?" is answered: see the check in
 -- overlay_onupdate.
@@ -171,6 +172,18 @@ end
 local function apply_pan()
     if not pan then return end
     clamp_pan()
+    -- A pan with no offset is not a pan: holding one still flips travel_origin
+    -- between two values every frame, which makes DF rebuild the whole map port
+    -- and blows adv/read-the-map's hover cache (keyed on the map centre) on
+    -- every single frame -- for a view identical to the unpanned one. A stray
+    -- middle-click used to leave exactly that running, invisibly.
+    -- ...but NOT while the button is still down: releasing takes the drag
+    -- anchor with it, and a drag that re-anchors every frame never accumulates
+    -- any movement at all -- which is to say, panning would stop working.
+    if pan.ox == 0 and pan.oy == 0 and not drag then
+        release_pan(true)
+        return
+    end
     local x, y = clamp_origin(pan.home_x + pan.ox, pan.home_y + pan.oy)
     adv().travel_origin_x, adv().travel_origin_y = x, y
     wrote_x, wrote_y = x, y
@@ -185,7 +198,7 @@ end
 -- correct costs nothing.
 -- Drop the pan. `restore` writes DF's own centre back; without it the value
 -- currently in travel_origin is left exactly as found.
-local function release_pan(restore)
+function release_pan(restore)
     if restore and pan then
         adv().travel_origin_x, adv().travel_origin_y = pan.home_x, pan.home_y
     end
@@ -853,147 +866,59 @@ local function paint_cell(pen, cx, cy)
     if on_screen(tx, ty) then dfhack.screen.paintTile(pen, tx, ty) end
 end
 
--- The last cell of (x0,y0)->(x1,y1) that is still on the map: the target itself
--- when it is on screen, otherwise where the line crosses the edge. Walks the
--- same Bresenham path the line is drawn with, so the marker always sits ON the
--- line rather than beside it.
-local function clip_to_port(x0, y0, x1, y1)
-    local mp = port()
-    -- row 0 is excluded: that is where this overlay's own search bar sits, and a
-    -- marker there is painted and then buried under it (measured -- the line
-    -- appeared to run off the map with no label at all)
-    local function inside(x, y) return x >= 0 and y >= 1 and x < mp.dim_x and y < mp.dim_y end
-    if inside(x1, y1) then return x1, y1 end
-    local dx, dy = math.abs(x1 - x0), -math.abs(y1 - y0)
-    local sx = x0 < x1 and 1 or -1
-    local sy = y0 < y1 and 1 or -1
-    local err = dx + dy
-    local lx, ly = x0, y0
-    local guard = 0
-    while guard < 4096 do
-        guard = guard + 1
-        if inside(x0, y0) then lx, ly = x0, y0 end
-        if x0 == x1 and y0 == y1 then break end
-        local e2 = 2 * err
-        if e2 >= dy then err = err + dy; x0 = x0 + sx end
-        if e2 <= dx then err = err + dx; y0 = y0 + sy end
-    end
-    return lx, ly
-end
-
--- The trail is DOTTED: one dot every DOT_EVERY cells of the path, so it reads
--- as a direction rather than a wall of characters across the map you are trying
--- to look at. However sparse the sampling gets, the first, middle and last dots
--- are always drawn -- a bearing needs a near end, a far end and something in
--- between to be legible -- and a path with fewer cells than that simply draws
--- every cell it has.
+-- Walk (x0,y0)->(x1,y1) in map cells and return the VISIBLE cells plus the last
+-- one still on the map (the target itself when it is on screen, otherwise where
+-- the line crosses the edge).
+--
+-- The walk stops the moment it leaves the port: the path is a straight line out
+-- of a rectangle, so once outside it cannot come back. Without that, a target 40
+-- world tiles away on the lesser map -- 16 cells to the tile -- meant walking
+-- ~640 cells and allocating a table for each, every frame, and then walking them
+-- all again to find the clip point.
 local DOT_EVERY = 5
 
--- Bresenham in map cells, endpoints left to the callers' markers
-local function line_cells(x0, y0, x1, y1)
-    local cells = {}
+local function trace_line(x0, y0, x1, y1)
+    local mp = port()
+    local function inside(x, y)
+        -- row 0 is excluded: that is where this overlay's own search bar sits,
+        -- and a marker there is painted and then buried under it
+        return x >= 0 and y >= 1 and x < mp.dim_x and y < mp.dim_y
+    end
+    local cells, lx, ly = {}, x0, y0
     local dx, dy = math.abs(x1 - x0), -math.abs(y1 - y0)
     local sx = x0 < x1 and 1 or -1
     local sy = y0 < y1 and 1 or -1
     local err = dx + dy
-    local guard = 0
+    local guard, was_inside = 0, false
     while guard < 4096 do
         guard = guard + 1
-        if not (x0 == x1 and y0 == y1) and guard > 1 then
-            cells[#cells + 1] = {x0, y0}
+        local here = inside(x0, y0)
+        if here then
+            was_inside = true
+            lx, ly = x0, y0
+            if guard > 1 then cells[#cells + 1] = {x0, y0} end
+        elseif was_inside then
+            break                      -- left the map for good
         end
         if x0 == x1 and y0 == y1 then break end
         local e2 = 2 * err
         if e2 >= dy then err = err + dy; x0 = x0 + sx end
         if e2 <= dx then err = err + dx; y0 = y0 + sy end
     end
-    return cells
+    return cells, lx, ly
 end
 
-local function paint_line(x0, y0, x1, y1)
-    -- sample only what would actually be drawn: cells off the map are not part
-    -- of the trail, so clipping first keeps the spacing even across the visible
-    -- stretch instead of leaving gaps where the path ran off screen
-    local visible = {}
-    local mp = port()
-    for _, c in ipairs(line_cells(x0, y0, x1, y1)) do
-        if c[1] >= 0 and c[2] >= 0 and c[1] < mp.dim_x and c[2] < mp.dim_y then
-            visible[#visible + 1] = c
-        end
-    end
-    local n = #visible
+-- The trail is DOTTED: one dot every DOT_EVERY cells, so it reads as a direction
+-- rather than a wall of characters across the map you are trying to look at.
+-- However sparse the sampling gets, the first, middle and last dots are always
+-- drawn -- a bearing needs a near end, a far end and something in between to be
+-- legible -- and a path with fewer cells than that draws every cell it has.
+local function paint_trail(cells)
+    local n = #cells
     if n == 0 then return end
     local want = {[1] = true, [n] = true, [(n + 1) // 2] = true}
     for i = 1, n, DOT_EVERY do want[i] = true end
-    for i in pairs(want) do paint_cell(PEN_LINE, visible[i][1], visible[i][2]) end
-end
-
--- A searched SITE shows the same card adv/read-the-map pops when you hover it --
--- one description of a place, however you arrived at it -- with the distance and
--- bearing appended, since that is what a destination is for. The card lines are
--- cached per site: building one walks the site's nobles and residents, which is
--- far too much to redo sixty times a second.
-local card_cache = {}
-
-local function read_the_map()
-    return reqscript('adv/read-the-map')
-end
-
--- Wrap a long line to the card's width rather than letting it run off the map.
-local CARD_WIDTH = 52
-local function wrap_into(lines, text, indent)
-    indent = indent or '  '
-    while #text > CARD_WIDTH do
-        local cut = text:sub(1, CARD_WIDTH):match('.*()%s') or CARD_WIDTH
-        lines[#lines + 1] = text:sub(1, cut - 1)
-        text = indent .. text:sub(cut + 1)
-    end
-    if #text > 0 then lines[#lines + 1] = text end
-end
-
--- The card shown at the destination. A site (and a region) gets the very card
--- adv/read-the-map pops when you hover it -- one description of a place,
--- however you arrived at it. Everything else gets a card of the same shape
--- built here, so a civilization or an artifact is described on screen too
--- rather than reduced to a name on a line. Site and region cards are cached:
--- building one walks the place's nobles, residents and wildlife, which is far
--- too much to redo sixty times a second.
-local function cached(key, make)
-    if not card_cache[key] then
-        local ok, lines = pcall(make)
-        if not ok or not lines or #lines == 0 then return nil end
-        card_cache[key] = lines
-    end
-    return card_cache[key]
-end
-
-local CARD_HEAD = {
-    person = 'Person', beast = 'Beast', group = 'Group',
-    event = 'Rumour', artifact = 'Artifact', region = 'Region',
-}
-
-local function target_card(t, dist, dir)
-    local base
-    if t.cat == 'site' and t.site then
-        base = cached('s' .. t.site.id, function() return read_the_map().lines_for_site(t.site.id) end)
-    elseif t.cat == 'region' and t.region then
-        base = cached('r' .. t.region.index, function() return read_the_map().lines_for_region(t.region) end)
-    end
-    if not base then
-        base = {}
-        wrap_into(base, ('%s: %s'):format(CARD_HEAD[t.cat] or 'Target', t.name))
-        if t.detail then wrap_into(base, '  ' .. t.detail) end
-    end
-    local out = {}
-    for _, l in ipairs(base) do out[#out + 1] = l end
-    out[#out + 1] = ('  %d %s %s%s'):format(dist, dist == 1 and 'tile' or 'tiles', dir,
-                                            t.stale and ' (last seen)' or '')
-    if t.detail and t.detail:find('unmapped', 1, true) then
-        out[#out + 1] = '  (not on your map)'
-    elseif t.detail and t.detail:find('unheard%-of') then
-        out[#out + 1] = '  (nobody told you of this)'
-    end
-    return out
+    for i in pairs(want) do paint_cell(PEN_LINE, cells[i][1], cells[i][2]) end
 end
 
 -- ---- the overlay ------------------------------------------------------------
@@ -1326,13 +1251,10 @@ function WorldMapFeatures:paint_map()
     if target then
         local tx, ty = target_cell(target)
         if tx and hx then
-            paint_line(hx, hy, tx, ty)
-            -- The marker goes on the target -- or, when the target lies beyond
-            -- the map's edge (which on the lesser map is most of the world: it
-            -- shows about 7 world tiles across), on the point where the line
-            -- leaves the map, so the name and distance are always readable
-            -- instead of a bare line running off the screen.
-            local mx, my = clip_to_port(hx, hy, tx, ty)
+            local cells, mx, my = trace_line(hx, hy, tx, ty)
+            paint_trail(cells)
+            -- the marker sits on the target, or where the line leaves the map
+            -- when the target is beyond it, so the card is always readable
             paint_cell(PEN_MARK, mx, my)
             local sx, sy = cell_to_text(mx, my)
             local dx, dy = target.wx - pwx, target.wy - pwy
