@@ -214,6 +214,11 @@ Clears miasma and other flow clouds — a quick FPS fix.
 ### **`fix/raiders`**
 Rescues squads and soldiers stuck on off-site raids.
 
+### **`fix/dead-armies`**
+Purges dead figures from the world's armies, deletes the armies left with nobody aboard, and
+clears figures still pointing at armies that no longer exist — the state that makes a corpse
+keep travelling the world map.
+
 ### **`fort/raid-status`**
 Reports raiding parties and a rough travel estimate, and retrieves stuck units.
 
