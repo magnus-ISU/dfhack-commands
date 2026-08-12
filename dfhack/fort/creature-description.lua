@@ -18,7 +18,7 @@ local gui = require('gui')
 
 -- ---- kill summary -----------------------------------------------------------
 -- Expands "Kills: N" into notable categories, in this order:
---   demons, angels, each MEGABEAST TYPE ("2 dragons, 1 bronze colossus, 1
+--   demons, archangels (a vault's colossal guardian), angels, each MEGABEAST TYPE ("2 dragons, 1 bronze colossus, 1
 --   forgotten beast" -- generated FB races all share a name, so they pool),
 --   each semi-megabeast type ("1 giant, 1 cyclops"), VAMPIRES then NECROMANCERS
 --   (each by creature type -- "1 goblin vampire, 2 human necromancers"), undead,
@@ -32,15 +32,27 @@ local gui = require('gui')
 -- e.g. "66 kills: 1 demon, 2 dragons, 1 goblin vampire, 2 kobold necromancers,
 --       4 undead, 1 weremoose, 30 goblins, 9 illithids, 10 giant elephants, 9 other"
 
+-- adult size that separates a vault guardian ("archangel") from a rank-and-file angel
+local ARCHANGEL_SIZE = 100000
+
 -- special category for a race, or nil for the sentient/animal/other pools
 local function classify_race(rid)
     local cr = df.global.world.raws.creatures.all[rid]
     if not cr then return nil end
     local id = tostring(cr.creature_id)
-    -- angels have no caste flag of their own; their generated tokens carry DIVINE/ANGEL
-    -- (e.g. "HF133 DIVINE_1", "SHARK_ANGEL"). Check before demons.
-    if id:find('DIVINE') or id:find('ANGEL') then return 'angel' end
     local f = cr.caste[0] and cr.caste[0].flags
+    -- angels have no caste flag of their own; their generated tokens carry DIVINE
+    -- ("HF133 DIVINE_1"). ANGEL is accepted too for modded ones, but only when the race
+    -- is not a natural animal -- vanilla SHARK_ANGEL is the angelshark, a fish.
+    if id:find('DIVINE') or (id:find('ANGEL') and not (f and f.NATURAL_ANIMAL)) then
+        -- DF generates three divine races per deity, and the third is the vault's
+        -- colossal guardian: same tokens, but an adult size two orders of magnitude
+        -- above its siblings (1,000,000 vs the 6-9k of a humanoid angel). Size is the
+        -- distinction, not the trailing numeral, which nothing guarantees is ordered.
+        local c = cr.caste[0]
+        if c and (c.misc.adult_size or 0) >= ARCHANGEL_SIZE then return 'archangel' end
+        return 'angel'
+    end
     if f then
         if f.DEMON or f.UNIQUE_DEMON then return 'demon' end
         if f.MEGABEAST or f.TITAN or f.FEATURE_BEAST then return 'megabeast' end
@@ -58,7 +70,7 @@ local function animal_info(rid)
     return true, c.misc.adult_size or 0
 end
 
-local CAT_PLURAL = {demon = 'demons', angel = 'angels'}
+local CAT_PLURAL = {demon = 'demons', archangel = 'archangels', angel = 'angels'}
 
 -- WERECREATURES and VAMPIRES are recorded as a CURSE on the historical figure, never as a race:
 -- the figure keeps its BIRTH race, so the weremoose that killed your dwarves is stored as the
@@ -226,7 +238,7 @@ function kill_summary(u)
         end
         local cr = df.global.world.raws.creatures.all[rid]
         local cat = classify_race(rid)
-        if cat == 'demon' or cat == 'angel' then
+        if CAT_PLURAL[cat] then
             cats[cat] = (cats[cat] or 0) + n
             return
         elseif cat == 'megabeast' or cat == 'beast' then
@@ -293,7 +305,7 @@ function kill_summary(u)
     local function put(n, sing, plur)
         parts[#parts + 1] = ('%d %s'):format(n, n == 1 and sing or plur)
     end
-    for _, cat in ipairs({'demon', 'angel'}) do
+    for _, cat in ipairs({'demon', 'archangel', 'angel'}) do
         if cats[cat] and cats[cat] > 0 then put(cats[cat], cat, CAT_PLURAL[cat]) end
     end
     for _, g in ipairs(sorted_groups(megas)) do put(g.n, g.sing, g.plur) end
