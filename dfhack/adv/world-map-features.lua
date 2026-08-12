@@ -36,24 +36,36 @@ and results appear underneath, drawn from your adventurer's own knowledge --
 not from the world at large:
 
     sites     every site you have heard of (`heard_of_stid`), by name and kind
-    people    everyone you have met or heard of, with their last known spot
+    people    everyone you have met or heard of, placed where the world says
+              they are -- having heard of someone counts as knowing where they
+              are, so a name that reached you by rumour arrives with its place
     beasts    your bestiary, with the region or site the sighting came from
     regions   the regions your sites, sightings and travels have touched
     groups    the civilizations and gangs behind those sites and people
     events    the rumours you are carrying, located where they happened
+    artifacts those kept at a site you know or held by someone you know of
 
 Sites and groups always carry a bearing -- a civilization is placed by its
 capital (or the centre of its sites) even when you know none of its towns -- and
-typing the exact name of a site you have NEVER discovered will still point at
-it, on the grounds that knowing the name is itself the knowledge. Such a site is
-marked `unmapped`.
+typing the exact name of a site or artifact you have NEVER heard of will still
+point at it, on the grounds that knowing the name is itself the knowledge; those
+are marked `unmapped` / `unheard-of`.
+
+Targets are placed EXACTLY where the data allows: a site by the centre of its
+footprint (DF records those in mid tiles, 16 to a world tile) rather than by the
+middle of the world tile it sits in, which on the lesser map -- 3 army units to a
+cell -- is the difference between the marker landing on the vault and landing
+six cells away from it.
 
 Every row carries a category tag, a distance in world tiles and a compass
 bearing.  Clicking a row (or Enter on it) TYPES that row's name into the bar,
 and that is the whole mechanism: whenever the text exactly names one of the
 things you know, the results list folds away and the map draws a LINE from you
-to it. A site names itself there with the very card adv/read-the-map pops when
-you hover it, distance and bearing appended; anything else gets a plain label.  The line is nothing but a reading of the
+to it, ending in a bordered CARD describing what you are heading for -- for a
+site or a region the very card adv/read-the-map pops when you hover it, for
+anything else one of the same shape built from what is known, always with the
+distance and bearing. The card is drawn where the line meets the edge when the
+target itself is off the map, so it is on screen whatever the range.  The line is nothing but a reading of the
 search bar -- it appears the instant the text matches, and goes when it stops
 matching -- so it survives travelling, and Esc (which empties the bar) is what
 takes it away.
@@ -265,9 +277,24 @@ local function species_name(race)
     return cr and (cr.name[0] ~= '' and cr.name[0] or cr.creature_id) or '?'
 end
 
-local function entry(cat, name, detail, wx, wy, stale)
+-- wx/wy are the world tile (what distances and bearings are quoted in). `ax/ay`
+-- is an EXACT position in army units where one is known -- a site's footprint,
+-- say -- because a world tile is 48 army units wide and the lesser map draws
+-- one cell per 3 of them: aiming at the middle of the tile puts the marker up
+-- to 8 cells from a site sitting in the tile's corner (measured on a vault at
+-- world 45.75, 8.19: 4 mid tiles east and 5 north of where we pointed).
+local function entry(cat, name, detail, wx, wy, stale, ax, ay)
     return {cat = cat, name = name, detail = detail, wx = wx, wy = wy, stale = stale,
+            ax = ax, ay = ay,
             key = (name .. ' ' .. (detail or '') .. ' ' .. cat):lower()}
+end
+
+-- a site's exact spot: the centre of its footprint, which DF records in MID
+-- tiles (16 to a world tile, 3 army units each)
+local function site_army_pos(s)
+    local mx = (s.global_min_x + s.global_max_x) // 2
+    local my = (s.global_min_y + s.global_max_y) // 2
+    return mx * 3 + 1, my * 3 + 1
 end
 
 -- world region id under a world tile (region_map rows are pointers: _displace)
@@ -314,7 +341,8 @@ local function build_sites(out, hf, known_regions)
             local civ = s.civ_id >= 0 and df.historical_entity.find(s.civ_id)
             local detail = kind
             if owner then detail = detail .. ' of ' .. (name_of(owner.name) or '?') end
-            local e = entry('site', site_name(s), detail, s.pos.x, s.pos.y)
+            local ax, ay = site_army_pos(s)
+            local e = entry('site', site_name(s), detail, s.pos.x, s.pos.y, nil, ax, ay)
             e.site = s              -- kept for footprint hit-testing on map clicks
             -- searchable by WHOSE it is as well as what it is, so "high elf"
             -- finds high elf towns and not just high elves
@@ -328,12 +356,49 @@ local function build_sites(out, hf, known_regions)
     end
 end
 
+-- Where the WORLD says a figure is. Two records exist and they answer different
+-- questions: the relationship remembers where YOU last saw them (and is the
+-- -1000000 sentinel for anyone you have only heard of), while the histfig's
+-- whereabouts is DF's own bookkeeping -- which site they settled in, which
+-- region they wander, which army they march with. Having heard of someone is
+-- taken as knowing where they are: a name arrives with the story attached.
+local function figure_place(h)
+    local w = h.info and h.info.whereabouts
+    if not w then return end
+    if w.site_id >= 0 then
+        local s = df.world_site.find(w.site_id)
+        if s then
+            local ax, ay = site_army_pos(s)
+            return s.pos.x, s.pos.y, site_name(s), ax, ay
+        end
+    end
+    if w.army_id >= 0 then
+        local a = df.army.find(w.army_id)
+        if a then
+            return a.pos.x // ARMY_PER_WORLD, a.pos.y // ARMY_PER_WORLD, 'on the march',
+                   a.pos.x, a.pos.y
+        end
+    end
+    if w.subregion_id >= 0 then
+        local reg = df.global.world.world_data.regions[w.subregion_id]
+        if reg then return reg.mid_x, reg.mid_y, name_of(reg.name) end
+    end
+    if w.abs_smm_x and w.abs_smm_x > 0 then
+        return w.abs_smm_x // ARMY_PER_WORLD, w.abs_smm_y // ARMY_PER_WORLD, nil,
+               w.abs_smm_x, w.abs_smm_y
+    end
+end
+
 local function build_people(out, hf)
     for _, r in ipairs(hf.info.relationships.hf_visual) do
         local h = df.historical_figure.find(r.histfig_id)
         if h then
-            local wx, wy, stale
-            if r.abs_x > -100000 then
+            local wx, wy, stale, ax, ay, where
+            -- where the world says they are, first: it is current, and it is the
+            -- only thing anyone you have merely heard of has
+            wx, wy, where, ax, ay = figure_place(h)
+            if not wx and r.abs_x > -100000 then
+                -- fall back to your own last sighting
                 wx, wy, stale = r.abs_x // LOCAL_PER_WORLD, r.abs_y // LOCAL_PER_WORLD, true
             end
             local species = species_name(h.race)
@@ -344,10 +409,14 @@ local function build_people(out, hf)
             else
                 detail = detail .. ', heard of'
             end
+            if where then detail = detail .. ', at ' .. where end
+            if h.died_year and h.died_year > 0 then detail = detail .. ' (dead)' end
             -- worldgen leaves plenty of figures nameless; the species reads better
             -- in the list than "figure 14024"
-            out[#out + 1] = entry('person', name_of(h.name) or ('unnamed ' .. species),
-                                  detail, wx, wy, stale)
+            local e = entry('person', name_of(h.name) or ('unnamed ' .. species),
+                            detail, wx, wy, stale, ax, ay)
+            e.hf = h
+            out[#out + 1] = e
         end
     end
 end
@@ -408,9 +477,11 @@ local function build_regions(out, known_regions)
     for id in pairs(known_regions) do
         local reg = wd.regions[id]
         if reg then
-            out[#out + 1] = entry('region', name_of(reg.name) or ('region ' .. id),
+            local e = entry('region', name_of(reg.name) or ('region ' .. id),
                 (df.world_region_type[reg.type] or '?'):gsub('(%l)(%u)', '%1 %2'),
                 reg.mid_x, reg.mid_y)
+            e.region = reg
+            out[#out + 1] = e
         end
     end
 end
@@ -506,6 +577,68 @@ local function build_events(out, hf)
     end
 end
 
+
+-- Artifacts. The world holds hundreds; the ones listed are those tied to
+-- something you know -- kept at a site you have heard of, or held or made by
+-- someone you know of -- and any other can still be found by typing its exact
+-- name, the same bargain unmapped sites get. Many artifacts carry no name of
+-- their own, in which case the item itself is the name ("primordial fire short
+-- sword"), which is also what you would call it.
+local function artifact_name(a)
+    local n = name_of(a.name)
+    if n then return n end
+    local ok, desc = pcall(dfhack.items.getReadableDescription, a.item)
+    return (ok and desc) or ('artifact ' .. a.id)
+end
+
+local function artifact_place(a)
+    for _, hfid in ipairs{a.holder_hf, a.owner_hf} do
+        local h = hfid >= 0 and df.historical_figure.find(hfid) or nil
+        if h then
+            -- NOT `h and figure_place(h)`: `and` truncates a multi-value call to
+            -- its first result, which handed every held artifact an x with no y
+            local wx, wy, _, ax, ay = figure_place(h)
+            if wx then
+                return wx, wy, ('held by %s'):format(name_of(h.name) or species_name(h.race)),
+                       ax, ay
+            end
+        end
+    end
+    for _, sid in ipairs{a.site, a.storage_site} do
+        if sid >= 0 then
+            local s = df.world_site.find(sid)
+            if s then
+                local ax, ay = site_army_pos(s)
+                return s.pos.x, s.pos.y, 'at ' .. site_name(s), ax, ay
+            end
+        end
+    end
+    if a.subregion >= 0 then
+        local reg = df.global.world.world_data.regions[a.subregion]
+        if reg then return reg.mid_x, reg.mid_y, 'lost in ' .. (name_of(reg.name) or 'the wilds') end
+    end
+    if a.abs_tile_x > -100000 then
+        return a.abs_tile_x // LOCAL_PER_WORLD, a.abs_tile_y // LOCAL_PER_WORLD, nil,
+               nil, nil
+    end
+end
+
+local function build_artifacts(out, known_sites, known_hfs)
+    for _, a in ipairs(df.global.world.artifacts.all) do
+        local linked = known_sites[a.site] or known_sites[a.storage_site]
+            or known_hfs[a.holder_hf] or known_hfs[a.owner_hf]
+        if linked then
+            local wx, wy, where, ax, ay = artifact_place(a)
+            local ok, desc = pcall(dfhack.items.getReadableDescription, a.item)
+            local detail = (ok and desc) or 'artifact'
+            if where then detail = detail .. ', ' .. where end
+            local e = entry('artifact', artifact_name(a), detail, wx, wy, nil, ax, ay)
+            e.artifact = a
+            out[#out + 1] = e
+        end
+    end
+end
+
 function build_index(force)
     local hf, u = adventurer_hf()
     if not hf then return {} end
@@ -519,8 +652,13 @@ function build_index(force)
         local rid = region_id_at(wx, wy)
         if rid then known_regions[rid] = true end
     end
+    local known_sites, known_hfs = {}, {}
+    for _, id in ipairs(hf.info.known_info.heard_of_stid) do known_sites[id] = true end
+    for _, r in ipairs(hf.info.relationships.hf_visual) do known_hfs[r.histfig_id] = true end
+    known_hfs[hf.id] = true
     pcall(build_sites, out, hf, known_regions)
     pcall(build_people, out, hf)
+    pcall(build_artifacts, out, known_sites, known_hfs)
     pcall(build_beasts, out, hf, known_regions)
     pcall(build_groups, out, hf)
     pcall(build_events, out, hf)
@@ -531,6 +669,7 @@ end
 
 -- ---- search -----------------------------------------------------------------
 local CATS = {site = 'site', sites = 'site', person = 'person', people = 'person',
+              artifact = 'artifact', artifacts = 'artifact',
               beast = 'beast', beasts = 'beast', region = 'region', regions = 'region',
               group = 'group', groups = 'group', event = 'event', events = 'event'}
 
@@ -543,6 +682,7 @@ end
 
 local function decorate(e)
     local wx, wy = player_world()
+    if e.wx and not e.wy then e.wx = nil end        -- half a position is no position
     if not wx or not e.wx then
         e.dist, e.dir = nil, nil
         return e
@@ -601,8 +741,31 @@ local function unknown_site(want)
     end
     local s = all_sites_by_name[want]
     if not s then return end
-    local e = entry('site', name_of(s.name), site_kind(s) .. ', unmapped', s.pos.x, s.pos.y)
+    local ax, ay = site_army_pos(s)
+    local e = entry('site', name_of(s.name), site_kind(s) .. ', unmapped',
+                    s.pos.x, s.pos.y, nil, ax, ay)
     e.site = s
+    return e
+end
+
+local all_artifacts_by_name = nil
+
+local function unknown_artifact(want)
+    if not all_artifacts_by_name then
+        all_artifacts_by_name = {}
+        for _, a in ipairs(df.global.world.artifacts.all) do
+            all_artifacts_by_name[artifact_name(a):lower()] = a
+        end
+    end
+    local a = all_artifacts_by_name[want]
+    if not a then return end
+    local wx, wy, where, ax, ay = artifact_place(a)
+    if not wx then return end
+    local ok, desc = pcall(dfhack.items.getReadableDescription, a.item)
+    local e = entry('artifact', artifact_name(a),
+        ((ok and desc) or 'artifact') .. ', ' .. (where or 'whereabouts unclear') .. ', unheard-of',
+        wx, wy, nil, ax, ay)
+    e.artifact = a
     return e
 end
 
@@ -612,8 +775,12 @@ function exact_match(text, hits)
     for _, e in ipairs(hits) do
         if e.wx and e.name:lower() == want then return e end
     end
-    if only and only ~= 'site' then return nil end
-    return unknown_site(want)
+    if only and only ~= 'site' and only ~= 'artifact' then return nil end
+    if only ~= 'artifact' then
+        local s = unknown_site(want)
+        if s then return s end
+    end
+    if only ~= 'site' then return unknown_artifact(want) end
 end
 
 -- ---- painting ---------------------------------------------------------------
@@ -646,23 +813,26 @@ end
 -- units per cell -- and 1 next to a site -- where the same rounding is 8 cells
 -- out, or 24 when zoomed in. Anything whose exact position IS known (the
 -- traveller) must go through army_to_cell directly.
-local function world_to_cell(wx, wy)
-    -- On the GREATER map one cell is exactly one world tile, and the centre cell
-    -- is the tile you stand in -- so the cell is counted in TILES from there.
-    -- Going through the tile's centre army-coordinate instead lands a cell short
-    -- whenever you are deep inside your own tile (measured: standing at 2289,
-    -- i.e. 33/48 through tile 47, put a site at tile 52 on cell 64 where DF
-    -- draws it on 65). On the lesser map a world tile spans many cells, so there
-    -- the tile centre is exactly what you want.
+-- Where a TARGET is drawn. Takes the entry so it can use the exact position
+-- when one is known.
+--
+-- On the GREATER map one cell is exactly one world tile, and the centre cell is
+-- the tile you stand in -- so the cell is counted in TILES from there. Going
+-- through army coordinates instead lands a cell short whenever you are deep
+-- inside your own tile (measured: standing 33/48 through tile 47 put a site at
+-- tile 52 on cell 64 where DF draws it on 65). On the LESSER map cells are 3
+-- army units each, so there the exact position is what matters.
+local function target_cell(e)
     local cx, cy = center_pos()
     if not cx then return end
+    local ax = e.ax or (e.wx * ARMY_PER_WORLD + ARMY_PER_WORLD // 2)
+    local ay = e.ay or (e.wy * ARMY_PER_WORLD + ARMY_PER_WORLD // 2)
     if is_greater() then
         local mp = port()
-        return mp.dim_x // 2 + (wx - cx // ARMY_PER_WORLD),
-               mp.dim_y // 2 + (wy - cy // ARMY_PER_WORLD)
+        return mp.dim_x // 2 + (ax // ARMY_PER_WORLD - cx // ARMY_PER_WORLD),
+               mp.dim_y // 2 + (ay // ARMY_PER_WORLD - cy // ARMY_PER_WORLD)
     end
-    return army_to_cell(wx * ARMY_PER_WORLD + ARMY_PER_WORLD // 2,
-                        wy * ARMY_PER_WORLD + ARMY_PER_WORLD // 2)
+    return army_to_cell(ax, ay)
 end
 
 local function cell_to_text(cx, cy)
@@ -769,19 +939,59 @@ local function read_the_map()
     return reqscript('adv/read-the-map')
 end
 
-local function site_card(t, dist, dir)
-    if t.cat ~= 'site' or not t.site then return nil end
-    local id = t.site.id
-    if not card_cache[id] then
-        local ok, lines = pcall(function() return read_the_map().lines_for_site(id) end)
+-- Wrap a long line to the card's width rather than letting it run off the map.
+local CARD_WIDTH = 52
+local function wrap_into(lines, text, indent)
+    indent = indent or '  '
+    while #text > CARD_WIDTH do
+        local cut = text:sub(1, CARD_WIDTH):match('.*()%s') or CARD_WIDTH
+        lines[#lines + 1] = text:sub(1, cut - 1)
+        text = indent .. text:sub(cut + 1)
+    end
+    if #text > 0 then lines[#lines + 1] = text end
+end
+
+-- The card shown at the destination. A site (and a region) gets the very card
+-- adv/read-the-map pops when you hover it -- one description of a place,
+-- however you arrived at it. Everything else gets a card of the same shape
+-- built here, so a civilization or an artifact is described on screen too
+-- rather than reduced to a name on a line. Site and region cards are cached:
+-- building one walks the place's nobles, residents and wildlife, which is far
+-- too much to redo sixty times a second.
+local function cached(key, make)
+    if not card_cache[key] then
+        local ok, lines = pcall(make)
         if not ok or not lines or #lines == 0 then return nil end
-        card_cache[id] = lines
+        card_cache[key] = lines
+    end
+    return card_cache[key]
+end
+
+local CARD_HEAD = {
+    person = 'Person', beast = 'Beast', group = 'Group',
+    event = 'Rumour', artifact = 'Artifact', region = 'Region',
+}
+
+local function target_card(t, dist, dir)
+    local base
+    if t.cat == 'site' and t.site then
+        base = cached('s' .. t.site.id, function() return read_the_map().lines_for_site(t.site.id) end)
+    elseif t.cat == 'region' and t.region then
+        base = cached('r' .. t.region.index, function() return read_the_map().lines_for_region(t.region) end)
+    end
+    if not base then
+        base = {}
+        wrap_into(base, ('%s: %s'):format(CARD_HEAD[t.cat] or 'Target', t.name))
+        if t.detail then wrap_into(base, '  ' .. t.detail) end
     end
     local out = {}
-    for _, l in ipairs(card_cache[id]) do out[#out + 1] = l end
-    out[#out + 1] = ('%d tiles %s'):format(dist, dir)
+    for _, l in ipairs(base) do out[#out + 1] = l end
+    out[#out + 1] = ('  %d %s %s%s'):format(dist, dist == 1 and 'tile' or 'tiles', dir,
+                                            t.stale and ' (last seen)' or '')
     if t.detail and t.detail:find('unmapped', 1, true) then
-        out[#out + 1] = '(not on your map)'
+        out[#out + 1] = '  (not on your map)'
+    elseif t.detail and t.detail:find('unheard%-of') then
+        out[#out + 1] = '  (nobody told you of this)'
     end
     return out
 end
@@ -919,6 +1129,7 @@ end
 local CAT_PEN = {
     site = COLOR_LIGHTGREEN, person = COLOR_LIGHTCYAN, beast = COLOR_LIGHTRED,
     region = COLOR_GREEN, group = COLOR_YELLOW, event = COLOR_LIGHTMAGENTA,
+    artifact = COLOR_WHITE,
 }
 
 -- One text field drives both halves: the results list is what you get while the
@@ -1113,7 +1324,7 @@ function WorldMapFeatures:paint_map()
         target, target_text = nil, nil          -- the bar moved on without us
     end
     if target then
-        local tx, ty = world_to_cell(target.wx, target.wy)
+        local tx, ty = target_cell(target)
         if tx and hx then
             paint_line(hx, hy, tx, ty)
             -- The marker goes on the target -- or, when the target lies beyond
@@ -1126,23 +1337,10 @@ function WorldMapFeatures:paint_map()
             local sx, sy = cell_to_text(mx, my)
             local dx, dy = target.wx - pwx, target.wy - pwy
             local dist = math.floor(math.sqrt(dx * dx + dy * dy) + 0.5)
-            local card = site_card(target, dist, bearing(dx, dy))
-            if card then
-                read_the_map().paint_card(card, sx, sy)
-            else
-                local label = ('%s (%d %s)'):format(target.name, dist, bearing(dx, dy))
-                if target.stale then label = label .. ' (last seen)' end
-                -- keep the whole string on the grid: flip to the other side of
-                -- the marker when it would overrun the right edge, then trim
-                -- what is left rather than painting past the end
-                local dimx = df.global.gps.dimx
-                local lx = sx + 2
-                if lx + #label >= dimx then lx = sx - #label - 2 end
-                if lx < 0 then lx = 0 end
-                if on_screen(lx, sy) then
-                    dfhack.screen.paintString(PEN_LABEL, lx, sy, label:sub(1, dimx - lx))
-                end
-            end
+            -- always a bordered card, whatever kind of thing it is; paint_card
+            -- nudges it to stay on screen by itself
+            local card = target_card(target, dist, bearing(dx, dy))
+            pcall(function() read_the_map().paint_card(card, sx, sy) end)
         end
     end
     -- while panned, DF's own marker sits at the panned centre, not on us. The
@@ -1159,7 +1357,7 @@ dfhack.onStateChange[_ENV] = function(sc)
     if sc == SC_WORLD_UNLOADED then
         recenter()
         index, index_built_for, target, target_text = nil, nil, nil, nil
-        card_cache, all_sites_by_name = {}, nil
+        card_cache, all_sites_by_name, all_artifacts_by_name = {}, nil, nil
     end
 end
 
@@ -1190,7 +1388,7 @@ else
     local by = {}
     for _, e in ipairs(index or {}) do by[e.cat] = (by[e.cat] or 0) + 1 end
     local parts = {}
-    for _, c in ipairs{'site', 'person', 'beast', 'region', 'group', 'event'} do
+    for _, c in ipairs{'site', 'person', 'beast', 'region', 'group', 'event', 'artifact'} do
         parts[#parts + 1] = ('%s %d'):format(c, by[c] or 0)
     end
     print(('adv/world-map-features: %s | %d known things (%s) | %s | %s')

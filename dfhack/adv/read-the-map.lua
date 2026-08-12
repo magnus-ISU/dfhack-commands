@@ -667,6 +667,13 @@ function lines_for_tile(mx, my)
     return tile_info(mx, my)
 end
 
+-- the region blurb (type, name, wildlife) on its own, for adv/world-map-features
+function lines_for_region(region)
+    local lines = {}
+    pcall(region_lines, region, lines)
+    return lines
+end
+
 -- ---- overlay ----------------------------------------------------------------
 
 ReadTheMap = defclass(ReadTheMap, overlay.OverlayWidget)

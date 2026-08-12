@@ -420,14 +420,16 @@ Allow hovering over sites to learn about them in fast travel.
 
 ### **`adv/world-map-features`** 
 Middle-drag the travel map to pan it, and search everything your adventurer
-  knows from a bar centred on the top row (Alt-F): sites you have heard of, people you have met,
-  your bestiary, regions, groups and the rumours you carry. Rows show a category, distance
+  knows from a bar centred on the top row (Alt-F): sites you have heard of, people (placed
+  where the world says they are, since a name reaches you with its story), your bestiary,
+  regions, groups, carried rumours and artifacts kept or held by what you know. Rows show a category, distance
   and bearing; clicking one types its name into the bar, and whenever the text exactly names
   something the list folds away and the map draws a dotted line to it (the line is purely a
-  reading of the bar -- clear the text and it goes), naming a site with read-the-map's own
-  hover card. Typing a TYPE finds everything of it you know -- `vault`, `rabbit devil`,
+  reading of the bar -- clear the text and it goes), ending in a bordered card describing the
+  target: read-the-map's own hover card for a site or region, one of the same shape for
+  anything else, drawn at the map's edge when the target is beyond it. Typing a TYPE finds everything of it you know -- `vault`, `rabbit devil`,
   `high elf` (which also finds high elf sites); sites and civilizations always carry a
-  bearing, and the exact name of an undiscovered site points at it too. On the
+  bearing, and the exact name of an undiscovered site or artifact points at it too. On the
   world map, clicking a site types its name in. `site:`/`person:`/`beast:`/
   `region:`/`group:`/`event:` narrows the search. DF has no camera for this map, so the pan
   moves what DF thinks the centre is (`travel_origin`) only between update and render, and
