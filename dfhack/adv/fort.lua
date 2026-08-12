@@ -55,7 +55,9 @@ job items, ``-a``/``--nodfassign`` manual item assignment, ``-e [NAME]``
 recipe entity override (default: your civ + the site owner's).
 
 .. warning::
-    changes only persist in non-procedural sites: player forts, caves, camps.
+    digging/construction changes only persist at player forts, caves, camps,
+    lairs/monster shrines and important locations (buildings save everywhere);
+    the menu shows a centered "won't persist" on its bottom edge anywhere else.
 
 ]====]
 
@@ -3027,14 +3029,28 @@ function AdvFort:menu_geom()
     return 0, top, MENU_W, h, n
 end
 
+-- Where changes STICK (per Rumrusher's testing): buildings save everywhere,
+-- constructions don't, and digging is undone anywhere but player forts, caves,
+-- camps, lairs/monster shrines and important locations. The pre-gen civ sites
+-- (elven retreats, fortresses, dark fortresses, towns...) and the open
+-- wilderness all revert.
+local PERSIST_SITE_TYPES = utils.invert{
+    df.world_site_type.PlayerFortress,
+    df.world_site_type.Cave,
+    df.world_site_type.LairShrine,
+    df.world_site_type.ImportantLocation,
+    df.world_site_type.Camp,
+}
+function AdvFort:persists_here()
+    local site = self.current_site
+    return site ~= nil and PERSIST_SITE_TYPES[site.type] ~= nil
+end
+
 function AdvFort:draw_menu(dc)
     local l, t, w, h, n = self:menu_geom()
     local site = self.current_site
-    local title
-    if site then title = dfhack.translation.translateName(site.name)
-    elseif settings.safe then title = '<no site: disabled>'
-    else title = '<no site: won\'t persist>' end
-    draw_box(dc, l, t, w, h, title, site and COLOR_WHITE or COLOR_YELLOW)
+    local title = site and dfhack.translation.translateName(site.name) or nil
+    draw_box(dc, l, t, w, h, title, COLOR_WHITE)
     dc:seek(l+w-5, t):pen(COLOR_LIGHTCYAN):string('[-]')
     for li, line in ipairs(LAYOUT) do
         local y = t+li
@@ -3080,6 +3096,11 @@ function AdvFort:draw_menu(dc)
     end
     if settings.quick then stat = stat..' *' end
     dc:seek(l+1, t+n+2):pen(pen):string(stat:sub(1, w-2))
+    if not self:persists_here() then
+        local msg = "won't persist"
+        dc:seek(l+math.max(1, math.floor((w-#msg)/2)), t+h-1)
+            :pen(COLOR_YELLOW):string(msg)
+    end
 end
 
 -- every aux panel fills the screen vertically, minus the top and bottom 10 rows
