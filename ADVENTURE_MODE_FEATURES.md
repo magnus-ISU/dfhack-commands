@@ -133,7 +133,10 @@ Middle-drag the travel map to pan it, and search everything your adventurer
   target: read-the-map's own hover card for a site or region, one of the same shape for
   anything else, drawn at the map's edge when the target is beyond it. Typing a TYPE finds everything of it you know -- `vault`, `rabbit devil`,
   `high elf` (which also finds high elf sites); sites and civilizations always carry a
-  bearing, and the exact name of an undiscovered site or artifact points at it too. On the
+  bearing, and the exact name of an undiscovered site, artifact or person points at it too.
+  Names match in either rendering (translated or native), first-and-last-name is enough
+  without the epithet, accented letters are typed as plain ascii, and true names learned
+  from slabs are searchable -- a demon is findable by what its slab calls it. On the
   world map, clicking a site types its name in. `site:`/`person:`/`beast:`/
   `region:`/`group:`/`event:` narrows the search. DF has no camera for this map, so the pan
   moves what DF thinks the centre is (`travel_origin`) only between update and render, and

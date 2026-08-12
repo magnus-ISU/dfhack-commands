@@ -47,9 +47,30 @@ not from the world at large:
 
 Sites and groups always carry a bearing -- a civilization is placed by its
 capital (or the centre of its sites) even when you know none of its towns -- and
-typing the exact name of a site or artifact you have NEVER heard of will still
-point at it, on the grounds that knowing the name is itself the knowledge; those
-are marked `unmapped` / `unheard-of`.
+typing the exact name of a site, artifact or PERSON you have never heard of
+will still point at it, on the grounds that knowing the name is itself the
+knowledge; those are marked `unmapped` / `unheard-of`.
+
+Names are matched generously, in three ways that all come from how DF stores
+them:
+
+  * either RENDERING -- "Charin Vanishedlimbs" and "Charin Trabingunger" are
+    the same person, translated and native. Both are searched.
+  * the first and last name is ENOUGH: DF hangs an epithet off many figures
+    ("Wom Topfins the Tenacious Persuasions of Indignation") and nobody types
+    that. A given name on its own is not enough, though -- one Wom does not
+    stand for all of them.
+  * accented letters are typed as PLAIN ASCII. Names come back in CP437, where
+    the accent is a single high byte, so "Zikath" finds "Zik\131th" -- you can
+    see the accent without having to reproduce it.
+
+TRUE NAMES are searchable too. A slab out of a vault teaches you what a demon
+is really called, and DF keeps that as an `identity` pointing at the figure --
+not as the figure's own name -- so the name on your slab appears nowhere in its
+name fields. Those you have learned are listed under the true name, with the
+figure's public name searchable alongside; the demon that answers to
+"Orguxadece Emeraldsaffron" in the world is the one your slab calls
+"Zik\131th Crimsonlarva".
 
 Targets are placed EXACTLY where the data allows: a site by the centre of its
 footprint (DF records those in mid tiles, 16 to a world tile) rather than by the
@@ -266,9 +287,42 @@ local function adventurer_hf()
     if nem and nem.figure then return nem.figure, u end
 end
 
+-- DF renders names in CP437, where accented letters are single high bytes:
+-- a demon's true name reads "Zik\131th" -- Zik-a-circumflex-th -- and no amount
+-- of typing "Zikath" will ever equal that. Every name and every query is folded
+-- to plain lowercase ASCII before comparison, so the accent is something you
+-- can see but never have to reproduce.
+local CP437_FOLD = {
+    [128] = 'c', [129] = 'u', [130] = 'e', [131] = 'a', [132] = 'a', [133] = 'a',
+    [134] = 'a', [135] = 'c', [136] = 'e', [137] = 'e', [138] = 'e', [139] = 'i',
+    [140] = 'i', [141] = 'i', [142] = 'a', [143] = 'a', [144] = 'e', [145] = 'ae',
+    [146] = 'ae', [147] = 'o', [148] = 'o', [149] = 'o', [150] = 'u', [151] = 'u',
+    [152] = 'y', [153] = 'o', [154] = 'u', [160] = 'a', [161] = 'i', [162] = 'o',
+    [163] = 'u', [164] = 'n', [165] = 'n',
+}
+
+local function fold(s)
+    if not s then return nil end
+    s = s:lower()
+    if not s:find('[\128-\255]') then return s end
+    return (s:gsub('[\128-\255]', function(c) return CP437_FOLD[c:byte()] or c end))
+end
+
 local function name_of(obj, english)
     local ok, s = pcall(dfhack.translation.translateName, obj, english ~= false)
     return ok and s ~= '' and s or nil
+end
+
+-- Every name in DF has two renderings: the translated one you read in play
+-- ("Charin Vanishedlimbs") and the native one the same figure is called in its
+-- own language ("Charin Trabingunger"). The first name is shared; only the
+-- surname differs. Both are worth searching by -- legends, rumours and other
+-- players quote whichever they saw -- so entries carry both.
+local function name_forms(obj)
+    local en = name_of(obj, true)
+    local na = name_of(obj, false)
+    if na == en then na = nil end
+    return en, na
 end
 
 local function site_name(s)
@@ -296,10 +350,10 @@ end
 -- one cell per 3 of them: aiming at the middle of the tile puts the marker up
 -- to 8 cells from a site sitting in the tile's corner (measured on a vault at
 -- world 45.75, 8.19: 4 mid tiles east and 5 north of where we pointed).
-local function entry(cat, name, detail, wx, wy, stale, ax, ay)
+local function entry(cat, name, detail, wx, wy, stale, ax, ay, alt)
     return {cat = cat, name = name, detail = detail, wx = wx, wy = wy, stale = stale,
-            ax = ax, ay = ay,
-            key = (name .. ' ' .. (detail or '') .. ' ' .. cat):lower()}
+            ax = ax, ay = ay, alt = alt,
+            key = fold(name .. ' ' .. (alt or '') .. ' ' .. (detail or '') .. ' ' .. cat)}
 end
 
 -- a site's exact spot: the centre of its footprint, which DF records in MID
@@ -355,7 +409,8 @@ local function build_sites(out, hf, known_regions)
             local detail = kind
             if owner then detail = detail .. ' of ' .. (name_of(owner.name) or '?') end
             local ax, ay = site_army_pos(s)
-            local e = entry('site', site_name(s), detail, s.pos.x, s.pos.y, nil, ax, ay)
+            local _, na = name_forms(s.name)
+            local e = entry('site', site_name(s), detail, s.pos.x, s.pos.y, nil, ax, ay, na)
             e.site = s              -- kept for footprint hit-testing on map clicks
             -- searchable by WHOSE it is as well as what it is, so "high elf"
             -- finds high elf towns and not just high elves
@@ -426,8 +481,9 @@ local function build_people(out, hf)
             if h.died_year and h.died_year > 0 then detail = detail .. ' (dead)' end
             -- worldgen leaves plenty of figures nameless; the species reads better
             -- in the list than "figure 14024"
-            local e = entry('person', name_of(h.name) or ('unnamed ' .. species),
-                            detail, wx, wy, stale, ax, ay)
+            local en, na = name_forms(h.name)
+            local e = entry('person', en or ('unnamed ' .. species),
+                            detail, wx, wy, stale, ax, ay, na)
             e.hf = h
             out[#out + 1] = e
         end
@@ -591,6 +647,37 @@ local function build_events(out, hf)
 end
 
 
+-- TRUE NAMES. A slab from a vault teaches you what a demon is really called,
+-- and DF keeps that as an `identity` -- a name record pointing at the figure --
+-- not as the figure's own name. So the thing you know it by appears nowhere in
+-- the figure's name fields: the demon whose slab you carry answers to
+-- "Orguxadece Emeraldsaffron" in the world and to "Zik\131th Crimsonlarva the
+-- Fortune of Wealths" only on your slab. Both are listed, and the true name is
+-- what the row is called, since that is the name you would go looking for.
+local function build_identities(out, hf)
+    for _, iid in ipairs(hf.info.known_info.known_identities) do
+        local id = df.identity.find(iid)
+        local h = id and id.histfig_id >= 0 and df.historical_figure.find(id.histfig_id) or nil
+        if h then
+            local en, na = name_forms(id.name)
+            local wx, wy, where, ax, ay = figure_place(h)
+            local detail = species_name(h.race)
+            local public = name_of(h.name)
+            if public then detail = detail .. ', truly ' .. public end
+            if where then detail = detail .. ', at ' .. where end
+            if h.died_year and h.died_year > 0 then detail = detail .. ' (dead)' end
+            local e = entry('person', en or public or ('figure ' .. h.id),
+                            detail, wx, wy, nil, ax, ay, na)
+            -- searchable by the public name too, in both renderings
+            local pen, pna = name_forms(h.name)
+            e.key = e.key .. ' ' .. fold((pen or '') .. ' ' .. (pna or ''))
+            e.hf = h
+            e.identity = id
+            out[#out + 1] = e
+        end
+    end
+end
+
 -- Artifacts. The world holds hundreds; the ones listed are those tied to
 -- something you know -- kept at a site you have heard of, or held or made by
 -- someone you know of -- and any other can still be found by typing its exact
@@ -645,7 +732,8 @@ local function build_artifacts(out, known_sites, known_hfs)
             local ok, desc = pcall(dfhack.items.getReadableDescription, a.item)
             local detail = (ok and desc) or 'artifact'
             if where then detail = detail .. ', ' .. where end
-            local e = entry('artifact', artifact_name(a), detail, wx, wy, nil, ax, ay)
+            local _, na = name_forms(a.name)
+            local e = entry('artifact', artifact_name(a), detail, wx, wy, nil, ax, ay, na)
             e.artifact = a
             out[#out + 1] = e
         end
@@ -671,6 +759,7 @@ function build_index(force)
     known_hfs[hf.id] = true
     pcall(build_sites, out, hf, known_regions)
     pcall(build_people, out, hf)
+    pcall(build_identities, out, hf)
     pcall(build_artifacts, out, known_sites, known_hfs)
     pcall(build_beasts, out, hf, known_regions)
     pcall(build_groups, out, hf)
@@ -708,7 +797,7 @@ end
 
 -- split "beast: cave dragon" into the category filter and what is left to match
 function parse_query(text)
-    text = (text or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
+    text = fold(text or ''):gsub('^%s+', ''):gsub('%s+$', '')
     local head, tail = text:match('^(%a+):%s*(.*)$')
     if head and CATS[head] then return CATS[head], tail end
     return nil, text
@@ -748,8 +837,9 @@ local function unknown_site(want)
     if not all_sites_by_name then
         all_sites_by_name = {}
         for _, s in ipairs(df.global.world.world_data.sites) do
-            local n = name_of(s.name)
-            if n then all_sites_by_name[n:lower()] = s end
+            local en, na = name_forms(s.name)
+            if en then all_sites_by_name[fold(en)] = s end
+            if na then all_sites_by_name[fold(na)] = s end
         end
     end
     local s = all_sites_by_name[want]
@@ -767,7 +857,9 @@ local function unknown_artifact(want)
     if not all_artifacts_by_name then
         all_artifacts_by_name = {}
         for _, a in ipairs(df.global.world.artifacts.all) do
-            all_artifacts_by_name[artifact_name(a):lower()] = a
+            all_artifacts_by_name[fold(artifact_name(a))] = a
+            local _, na = name_forms(a.name)
+            if na then all_artifacts_by_name[fold(na)] = a end
         end
     end
     local a = all_artifacts_by_name[want]
@@ -782,18 +874,197 @@ local function unknown_artifact(want)
     return e
 end
 
+-- Anyone in the world, by their full name in either rendering -- knowing what
+-- someone is called is taken as knowing of them, the same bargain unmapped
+-- sites and unheard-of artifacts get.
+--
+-- The world holds 14,301 historical figures here, and rendering every name to
+-- compare it costs ~700ms per pass (1.4s for both forms) -- an unacceptable
+-- freeze on a keystroke, since this all runs on DF's main thread. So the search
+-- goes the other way round: FIRST NAMES are plain strings needing no
+-- translation at all, and reading every one of them takes 15ms. Index by first
+-- name once, then render only the handful of figures that share the one typed.
+-- Does `want` name this figure? Either rendering counts, and the first and last
+-- name alone is enough: DF hangs an epithet off many figures ("Wom Topfins the
+-- Tenacious Persuasions of Indignation"), and nobody types that. A bare prefix
+-- of the given name is not accepted -- "Wom" must not stand for every Wom in
+-- the world -- so the match starts at a word boundary past the first space.
+-- Does `want` name this figure? Either rendering counts, and the first and last
+-- name alone is enough: DF hangs an epithet off many figures ("Wom Topfins the
+-- Tenacious Persuasions of Indignation"), and nobody types that. A bare prefix
+-- of the given name is not accepted -- "Wom" must not stand for every Wom in
+-- the world -- so the match starts at a word boundary past the first space.
+local function name_matches(want, en, na)
+    for _, nm in ipairs{en, na} do
+        if nm then
+            nm = fold(nm)
+            if nm == want then return true end
+            if want:find(' ') and nm:sub(1, #want + 1) == want .. ' ' then return true end
+        end
+    end
+    return false
+end
+
+-- Anyone in the world, by their full name in either rendering -- knowing what
+-- someone is called is taken as knowing of them, the same bargain unmapped
+-- sites and unheard-of artifacts get.
+--
+-- The world holds 14,301 historical figures here, and rendering every name to
+-- compare it costs ~700ms per pass (1.4s for both forms) -- an unacceptable
+-- freeze on a keystroke, since this all runs on DF's main thread. So the search
+-- goes the other way round: FIRST NAMES are plain strings needing no
+-- translation at all, and reading every one of them takes 15ms. Index by first
+-- name once, then render only the handful of figures that share the one typed.
+-- Does `want` name this figure? Either rendering counts, and the first and last
+-- name alone is enough: DF hangs an epithet off many figures ("Wom Topfins the
+-- Tenacious Persuasions of Indignation"), and nobody types that. A bare prefix
+-- of the given name is not accepted -- "Wom" must not stand for every Wom in
+-- the world -- so the match starts at a word boundary past the first space.
+-- true when `a` and `b` differ by at most one character -- one typo, in other
+-- words. Cheap because it never builds a matrix: walk from both ends and see
+-- whether what is left over is a single edit.
+local function within_one_edit(a, b)
+    if math.abs(#a - #b) > 1 then return false end
+    local i = 1
+    while i <= #a and i <= #b and a:byte(i) == b:byte(i) do i = i + 1 end
+    local j = 0
+    while j < #a - i + 1 and j < #b - i + 1
+            and a:byte(#a - j) == b:byte(#b - j) do j = j + 1 end
+    return (#a - i - j + 1) <= 0 and (#b - i - j + 1) <= 0
+        or (#a == #b and #a - i - j + 1 == 1)          -- one substitution
+        or (math.abs(#a - #b) == 1 and math.min(#a, #b) - i - j + 1 <= 0)
+end
+
+-- `lenient` allows a single typo anywhere in the name. It is only ever used as
+-- a second pass, after every strict match has failed, so a name you typed
+-- correctly can never be beaten by a near-miss on something else.
+local function name_matches(want, en, na, lenient)
+    for _, nm in ipairs{en, na} do
+        if nm then
+            nm = fold(nm)
+            if nm == want then return true end
+            if want:find(' ') and nm:sub(1, #want + 1) == want .. ' ' then return true end
+            if lenient and want:find(' ') then
+                -- compare against the name cut to the same number of words, so
+                -- an epithet cannot swamp the comparison
+                local words, cut = 0, nil
+                for pos in nm:gmatch('()%s') do
+                    words = words + 1
+                    if words == select(2, want:gsub(' ', '')) + 1 then cut = pos - 1 break end
+                end
+                local head = cut and nm:sub(1, cut) or nm
+                if within_one_edit(want, head) then return true end
+            end
+        end
+    end
+    return false
+end
+
+local figures_by_first = nil
+
+local function build_figure_index()
+    if figures_by_first then return figures_by_first end
+    figures_by_first = {}
+    for _, h in ipairs(df.global.world.history.figures) do
+        local fn = h.name.first_name
+        if fn and fn ~= '' then
+            fn = fold(fn)
+            local bucket = figures_by_first[fn]
+            if not bucket then
+                bucket = {}
+                figures_by_first[fn] = bucket
+            end
+            bucket[#bucket + 1] = h
+        end
+    end
+    return figures_by_first
+end
+
+local identities_by_first = nil
+
+local function build_identity_index()
+    if identities_by_first then return identities_by_first end
+    identities_by_first = {}
+    for _, id in ipairs(df.global.world.identities.all) do
+        local fn = id.name.first_name
+        if fn and fn ~= '' and id.histfig_id >= 0 then
+            fn = fold(fn)
+            local bucket = identities_by_first[fn]
+            if not bucket then
+                bucket = {}
+                identities_by_first[fn] = bucket
+            end
+            bucket[#bucket + 1] = id
+        end
+    end
+    return identities_by_first
+end
+
+local function figure_entry(h, name, alt, extra)
+    local wx, wy, where, ax, ay = figure_place(h)
+    if not wx then return end
+    local detail = species_name(h.race)
+    if extra then detail = detail .. ', ' .. extra end
+    if where then detail = detail .. ', at ' .. where end
+    if h.died_year and h.died_year > 0 then detail = detail .. ' (dead)' end
+    local e = entry('person', name, detail .. ', unheard-of', wx, wy, nil, ax, ay, alt)
+    e.hf = h
+    return e
+end
+
+local function unknown_figure(want)
+    local first = want:match('^(%S+)')
+    if not first then return end
+    for _, id in ipairs(build_identity_index()[first] or {}) do
+        local en, na = name_forms(id.name)
+        if name_matches(want, en, na) then
+            local h = df.historical_figure.find(id.histfig_id)
+            local e = h and figure_entry(h, en, na, 'truly ' .. (name_of(h.name) or '?'))
+            if e then e.identity = id return e end
+        end
+    end
+    local bucket = build_figure_index()[first]
+    if not bucket then return end
+    for _, h in ipairs(bucket) do
+        local en, na = name_forms(h.name)
+        if name_matches(want, en, na) then
+            local wx, wy, where, ax, ay = figure_place(h)
+            if not wx then return end
+            local species = species_name(h.race)
+            local detail = species
+            if where then detail = detail .. ', at ' .. where end
+            if h.died_year and h.died_year > 0 then detail = detail .. ' (dead)' end
+            local e = entry('person', en, detail .. ', unheard-of', wx, wy, nil, ax, ay, na)
+            e.hf = h
+            return e
+        end
+    end
+end
+
 function exact_match(text, hits)
     local only, want = parse_query(text)
     if want == '' then return nil end
     for _, e in ipairs(hits) do
-        if e.wx and e.name:lower() == want then return e end
+        if e.wx then
+            if e.cat == 'person' then
+                if name_matches(want, e.name, e.alt) then return e end
+            elseif fold(e.name) == want or (e.alt and fold(e.alt) == want) then
+                return e
+            end
+        end
     end
+    -- nothing you know is called that: try the world at large
+    if only == 'person' then return unknown_figure(want) end
     if only and only ~= 'site' and only ~= 'artifact' then return nil end
     if only ~= 'artifact' then
         local s = unknown_site(want)
         if s then return s end
     end
-    if only ~= 'site' then return unknown_artifact(want) end
+    if only ~= 'site' then
+        local a = unknown_artifact(want)
+        if a then return a end
+    end
+    if not only then return unknown_figure(want) end
 end
 
 -- ---- painting ---------------------------------------------------------------
@@ -919,6 +1190,69 @@ local function paint_trail(cells)
     local want = {[1] = true, [n] = true, [(n + 1) // 2] = true}
     for i = 1, n, DOT_EVERY do want[i] = true end
     for i in pairs(want) do paint_cell(PEN_LINE, cells[i][1], cells[i][2]) end
+end
+
+local card_cache = {}
+
+local function read_the_map()
+    return reqscript('adv/read-the-map')
+end
+
+-- Wrap a long line to the card's width rather than letting it run off the map.
+local CARD_WIDTH = 52
+local function wrap_into(lines, text, indent)
+    indent = indent or '  '
+    while #text > CARD_WIDTH do
+        local cut = text:sub(1, CARD_WIDTH):match('.*()%s') or CARD_WIDTH
+        lines[#lines + 1] = text:sub(1, cut - 1)
+        text = indent .. text:sub(cut + 1)
+    end
+    if #text > 0 then lines[#lines + 1] = text end
+end
+
+-- The card shown at the destination. A site (and a region) gets the very card
+-- adv/read-the-map pops when you hover it -- one description of a place,
+-- however you arrived at it. Everything else gets a card of the same shape
+-- built here, so a civilization or an artifact is described on screen too
+-- rather than reduced to a name on a line. Site and region cards are cached:
+-- building one walks the place's nobles, residents and wildlife, which is far
+-- too much to redo sixty times a second.
+local function cached(key, make)
+    if not card_cache[key] then
+        local ok, lines = pcall(make)
+        if not ok or not lines or #lines == 0 then return nil end
+        card_cache[key] = lines
+    end
+    return card_cache[key]
+end
+
+local CARD_HEAD = {
+    person = 'Person', beast = 'Beast', group = 'Group',
+    event = 'Rumour', artifact = 'Artifact', region = 'Region',
+}
+
+local function target_card(t, dist, dir)
+    local base
+    if t.cat == 'site' and t.site then
+        base = cached('s' .. t.site.id, function() return read_the_map().lines_for_site(t.site.id) end)
+    elseif t.cat == 'region' and t.region then
+        base = cached('r' .. t.region.index, function() return read_the_map().lines_for_region(t.region) end)
+    end
+    if not base then
+        base = {}
+        wrap_into(base, ('%s: %s'):format(CARD_HEAD[t.cat] or 'Target', t.name))
+        if t.detail then wrap_into(base, '  ' .. t.detail) end
+    end
+    local out = {}
+    for _, l in ipairs(base) do out[#out + 1] = l end
+    out[#out + 1] = ('  %d %s %s%s'):format(dist, dist == 1 and 'tile' or 'tiles', dir,
+                                            t.stale and ' (last seen)' or '')
+    if t.detail and t.detail:find('unmapped', 1, true) then
+        out[#out + 1] = '  (not on your map)'
+    elseif t.detail and t.detail:find('unheard%-of') then
+        out[#out + 1] = '  (nobody told you of this)'
+    end
+    return out
 end
 
 -- ---- the overlay ------------------------------------------------------------
@@ -1280,6 +1614,7 @@ dfhack.onStateChange[_ENV] = function(sc)
         recenter()
         index, index_built_for, target, target_text = nil, nil, nil, nil
         card_cache, all_sites_by_name, all_artifacts_by_name = {}, nil, nil
+        figures_by_first, identities_by_first = nil, nil
     end
 end
 
