@@ -722,6 +722,65 @@ end
 
 local cache_key, cache_lines = nil, nil
 
+-- Draw a card of `lines` beside (ax, ay), nudged to stay on screen. Exported:
+-- adv/world-map-features paints the very same card at a searched destination, so
+-- a site reads identically whether you hovered it or looked it up by name.
+function paint_card(lines, ax, ay)
+    local gps = df.global.gps
+    -- tooltip near the mouse, nudged to stay on screen, in a double-line UI frame
+    local width = 0
+    for _, l in ipairs(lines) do width = math.max(width, #l) end
+    local inner = width + 2                        -- one space of padding each side
+    local bw, bh = inner + 2, #lines + 2     -- plus the border itself
+    local tx = ax + 2
+    local ty = ay + 1
+    if tx + bw >= gps.dimx then tx = math.max(0, ax - bw - 1) end
+    if ty + bh >= gps.dimy then ty = math.max(0, ay - bh - 1) end
+    if border_anchor then
+        -- the native premium frame: stamp the captured tiles (and the panel fill under the
+        -- text) into the lower layer; the text grid gets blanks so no glyph covers the art
+        local dimy = gps.dimy
+        local low = gps.screentexpos_lower
+        local a = border_anchor
+        local T, F, B = a, a - 64, a - 128
+        local function put(x, y, tile)
+            dfhack.screen.paintTile(PEN_BLANK, x, y)
+            low[x * dimy + y] = tile
+        end
+        put(tx, ty, T + 1)
+        put(tx + inner + 1, ty, T - 1)
+        put(tx, ty + bh - 1, B + 1)
+        put(tx + inner + 1, ty + bh - 1, B - 1)
+        for x = tx + 1, tx + inner do
+            put(x, ty, T)
+            put(x, ty + bh - 1, B)
+        end
+        for i = 1, #lines do
+            put(tx, ty + i, F + 1)
+            put(tx + inner + 1, ty + i, F - 1)
+            for x = tx + 1, tx + inner do
+                low[x * dimy + ty + i] = F      -- panel fill under the text
+            end
+        end
+    else
+        -- no graphics captured (ASCII mode): golden single-bar frame
+        local ch = string.char
+        dfhack.screen.paintString(PEN_GOLD, tx, ty,
+            ch(218) .. string.rep(ch(196), inner) .. ch(191))
+        for i = 1, #lines do
+            dfhack.screen.paintString(PEN_GOLD, tx, ty + i, ch(179))
+            dfhack.screen.paintString(PEN_GOLD, tx + inner + 1, ty + i, ch(179))
+        end
+        dfhack.screen.paintString(PEN_GOLD, tx, ty + bh - 1,
+            ch(192) .. string.rep(ch(196), inner) .. ch(217))
+    end
+    for i, line in ipairs(lines) do
+        local pen = i == 1 and PEN_EDGE or PEN_TEXT
+        dfhack.screen.paintString(pen, tx + 1, ty + i,
+            ' ' .. line .. string.rep(' ', inner - #line - 1))
+    end
+end
+
 local function paint()
     local adv = df.global.adventure
     if adv.travel_right_map ~= 0 then return end     -- greater map has DF's own hover
@@ -749,59 +808,7 @@ local function paint()
         cache_lines = tile_info(mx, my)
     end
     if not cache_lines then return end
-
-    -- tooltip near the mouse, nudged to stay on screen, in a double-line UI frame
-    local width = 0
-    for _, l in ipairs(cache_lines) do width = math.max(width, #l) end
-    local inner = width + 2                        -- one space of padding each side
-    local bw, bh = inner + 2, #cache_lines + 2     -- plus the border itself
-    local tx = gps.mouse_x + 2
-    local ty = gps.mouse_y + 1
-    if tx + bw >= gps.dimx then tx = math.max(0, gps.mouse_x - bw - 1) end
-    if ty + bh >= gps.dimy then ty = math.max(0, gps.mouse_y - bh - 1) end
-    if border_anchor then
-        -- the native premium frame: stamp the captured tiles (and the panel fill under the
-        -- text) into the lower layer; the text grid gets blanks so no glyph covers the art
-        local dimy = gps.dimy
-        local low = gps.screentexpos_lower
-        local a = border_anchor
-        local T, F, B = a, a - 64, a - 128
-        local function put(x, y, tile)
-            dfhack.screen.paintTile(PEN_BLANK, x, y)
-            low[x * dimy + y] = tile
-        end
-        put(tx, ty, T + 1)
-        put(tx + inner + 1, ty, T - 1)
-        put(tx, ty + bh - 1, B + 1)
-        put(tx + inner + 1, ty + bh - 1, B - 1)
-        for x = tx + 1, tx + inner do
-            put(x, ty, T)
-            put(x, ty + bh - 1, B)
-        end
-        for i = 1, #cache_lines do
-            put(tx, ty + i, F + 1)
-            put(tx + inner + 1, ty + i, F - 1)
-            for x = tx + 1, tx + inner do
-                low[x * dimy + ty + i] = F      -- panel fill under the text
-            end
-        end
-    else
-        -- no graphics captured (ASCII mode): golden single-bar frame
-        local ch = string.char
-        dfhack.screen.paintString(PEN_GOLD, tx, ty,
-            ch(218) .. string.rep(ch(196), inner) .. ch(191))
-        for i = 1, #cache_lines do
-            dfhack.screen.paintString(PEN_GOLD, tx, ty + i, ch(179))
-            dfhack.screen.paintString(PEN_GOLD, tx + inner + 1, ty + i, ch(179))
-        end
-        dfhack.screen.paintString(PEN_GOLD, tx, ty + bh - 1,
-            ch(192) .. string.rep(ch(196), inner) .. ch(217))
-    end
-    for i, line in ipairs(cache_lines) do
-        local pen = i == 1 and PEN_EDGE or PEN_TEXT
-        dfhack.screen.paintString(pen, tx + 1, ty + i,
-            ' ' .. line .. string.rep(' ', inner - #line - 1))
-    end
+    paint_card(cache_lines, gps.mouse_x, gps.mouse_y)
 end
 
 function ReadTheMap:onRenderFrame(dc, rect)
