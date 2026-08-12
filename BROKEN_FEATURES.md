@@ -101,6 +101,33 @@ Designate creatures on the local map as kill targets and have your adventurer hu
 turn by turn, travelling to each and attacking until every target is dead. Never enabled by
 `magnus-scripts` — it is a manual command.
 
+### **`fix/dead-armies`**
+Purges figures recorded dead from the world's armies, deletes the armies left with nobody
+aboard, and clears figures pointing at armies that no longer exist. **Run once on a live world
+(337 members purged, 155 armies deleted); no fix planned and no demonstrated value.** Two
+problems, either of which sinks it:
+
+- **`hf.died_year >= 0` is not "should not be in an army".** An intelligent undead — a raised
+  thrall, a ghoul, anything a necromancer animated — keeps the death year of the body it was
+  made from while walking, fighting and *travelling in armies*. Marching undead are exactly
+  what a necromancer's army is made of, so the main rule plausibly disbands real forces and
+  reads as having "cleaned up" hundreds of members that were doing their job. Nothing in the
+  run distinguished them, and the counts were never broken down by undead status.
+- **It never fixed the case it was written for.** The prompting bug was a jade brute whose
+  death never reached its historical figure: the figure still said alive, so the script leaves
+  it alone. It only catches figures history *already* knows are dead — which is the state that
+  bothers nobody, since DF re-mints armies constantly and nothing reads a dead member except
+  location tools.
+
+What it got right is worth keeping if this is ever retried: "empty" must mean no members **and**
+`sum(army.squads.count) == 0`, because `army.squads` holds `army_popst` — anonymous troops with
+no unit and no figure, which is how most of the world's forces are stored. Every memberless army
+in the test world still had troops aboard; without that guard the run would have disbanded 204
+real armies, one of them 70 strong.
+
+A retry would need a positive test for "this member is a corpse, not an animated corpse", and a
+concrete symptom it repairs.
+
 ### **`fort/noble-warriors`**
 Assigns each fort noble's symbols of office as specific items in their squad uniform, so
 nobles wear their regalia into battle. Implemented and verified live, but **parked pending a
