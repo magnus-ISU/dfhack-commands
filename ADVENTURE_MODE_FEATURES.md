@@ -54,7 +54,8 @@ Search the inventory list (Alt-S) by item description, material or type.
   Magic words: `heavy` sorts by weight, `equip`/`equipped` shows equipped items
   (hands always first, then strapped weapons/tools, containers last), `food` shows food and drink (drinks, food,
   healing drinks, healing food, then ethics-refused sapient flesh; containers
-  excluded), `healing` shows food/drink with beneficial syndromes. The unsearched list
+  excluded), `healing` shows food/drink with beneficial syndromes. One-click presets on the
+  bar type them for you: `[Food] [Heal] [Book] [Heavy]`. The unsearched list
   displays in the equip order by default. keep-inventory reopens keep the filter.
 
 ![adv/inventory-search demo](demos/adv-search-inventory.png)

@@ -388,8 +388,8 @@ AdvInventorySearchOverlay.ATTRS{
     desc = 'Adds a search bar to the adventure-mode inventory list.',
     default_pos = {x = 2, y = 2},   -- fallback until it snaps below the "Your inventory" header
     viewscreens = 'dungeonmode/Inventory',
-    -- interior: 'Alt+s: ' fills cols 1-7, button labels to col 28, ']' at 29
-    frame = {w = 30, h = 1},
+    -- interior: 'Alt+s: ' fills cols 1-7, button labels to col 36, ']' at 37
+    frame = {w = 38, h = 1},
 }
 
 -- snap the search bar one row below the header, left-aligned (frame coords are relative to the
@@ -452,8 +452,8 @@ function AdvInventorySearchOverlay:init()
     local function preset(text)
         return function() self.subviews.search:setText(text) end
     end
-    -- The bar renders as `[Alt+s: ] [Food] [Heal] [Book]` when idle. The EditField spans
-    -- the whole banner underneath; the `]` and the three buttons are labels drawn over its
+    -- The bar renders as `[Alt+s: ] [Food] [Heal] [Book] [Heavy]` when idle. The EditField spans
+    -- the whole banner underneath; the `]` and the four buttons are labels drawn over its
     -- (empty) text area, hidden the moment there is text or focus -- so typed text overflows
     -- rightward across where the buttons were, and only the banner's final `]` (the one that
     -- closes [Book]) keeps rendering at the far edge.
@@ -491,9 +491,11 @@ function AdvInventorySearchOverlay:init()
                               on_click = preset('food'), visible = buttons_visible},
                 widgets.Label{frame = {l = 17, t = 0, w = 6}, text = '[Heal]',
                               on_click = preset('healing'), visible = buttons_visible},
-                -- no closing bracket: the banner's own ']' at the bar's right edge finishes it
-                widgets.Label{frame = {l = 24, t = 0, w = 5}, text = '[Book',
+                widgets.Label{frame = {l = 24, t = 0, w = 6}, text = '[Book]',
                               on_click = preset('book'), visible = buttons_visible},
+                -- no closing bracket: the banner's own ']' at the bar's right edge finishes it
+                widgets.Label{frame = {l = 31, t = 0, w = 6}, text = '[Heavy',
+                              on_click = preset('heavy'), visible = buttons_visible},
             },
         },
     }
