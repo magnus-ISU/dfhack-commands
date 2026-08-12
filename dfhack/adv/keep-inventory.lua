@@ -47,9 +47,12 @@ quietly rather than spamming input.
 WHAT COUNTS AS "AN ACTION" -- everything that is not a close GESTURE. Escape, right-click and
 a click on the header's Done button dismiss the panel and are recorded in onInput (without
 being consumed); any other way the panel
-closes is treated as an action and reopened. EXCEPT reading: a read prints the book's text into
-the announcement feed -- the same screen area the reopened panel would cover -- so when the
-reports appended since the panel was open start with "You read ", the reopen is skipped.
+closes is treated as an action and reopened. EXCEPT reading: a read prints the text into the
+announcement feed -- the same screen area the reopened panel would cover -- so when the reports
+appended since the panel was open start with "You read ", the reopen is skipped. That covers
+every readable, books, scrolls, quires and slabs alike; they share the announcement. The
+comparison is by report ID, because the report log is a capped ring and its COUNT stops
+growing in a long game (see read_just_happened).
 
 Do NOT try to detect an action by watching for the game to take a turn. `adventure`'s
 last_took_input_* stamp does not advance for inventory actions (it sat at year 100 in a year-250
@@ -240,7 +243,7 @@ local RESTORE_MS = 400
 function KeepInventory:reset()
     self.was_open = false
     self.escaped = false
-    self.report_n = nil
+    self.report_id = nil
     self.job = nil
     self.context = CTX.MAIN
     self.scroll = 0
@@ -274,18 +277,28 @@ function KeepInventory:hold_ol_scroll()
     end
 end
 
--- Did the action that closed the panel READ something? Reading prints the book's text into the
--- announcement feed ("You read An Exploration of the Farm."), in the same screen area a
--- reopened inventory panel covers -- so a read must NOT reopen. Detected from the reports
--- appended since the panel was last seen open; there is no screen or struct to test, the read
--- happens entirely inline.
+-- Did the action that closed the panel READ something? Reading prints the text into the
+-- announcement feed ("You read An Exploration of the Farm.", "You read Morilislilocorie
+-- Andilirouve Oles." for a slab, followed by the engraved words), in the same screen area a
+-- reopened inventory panel covers -- so a read must NOT reopen. Books, scrolls, quires and
+-- slabs all announce with the same "You read " prefix, so one test covers every readable.
+-- There is no screen or struct to test; the read happens entirely inline.
+--
+-- Anchored on the last report's ID, never on the report COUNT. `status.reports` is a ring
+-- capped at 10000: once a long game fills it, each new report drops one off the front and the
+-- count stops changing, so a saved "#reports at open time" stays equal to the count forever
+-- and the scan-from-there loop never has a single iteration to run. The suppression then dies
+-- silently -- every read reopens the panel over the text it just printed -- and it dies for
+-- every readable at once, which is why this surfaced on a slab in a 10000-report game rather
+-- than on the books it was written against. IDs keep counting up regardless of the eviction.
 function KeepInventory:read_just_happened()
-    local base = self.report_n
+    local base = self.report_id
     if not base then return false end
     local reports = df.global.world.status.reports
-    for i = base, #reports - 1 do
-        local ok, txt = pcall(function() return reports[i].text end)
-        if ok and txt and txt:sub(1, 9) == 'You read ' then return true end
+    for i = #reports - 1, 0, -1 do                 -- newest first, stop at what we already saw
+        local ok, rep = pcall(function() return reports[i] end)
+        if not (ok and rep) or rep.id <= base then break end
+        if rep.text:sub(1, 9) == 'You read ' then return true end
     end
     return false
 end
@@ -402,9 +415,11 @@ function KeepInventory:overlay_onupdate()
         end
         self.was_open = true
         self.escaped = false
-        -- reports high-water mark while the panel is up: anything past this at reopen time was
-        -- printed by the closing action (how read_just_happened knows the read was THIS action)
-        self.report_n = #df.global.world.status.reports
+        -- reports high-water mark while the panel is up: anything newer than this at reopen time
+        -- was printed by the closing action (how read_just_happened knows the read was THIS
+        -- action). The last report's ID, not the count -- see read_just_happened.
+        local reports = df.global.world.status.reports
+        self.report_id = #reports > 0 and reports[#reports - 1].id or -1
         if dfhack.getTickCount() < (self.restore_until or 0) then
             -- still re-asserting after a reopen: keep writing our value, and do NOT read
             -- DF's back over it, or the zero it just wrote becomes the new "saved" position
