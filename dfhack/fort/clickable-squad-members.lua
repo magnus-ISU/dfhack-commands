@@ -1,48 +1,56 @@
 -- Squad details screen: click a member's portrait to open their sheet instead of the
--- assignment list.
+-- position-assignment list.
 --@module = true
 --[[
 clickable-squad-members
 
-On the squad details screen (Squads > a squad), every member row carries a portrait to the
-side of the name. Clicking it does the same thing as clicking the name: it opens the
-position-assignment list, offering to replace the dwarf standing there. That is a reasonable
-default for an EMPTY position and a poor one for a filled one -- the portrait is the most
-face-like thing on the screen and the last thing that should mean "swap this soldier out".
+On a squad's details screen (Squads > pick a squad -- focus dwarfmode/Squads/Default), each
+filled position shows a portrait beside the member's name. Clicking either one does the same
+thing: it opens the position-assignment list, offering to replace the dwarf standing there.
+Sensible for an EMPTY slot, wrong for a filled one -- the portrait is the most face-like
+thing on the screen and the last thing that should mean "swap this soldier out".
 
-So a click on the portrait of a FILLED position now opens that dwarf's own detail sheet and
-follows them on the map, the same pair of actions `fort/clickable-noble-names` gives a noble
-row. Everything else is left exactly as DF has it:
+So a click on the PORTRAIT of a filled position opens that dwarf's own sheet and follows
+them, the pair of actions `fort/clickable-noble-names` gives a noble row. Everything else DF
+does is left alone:
 
-  * the NAME still opens the assignment list -- that is how you replace a soldier, and it
-    stays one click away;
-  * an EMPTY position has no portrait to click, so "Assign position 4" is untouched;
-  * every other click on the screen -- the squad name, Back to squads, the order buttons --
-    never reaches this.
+  * the NAME still opens the assignment list -- that is how you replace a soldier;
+  * an empty slot draws no portrait, so "Assign position 4" is untouched;
+  * the squad name, Back to squads and the order buttons never reach this.
 
-MEMBERS ARE MATCHED BY NAME PREFIX, because this screen truncates. The panel is narrow and
-DF renders "Ineth Deler..." rather than the whole name, so the row is identified by testing
-the visible text as a prefix of each squad member's name, dots stripped. That reads the row
-actually under the cursor, which is what makes it survive a scrolled list -- and if nothing
-matches, the click goes to DF untouched and you get the old behaviour rather than a wrong
-dwarf.
+WHICH POSITION A LINE IS is read off the screen rather than counted, because the list
+scrolls. DF labels every empty slot with its own number -- "Assign position 6" -- so any one
+of those lines is an exact anchor: it fixes both the row pitch and which position index the
+line holds, and every other row follows from it. When a squad is full and no such label is
+on screen, the member is identified instead by testing the drawn text as a PREFIX of each
+member's name, which is necessary anyway because this panel truncates ("Ineth Deler...").
+If neither method resolves the line, the click is handed to DF unchanged.
 
-The portrait is found the same way `clickable-noble-names` finds DF's blocks: it is drawn
-from four consecutive texture-atlas tiles, so it is located on the spot instead of at a
-hardcoded column, at whatever width DF has squeezed the panel to.
+The portrait is located by shape, not column: it is drawn from four consecutive
+texture-atlas tiles, so it is found wherever DF has put it at whatever width the panel has
+been squeezed to.
+
+BOTH MOUSE EDGES ARE CONSUMED on a portrait -- the press and the click. Consuming only the
+click leaves DF free to act on the press, which opens the assignment list anyway and makes
+the overlay look dead even though it ran.
+
+    clickable-squad-members            what the overlay decided about recent clicks
+    clickable-squad-members debug      the same, with every click it saw and rejected
 
 Registered automatically as overlay `fort/clickable-squad-members.click`.
 ]]
 
 local overlay = require('plugins.overlay')
 
+local ROW_PITCH = 3          -- a member row is three lines tall, name in the middle
+
 local function squads_panel()
     return df.global.game.main_interface.squads
 end
 
--- the squad whose details are on screen
 local function viewing_squad()
     local sq = squads_panel()
+    if not sq.open then return nil end
     local idx = sq.viewing_squad_index
     if idx < 0 or idx >= #sq.squad_id then return nil end
     return df.squad.find(sq.squad_id[idx])
@@ -54,10 +62,11 @@ local function position_unit(pos)
     return hf and df.unit.find(hf.unit_id) or nil
 end
 
--- ---- reading the rendered row ------------------------------------------------
+-- ---- what got drawn ----------------------------------------------------------
 
 local function line_text(y)
-    local w = dfhack.screen.getWindowSize()
+    local w, h = dfhack.screen.getWindowSize()
+    if y < 0 or y >= h then return '' end
     local out = {}
     for x = 0, w - 1 do
         local p = dfhack.screen.readTile(x, y)
@@ -66,7 +75,7 @@ local function line_text(y)
     return table.concat(out)
 end
 
--- every 4-wide block of consecutive atlas tiles on this line: the member portraits
+-- 4-wide blocks of consecutive atlas tiles: the member portraits
 local function tile_blocks(y)
     local w = dfhack.screen.getWindowSize()
     local blocks, run_start, prev = {}, nil, nil
@@ -90,14 +99,24 @@ local function tile_blocks(y)
     return blocks
 end
 
--- the squad member whose name DF drew on this line, or nil. The name is truncated to fit
--- ("Ineth Deler..."), so the drawn text is tested as a PREFIX of each member's real name.
-local function member_on_line(y)
-    local squad = viewing_squad()
-    if not squad then return nil end
+-- ---- which position a line holds ---------------------------------------------
+
+-- DF numbers its empty slots on screen ("Assign position 6"), and those numbers are the
+-- position's own 1-based index -- an exact anchor that survives any scroll. Returns the
+-- first one found as {y = <line>, index = <1-based position>}.
+local function empty_slot_anchor()
+    local _, h = dfhack.screen.getWindowSize()
+    for y = 0, h - 1 do
+        local n = line_text(y):match('Assign position (%d+)')
+        if n then return {y = y, index = tonumber(n)} end
+    end
+end
+
+-- the member whose name is drawn on this line, by prefix -- the panel truncates
+local function member_by_name(squad, y)
     local text = line_text(y):gsub('%s+$', ''):gsub('^%s+', '')
     local prefix = text:gsub('%.+$', '')
-    if #prefix < 3 then return nil end             -- too little to identify anyone by
+    if #prefix < 3 then return nil end
     for _, pos in ipairs(squad.positions) do
         local unit = position_unit(pos)
         if unit then
@@ -107,17 +126,32 @@ local function member_on_line(y)
     end
 end
 
--- a member row is three lines tall with the name in the middle, and the portrait is drawn
--- down all three -- the same shape the Nobles screen uses
-local function row_at(y)
+-- the member on this line: by anchor where DF has given us one, by name otherwise. Returns
+-- unit, how ('anchor' | 'name') -- `how` is only carried for the debug listing.
+local function member_on_line(squad, y)
+    local anchor = empty_slot_anchor()
+    if anchor then
+        local delta = y - anchor.y
+        if delta % ROW_PITCH == 0 then
+            local idx = anchor.index + math.floor(delta / ROW_PITCH)
+            local pos = idx >= 1 and idx <= #squad.positions and squad.positions[idx - 1]
+            local unit = position_unit(pos)
+            if unit then return unit, 'anchor' end
+        end
+        return nil
+    end
+    local unit = member_by_name(squad, y)
+    if unit then return unit, 'name' end
+end
+
+-- the row under the cursor: the name sits on the clicked line or one either side
+local function row_at(squad, y)
     for _, name_y in ipairs({y, y - 1, y + 1}) do
-        local unit = member_on_line(name_y)
-        if unit then return unit, name_y end
+        local unit, how = member_on_line(squad, name_y)
+        if unit then return unit, name_y, how end
     end
 end
 
--- is the click on the portrait? The name line carries exactly one 4-wide tile block, the
--- portrait itself; the name is plain text and the rest of the row is flat background.
 local function on_portrait(x, name_y)
     for _, b in ipairs(tile_blocks(name_y)) do
         if x >= b.x1 and x <= b.x2 then return true end
@@ -125,11 +159,21 @@ local function on_portrait(x, name_y)
     return false
 end
 
+-- ---- what the overlay saw, for diagnosing a click that did nothing -----------
+
+log = log or {}
+local LOG_MAX = 12
+
+local function note(fmt, ...)
+    log[#log + 1] = ('%s'):format(fmt:format(...))
+    while #log > LOG_MAX do table.remove(log, 1) end
+end
+
 -- ---- the action --------------------------------------------------------------
 
--- Opened on a later frame, for the reason `clickable-noble-names` documents: the reveal
--- tears a unit sheet down, and it runs after this handler. Overlay updates keep ticking
--- with a panel up, where frame timers do not.
+-- Opened on a later frame: revealing the map tears a unit sheet down, and that runs after
+-- this handler. The wait is an overlay update rather than dfhack.timeout, whose 'frames'
+-- timers stop while a panel is up -- which is exactly the situation here.
 pending_sheet_id = pending_sheet_id or nil
 
 local function goto_member(unit)
@@ -139,7 +183,7 @@ local function goto_member(unit)
         df.global.plotinfo.follow_item = -1
         df.global.plotinfo.follow_unit = unit.id
     end
-    pending_sheet_id = unit.id                     -- off-map (raiding, say): sheet only
+    pending_sheet_id = unit.id             -- off-map (raiding, say): sheet only
 end
 
 -- ---- overlays ----------------------------------------------------------------
@@ -150,23 +194,34 @@ SquadMemberClickOverlay.ATTRS{
     default_pos = {x = 1, y = 1},
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Default',
-    frame = {w = 1, h = 1},          -- draws nothing; onInput sees the whole screen anyway
-    version = 1,
+    frame = {w = 1, h = 1},        -- draws nothing; onInput sees the whole screen anyway
+    version = 2,
 }
 
 function SquadMemberClickOverlay:onInput(keys)
-    if not keys._MOUSE_L then return false end
+    -- the press as well as the click: DF acts on the press, so consuming only the click
+    -- lets the assignment list open regardless
+    if not (keys._MOUSE_L or keys._MOUSE_L_DOWN) then return false end
     local x, y = dfhack.screen.getMousePos()
     if not x or not y then return false end
 
-    local unit, name_y = row_at(y)
-    if not unit or not on_portrait(x, name_y) then return false end
+    local squad = viewing_squad()
+    if not squad then note('(%s,%s) no squad being viewed', x, y) return false end
 
+    local unit, name_y, how = row_at(squad, y)
+    if not unit then note('(%s,%s) no member on lines %d-%d', x, y, y - 1, y + 1) return false end
+    if not on_portrait(x, name_y) then
+        note('(%s,%s) %s row (by %s) but x is not on the portrait', x, y,
+            dfhack.units.getReadableName(unit), how)
+        return false
+    end
+
+    note('(%s,%s) OPEN %s (by %s)', x, y, dfhack.units.getReadableName(unit), how)
     goto_member(unit)
     return true
 end
 
--- the deferred half, on plain `dwarfmode` so it still runs once the click is over
+-- the deferred half, on plain `dwarfmode` so it still runs after the click is over
 PendingSheetOverlay = defclass(PendingSheetOverlay, overlay.OverlayWidget)
 PendingSheetOverlay.ATTRS{
     desc = 'Opens the unit sheet a click on a squad member\'s portrait asked for.',
@@ -175,7 +230,7 @@ PendingSheetOverlay.ATTRS{
     viewscreens = 'dwarfmode',
     frame = {w = 1, h = 1},
     overlay_onupdate_max_freq_seconds = 0,
-    version = 1,
+    version = 2,
 }
 
 function PendingSheetOverlay:overlay_onupdate()
@@ -196,7 +251,23 @@ if dfhack_flags.module then
     return
 end
 
+-- ---- command line ------------------------------------------------------------
+
+local cmd = ({...})[1]
+
+if cmd == 'debug' or cmd == 'log' then
+    print(('clickable-squad-members: %d click%s seen'):format(#log, #log == 1 and '' or 's'))
+    for _, entry in ipairs(log) do print('  ' .. entry) end
+    if #log == 0 then
+        print('  Nothing -- the overlay never saw a click. Either it is disabled')
+        print('  (`overlay list | grep clickable-squad`) or the screen is not')
+        print('  dwarfmode/Squads/Default.')
+    end
+    return
+end
+
 require('plugins.overlay').rescan()
 print('clickable-squad-members: registered overlay fort/clickable-squad-members.click')
 print('  on a squad\'s details screen, click a member\'s portrait to open their sheet;')
 print('  the name still opens DF\'s position-assignment list.')
+print('  `clickable-squad-members debug` lists what it decided about recent clicks.')
