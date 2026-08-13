@@ -12,6 +12,10 @@ rest of the row live:
     detail sheet opens and the camera starts following them -- the same pair of actions
     dwarf-rts does for a squad member. The Info panel closes on the way out, because a
     camera following a dwarf behind a full-screen panel is not much of a view.
+
+    The whole row counts, and a row is three lines tall with the NAME IN THE MIDDLE: a blank
+    line, the name, then the squad line. So the line above a name is that noble's, and the
+    line below a name is still theirs rather than the next noble's.
   * CLICK A ROOM ICON -- the office / bedroom / dining room / tomb squares at the right of
     the row -- and the map jumps to that room instead. No sheet, no follow: you asked where
     the room is, so you get the room. A noble with no room of that kind gets a one-line
@@ -120,14 +124,21 @@ local function noble_on_line(y)
     end
 end
 
--- a row is three lines tall: the name, the squad line under it, and a separator. The icons
--- are drawn down all three, so a click anywhere in the block belongs to the row above it.
-local ROW_HEIGHT = 3
-
+-- A row is three lines tall WITH THE NAME IN THE MIDDLE: a blank line, the name, then the
+-- squad line. The buttons and room icons are drawn down all three, so the line above a name
+-- belongs to that noble and the line below a name does NOT belong to the next one -- getting
+-- this backwards hands the next row's room icons to the row above it.
+--
+-- So the name sits on the clicked line, one above it, or one below it, and since names are
+-- three lines apart at most one of those can hold one: no ambiguity to resolve.
+--
+-- The name line is what gets returned and measured, not the clicked line. On a row's top
+-- line DF draws the assign button in the plain colour rather than cyan, which would read as
+-- a room icon; on the name line every block is drawn in its true colour.
 local function row_at(y)
-    for dy = 0, ROW_HEIGHT - 1 do
-        local nl = noble_on_line(y - dy)
-        if nl then return nl, y - dy, dy end
+    for _, name_y in ipairs({y, y - 1, y + 1}) do
+        local nl = noble_on_line(name_y)
+        if nl then return nl, name_y end
     end
 end
 
@@ -160,7 +171,7 @@ end
 local MARGIN = 1   -- DF's hitboxes can run a shade wider than the graphic; never clip them
 
 -- 'room', <ROOM_ICONS entry>  |  'noble'  |  nil (not ours -- give the click back to DF)
-local function classify(x, row_line, dy)
+local function classify(x, row_line)
     local buttons, icons = row_blocks(row_line)
     if #buttons == 0 then return nil end          -- unrecognisable row; don't guess
     for _, b in ipairs(buttons) do
@@ -172,9 +183,9 @@ local function classify(x, row_line, dy)
             return room and 'room' or nil, room   -- a 5th+ icon is not ours
         end
     end
-    -- the row proper: caption, name and the space among them, left of the last button. The
-    -- separator line is left out so a click in the gap doesn't fire the row above it.
-    if x < buttons[#buttons].x1 and dy < ROW_HEIGHT - 1 then return 'noble' end
+    -- the row proper: caption, name and the space among them, left of the last button --
+    -- on any of the row's three lines, since all three are the noble's own block
+    if x < buttons[#buttons].x1 then return 'noble' end
 end
 
 -- ---- the actions -------------------------------------------------------------
@@ -252,10 +263,10 @@ function NobleClickOverlay:onInput(keys)
     local x, y = dfhack.screen.getMousePos()
     if not x or not y then return false end
 
-    local nl, row_line, dy = row_at(y)
+    local nl, row_line = row_at(y)
     if not nl or not nl.un then return false end
 
-    local what, room = classify(x, row_line, dy)
+    local what, room = classify(x, row_line)
     if not what then return false end             -- DF's button, or none of our business
 
     if what == 'room' then goto_room(nl.un, room) else goto_noble(nl.un) end
