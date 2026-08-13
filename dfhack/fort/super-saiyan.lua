@@ -1,4 +1,4 @@
--- A dwarf enters a martial trance: pause, centre on them, blink a cursor, play the theme.
+-- A dwarf enters a martial trance: pause the game, centre on them, play the theme.
 --@module = true
 --@enable = true
 --[[
@@ -6,14 +6,22 @@ super-saiyan
 
 A martial trance is the best thing a dwarf can do and DF tells you about it in a line of grey
 text you will miss. This gives the moment its due: the instant a citizen enters a martial
-trance the game PAUSES, the view snaps to them, a cursor blinks on their tile for three
-seconds, and the Ultra Instinct theme plays in full.
+trance the game PAUSES, the view snaps to them, and the Ultra Instinct theme plays in full.
 
-  enable super-saiyan     watch for martial trances
-  disable super-saiyan    stop watching
-  super-saiyan            status
-  super-saiyan test       do the whole thing on a citizen right now, trance or not
-  super-saiyan stop       cut the theme short (and stop the cursor blinking)
+There WAS a cursor blinking on the dwarf's tile for three seconds. It drew in the wrong
+place: it assumed the map viewport's top-left cell is screen (0,0), so `pos - window` is the
+screen cell, and that is not where DF puts the map. Rather than leave a marker pointing at
+the wrong dwarf, it is gone -- the view is centred on them anyway, which is the thing that
+actually finds them.
+
+  enable fort/super-saiyan    watch for martial trances
+  disable fort/super-saiyan   stop watching
+  super-saiyan                status
+  super-saiyan test           do the whole thing on a citizen right now, trance or not
+  super-saiyan stop           cut the theme short
+
+`enable` needs the FOLDER in the name -- `enable super-saiyan` answers "No such plugin or
+Lua script", because DFHack resolves an enableable script by its full script path.
 
 `stop` ends the current celebration without disabling the watcher: the theme runs 167
 seconds and a trance in the middle of a siege is not always a moment to sit through. The
@@ -40,23 +48,19 @@ simply silent; the status line says so.
 
 The track is read from `dfhack-config/scripts/data/`, beside the other data files.
 
-TIMING IS REAL TIME, not game time, and it has to be: the first thing this does is pause, and
-a paused fort advances no frames or ticks at all. The blink is driven from an overlay's
-render callback against dfhack.getTickCount(), both of which keep running while paused.
+PAUSING IS THE FIRST THING IT DOES, so anything that has to happen afterwards cannot be
+driven by frame timers or game ticks -- a paused fort advances neither. The theme is handed
+to the ssaudio plugin, which plays on its own thread and is unaffected.
 ]]
-
-local overlay = require('plugins.overlay')
 
 local GLOBAL_KEY = 'super-saiyan'
 local CHECK_FRAMES = 5             -- trances are rare; no need to look every frame
-local BLINK_MS = 3000              -- how long the cursor blinks for
-local BLINK_PERIOD_MS = 400        -- on for half of this, off for the other half
 
 local THEME = dfhack.getDFPath() .. '/dfhack-config/scripts/data/ultra_instinct_theme.mp3'
 
 -- ---- the sound ---------------------------------------------------------------
 
--- the plugin is optional: without it the pause/centre/blink still happen
+-- the plugin is optional: without it the pause and the camera snap still happen
 local function audio()
     local ok, plug = pcall(require, 'plugins.ssaudio')
     if ok and plug and plug.play then return plug end
@@ -102,9 +106,6 @@ local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) en
 
 -- ---- the moment --------------------------------------------------------------
 
--- set by a trance, read by the overlay that draws the cursor
-blink = blink or nil               -- {unit_id = <id>, until_ms = <tick>}
-
 local function is_trancing(unit)
     return unit.counters.soldier_mood == df.soldier_mood_type.MartialTrance
 end
@@ -115,7 +116,6 @@ local function celebrate(unit)
     if pos and pos.x >= 0 then
         dfhack.gui.revealInDwarfmodeMap(pos, true, true)
     end
-    blink = {unit_id = unit.id, until_ms = dfhack.getTickCount() + BLINK_MS}
     local sound = play_theme()
     load_state()
     state.trances = state.trances + 1
@@ -181,12 +181,12 @@ end
 
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
-        state, seen, blink = nil, {}, nil
+        state, seen = nil, {}
         load_state()
         if state.enabled then start() end
     elseif sc == SC_MAP_UNLOADED then
         stop()
-        state, seen, blink = nil, {}, nil
+        state, seen = nil, {}
     end
 end
 
@@ -197,42 +197,6 @@ function set_enabled(on)
     save_state()
     return enabled
 end
-
--- ---- the blinking cursor -----------------------------------------------------
-
--- Drawn from an overlay because the game is PAUSED by then: frame timers and game ticks are
--- both stopped, and a render callback is the only thing still being called. The clock is
--- dfhack.getTickCount() (real milliseconds) for the same reason.
-TranceCursorOverlay = defclass(TranceCursorOverlay, overlay.OverlayWidget)
-TranceCursorOverlay.ATTRS{
-    desc = 'Blinks a cursor on a dwarf who has just entered a martial trance.',
-    default_pos = {x = 1, y = 1},
-    default_enabled = true,
-    viewscreens = 'dwarfmode',
-    frame = {w = 1, h = 1},
-    version = 1,
-}
-
-function TranceCursorOverlay:onRenderFrame(dc, rect)
-    if not blink then return end
-    local now = dfhack.getTickCount()
-    if now >= blink.until_ms then blink = nil return end
-    if (now % BLINK_PERIOD_MS) * 2 >= BLINK_PERIOD_MS then return end   -- the off half
-
-    local unit = df.unit.find(blink.unit_id)
-    if not unit then blink = nil return end
-    local pos = xyz2pos(dfhack.units.getPosition(unit))
-    if not pos or pos.x < 0 or pos.z ~= df.global.window_z then return end
-
-    -- the map viewport's top-left cell is screen (0,0); window_x/y is the map tile drawn there
-    local vp = df.global.gps.main_viewport
-    local x, y = pos.x - df.global.window_x, pos.y - df.global.window_y
-    if x < 0 or y < 0 or x >= vp.dim_x or y >= vp.dim_y then return end
-
-    dfhack.screen.paintTile({ch = 'X', fg = COLOR_LIGHTCYAN, bg = COLOR_BLACK, bold = true}, x, y)
-end
-
-OVERLAY_WIDGETS = {cursor = TranceCursorOverlay}
 
 if dfhack_flags.module then
     return
@@ -252,8 +216,6 @@ end
 local cmd = ({...})[1]
 
 if cmd == 'stop' then
-    -- the blink goes too: `stop` means "that's enough", not "just mute it"
-    blink = nil
     local plug = audio()
     if not plug then
         print('super-saiyan: nothing to stop -- no ssaudio plugin loaded')
@@ -278,7 +240,6 @@ if cmd == 'test' then
     return
 end
 
-require('plugins.overlay').rescan()
 print(('super-saiyan: %s'):format(enabled and 'ENABLED -- watching for martial trances'
     or 'disabled  (`enable super-saiyan` to watch)'))
 print(('  theme: %s'):format(dfhack.filesystem.exists(THEME) and THEME or (THEME .. '  [MISSING]')))
