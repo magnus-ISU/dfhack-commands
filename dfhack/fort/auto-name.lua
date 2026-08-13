@@ -18,6 +18,13 @@ and are drawn from `dfhack-config/scripts/data/auto-name-names.txt` -- a plain, 
 file: one name per line, the MALE block first, then a single blank line, then the
 FEMALE block. Lines starting with `#` are comments.
 
+No two civilians ever share a first name. Every name it hands out is checked against
+the first name of every LOADED unit -- fort civilians and any loaded historical figure
+(visitors, merchants, diplomats, invaders) -- so a migrant is never given the name of
+somebody already walking around. It also re-checks the dwarves it named on every scan
+and renames any that have come to collide with a newcomer; the dwarf whose name it may
+not touch (a founder, a fort-born child, a real historical figure) always keeps it.
+
 What it leaves alone:
   * the original 7 (the embark group)
   * any dwarf that already has a nickname
@@ -25,7 +32,7 @@ What it leaves alone:
   * REAL historical figures -- a migrant flagged important, or one that was a former
     member of another entity (e.g. came from another fort) or has held a noble
     position -- keeps its own name
-  * any migrant it has already named (so it never renames twice)
+  * any migrant it has already named, unless its name has become a duplicate
 
 Waves are identified by the dwarves' real in-game arrival time (the historical
 "settled at this site" event), so a wave is grouped correctly no matter when the
@@ -159,32 +166,49 @@ local function shuffled_indices(n)
     return idx
 end
 
--- a name not used in this wave; prefer one not used anywhere in the fort yet
-local function pick_from(list, wave_used, global_used)
+-- a name nobody in the fort is using. `taken` is the hard constraint: it holds the
+-- first name of every loaded unit (see name_holders), so a returned name is unique.
+local function pick_from(list, taken)
     if not list then return nil end
-    local fallback
     for _, i in ipairs(shuffled_indices(#list)) do
         local n = list[i]
-        if not wave_used[n] then
-            if global_used[n] then fallback = fallback or n else return n end
-        end
+        if not taken[n] then return n end
     end
-    return fallback
+    return nil
 end
 
--- returns name, exact_letter_match. Tries the wave's letter first; if that gendered
--- pool is exhausted, rolls FORWARD through the alphabet (Q->R->S..., wrapping Z->A)
--- and takes the first free name -- never random, never straight back to A.
-local function pick_name(sex, letter, wave_used, global_used)
+-- returns name, exact_letter_match. Tries the wave's letter first; if every free name
+-- of that letter is taken, rolls FORWARD through the alphabet (Q->R->S..., wrapping
+-- Z->A) and takes the first free name -- never random, never straight back to A.
+-- nil means the whole gendered pool is in use: the caller leaves the dwarf alone
+-- rather than hand out a duplicate.
+local function pick_name(sex, letter, taken)
     local g = pools[sex] or pools[1]
     local base = string.byte(letter) - string.byte('a')
     for step = 0, 25 do
         local L = string.char((base + step) % 26 + string.byte('a'))
-        local n = pick_from(g.byletter[L], wave_used, global_used)
+        local n = pick_from(g.byletter[L], taken)
         if n then return n, step == 0 end
     end
-    -- every letter's pool is used up this wave: last-ditch any free gendered name
-    return pick_from(g.all, wave_used, global_used), false
+    return nil, false
+end
+
+-- first names currently in use, lowercased -> list of the units holding them. Covers
+-- every fort civilian AND every loaded historical figure (visitors, merchants,
+-- invaders), so those names are never handed to a migrant. Bounded by units.active.
+local function name_holders()
+    local holders = {}
+    for _, u in ipairs(df.global.world.units.active) do
+        if dfhack.units.isCitizen(u) or u.hist_figure_id >= 0 then
+            local n = u.name.first_name
+            if n and n ~= '' then
+                n = n:lower()
+                holders[n] = holders[n] or {}
+                table.insert(holders[n], u)
+            end
+        end
+    end
+    return holders
 end
 
 -- A migrant that came from ANOTHER FORT keeps its own name. The tell: its histfig has an
@@ -219,7 +243,7 @@ end
 -- persistent state
 -- ---------------------------------------------------------------------------
 -- {enabled, initialized, next_index, wave_index={key=idx}, used={key={names}},
---  processed={unit_ids}}
+--  processed={unit_ids}, unit_wave={["unit id"]=key}}
 
 local function get_state()
     local s = dfhack.persistent.getSiteData(GLOBAL_KEY) or {}
@@ -230,6 +254,7 @@ local function get_state()
     s.used = s.used or {}
     s.processed = s.processed or {}
     s.skip = s.skip or {}              -- founders + fort-born: examined, never rename
+    s.unit_wave = s.unit_wave or {}    -- "unit id" -> wave key (so a re-name keeps its letter)
     s.founder_key = s.founder_key      -- "year:tick" of fort founding (earliest settle)
     return s
 end
@@ -250,10 +275,11 @@ local function process()
     local processed, skip = {}, {}
     for _, id in ipairs(s.processed) do processed[id] = true end
     for _, id in ipairs(s.skip) do skip[id] = true end
-    local global_used = {}
-    for _, names in pairs(s.used) do
-        for _, n in ipairs(names) do global_used[n] = true end
-    end
+
+    -- who holds which first name right now; `taken` is the hard no-duplicates rule
+    local holders = name_holders()
+    local taken = {}
+    for n in pairs(holders) do taken[n] = true end
 
     local cits = living_citizens()
 
@@ -277,7 +303,53 @@ local function process()
             end
         end
     end
-    if #candidates == 0 then return {} end
+    -- ---- keep first names unique -------------------------------------------
+    -- Anything WE named that has come to share its first name with another loaded
+    -- unit gets a fresh one, keeping its own wave's letter. The other holder wins
+    -- the name whenever we may not rename it -- a founder, a fort-born child, a
+    -- real historical figure or a visitor is never touched.
+    local report = {}
+    local dup_names = {}
+    for n, list in pairs(holders) do
+        if #list > 1 then table.insert(dup_names, n) end
+    end
+    table.sort(dup_names)
+    for _, n in ipairs(dup_names) do
+        local list = holders[n]
+        table.sort(list, function(a, b) return a.id < b.id end)
+        local keeper
+        for _, u in ipairs(list) do
+            if not processed[u.id] then
+                keeper = u
+                break
+            end
+        end
+        keeper = keeper or list[1]
+        for _, u in ipairs(list) do
+            if u ~= keeper and processed[u.id] then
+                local key = s.unit_wave[tostring(u.id)]
+                local widx = key and s.wave_index[key]
+                local letter = widx and wave_letter(widx) or n:sub(1, 1)
+                local sex = (u.sex == 0) and 0 or 1
+                local name, exact = pick_name(sex, letter, taken)
+                if name then
+                    set_first_name(u, name)
+                    taken[name] = true
+                    if key then
+                        s.used[key] = s.used[key] or {}
+                        table.insert(s.used[key], name)
+                    end
+                    table.insert(report, {wave = letter, id = u.id, name = name,
+                        sex = sex, exact = exact, was = n})
+                end
+            end
+        end
+    end
+
+    if #candidates == 0 then
+        save_state(s)
+        return report
+    end
 
     -- the founding arrival key = the earliest "settled here" time among ALL
     -- citizens. Computed once (then persisted): the original 7 share it.
@@ -325,27 +397,28 @@ local function process()
     for k in pairs(groups) do table.insert(allkeys, k) end
     table.sort(allkeys, function(a, b) return s.wave_index[a] < s.wave_index[b] end)
 
-    local report = {}
     for _, k in ipairs(allkeys) do
         local letter = wave_letter(s.wave_index[k])
         s.used[k] = s.used[k] or {}
-        local wave_used = {}
-        for _, n in ipairs(s.used[k]) do wave_used[n] = true end
 
         local units = groups[k]
         table.sort(units, function(a, b) return a.id < b.id end)
         for _, u in ipairs(units) do
             local sex = (u.sex == 0) and 0 or 1
-            local name, exact = pick_name(sex, letter, wave_used, global_used)
+            local name, exact = pick_name(sex, letter, taken)
             if name then
                 set_first_name(u, name)
-                wave_used[name] = true
-                global_used[name] = true
+                taken[name] = true
                 table.insert(s.used[k], name)
                 table.insert(s.processed, u.id)
+                s.unit_wave[tostring(u.id)] = k
                 processed[u.id] = true
                 table.insert(report,
                     {wave = letter, id = u.id, name = name, sex = sex, exact = exact})
+            else
+                -- every free name of this dwarf's sex is in use: leave it alone (a
+                -- duplicate is worse than the original name) and retry next scan.
+                table.insert(report, {wave = letter, id = u.id, sex = sex, exhausted = true})
             end
         end
     end
@@ -354,23 +427,49 @@ local function process()
     return report
 end
 
+-- did anything actually get renamed? (entries flagged `exhausted` are only a warning)
+local function changed(report)
+    for _, r in ipairs(report) do
+        if not r.exhausted then return true end
+    end
+    return false
+end
+
 local function print_report(report)
     if #report == 0 then
         print('auto-name: no new migrants to name.')
         return
     end
-    local counts = {}
-    for _, r in ipairs(report) do counts[r.wave] = (counts[r.wave] or 0) + 1 end
+    local counts, named, redone, stuck = {}, 0, 0, 0
+    for _, r in ipairs(report) do
+        if r.exhausted then stuck = stuck + 1
+        else
+            counts[r.wave] = (counts[r.wave] or 0) + 1
+            if r.was then redone = redone + 1 else named = named + 1 end
+        end
+    end
     local parts = {}
     for w, c in pairs(counts) do table.insert(parts, ('%s=%d'):format(w:upper(), c)) end
     table.sort(parts)
-    print(('auto-name: named %d migrant(s)  [wave=count: %s]')
-        :format(#report, table.concat(parts, ', ')))
+    print(('auto-name: named %d migrant(s)%s  [wave=count: %s]'):format(named,
+        redone > 0 and (', renamed %d duplicate(s)'):format(redone) or '',
+        table.concat(parts, ', ')))
+    local cap_first = function(n) return (n:gsub('^%l', string.upper)) end
     for _, r in ipairs(report) do
-        local cap = r.name:gsub('^%l', string.upper)
-        local tail = r.exact and '' or ('  (no free %s-name; used a fallback)'):format(r.wave:upper())
-        print(('  wave %s  unit %d  %s  -> %s%s')
-            :format(r.wave:upper(), r.id, r.sex == 1 and 'M' or 'F', cap, tail))
+        if r.exhausted then
+            print(('  wave %s  unit %d  %s  -- no free name left in the whole pool; left as-is')
+                :format(r.wave:upper(), r.id, r.sex == 1 and 'M' or 'F'))
+        else
+            local tail = r.exact and ''
+                or ('  (no free %s-name; used a fallback)'):format(r.wave:upper())
+            print(('  wave %s  unit %d  %s  %s-> %s%s'):format(r.wave:upper(), r.id,
+                r.sex == 1 and 'M' or 'F',
+                r.was and ('duplicate ' .. cap_first(r.was) .. ' ') or '',
+                cap_first(r.name), tail))
+        end
+    end
+    if stuck > 0 then
+        print(('  (add more names to %s)'):format(NAMES_PATH))
     end
 end
 
@@ -389,7 +488,9 @@ local function start_heartbeat()
     local function hb()
         if not isEnabled() or my ~= hb_gen() then return end
         local ok, report = pcall(process)
-        if ok and #report > 0 then print_report(report) end
+        -- a report of nothing but "pool exhausted" entries repeats every scan: don't
+        -- print it over and over, `auto-name scan` shows it on demand.
+        if ok and changed(report) then print_report(report) end
         dfhack.timeout(SCAN_FRAMES, 'frames', hb)
     end
     hb()
