@@ -94,6 +94,7 @@ Marks a wild animal for taming, so it's trained the moment it's caught.
 
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
+Soldiers whose squad is under orders are left to those orders.
 
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.

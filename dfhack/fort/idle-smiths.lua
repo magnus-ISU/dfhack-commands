@@ -34,6 +34,13 @@ LEGAL metal currently has the most bars in the fort. Legality comes from the mat
 item flags: armor needs ITEMS_ARMOR (silver has none -- silver armor is never queued), weapons
 ITEMS_WEAPON, furniture/crafts/cages ITEMS_HARD. Anvils excepted: always iron (ITEMS_ANVIL).
 
+SOLDIERS UNDER ORDERS ARE LEFT ALONE. A dwarf whose squad is carrying out an order -- or who
+holds an individual one -- is doing that order, however badly they want to craft, so they are
+never handed a forge job and the squad never arrives one dwarf short. It is checked both when
+the slow scan picks candidates and again when a forge is actually paired with a dwarf, since
+an order can be given in between; the moment the order ends they are a candidate again. An
+off-duty soldier with no order on them is fair game, as before.
+
 The toggle appears on the forge's Workers tab, exactly like the original's. A forge with a
 workshop master assigned cannot be used. Job scheduling mirrors idle-crafting: a slow scan
 buckets dwarves by how badly they need to craft (same 500/1000/10000 thresholds), a fast
@@ -363,6 +370,32 @@ local function invalidProfile(forge)
             and p.blocked_labors[TRAPPER])
 end
 
+---A SOLDIER UNDER ORDERS IS NOT IDLE, whatever their craft need says. A station, patrol,
+---kill or training order is the thing they are supposed to be doing, and handing them a
+---forge job pulls them off it -- the squad arrives one dwarf short, and on a kill order
+---that dwarf is walking to a workshop while the rest fight.
+---
+---Both scopes count: `squad.orders` is the order given to the whole squad, and a member can
+---also carry an individual one in their own position's `orders`. Either means busy.
+---
+---A citizen can belong to a squad that is not this fort's (a soldier who joined keeps the
+---squad_id of their old civ's squad), so a missing squad record is treated as no orders
+---rather than an error.
+local function under_military_order(unit)
+    local squad_id = unit.military and unit.military.squad_id or -1
+    if squad_id < 0 then return false end
+    local squad = df.squad.find(squad_id)
+    if not squad then return false end
+    if #squad.orders > 0 then return true end
+    for _, pos in ipairs(squad.positions) do
+        if #pos.orders > 0 and pos.occupant >= 0 then
+            local hf = df.historical_figure.find(pos.occupant)
+            if hf and hf.unit_id == unit.id then return true end
+        end
+    end
+    return false
+end
+
 -- ---- scheduling loops (mirroring idle-crafting) ------------------------------
 
 local function stop()
@@ -384,6 +417,11 @@ local function processUnit(forge, idx, unit_id)
     elseif not idle.canAccessWorkshop(unit, forge) then
         return false
     elseif not dfhack.units.isJobAvailable(unit) then
+        return false
+    elseif under_military_order(unit) then
+        -- checked again HERE, not just in the slow scan: an order can be given in the
+        -- minutes between that scan and this pairing. Left in `watched`, so the moment the
+        -- order is over they are a candidate again.
         return false
     end
     local job_type, subtype, mat, bars = select_forge_job(forge, unit)
@@ -442,7 +480,7 @@ local function main_loop()
     local watching = false
     for idx in ipairs(thresholds) do watched[idx] = {} end
     for _, unit in ipairs(dfhack.units.getCitizens(true, false)) do
-        local need = idle.getCraftingNeed(unit, nil)
+        local need = not under_military_order(unit) and idle.getCraftingNeed(unit, nil)
         if need then
             for idx, threshold in ipairs(thresholds) do
                 if need > threshold then
