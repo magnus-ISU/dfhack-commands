@@ -17,10 +17,16 @@ ways a crown reaches a commoner, all watched:
   * A PICKUP-EQUIPMENT JOB holds a reference to the crown. That is the "tries to" case, caught
     before the crown is ever put on.
 
-A NOBLE is anyone holding a position assignment in the fort's own government OR in its parent
-civilization -- so the monarch counts as much as the mayor. Anything a noble wears, owns or
-fetches is left strictly alone, and a crown lying in a stockpile with nobody attached to it is
-not touched either.
+A NOBLE is anyone holding ANY position, of any rank, in any entity -- the monarch and the mayor,
+and just as much the bookkeeper, broker, manager and expedition leader. Administrators are
+nobles for this purpose: the fort gave them the office, so the fort may dress them for it.
+Anything such a dwarf wears, owns or fetches is left strictly alone, and a crown lying in a
+stockpile with nobody attached to it is not touched either.
+
+The test is `dfhack.units.getNoblePositions`, read off the dwarf's own historical figure, so it
+sees the assignment wherever it is recorded. Scanning `positions.assignments` on the site
+government and the civ instead -- what this did before -- missed holders those two vectors do
+not list, and quietly confiscated the broker's and the bookkeeper's crowns.
 
 HAULING IS ALWAYS ALLOWED, and this is the important exclusion. A crown in a dwarf's inventory
 in any role but `Worn` is being carried somewhere, and the destination that matters is the
@@ -46,9 +52,13 @@ dwarf is stripped. Two consequences worth knowing:
     on its own eventually, and clearing an owner mid-job is exactly the kind of live-structure
     edit that crashed `adamantine-hospital`'s retarget mode (BROKEN_FEATURES.md).
 
-`noble-crowns release` unforbids every crown in the fort, for when a crown has been freed up
-and you want a noble to be able to claim it again. The watcher only ever forbids, so a crown
-that no commoner has hold of stays released.
+The forbid is a SYNC, not a ratchet: each pass releases any crown no commoner has hold of any
+more. A peasant's crown that gets forbidden and is then dropped, or worn by a dwarf who has
+since been appointed bookkeeper, is unforbidden again on the next check -- otherwise it stayed
+locked out of everyone's hands, nobles included, until released by hand.
+
+`noble-crowns release` unforbids every crown in the fort immediately, without waiting for a
+pass; with the watcher enabled it will re-forbid any a commoner still has hold of.
 
 Usage:
     enable noble-crowns      watch crowns (checks every 100 frames)
@@ -81,10 +91,18 @@ local function save_state() dfhack.persistent.saveSiteData(GLOBAL_KEY, state) en
 
 -- ---- nobles -----------------------------------------------------------------
 
--- every historical figure holding a position, in the fort's government AND in the civ above
--- it -- the monarch's assignment lives on the civ, not on your site, so checking only the site
--- would forbid the king's own crown. Rebuilt per check: a fort has a couple of dozen
--- assignments, and a position changing hands must take effect without a reload.
+-- ANY position counts, elected or appointed, grand or clerical: monarch, mayor, baron, and
+-- equally the bookkeeper, broker, manager and expedition leader. "Administrator" is not a
+-- lesser rank here -- if the fort gave a dwarf a hat, the dwarf may keep the crown.
+--
+-- The test that decides this is `dfhack.units.getNoblePositions`, which walks the dwarf's OWN
+-- historical figure for position links and so finds an assignment in whatever entity holds it.
+-- The earlier version instead scanned `positions.assignments` on the site government and the
+-- civ and matched `assignment.histfig`, which reads as "no position at all" for any holder
+-- those two vectors do not happen to list -- which is how the broker and the bookkeeper ended
+-- up losing their crowns. The entity scan is KEPT as a second opinion, for the mirror-image
+-- case (the assignment names the histfig but the histfig carries no link), and the two are
+-- OR-ed: a hit from either one is a noble.
 local function noble_hfs()
     local out = {}
     for _, ent_id in ipairs({df.global.plotinfo.group_id, df.global.plotinfo.civ_id}) do
@@ -99,7 +117,10 @@ local function noble_hfs()
 end
 
 local function is_noble(unit, nobles)
-    return unit and unit.hist_figure_id >= 0 and nobles[unit.hist_figure_id] or false
+    if not unit then return false end
+    local ok, positions = pcall(dfhack.units.getNoblePositions, unit)
+    if ok and positions and #positions > 0 then return true end
+    return unit.hist_figure_id >= 0 and nobles[unit.hist_figure_id] or false
 end
 
 -- ---- crowns -----------------------------------------------------------------
@@ -177,28 +198,41 @@ local function forbid(item, unit, why)
         COLOR_YELLOW, true)
 end
 
+-- who, if anyone, is trying to keep this crown -- possession first, then the pickup job
+local function holder(item)
+    local unit, why = possessor(item)
+    if not unit then
+        local worker, jobname = job_claimant(item)
+        if worker then unit, why = worker, 'fetching it for ' .. jobname end
+    end
+    return unit, why
+end
+
 -- one pass over the fort's crowns. Bounded by the crown count (single digits in most forts),
 -- and the units.active walk inside possessor() only runs for crowns that are not already
 -- forbidden, so a fort that has settled costs one vector read per crown per check.
+--
+-- The pass is a SYNC, not a one-way ratchet: a crown is forbidden exactly while a commoner
+-- has hold of it, and released the moment that stops being true. Without the release half, a
+-- crown forbidden off a peasant stayed forbidden after the peasant dropped it or was appointed
+-- bookkeeper -- unclaimable by anyone, noble included, until `noble-crowns release` was run by
+-- hand. Only crowns are touched, and only while the watcher is enabled.
 local function do_check()
     if not dfhack.world.isFortressMode() then return 0 end
     local nobles = noble_hfs()
     local hits = 0
     for _, item in ipairs(crown_items()) do
-        if not item.flags.forbid then
-            local unit, why = possessor(item)
-            if not unit then
-                local worker, jobname = job_claimant(item)
-                if worker then unit, why = worker, 'fetching it for ' .. jobname end
-            end
-            -- CITIZENS ONLY. A merchant's stock walks into the fort on the merchant's own back,
-            -- and a visiting lord's position is held in HIS civ, not ours, so he reads as a
-            -- commoner here. Forbidding either would be confiscating someone else's property --
-            -- and for the caravan, forbidding goods that came to be traded.
-            if unit and dfhack.units.isCitizen(unit) and not is_noble(unit, nobles) then
-                forbid(item, unit, why)
-                hits = hits + 1
-            end
+        local unit, why = holder(item)
+        -- CITIZENS ONLY. A merchant's stock walks into the fort on the merchant's own back,
+        -- and a visiting lord's position is held in HIS civ, not ours, so he reads as a
+        -- commoner here. Forbidding either would be confiscating someone else's property --
+        -- and for the caravan, forbidding goods that came to be traded.
+        local commoner = unit and dfhack.units.isCitizen(unit) and not is_noble(unit, nobles)
+        if commoner and not item.flags.forbid then
+            forbid(item, unit, why)
+            hits = hits + 1
+        elseif not commoner and item.flags.forbid then
+            item.flags.forbid = false
         end
     end
     return hits
@@ -293,11 +327,7 @@ else
     for _, it in ipairs(items) do if it.flags.forbid then held = held + 1 end end
     print(('  crowns in the fort: %d (%d forbidden)'):format(#items, held))
     for _, it in ipairs(items) do
-        local unit, why = possessor(it)
-        if not unit then
-            local worker, jobname = job_claimant(it)
-            if worker then unit, why = worker, 'fetching it for ' .. jobname end
-        end
+        local unit, why = holder(it)
         local who = 'unclaimed or in transit'
         if unit then
             local rank = is_noble(unit, nobles) and 'NOBLE'

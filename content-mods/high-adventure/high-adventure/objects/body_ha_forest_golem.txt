@@ -1,0 +1,34 @@
+body_ha_forest_golem
+
+[OBJECT:BODY]
+
+Two custom parts for the forest golem. Both exist so that a body part CATEGORY
+can be targeted -- vanilla categories are shared (both hands are CATEGORY:HAND),
+and CDI:BP_REQUIRED and TISSUE_LAYER both select by category.
+
+GOLEM_HEART is the kill switch. THOUGHT is the token that makes a part lethal to
+lose: destroying a thought centre kills instantly, the same way a brain does.
+Putting it in the UPPERBODY rather than the head is what makes the head and neck
+cosmetic -- the golem has no brain and no skull, so decapitation takes nothing
+vital with it. INTERNAL keeps it buried until the torso is broken open, which is
+the "uncover the heart by destroying the body" part.
+
+Vanilla ships an equivalent module (BODY:UB_BRAIN in body_default.txt) but no
+vanilla creature uses it, so this path is unproven in play -- see CHANGES.md.
+
+[BODY:HA_GOLEM_HEART]
+	[BP:GOLEM_HEART:golden heart:STP][CONTYPE:UPPERBODY][THOUGHT][INTERNAL][SMALL][CATEGORY:GOLEM_HEART]
+		[DEFAULT_RELSIZE:100]
+
+FLAMETHROWER is the glass nozzle on the left hand. CON:LH attaches it to the left
+hand specifically -- CONTYPE:GRASP would attach one to each hand and give the
+golem two of them. It is a separate part rather than a re-tissued hand so that
+CDI:BP_REQUIRED can name it: lose the nozzle (or the hand carrying it, which
+takes its children with it) and the flame interaction is revoked.
+
+Small on purpose: a low RELSIZE makes it an easy part to sever, which is the
+"fragile" half of the design.
+
+[BODY:HA_GOLEM_FLAMETHROWER]
+	[BP:FLAMETHROWER:flamethrower:STP][CON:LH][SMALL][CATEGORY:FLAMETHROWER]
+		[DEFAULT_RELSIZE:30]

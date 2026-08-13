@@ -1,0 +1,255 @@
+entity_ha_forest_golem
+
+[OBJECT:ENTITY]
+
+Forest golems: a civilization that founds ONE forest retreat and never founds
+another. The placement layout is the same one ha-high-elves uses -- see the
+comments there -- and the reasoning bears repeating: BIOME_SUPPORT is not what
+limits expansion. SETTLEMENT_BIOME and START_BIOME are what grant the right to
+build, so both are absent; EXCLUSIVE_START_BIOME places the first site and
+BIOME_SUPPORT stays only because worldgen rejects a world with none at all.
+
+Because each civ is exactly one grove, MAX_STARTING_CIV_NUMBER is the dial for
+"how many golem groves exist in the world". They start in forest, which is where
+the elves start, so the two compete for the same handful of good sites.
+
+They are also the quietest civ in the suite, on purpose. The four tokens that
+send members out into the world as roaming historical figures -- WANDERER,
+BEAST_HUNTER, SCOUT, MERCENARY -- are all absent, which is how vanilla kobolds
+stay out of everyone's history. NO_ARTIFACT_CLAIMS keeps them out of artifact
+quest chains, and they carry none of SIEGER, AMBUSHER, BABYSNATCHER, ITEM_THIEF
+or LOCAL_BANDITRY, so they never mount an offensive. What they cannot be stopped
+from doing is holding professions and being drawn into wars -- no token exists
+for either.
+
+[ENTITY:HA_FOREST_GOLEM]
+	[CREATURE:HA_FOREST_GOLEM]
+	[TRANSLATION:ELF]
+	[ALL_MAIN_POPS_CONTROLLABLE]
+	[SITE_CONTROLLABLE]
+
+	--- no armour, no clothing, no shields: they are made of iron and wear nothing ---
+	Weapons and tools are kept so a player fort can dig, fell and fight; the
+	golems' own bodies are their armour.
+	[WEAPON:ITEM_WEAPON_PICK]
+	[DIGGER:ITEM_WEAPON_PICK]
+	[WEAPON:ITEM_WEAPON_AXE_BATTLE]
+	[WEAPON:ITEM_WEAPON_SWORD_LONG]
+	[WEAPON:ITEM_WEAPON_SPEAR]
+	[WEAPON:ITEM_WEAPON_MACE]
+	[WEAPON:ITEM_WEAPON_HAMMER_WAR]
+	[TOOL:ITEM_TOOL_PEDESTAL]
+	[TOOL:ITEM_TOOL_ALTAR]
+	[TOOL:ITEM_TOOL_MINECART]
+	[TOOL:ITEM_TOOL_WHEELBARROW]
+	[GEM_SHAPE:ALL]
+	[STONE_SHAPE:ALL]
+
+	[METAL_PREF]
+	[STONE_PREF]
+	[WOOD_PREF]
+	[USE_ANIMAL_PRODUCTS]
+	[COMMON_DOMESTIC_PACK]
+	[COMMON_DOMESTIC_PULL]
+	[EQUIPMENT_IMPROVEMENTS]
+	[IMPROVED_BOWS]
+	[METALWORKING]
+	[MELEE_EQUIPMENT]
+	[RANGED_EQUIPMENT]
+	[SIEGE_ENGINEER]
+	[SOAP_MAKER]
+	[WOOD_ARMOR]
+	[GENERATED]
+	[BUILDS_OUTDOOR_TOMBS]
+
+	--- one grove, in the forest, forever ---
+	[DEFAULT_SITE_TYPE:TREE_CITY]
+	[LIKES_SITE:TREE_CITY]
+	[TOLERATES_SITE:TREE_CITY]
+	[EXCLUSIVE_START_BIOME:ANY_FOREST]
+	[BIOME_SUPPORT:ANY_FOREST:1]
+	a handful of ancient groves, each one populous and static
+	[MAX_STARTING_CIV_NUMBER:6]
+	[MAX_POP_NUMBER:2000]
+	[MAX_SITE_POP_NUMBER:120]
+
+	--- silence: no wandering histfigs, no artifact quests, no raids ---
+	(intentionally omitted, and never write them bracketed even inside comment
+	text -- the raw parser reads tokens in comments: WANDERER, BEAST_HUNTER,
+	SCOUT, MERCENARY, SIEGER, AMBUSHER, BABYSNATCHER, ITEM_THIEF, ACTIVE_SEASON)
+	[NO_ARTIFACT_CLAIMS]
+	[PROGRESS_TRIGGER_POPULATION:2]
+	[PROGRESS_TRIGGER_PRODUCTION:2]
+	[PROGRESS_TRIGGER_TRADE:0]
+	[PROGRESS_TRIGGER_POP_SIEGE:5]
+	[AT_PEACE_WITH_WILDLIFE]
+	[INVADERS_IGNORE_NEUTRALS]
+	[SPHERE_ALIGNMENT:METALS:512]
+	[SPHERE_ALIGNMENT:FORESTS:512]
+	[SPHERE_ALIGNMENT:SILENCE:384]
+	[FRIENDLY_COLOR:6:0:0]
+
+	[SCHOLAR:ALL]
+	[SET_SCHOLAR_ON_VALUES_AND_JOBS]
+
+	--- ethics: guardians. They kill what enters the grove and nothing else. ---
+	[ETHIC:KILL_ENTITY_MEMBER:PUNISH_EXILE]
+	[ETHIC:KILL_NEUTRAL:JUSTIFIED_IF_SELF_DEFENSE]
+	[ETHIC:KILL_ENEMY:ACCEPTABLE]
+	[ETHIC:KILL_ANIMAL:JUSTIFIED_IF_SELF_DEFENSE]
+	[ETHIC:KILL_PLANT:UNTHINKABLE]
+	[ETHIC:TORTURE_AS_EXAMPLE:UNTHINKABLE]
+	[ETHIC:TORTURE_FOR_INFORMATION:UNTHINKABLE]
+	[ETHIC:TORTURE_FOR_FUN:UNTHINKABLE]
+	[ETHIC:TORTURE_ANIMALS:UNTHINKABLE]
+	[ETHIC:TREASON:PUNISH_EXILE]
+	[ETHIC:OATH_BREAKING:PUNISH_EXILE]
+	[ETHIC:LYING:PUNISH_REPRIMAND]
+	[ETHIC:VANDALISM:PUNISH_EXILE]
+	[ETHIC:TRESPASSING:PUNISH_CAPITAL]
+	[ETHIC:THEFT:PUNISH_EXILE]
+	[ETHIC:ASSAULT:PUNISH_EXILE]
+	[ETHIC:SLAVERY:UNTHINKABLE]
+	[ETHIC:EAT_SAPIENT_OTHER:UNTHINKABLE]
+	[ETHIC:EAT_SAPIENT_KILL:UNTHINKABLE]
+	[ETHIC:MAKE_TROPHY_SAME_RACE:UNTHINKABLE]
+	[ETHIC:MAKE_TROPHY_SAPIENT:UNTHINKABLE]
+	[ETHIC:MAKE_TROPHY_ANIMAL:UNTHINKABLE]
+
+	--- values: duty, stillness, the grove ---
+	[VALUE:LAW:25]
+	[VALUE:LOYALTY:40]
+	[VALUE:FAMILY:0]
+	[VALUE:FRIENDSHIP:5]
+	[VALUE:POWER:0]
+	[VALUE:TRUTH:25]
+	[VALUE:CUNNING:-10]
+	[VALUE:ELOQUENCE:-10]
+	[VALUE:FAIRNESS:15]
+	[VALUE:DECORUM:15]
+	[VALUE:TRADITION:40]
+	[VALUE:ARTWORK:15]
+	[VALUE:COOPERATION:25]
+	[VALUE:INDEPENDENCE:0]
+	[VALUE:STOICISM:50]
+	[VALUE:INTROSPECTION:25]
+	[VALUE:SELF_CONTROL:50]
+	[VALUE:TRANQUILITY:40]
+	[VALUE:HARMONY:40]
+	[VALUE:MERRIMENT:-25]
+	[VALUE:CRAFTSMANSHIP:25]
+	[VALUE:MARTIAL_PROWESS:25]
+	[VALUE:SKILL:25]
+	[VALUE:HARD_WORK:25]
+	[VALUE:SACRIFICE:40]
+	[VALUE:COMPETITION:-10]
+	[VALUE:PERSEVERANCE:40]
+	[VALUE:LEISURE_TIME:-25]
+	[VALUE:COMMERCE:-25]
+	[VALUE:ROMANCE:-50]
+	[VALUE:NATURE:50]
+	[VALUE:PEACE:15]
+	[VALUE:KNOWLEDGE:15]
+
+	--- positions ---
+	The Root: the civ-level ruler of the grove. LAND_HOLDER so the site reads as
+	a held territory rather than an unclaimed ruin.
+	[POSITION:ROOT]
+		[NAME:root:roots]
+		[NAME_MALE:root:roots]
+		[NUMBER:1]
+		[RESPONSIBILITY:LAW_MAKING]
+		[RESPONSIBILITY:MAKE_INTRODUCTIONS]
+		[RESPONSIBILITY:MAKE_PEACE_AGREEMENTS]
+		[RESPONSIBILITY:MAKE_TOPIC_AGREEMENTS]
+		[PRECEDENCE:1]
+		[LAND_HOLDER:1]
+		[LAND_NAME:a grove]
+		[REQUIRES_POPULATION:20]
+		[DO_NOT_CULL]
+		[KILL_QUEST]
+		[EXPORTED_IN_LEGENDS]
+		[COLOR:6:0:1]
+		[DUTY_BOUND]
+
+	Warden: fort-level militia commander. Rootless (no APPOINTED_BY) so a player
+	fort can assign it directly.
+	[POSITION:WARDEN]
+		[NAME:warden:wardens]
+		[SITE]
+		[NUMBER:1]
+		[SQUAD:10:sentinel:sentinels]
+		[RESPONSIBILITY:MILITARY_STRATEGY]
+		[COMMANDER:MILITIA_CAPTAIN:ALL]
+		[PRECEDENCE:120]
+		[DO_NOT_CULL]
+		[DUTY_BOUND]
+	[POSITION:MILITIA_CAPTAIN]
+		[NAME:sentinel:sentinels]
+		[SITE]
+		[NUMBER:AS_NEEDED]
+		[SQUAD:10:sentinel:sentinels]
+		[RESPONSIBILITY:ATTACK_ENEMIES]
+		[RESPONSIBILITY:PATROL_TERRITORY]
+		[APPOINTED_BY:WARDEN]
+		[PRECEDENCE:200]
+		[DO_NOT_CULL]
+		[DUTY_BOUND]
+
+	Fort administration: the minimum a playable site needs.
+	[POSITION:EXPEDITION_LEADER]
+		[NAME:first waking:first wakings]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:TRADE]
+		[RESPONSIBILITY:MEET_WORKERS]
+		[RESPONSIBILITY:ESTABLISH_COLONY_TRADE_AGREEMENTS]
+		[PRECEDENCE:130]
+		[REPLACED_BY:MAYOR]
+		[DO_NOT_CULL]
+		[DETERMINES_COIN_DESIGN]
+		[DUTY_BOUND]
+	[POSITION:MAYOR]
+		[NAME:elder trunk:elder trunks]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:TRADE]
+		[RESPONSIBILITY:MEET_WORKERS]
+		[RESPONSIBILITY:ESTABLISH_COLONY_TRADE_AGREEMENTS]
+		[RESPONSIBILITY:LAW_ENFORCEMENT]
+		[PRECEDENCE:110]
+		[REQUIRES_POPULATION:50]
+		[ELECTED]
+		[DO_NOT_CULL]
+		[DETERMINES_COIN_DESIGN]
+		[DUTY_BOUND]
+	[POSITION:MANAGER]
+		[NAME:tally:tallies]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:MANAGE_PRODUCTION]
+		[PRECEDENCE:140]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[APPOINTED_BY:MAYOR]
+		[DO_NOT_CULL]
+		[DUTY_BOUND]
+	[POSITION:BOOKKEEPER]
+		[NAME:ledger:ledgers]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:ACCOUNTING]
+		[PRECEDENCE:150]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[APPOINTED_BY:MAYOR]
+		[DO_NOT_CULL]
+		[DUTY_BOUND]
+	[POSITION:BROKER]
+		[NAME:speaker:speakers]
+		[SITE]
+		[NUMBER:1]
+		[RESPONSIBILITY:TRADE]
+		[PRECEDENCE:160]
+		[APPOINTED_BY:EXPEDITION_LEADER]
+		[APPOINTED_BY:MAYOR]
+		[DO_NOT_CULL]
+		[DUTY_BOUND]
