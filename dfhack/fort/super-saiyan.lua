@@ -19,6 +19,14 @@ seconds, and the Ultra Instinct theme plays in full.
 seconds and a trance in the middle of a siege is not always a moment to sit through. The
 next trance fires as normal.
 
+ONE AT A TIME. While the theme is playing, a further trance is skipped entirely -- no sound,
+no pause, no camera jump. Sieges produce trances in clusters and each one restarting the
+track from the top would be a stutter, not a celebration. The test is "is the plugin playing
+right now", not a stopwatch, so replacing the track with one of a different length needs no
+change here and `stop` frees the next trance to fire immediately.
+
+`test` is exempt: asking for it explicitly restarts the theme whatever is playing.
+
 WHAT COUNTS. `unit.counters.soldier_mood == MartialTrance`, on the RISING edge per unit: a
 trance lasts a while, so the flag is remembered until it clears and one trance fires once.
 Only citizens -- a goblin lieutenant's trance is not a moment to celebrate. The scan is over
@@ -52,6 +60,18 @@ local THEME = dfhack.getDFPath() .. '/dfhack-config/scripts/data/ultra_instinct_
 local function audio()
     local ok, plug = pcall(require, 'plugins.ssaudio')
     if ok and plug and plug.play then return plug end
+end
+
+-- Is the theme still going from an earlier trance? Asked of the plugin rather than measured
+-- against a 167-second stopwatch: the file can be replaced with one of any length, and a
+-- `super-saiyan stop` (or an ssaudio stop) ends it early, which a timer would not know about.
+-- The plugin counts its decode as playing too, so two dwarves entering a trance in the same
+-- scan cannot both get through.
+local function theme_playing()
+    local plug = audio()
+    if not plug or not plug.is_playing then return false end
+    local ok, playing = pcall(plug.is_playing)
+    return ok and playing or false
 end
 
 local function play_theme()
@@ -117,7 +137,12 @@ local function scan()
     for _, unit in ipairs(df.global.world.units.active) do
         if dfhack.units.isCitizen(unit) and dfhack.units.isAlive(unit) and is_trancing(unit) then
             now[unit.id] = true
-            if not seen[unit.id] then celebrate(unit) end
+            -- ONE CELEBRATION AT A TIME. A trance that arrives while the theme is still
+            -- playing passes without a sound, a pause or a camera jump: interrupting the
+            -- last one to restart at bar zero is worse than letting it finish. The dwarf is
+            -- still marked seen, so this is a skip rather than a celebration held in a queue
+            -- to ambush you when the music stops.
+            if not seen[unit.id] and not theme_playing() then celebrate(unit) end
         end
     end
     seen = now
