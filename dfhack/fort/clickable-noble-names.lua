@@ -93,20 +93,37 @@ local function tile_blocks(y)
     return blocks
 end
 
--- DF's buttons are the cyan blocks (assign, symbols); the room icons are the plain blocks
--- that come after the last button. Returns buttons, icons.
+-- Sort the row's blocks into DF's buttons and the room icons, BY SHAPE rather than by
+-- colour. DF's buttons stand alone with clear space either side; the room icons are packed
+-- edge to edge into a strip. So an isolated block is a button and a block with a neighbour
+-- is an icon, and the icons wanted are the first such strip after the last button.
+--
+-- Colour is what this used to test -- cyan for a button -- and it was wrong. Cyan means the
+-- button is ENABLED: a militia captain can be neither appointed nor given a symbol from this
+-- screen, so both of their buttons are drawn greyed, the row came back with no buttons at
+-- all, and every military row was written off as unrecognisable and left dead.
+--
+-- Returns buttons, icons (icons in left-to-right order, and empty if there is no strip).
 local function row_blocks(y)
-    local buttons, icons = {}, {}
-    for _, b in ipairs(tile_blocks(y)) do
-        if b.fg == COLOR_CYAN then buttons[#buttons + 1] = b else icons[#icons + 1] = b end
+    local blocks = tile_blocks(y)
+    local adjacent = {}
+    for i, b in ipairs(blocks) do
+        local prev, next_ = blocks[i - 1], blocks[i + 1]
+        adjacent[i] = (prev and prev.x2 + 1 == b.x1) or (next_ and b.x2 + 1 == next_.x1) or false
     end
-    local last_button = buttons[#buttons]
-    if not last_button then return buttons, {} end
-    local after = {}
-    for _, b in ipairs(icons) do
-        if b.x1 > last_button.x2 then after[#after + 1] = b end
+    local buttons, last_button_i = {}, 0
+    for i, b in ipairs(blocks) do
+        if not adjacent[i] then buttons[#buttons + 1] = b; last_button_i = i end
     end
-    return buttons, after
+    local icons = {}
+    for i = last_button_i + 1, #blocks do
+        if adjacent[i] then
+            -- the strip ends where the packing does: later strips are DF's own business
+            if #icons > 0 and blocks[i].x1 ~= icons[#icons].x2 + 1 then break end
+            icons[#icons + 1] = blocks[i]
+        end
+    end
+    return buttons, icons
 end
 
 -- ---- rows --------------------------------------------------------------------
@@ -173,7 +190,6 @@ local MARGIN = 1   -- DF's hitboxes can run a shade wider than the graphic; neve
 -- 'room', <ROOM_ICONS entry>  |  'noble'  |  nil (not ours -- give the click back to DF)
 local function classify(x, row_line)
     local buttons, icons = row_blocks(row_line)
-    if #buttons == 0 then return nil end          -- unrecognisable row; don't guess
     for _, b in ipairs(buttons) do
         if x >= b.x1 - MARGIN and x <= b.x2 + MARGIN then return nil end
     end
@@ -183,9 +199,11 @@ local function classify(x, row_line)
             return room and 'room' or nil, room   -- a 5th+ icon is not ours
         end
     end
-    -- the row proper: caption, name and the space among them, left of the last button --
-    -- on any of the row's three lines, since all three are the noble's own block
-    if x < buttons[#buttons].x1 then return 'noble' end
+    -- The row proper: caption, name and the space among them -- everything left of the icon
+    -- strip, on any of the row's three lines, since all three are the noble's own block.
+    -- Falls back to the last button when a row draws no icons at all.
+    local edge = icons[1] and icons[1].x1 or (buttons[#buttons] and buttons[#buttons].x1)
+    if edge and x < edge then return 'noble' end
 end
 
 -- ---- the actions -------------------------------------------------------------
@@ -207,13 +225,17 @@ local function unit_pos(unit)
     return pos
 end
 
--- open the sheet and follow, the way dwarf-rts follows a squad member.
+-- THE SHEET IS OPENED ON A LATER FRAME, and it has to be: closing the Info panel tears a
+-- unit sheet down, and that happens after this handler runs, so a sheet opened here is
+-- opened and shut before anything is drawn -- the click reads as "it only followed him".
 --
--- THE SHEET IS OPENED ONE FRAME LATE, and it has to be. Closing the Info panel and revealing
--- the map both tear the unit sheet down, and they run after this handler in the same frame,
--- so a sheet opened here is opened and shut before anything is drawn -- the click read as
--- "it only followed him". A 'frames' timeout lands after that teardown, and unlike 'ticks'
--- it still fires while the game is paused, which is exactly when this screen is used.
+-- The wait is handed to an overlay update rather than to dfhack.timeout. A 'frames' timeout
+-- looks like the obvious tool and quietly fails: with a panel up the frame timers stop, so
+-- on the very screen this runs from the sheet would never appear. Overlay updates keep
+-- ticking. This is the same shape dwarf-rts uses for its own deferred follow.
+pending_sheet_id = pending_sheet_id or nil
+
+-- open the sheet and follow, the way dwarf-rts follows a squad member
 local function goto_noble(unit)
     local pos = unit_pos(unit)
     close_info()
@@ -222,11 +244,7 @@ local function goto_noble(unit)
         df.global.plotinfo.follow_item = -1
         df.global.plotinfo.follow_unit = unit.id
     end
-    local id = unit.id
-    dfhack.timeout(1, 'frames', function()
-        local u = df.unit.find(id)                -- off-map (on a raid, say): sheet only
-        if u then open_sheet(u) end
-    end)
+    pending_sheet_id = unit.id                    -- off-map (on a raid, say): sheet only
 end
 
 -- jump to the room itself: no sheet, and following is dropped -- a camera glued to the
@@ -273,7 +291,29 @@ function NobleClickOverlay:onInput(keys)
     return true
 end
 
-OVERLAY_WIDGETS = {click = NobleClickOverlay}
+-- The deferred half of a row click. Lives on plain `dwarfmode` because by the time it runs
+-- the Info panel is shut and the click overlay's own screen is gone. It does nothing at all
+-- until a click asks for a sheet, which is one nil test per frame.
+PendingSheetOverlay = defclass(PendingSheetOverlay, overlay.OverlayWidget)
+PendingSheetOverlay.ATTRS{
+    desc = 'Opens the unit sheet a click on the Nobles screen asked for, once the panel has closed.',
+    default_pos = {x = 1, y = 1},
+    default_enabled = true,
+    viewscreens = 'dwarfmode',
+    frame = {w = 1, h = 1},
+    overlay_onupdate_max_freq_seconds = 0,
+    version = 1,
+}
+
+function PendingSheetOverlay:overlay_onupdate()
+    local id = pending_sheet_id
+    if not id then return end
+    pending_sheet_id = nil
+    local unit = df.unit.find(id)
+    if unit then open_sheet(unit) end
+end
+
+OVERLAY_WIDGETS = {click = NobleClickOverlay, sheet = PendingSheetOverlay}
 
 if dfhack_flags.module then
     return

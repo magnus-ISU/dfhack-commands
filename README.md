@@ -202,6 +202,11 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/clickable-squad-members`**
+On a squad's details screen, clicking a member's portrait opens that dwarf's sheet and
+follows them instead of offering to replace them. The name still opens DF's
+position-assignment list, and an empty position has no portrait to click.
+
 ## Searchable Lists
 
 ### **`fort/noble-symbol-search`**
