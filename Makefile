@@ -449,6 +449,14 @@ build:
 	cp "$$built" "$$tmp"
 	mv -f "$$tmp" "$(SO)"
 	echo "Installed freshly-built plugin: $(SO)"
+	# The Lua companion, if the plugin has one. Without it `require('plugins.<name>')` fails
+	# even though the plugin loaded and `plug` lists it: DFHack resolves plugins.<name> to a
+	# real file under hack/lua/plugins/, and mkmodule inside that file is what binds the
+	# exported C++ functions. Pure Lua, so unlike the .so this takes effect immediately.
+	if [ -d "$(PLUGIN_SRC)/lua" ]; then
+	  install -Dm644 "$(PLUGIN_SRC)/lua/"*.lua -t "$(DFHACK_DIR)/hack/lua/plugins/"
+	  echo "Installed plugin Lua: $(DFHACK_DIR)/hack/lua/plugins/"
+	fi
 	echo "RESTART Dwarf Fortress now (or: dfhack-run load $(PLUGIN) && dfhack-run enable $(PLUGIN)"
 	echo "for a hot reload, then verify with 'make status')."
 
