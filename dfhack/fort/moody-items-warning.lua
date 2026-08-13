@@ -32,8 +32,13 @@ decoration is never the same item type as the base material.
 
 RAW GLASS IS ONLY DEMANDED IF YOU HAVE MADE IT. The game checks the fort's production history
 (created_item_type) for green, clear and crystal glass, and a type you have never produced is
-never asked for. So this warns about a glass type only once your fort has made some -- an
-untouched glass industry is not a gap.
+never asked for. So a fort with no glass industry is never nagged about glass -- but once
+yours has made some, running out of it becomes a real gap and is reported like any other.
+
+That is tracked from the production history AND from glass actually seen in your stockpiles,
+remembered per site. Either alone has a hole: the history is one global read away from
+silently disabling the whole check, and stock cannot be observed at the exact moment it
+matters, which is when it has hit zero.
 
 FELL AND MACABRE MOODS need corpses instead, and those are gated on MISERY: they happen to
 stressed dwarves. So the remains/bones section only appears when at least one citizen is
@@ -155,15 +160,44 @@ local GLASS = {
     {label = 'crystal glass', mat = df.builtin_mats.GLASS_CRYSTAL},
 }
 
+-- Which glass types this fort is expected to keep in stock. Two sources, OR-ed, because
+-- either one alone has a hole:
+--
+--   * the production history (created_item_type), which is what DF itself consults -- but it
+--     is a single global read, and if it is ever unreadable this feature silently never
+--     warns about anything, which is the worst failure mode available;
+--   * glass we have SEEN in the stockpiles, remembered per site. Once a fort has had raw
+--     glass of a type, running out of it is exactly the thing worth saying.
+--
+-- Seen-once is sticky on purpose: the whole point is to warn AFTER it runs out, and a
+-- count of zero is precisely when the stock-based half stops being able to see it.
+local SITE_KEY = 'moody-items-warning'
+
+local function remembered_glass()
+    local ok, data = pcall(dfhack.persistent.getSiteData, SITE_KEY, {glass = {}})
+    if not ok or type(data) ~= 'table' or type(data.glass) ~= 'table' then return {} end
+    return data.glass
+end
+
+local function remember_glass(mat)
+    local ok, data = pcall(dfhack.persistent.getSiteData, SITE_KEY, {glass = {}})
+    if not ok or type(data) ~= 'table' then return end
+    data.glass = type(data.glass) == 'table' and data.glass or {}
+    if data.glass[tostring(mat)] then return end
+    data.glass[tostring(mat)] = true
+    pcall(dfhack.persistent.saveSiteData, SITE_KEY, data)
+end
+
 local function produced_glass()
     local made = {}
-    local ok = pcall(function()
+    pcall(function()
         local types, mats = df.global.created_item_type, df.global.created_item_mattype
         for i = 0, #types - 1 do
             if types[i] == df.item_type.ROUGH then made[mats[i]] = true end
         end
     end)
-    if not ok then return {} end
+    local seen = remembered_glass()
+    for mat in pairs(seen) do made[tonumber(mat) or -1] = true end
     return made
 end
 
@@ -199,8 +233,9 @@ local function survey()
 
     local made = produced_glass()
     for _, g in ipairs(GLASS) do
-        if made[g.mat] then
-            local n = count('ROUGH', glass_of(g.mat))
+        local n = count('ROUGH', glass_of(g.mat))
+        if n > 0 then remember_glass(g.mat) end     -- seen it: expect it from now on
+        if made[g.mat] or n > 0 then
             have[#have + 1] = {label = g.label, n = n}
             if n == 0 then missing[#missing + 1] = g.label end
         end
