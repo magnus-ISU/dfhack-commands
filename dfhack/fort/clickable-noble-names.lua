@@ -212,10 +212,16 @@ local function close_info()
     df.global.game.main_interface.info.open = false
 end
 
+-- Overview, always. The sheet remembers whichever tab was last looked at, so without this
+-- a click that means "who is this dwarf" lands on Rooms or Labor -- whatever the last sheet
+-- was left on, which is never what you wanted from the row you just clicked.
+local SHEET_TAB_OVERVIEW = 0
+
 local function open_sheet(unit)
     local vs = df.global.game.main_interface.view_sheets
     vs.active_sheet = df.view_sheet_type.UNIT
     vs.active_id = unit.id
+    vs.active_sub_tab = SHEET_TAB_OVERVIEW
     vs.open = true
 end
 

@@ -171,6 +171,8 @@ end
 -- timers stop while a panel is up -- which is exactly the situation here.
 pending_sheet_id = pending_sheet_id or nil
 
+local SHEET_TAB_OVERVIEW = 0
+
 local function goto_member(unit)
     local pos = xyz2pos(dfhack.units.getPosition(unit))
     if pos and pos.x >= 0 then
@@ -237,6 +239,9 @@ function PendingSheetOverlay:overlay_onupdate()
     local vs = df.global.game.main_interface.view_sheets
     vs.active_sheet = df.view_sheet_type.UNIT
     vs.active_id = unit.id
+    -- Overview, always: the sheet remembers the last tab looked at, so a click that means
+    -- "who is this soldier" would otherwise land on Rooms or Labor
+    vs.active_sub_tab = SHEET_TAB_OVERVIEW
     vs.open = true
 end
 
