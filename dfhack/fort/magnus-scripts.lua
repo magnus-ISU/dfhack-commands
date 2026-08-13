@@ -10,7 +10,7 @@ Tags: fort | adventure | auto
 GUI switchboard for all of magnus's persistent DFHack helpers.
 
 Running `fort/magnus-scripts` opens a window with five individually-scrollable
-columns -- fort/, adv/, embark/, joke/ and vanilla DFHack tools -- with a checkbox per
+columns -- fort/, adv/, embark/, vanilla DFHack tools and joke/ -- with a checkbox per
 script. Click a row to toggle that helper on or off; the choice is saved to
 dfhack-config/magnus-scripts.json and re-applied on every map load. Column
 headers toggle a whole column, [m] toggles all the mod columns (fort/adv/embark)
@@ -414,12 +414,6 @@ local COLUMNS = {
          enable = overlay_set('enable', 'fix/old-saves.stamp'),
          disable = overlay_set('disable', 'fix/old-saves.stamp')},
     }},
-    {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
-        {key = 'joke-super-saiyan', label = 'super-saiyan',
-         enable = cmd('enable', 'joke/super-saiyan'), disable = cmd('disable', 'joke/super-saiyan')},
-        {key = 'joke-noble-crowns', label = 'noble-crowns',
-         enable = cmd('enable', 'joke/noble-crowns'), disable = cmd('disable', 'joke/noble-crowns')},
-    }},
     {id = 'vanilla', title = 'vanilla dfhack', mode = 'mixed', items = {
         {key = 'hide-tutorials', label = 'hide-tutorials', mode = 'any',
          enable = cmd('enable', 'hide-tutorials'), disable = cmd('disable', 'hide-tutorials')},
@@ -525,6 +519,12 @@ local COLUMNS = {
                 if data.warn_nuisance then data.warn_nuisance.enabled = true end
             end)
          end},
+    }},
+    {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
+        {key = 'joke-super-saiyan', label = 'super-saiyan',
+         enable = cmd('enable', 'joke/super-saiyan'), disable = cmd('disable', 'joke/super-saiyan')},
+        {key = 'joke-noble-crowns', label = 'noble-crowns',
+         enable = cmd('enable', 'joke/noble-crowns'), disable = cmd('disable', 'joke/noble-crowns')},
     }},
 }
 
