@@ -75,28 +75,13 @@ local function line_text(y)
     return table.concat(out)
 end
 
--- 4-wide blocks of consecutive atlas tiles: the member portraits
-local function tile_blocks(y)
+-- where the name text starts on this line, or nil for a blank line
+local function text_start(y)
     local w = dfhack.screen.getWindowSize()
-    local blocks, run_start, prev = {}, nil, nil
-    local function close(at)
-        if run_start and at - run_start == 4 then
-            blocks[#blocks + 1] = {x1 = run_start, x2 = at - 1}
-        end
-    end
     for x = 0, w - 1 do
         local p = dfhack.screen.readTile(x, y)
-        local t = p and p.tile
-        if t and prev and t == prev + 1 then
-            -- still inside a run
-        else
-            close(x)
-            run_start = t and x or nil
-        end
-        prev = t
+        if p and p.ch and p.ch > 32 then return x end
     end
-    close(w)
-    return blocks
 end
 
 -- ---- which position a line holds ---------------------------------------------
@@ -152,11 +137,21 @@ local function row_at(squad, y)
     end
 end
 
+-- THE PORTRAIT IS NOT IN THE BUFFER dfhack.screen.readTile reads. Every cell it reports
+-- under the art is plain panel background, so hunting for the portrait's own tiles finds
+-- nothing -- that is what made the first two attempts pass a fed click and do nothing to a
+-- real one. (The one sprite-shaped block readTile does show on the row sits at the far right
+-- of the panel, past the name; that is some other widget and is left alone.)
+--
+-- So the art is located by what IS readable: the member's name. DF draws the portrait in the
+-- columns immediately to its left -- lined up under the first word of the squad's name, one
+-- column either side of it -- so the zone is the five columns ending where the name begins.
+local ART_WIDTH = 5
+
 local function on_portrait(x, name_y)
-    for _, b in ipairs(tile_blocks(name_y)) do
-        if x >= b.x1 and x <= b.x2 then return true end
-    end
-    return false
+    local start = text_start(name_y)
+    if not start then return false end
+    return x >= start - ART_WIDTH and x < start
 end
 
 -- ---- what the overlay saw, for diagnosing a click that did nothing -----------
