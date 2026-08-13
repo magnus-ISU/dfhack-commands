@@ -11,8 +11,12 @@ Sensible for an EMPTY slot, wrong for a filled one -- the portrait is the most f
 thing on the screen and the last thing that should mean "swap this soldier out".
 
 So a click anywhere on a FILLED position's row -- portrait or name, the whole width of DF's
-button, out to a couple of columns short of the screen edge -- opens that dwarf's own sheet
-and follows them, the pair of actions `fort/clickable-noble-names` gives a noble row.
+button -- opens that dwarf's own sheet and follows them, the pair of actions
+`fort/clickable-noble-names` gives a noble row.
+
+The CHECKBOX at the right end of the row is left alone: a click in those columns toggles it
+the way it always did. Where it starts is measured off the screen each time rather than
+assumed, so the exempt strip is exactly as wide as DF draws it.
 
 REPLACING A SOLDIER IS STILL ONE CLICK AWAY, because the row falls through to DF whenever
 that dwarf's sheet is ALREADY the one on screen. So the sequence reads: click to see who
@@ -177,16 +181,38 @@ end
 --
 -- So the row is located by what IS readable: the member's name. The art is drawn in the
 -- columns immediately to its left, and DF's own button -- the one that opens the assignment
--- list -- runs from there out to a couple of columns short of the screen edge. That whole
--- span is claimed: portrait and name alike open the dwarf's sheet.
+-- list -- runs from there towards the screen edge. Portrait and name alike open the sheet.
+--
+-- THE ROW DOES NOT RUN ALL THE WAY OUT, though: a CHECKBOX sits in the last few columns
+-- before the panel border, and it keeps its own behavior -- a click there toggles it, as it
+-- always did, and never opens a sheet.
 local ART_WIDTH = 5
-local RIGHT_MARGIN = 2       -- DF's button stops this far short of the screen edge
+local RIGHT_MARGIN = 2       -- the panel's own border, past the checkbox
+local CHECKBOX_WIDTH = 4     -- only a fallback; normally measured off the screen (below)
+
+-- Where DF's row button ends, which is NOT where the row ends. The button is drawn as one
+-- texture tile repeated across its width, with the name's glyphs laid over that same tile,
+-- so the checkbox -- its own little sprite, a different tile per column -- is exactly where
+-- the repetition stops. Measuring it beats assuming a width: it follows DF if the checkbox
+-- moves or changes size, and a row that has no checkbox stays clickable to its full width.
+-- If the tiles cannot be read at all (ASCII mode reports tile 0), fall back to the constant.
+local function button_right_edge(name_y, start)
+    local w = dfhack.screen.getWindowSize()
+    local limit = w - 1 - RIGHT_MARGIN
+    local bg = dfhack.screen.readTile(start, name_y)
+    bg = bg and bg.tile
+    if not bg or bg == 0 then return limit - CHECKBOX_WIDTH end
+    for x = limit, start, -1 do
+        local p = dfhack.screen.readTile(x, name_y)
+        if p and p.tile == bg then return x end
+    end
+    return limit - CHECKBOX_WIDTH
+end
 
 local function on_member_button(x, name_y)
     local start = panel_run(name_y)
     if not start then return false end
-    local w = dfhack.screen.getWindowSize()
-    return x >= start - ART_WIDTH and x <= w - 1 - RIGHT_MARGIN
+    return x >= start - ART_WIDTH and x <= button_right_edge(name_y, start)
 end
 
 -- ---- what the overlay saw, for diagnosing a click that did nothing -----------

@@ -165,7 +165,7 @@ render, so those blocks are handed straight back to DF.
 On a squad's details screen, clicking anywhere on a member's row — portrait or name — opens
 that dwarf's sheet and follows them instead of offering to replace them. Clicking again,
 while their sheet is the one on screen, falls through to DF's position-assignment list: see
-who this is, then replace them. Empty positions are untouched.
+who this is, then replace them. Empty positions and the row's own checkbox are untouched.
 
 ## Searchable Lists
 
