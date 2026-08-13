@@ -203,9 +203,10 @@ room. DF's own assign and symbol buttons still work — the row is measured from
 render, so those blocks are handed straight back to DF.
 
 ### **`fort/clickable-squad-members`**
-On a squad's details screen, clicking a member's portrait opens that dwarf's sheet and
-follows them instead of offering to replace them. The name still opens DF's
-position-assignment list, and an empty position has no portrait to click.
+On a squad's details screen, clicking anywhere on a member's row — portrait or name — opens
+that dwarf's sheet and follows them instead of offering to replace them. Clicking again,
+while their sheet is the one on screen, falls through to DF's position-assignment list: see
+who this is, then replace them. Empty positions are untouched.
 
 ## Searchable Lists
 

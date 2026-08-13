@@ -10,12 +10,16 @@ thing: it opens the position-assignment list, offering to replace the dwarf stan
 Sensible for an EMPTY slot, wrong for a filled one -- the portrait is the most face-like
 thing on the screen and the last thing that should mean "swap this soldier out".
 
-So a click on the PORTRAIT of a filled position opens that dwarf's own sheet and follows
-them, the pair of actions `fort/clickable-noble-names` gives a noble row. Everything else DF
-does is left alone:
+So a click anywhere on a FILLED position's row -- portrait or name, the whole width of DF's
+button, out to a couple of columns short of the screen edge -- opens that dwarf's own sheet
+and follows them, the pair of actions `fort/clickable-noble-names` gives a noble row.
 
-  * the NAME still opens the assignment list -- that is how you replace a soldier;
-  * an empty slot draws no portrait, so "Assign position 4" is untouched;
+REPLACING A SOLDIER IS STILL ONE CLICK AWAY, because the row falls through to DF whenever
+that dwarf's sheet is ALREADY the one on screen. So the sequence reads: click to see who
+this is, click again to replace them. Nothing is taken away, and the assignment list is
+never reached by accident -- you have to be looking at the dwarf you are about to replace.
+
+  * an empty slot draws no portrait and holds no unit, so "Assign position 4" is untouched;
   * the squad name, Back to squads and the order buttons never reach this.
 
 WHICH POSITION A LINE IS is read off the screen rather than counted, because the list
@@ -75,13 +79,40 @@ local function line_text(y)
     return table.concat(out)
 end
 
--- where the name text starts on this line, or nil for a blank line
-local function text_start(y)
-    local w = dfhack.screen.getWindowSize()
-    for x = 0, w - 1 do
+-- The LAST run of text on this line, as start_x, text -- which on this screen is the squad
+-- panel's, because the panel is anchored to the right edge.
+--
+-- Reading the FIRST run instead is a real bug that was live: with a unit sheet open, the
+-- sheet's own prose fills the left of every line, so the row's geometry was measured from
+-- "long." somewhere in a thought description and every click on a member missed. That is why
+-- having one dwarf's sheet open made the others unclickable.
+-- A name has spaces in it ("Hermias Ădrovod"), so the walk left tolerates a small gap and
+-- stops only at a wide one -- the empty stretch between the panel and whatever is drawn to
+-- its left, which is tens of columns.
+local MAX_NAME_GAP = 4
+
+local function panel_run(y)
+    local w, h = dfhack.screen.getWindowSize()
+    if y < 0 or y >= h then return nil, '' end
+    local last, first, gap = nil, nil, 0
+    for x = w - 1, 0, -1 do
         local p = dfhack.screen.readTile(x, y)
-        if p and p.ch and p.ch > 32 then return x end
+        if p and p.ch and p.ch > 32 then
+            last = last or x
+            first = x
+            gap = 0
+        elseif last then
+            gap = gap + 1
+            if gap > MAX_NAME_GAP then break end
+        end
     end
+    if not last then return nil, '' end
+    local out = {}
+    for x = first, last do
+        local p = dfhack.screen.readTile(x, y)
+        out[#out + 1] = string.char((p and p.ch and p.ch ~= 0) and p.ch or 32)
+    end
+    return first, table.concat(out)
 end
 
 -- ---- which position a line holds ---------------------------------------------
@@ -99,7 +130,8 @@ end
 
 -- the member whose name is drawn on this line, by prefix -- the panel truncates
 local function member_by_name(squad, y)
-    local text = line_text(y):gsub('%s+$', ''):gsub('^%s+', '')
+    local _, text = panel_run(y)
+    text = text:gsub('%s+$', ''):gsub('^%s+', '')
     local prefix = text:gsub('%.+$', '')
     if #prefix < 3 then return nil end
     for _, pos in ipairs(squad.positions) do
@@ -143,15 +175,18 @@ end
 -- real one. (The one sprite-shaped block readTile does show on the row sits at the far right
 -- of the panel, past the name; that is some other widget and is left alone.)
 --
--- So the art is located by what IS readable: the member's name. DF draws the portrait in the
--- columns immediately to its left -- lined up under the first word of the squad's name, one
--- column either side of it -- so the zone is the five columns ending where the name begins.
+-- So the row is located by what IS readable: the member's name. The art is drawn in the
+-- columns immediately to its left, and DF's own button -- the one that opens the assignment
+-- list -- runs from there out to a couple of columns short of the screen edge. That whole
+-- span is claimed: portrait and name alike open the dwarf's sheet.
 local ART_WIDTH = 5
+local RIGHT_MARGIN = 2       -- DF's button stops this far short of the screen edge
 
-local function on_portrait(x, name_y)
-    local start = text_start(name_y)
+local function on_member_button(x, name_y)
+    local start = panel_run(name_y)
     if not start then return false end
-    return x >= start - ART_WIDTH and x < start
+    local w = dfhack.screen.getWindowSize()
+    return x >= start - ART_WIDTH and x <= w - 1 - RIGHT_MARGIN
 end
 
 -- ---- what the overlay saw, for diagnosing a click that did nothing -----------
@@ -172,6 +207,12 @@ end
 pending_sheet_id = pending_sheet_id or nil
 
 local SHEET_TAB_OVERVIEW = 0
+
+-- is this dwarf's sheet the one already on screen?
+local function sheet_showing(unit)
+    local vs = df.global.game.main_interface.view_sheets
+    return vs.open and vs.active_sheet == df.view_sheet_type.UNIT and vs.active_id == unit.id
+end
 
 local function goto_member(unit)
     local pos = xyz2pos(dfhack.units.getPosition(unit))
@@ -207,9 +248,17 @@ function SquadMemberClickOverlay:onInput(keys)
 
     local unit, name_y, how = row_at(squad, y)
     if not unit then note('(%s,%s) no member on lines %d-%d', x, y, y - 1, y + 1) return false end
-    if not on_portrait(x, name_y) then
-        note('(%s,%s) %s row (by %s) but x is not on the portrait', x, y,
+    if not on_member_button(x, name_y) then
+        note('(%s,%s) %s row (by %s) but x is off the button', x, y,
             dfhack.units.getReadableName(unit), how)
+        return false
+    end
+    -- Already looking at this dwarf? Then the click means the other thing. Hand it to DF and
+    -- the assignment list opens as it always did -- so replacing a soldier is click-to-see,
+    -- click-again-to-replace rather than something this overlay has taken away.
+    if sheet_showing(unit) then
+        note('(%s,%s) %s sheet already open -- passing to DF', x, y,
+            dfhack.units.getReadableName(unit))
         return false
     end
 
