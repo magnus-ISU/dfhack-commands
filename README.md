@@ -233,7 +233,8 @@ Warns of enemies inside the alert burrow; shift-click sends selected squads to a
 Counts down how many days the trader is ready; click to jump to the depot.
 
 ### **`fort/empty-labor-notification`**
-Warns when a restricted work detail has nobody who can actually do it.
+Warns when a restricted work detail has nobody who can actually do it. Stays quiet while
+`autolabor` or `labormanager` is enabled, since those assign labors themselves.
 
 ### **`fort/needs-tomb-notification`**
 Alerts when a dwarf dies with no tomb, or when anything is haunting the fort — a ghost counts

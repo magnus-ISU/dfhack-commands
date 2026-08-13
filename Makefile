@@ -59,9 +59,14 @@ BUILDDIR    := $(ROOT)/build
 DFHACK_SRC  := $(BUILDDIR)/dfhack
 CMAKE_BUILD := $(DFHACK_SRC)/build-rel
 PERL5_LOCAL := $(BUILDDIR)/perl5
-PLUGIN_SRC  := $(ROOT)/other-authors/df-smooth-movement
+PLUGIN_SRC  ?= $(ROOT)/other-authors/df-smooth-movement
+# What the plugin source is symlinked to inside the DFHack tree's plugins/external, and the
+# submodule to init when its source is missing (empty for first-party plugins, which are
+# committed here rather than pulled in).
+PLUGIN_LINK ?= df-smooth-movement
+PLUGIN_SUBMODULE ?= other-authors/df-smooth-movement
 # Git tag of the DFHack source to build against. Must match the installed DFHack (ABI).
-DFHACK_TAG  ?= 53.16-r1
+DFHACK_TAG  ?= 53.16-r1.1
 # DFHack refuses to configure under GCC 16+. Prefer a versioned gcc-15 when the default is newer.
 CC_PIN      ?= $(shell if [ "$$(cc -dumpversion | cut -d. -f1)" -ge 16 ] && command -v gcc-15 >/dev/null; then command -v gcc-15; else command -v cc; fi)
 CXX_PIN     ?= $(shell if [ "$$(c++ -dumpversion | cut -d. -f1)" -ge 16 ] && command -v g++-15 >/dev/null; then command -v g++-15; else command -v c++; fi)
@@ -97,7 +102,7 @@ MERGED_SUBDIRS := objects graphics scripts_modactive
 # "current"), so never let -j interleave these.
 .NOTPARALLEL:
 .PHONY: help install install-scripts install-mods check-bundle prune-snapshots mods-status \
-        install-plugin build enable disable status uninstall readme docs-todo
+        install-plugin build build-ssaudio enable disable status uninstall readme docs-todo
 
 help:
 	@echo "dfhack-commands — make targets:"
@@ -383,13 +388,21 @@ install-plugin:
 	  echo "or run 'make enable' while the game is running."
 	fi
 
+# ssaudio -- the first-party audio plugin (source in plugins/ssaudio), used by fort/super-saiyan.
+# Same machinery as `build`, pointed at this repo's own source instead of the submodule.
+build-ssaudio:
+	$(MAKE) build PLUGIN=ssaudio PLUGIN_SRC=$(ROOT)/plugins/ssaudio PLUGIN_LINK=ssaudio PLUGIN_SUBMODULE=
+
 # Compile the plugin from the submodule source against a local DFHack source tree, then install.
 # The tree is cloned (shallow, tag $(DFHACK_TAG), with submodules) into build/dfhack on first run;
 # later runs reuse it. ABI rule: $(DFHACK_TAG) must match the installed DFHack version.
 build:
 	@if [ ! -f "$(PLUGIN_SRC)/CMakeLists.txt" ]; then
+	  if [ -z "$(PLUGIN_SUBMODULE)" ]; then
+	    echo "No source at $(PLUGIN_SRC)"; exit 1
+	  fi
 	  echo "Initializing the plugin submodule..."
-	  git -C "$(ROOT)" submodule update --init other-authors/df-smooth-movement
+	  git -C "$(ROOT)" submodule update --init "$(PLUGIN_SUBMODULE)"
 	fi
 	if [ ! -f "$(DFHACK_SRC)/CMakeLists.txt" ]; then
 	  echo "Cloning the DFHack $(DFHACK_TAG) source tree (one-time, ~200MB)..."
@@ -410,9 +423,9 @@ build:
 	fi
 	# Wire the plugin into the tree as an external plugin (symlink -> always builds current source).
 	mkdir -p "$(DFHACK_SRC)/plugins/external"
-	ln -sfn "$(PLUGIN_SRC)" "$(DFHACK_SRC)/plugins/external/df-smooth-movement"
-	grep -qs 'add_subdirectory(df-smooth-movement)' "$(DFHACK_SRC)/plugins/external/CMakeLists.txt" || \
-	  echo 'add_subdirectory(df-smooth-movement)' >> "$(DFHACK_SRC)/plugins/external/CMakeLists.txt"
+	ln -sfn "$(PLUGIN_SRC)" "$(DFHACK_SRC)/plugins/external/$(PLUGIN_LINK)"
+	grep -qs 'add_subdirectory($(PLUGIN_LINK))' "$(DFHACK_SRC)/plugins/external/CMakeLists.txt" || \
+	  echo 'add_subdirectory($(PLUGIN_LINK))' >> "$(DFHACK_SRC)/plugins/external/CMakeLists.txt"
 	if [ ! -f "$(CMAKE_BUILD)/CMakeCache.txt" ]; then
 	  # -Wno-error goes in the per-config flags: they land AFTER DFHack's hardcoded -Werror on the
 	  # compile line, neutralizing it (newer gcc releases add warnings the pinned tree predates).

@@ -20,6 +20,10 @@ Clicking the notification lists the offending details and the labors they cover.
 you genuinely want nobody to do should be set to "Nobody Does This", which does NOT warn.)
 The pack's "Military" detail is exempt -- it is meant to hold only soldiers.
 
+The whole warning goes quiet while `autolabor` or `labormanager` is enabled: those plugins
+hand out labors themselves and ignore work details, so an unstaffed detail says nothing
+about whether the work gets done.
+
 Run once per DFHack session to register; magnus-scripts loads it. To make it permanent on
 its own, add `empty-labor-notification` to dfhack-config/init/dfhack.init.
 ]]
@@ -29,7 +33,68 @@ local NAME = 'empty_labor'
 -- military-labor syncs squad members into it), so never flag it for being soldier-only.
 local MILITARY_DETAIL = 'Military'
 
+-- A labor plugin assigns labors itself and pays no attention to work details, so while one
+-- is running an unstaffed "Only Selected" detail means nothing and the warning stays hidden.
+local LABOR_PLUGINS = {'autolabor', 'labormanager'}
+-- Re-ask on a REAL-TIME clock, not frame_counter: the plugin is usually toggled from a
+-- paused game, and frame_counter does not advance while paused -- a frame-based cache
+-- would hold the pre-toggle answer until the player unpaused.
+local PLUGIN_RECHECK_MS = 1000
+
 local dlg = require('gui.dialogs')
+
+-- ---------------------------------------------------------------------------
+-- autolabor / labormanager detection
+-- ---------------------------------------------------------------------------
+
+-- is the plugin present at all? (labormanager is absent from some builds; asking `plug`
+-- about it every second would be a wasted command)
+local function plugin_loaded(name)
+    local ok, list = pcall(dfhack.internal.listPlugins)
+    if not ok or type(list) ~= 'table' then return true end   -- can't tell -> assume it is
+    for _, p in ipairs(list) do
+        if p == name then return true end
+    end
+    return false
+end
+
+local function plugin_enabled(name)
+    if not plugin_loaded(name) then return false end
+    -- a plugin that ships a lua wrapper (autolabor) answers directly
+    local ok, mod = pcall(require, 'plugins.' .. name)
+    if ok and type(mod) == 'table' and mod.isEnabled then
+        local ok_call, on = pcall(mod.isEnabled)
+        if ok_call then return on end
+    end
+    -- no wrapper (labormanager has none): ask `plug`, which prints one row per plugin
+    -- PRESENT IN THIS BUILD -- "<name> loaded <n> enabled" -- and nothing at all when the
+    -- plugin does not exist. The frontier pattern is what keeps "disabled" from matching.
+    local ok_cmd, out = pcall(dfhack.run_command_silent, 'plug', name)
+    if not ok_cmd or type(out) ~= 'string' then return false end
+    for line in out:gmatch('[^\r\n]+') do
+        if line:match('^' .. name .. '%s') and line:match('%f[%a]enabled%s*$') then
+            return true
+        end
+    end
+    return false
+end
+
+local plugin_cache = {ms = nil, name = nil}
+local function labor_plugin_running()
+    local now = dfhack.getTickCount()
+    if plugin_cache.ms and now >= plugin_cache.ms and now - plugin_cache.ms < PLUGIN_RECHECK_MS then
+        return plugin_cache.name
+    end
+    local found
+    for _, p in ipairs(LABOR_PLUGINS) do
+        if plugin_enabled(p) then
+            found = p
+            break
+        end
+    end
+    plugin_cache.ms, plugin_cache.name = now, found
+    return found
+end
 
 -- ---------------------------------------------------------------------------
 -- detection: details set to OnlySelectedDoesThis with no usable worker
@@ -114,6 +179,7 @@ end
 
 local function empty_labor_message()
     if not dfhack.world.isFortressMode() then return end
+    if labor_plugin_running() then return end   -- the plugin decides who works, not the details
     local list = scan()
     local n = #list
     if n == 0 then return end
@@ -140,6 +206,14 @@ local function labor_names(w)
 end
 
 local function show_dialog()
+    local plugin = labor_plugin_running()
+    if plugin then
+        dlg.showMessage('Work details with no available workers',
+            ('%s is enabled, so it assigns labors itself and work details are ignored.\n' ..
+             'This warning stays hidden until you `disable %s`.'):format(plugin, plugin),
+            COLOR_YELLOW)
+        return
+    end
     local list = scan()
     if #list == 0 then return end
     local lines = {
@@ -169,7 +243,7 @@ local function register()
         nmod.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
     -- (re)assign callbacks every time so re-running the script picks up edits
-    entry.desc = 'Notifies when an "Only Selected Does This" work detail has no usable worker (none, all dead, or only soldiers who stay on active duty -- soldiers Ready within the next month still count).'
+    entry.desc = 'Notifies when an "Only Selected Does This" work detail has no usable worker (none, all dead, or only soldiers who stay on active duty -- soldiers Ready within the next month still count). Silent while autolabor or labormanager is enabled.'
     entry.dwarf_fn = empty_labor_message
     entry.on_click = show_dialog
     -- the overlay gates on config.data[name].enabled; make sure it exists so it's on by default
@@ -189,4 +263,5 @@ end
 
 print('empty-labor-notification: "empty_labor" registered.')
 print('Warns when an "Only Selected" work detail has no available worker (none/dead/only soldiers).')
+print('Stays hidden while autolabor or labormanager is enabled.')
 print('Click the notification for the list. Add to dfhack.init to load it every session.')
