@@ -55,8 +55,9 @@ mechanism and chain each get their own ask.
 Tidies the Labor screen and creates any missing crafting work details.
 
 ### **`fort/auto-name`**
-Names each migrant wave to share a starting letter (wave 1→A, 2→B, …), gender-correct, and
-never lets two civilians end up with the same first name.
+Names each migrant wave to share a starting letter (wave 1→A, 2→B, …), gender-correct. A name
+it hands out is never one already in use by anybody in the fort — if the pool ever runs dry it
+numbers them instead (Aulus II, Aulus III, …).
 
 ## Military & Squads
 
