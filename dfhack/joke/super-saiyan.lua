@@ -14,8 +14,8 @@ screen cell, and that is not where DF puts the map. Rather than leave a marker p
 the wrong dwarf, it is gone -- the view is centred on them anyway, which is the thing that
 actually finds them.
 
-  enable fort/super-saiyan    watch for martial trances
-  disable fort/super-saiyan   stop watching
+  enable joke/super-saiyan    watch for martial trances
+  disable joke/super-saiyan   stop watching
   super-saiyan                status
   super-saiyan test           do the whole thing on a citizen right now, trance or not
   super-saiyan stop           cut the theme short

@@ -9,8 +9,8 @@ Tags: fort | adventure | auto
 
 GUI switchboard for all of magnus's persistent DFHack helpers.
 
-Running `fort/magnus-scripts` opens a window with four individually-scrollable
-columns -- fort/, adv/, embark/ and vanilla DFHack tools -- with a checkbox per
+Running `fort/magnus-scripts` opens a window with five individually-scrollable
+columns -- fort/, adv/, embark/, joke/ and vanilla DFHack tools -- with a checkbox per
 script. Click a row to toggle that helper on or off; the choice is saved to
 dfhack-config/magnus-scripts.json and re-applied on every map load. Column
 headers toggle a whole column, [m] toggles all the mod columns (fort/adv/embark)
@@ -19,6 +19,11 @@ again, everything off).
 
 The first run enables everything: any script that has never been toggled counts
 as ON, so a fresh install starts with the whole pack armed.
+
+joke/ IS THE EXCEPTION, both ways round. Its scripts are off until you turn them
+on, and neither [r] nor [m] touches them -- only the joke/ header [j] and a click
+on one of its rows. They are jokes; they should never arrive by surprise, and a
+master switch meant "arm the useful pack" should not start playing music.
 
 Usage
 -----
@@ -51,8 +56,11 @@ local CONFIG_PATH = dfhack.getDFPath() .. '/dfhack-config/magnus-scripts.json'
 
 local function load_cfg()
     local ok, cfg = pcall(json.decode_file, CONFIG_PATH)
-    if ok and type(cfg) == 'table' and type(cfg.disabled) == 'table' then return cfg end
-    return {disabled = {}}
+    if ok and type(cfg) == 'table' and type(cfg.disabled) == 'table' then
+        cfg.enabled = type(cfg.enabled) == 'table' and cfg.enabled or {}
+        return cfg
+    end
+    return {disabled = {}, enabled = {}}
 end
 
 local cfg = load_cfg()
@@ -62,9 +70,23 @@ local function save_cfg()
     pcall(json.encode_file, cfg, CONFIG_PATH)
 end
 
-local function is_on(key) return not cfg.disabled[key] end
+-- OPT-IN KEYS INVERT THE DEFAULT. Absent-means-on is right for the pack proper, but the
+-- joke/ column must never come on by itself -- not on a fresh install, and not because a
+-- master switch swept it up. Those keys live in cfg.enabled instead, where absent means OFF
+-- and only an explicit choice turns them on.
+local opt_in = {}          -- filled in from COLUMNS below
+
+local function is_on(key)
+    if opt_in[key] then return cfg.enabled[key] == true end
+    return not cfg.disabled[key]
+end
+
 local function set_on(key, on)
-    cfg.disabled[key] = (not on) and true or nil
+    if opt_in[key] then
+        cfg.enabled[key] = on and true or nil
+    else
+        cfg.disabled[key] = (not on) and true or nil
+    end
     save_cfg()
 end
 
@@ -392,6 +414,12 @@ local COLUMNS = {
          enable = overlay_set('enable', 'fix/old-saves.stamp'),
          disable = overlay_set('disable', 'fix/old-saves.stamp')},
     }},
+    {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
+        {key = 'joke-super-saiyan', label = 'super-saiyan',
+         enable = cmd('enable', 'joke/super-saiyan'), disable = cmd('disable', 'joke/super-saiyan')},
+        {key = 'joke-noble-crowns', label = 'noble-crowns',
+         enable = cmd('enable', 'joke/noble-crowns'), disable = cmd('disable', 'joke/noble-crowns')},
+    }},
     {id = 'vanilla', title = 'vanilla dfhack', mode = 'mixed', items = {
         {key = 'hide-tutorials', label = 'hide-tutorials', mode = 'any',
          enable = cmd('enable', 'hide-tutorials'), disable = cmd('disable', 'hide-tutorials')},
@@ -509,6 +537,13 @@ local function mode_active(m)
     return false
 end
 
+-- every key in an opt_in column defaults to OFF (see is_on)
+for _, col in ipairs(COLUMNS) do
+    if col.opt_in then
+        for _, item in ipairs(col.items) do opt_in[item.key] = true end
+    end
+end
+
 -- ---- apply ------------------------------------------------------------------
 -- Bring the game in line with the saved selection, for everything applicable to
 -- the current mode. Called on every map load (the onMapLoad.init line) and when
@@ -570,9 +605,11 @@ local COL_W = 30            -- interior width of one column
 local COL_GAP = 1
 
 MagnusWindow = defclass(MagnusWindow, widgets.Window)
+local COL_N = #COLUMNS      -- widen with the column count rather than a hardcoded 4
+
 MagnusWindow.ATTRS{
     frame_title = 'magnus-scripts',
-    frame = {w = 4 * COL_W + 3 * COL_GAP + 3, h = 40},
+    frame = {w = COL_N * COL_W + (COL_N - 1) * COL_GAP + 3, h = 40},
     resizable = true,
     resize_min = {w = 70, h = 20},
 }
@@ -592,7 +629,11 @@ end
 function MagnusWindow:column_items(which)
     local out = {}
     for _, col in ipairs(COLUMNS) do
-        if which == 'all' or which == 'mods' and col.id ~= 'vanilla' or which == col.id then
+        -- 'all' ([r]) and 'mods' ([m]) skip opt_in columns entirely: joke/ answers to its
+        -- own header and to a click on its rows, and to nothing else
+        local in_group = which == col.id
+            or (not col.opt_in and (which == 'all' or (which == 'mods' and col.id ~= 'vanilla')))
+        if in_group then
             for _, item in ipairs(col.items) do out[#out + 1] = {col = col, item = item} end
         end
     end
@@ -646,7 +687,8 @@ function MagnusWindow:init()
                      pen = COLOR_DARKGREY}},
         },
     }
-    local keys = {fort = 'CUSTOM_F', adv = 'CUSTOM_A', embark = 'CUSTOM_E', vanilla = 'CUSTOM_V'}
+    local keys = {fort = 'CUSTOM_F', adv = 'CUSTOM_A', embark = 'CUSTOM_E',
+                  joke = 'CUSTOM_J', vanilla = 'CUSTOM_V'}
     for i, col in ipairs(COLUMNS) do
         local l = (i - 1) * (COL_W + COL_GAP)
         table.insert(views, widgets.HotkeyLabel{

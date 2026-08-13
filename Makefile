@@ -75,6 +75,8 @@ JOBS        ?= $(shell nproc)
 # --- README composition (make readme) ---
 # README.md is GENERATED. Edit the parts, never README.md.
 # BROKEN_FEATURES.md is deliberately NOT included: the README advertises what works.
+# JOKE_FEATURES.md is deliberately NOT included either, for the opposite reason: those tools
+# work fine, they are just jokes and not what this repo is offering people.
 #
 # The header is emitted verbatim. Each SECTION file is folded into a collapsed <details> block:
 # its single leading `# h1` becomes the <summary>, everything after it becomes the body. That is

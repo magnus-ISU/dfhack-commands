@@ -4,8 +4,11 @@ This repo holds two kinds of deliverables for **Dwarf Fortress 0.53.x + DFHack**
 
 - **`dfhack/`** — standalone DFHack command scripts (`.lua`), one tool per file, in
   category folders that mirror the deployed tree: `fort/` (fortress mode + worldgen),
-  `adv/` (adventure mode), `embark/` (adventurer creation), `fix/`, and `data/` for
-  data files. The folder is the command prefix: `fort/auto-name`, `adv/reveal`.
+  `adv/` (adventure mode), `embark/` (adventurer creation), `fix/`, `joke/`, and `data/`
+  for data files. The folder is the command prefix: `fort/auto-name`, `adv/reveal`.
+  `joke/` is documented in `JOKE_FEATURES.md`, which is deliberately NOT composed into the
+  README, and its `magnus-scripts` column is opt-in: off by default and untouched by the
+  `[r]`/`[m]` master switches.
 - **`content-mods/high-adventure/`** — the *High Adventure* mod suite (raws + per-mod
   active scripts + graphics). Each mod is a folder with `info.txt`, `objects/`,
   `graphics/`, `scripts_modactive/`.

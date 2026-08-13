@@ -61,8 +61,8 @@ locked out of everyone's hands, nobles included, until released by hand.
 pass; with the watcher enabled it will re-forbid any a commoner still has hold of.
 
 Usage:
-    enable noble-crowns      watch crowns (checks every 100 frames)
-    disable noble-crowns     stop watching
+    enable joke/noble-crowns      watch crowns (checks every 100 frames)
+    disable joke/noble-crowns     stop watching
     noble-crowns             status: every crown in the fort, who has it, what is forbidden
     noble-crowns release     unforbid every crown in the fort
 ]]
@@ -338,5 +338,5 @@ else
             it.flags.forbid and '  [forbidden]' or ''))
     end
     print(('  crowns forbidden so far: %d'):format(state.forbidden))
-    if not enabled then print('  `enable noble-crowns` to watch.') end
+    if not enabled then print('  `enable joke/noble-crowns` to watch.') end
 end
