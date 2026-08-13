@@ -233,6 +233,14 @@ Warns of enemies inside the alert burrow; shift-click sends selected squads to a
 ### **`fort/trader-notification`**
 Counts down how many days the trader is ready; click to jump to the depot.
 
+### **`fort/moody-items-warning`**
+Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
+plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and raw glass in
+any type you have produced. A mood asks the moment it starts, so a gap found afterwards is a
+berserk dwarf. With stressed dwarves in the fort it also checks remains and bones, which a
+macabre mood wants. The list is taken from DFHack's `strangemood` plugin and cross-checked
+against the wiki, not from memory.
+
 ### **`fort/empty-labor-notification`**
 Warns when a restricted work detail has nobody who can actually do it. Stays quiet while
 `autolabor` or `labormanager` is enabled, since those assign labors themselves.

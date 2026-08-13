@@ -213,6 +213,8 @@ local COLUMNS = {
          disable = notify_off({'trader_ready'}, {'traders_ready'})},
         {key = 'empty-labor-notification', label = 'empty-labor-notification',
          enable = script('fort/empty-labor-notification'), disable = notify_off({'empty_labor'})},
+        {key = 'moody-items-warning', label = 'moody-items-warning',
+         enable = script('fort/moody-items-warning'), disable = notify_off({'moody_items'})},
         {key = 'civ-alert-notification', label = 'civ-alert-notification',
          enable = script('fort/civ-alert-notification'), disable = notify_off({'civ_alert_outside'})},
         {key = 'enemies-inside-notification', label = 'enemies-inside-notif.',
