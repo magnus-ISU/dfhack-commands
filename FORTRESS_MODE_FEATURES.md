@@ -153,6 +153,12 @@ Opens a statue's full item description, and adds a Remove button to built items.
 
 ![fort/statue-redirect demo](demos/fort-statue-redirect.gif)
 
+### **`fort/clickable-noble-names`**
+Makes the dead space on the Nobles screen live: click a noble's row to open their sheet
+and follow them, or click one of the office/bedroom/dining/tomb icons to jump to that
+room. DF's own assign and symbol buttons still work — the row is measured from the
+render, so those blocks are handed straight back to DF.
+
 ## Searchable Lists
 
 ### **`fort/noble-symbol-search`**
