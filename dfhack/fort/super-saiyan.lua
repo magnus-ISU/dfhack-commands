@@ -13,6 +13,11 @@ seconds, and the Ultra Instinct theme plays in full.
   disable super-saiyan    stop watching
   super-saiyan            status
   super-saiyan test       do the whole thing on a citizen right now, trance or not
+  super-saiyan stop       cut the theme short (and stop the cursor blinking)
+
+`stop` ends the current celebration without disabling the watcher: the theme runs 167
+seconds and a trance in the middle of a siege is not always a moment to sit through. The
+next trance fires as normal.
 
 WHAT COUNTS. `unit.counters.soldier_mood == MartialTrance`, on the RISING edge per unit: a
 trance lasts a while, so the flag is remembered until it clears and one trance fires once.
@@ -220,6 +225,19 @@ if dfhack_flags and dfhack_flags.enable ~= nil then
 end
 
 local cmd = ({...})[1]
+
+if cmd == 'stop' then
+    -- the blink goes too: `stop` means "that's enough", not "just mute it"
+    blink = nil
+    local plug = audio()
+    if not plug then
+        print('super-saiyan: nothing to stop -- no ssaudio plugin loaded')
+        return
+    end
+    plug.stop()
+    print('super-saiyan: stopped')
+    return
+end
 
 if cmd == 'test' then
     local unit = dfhack.gui.getSelectedUnit(true)
