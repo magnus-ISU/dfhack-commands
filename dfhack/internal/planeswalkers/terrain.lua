@@ -623,6 +623,26 @@ function load_phases(ctx)
     table.insert(phases, {
         name = 'map cleanup',
         step = function(job)
+            -- the destination's own units can end up inside the restored
+            -- terrain (the surface shape changed under them) -- dig them out
+            for _, u in ipairs(df.global.world.units.active) do
+                local tt = dfhack.maps.getTileType(u.pos.x, u.pos.y, u.pos.z)
+                if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.WALL then
+                    local moved = false
+                    for z = u.pos.z + 1, df.global.world.map.z_count - 2 do
+                        local t2 = dfhack.maps.getTileType(u.pos.x, u.pos.y, z)
+                        if t2 and df.tiletype.attrs[t2].shape ~= df.tiletype_shape.WALL then
+                            dfhack.units.teleport(u, xyz2pos(u.pos.x, u.pos.y, z))
+                            moved = true
+                            break
+                        end
+                    end
+                    if not moved and ctx.spawn_anchor then
+                        dfhack.units.teleport(u, ctx.spawn_anchor)
+                    end
+                    common.add_skip(ctx, 'unit-unstuck-from-wall')
+                end
+            end
             df.global.world.reindex_pathfinding = true
             df.global.gps.force_full_display_count = 1
             dfhack.run_command('fix/occupancy')

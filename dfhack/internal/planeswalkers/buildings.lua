@@ -32,6 +32,9 @@ end
 local function save_one(ctx, bld)
     local btype = bld:getType()
     if btype == df.building_type.Wagon then return nil end
+    -- world.buildings.all can contain buildings from OTHER previously-loaded
+    -- sites (adventurer travels); their coords belong to other maps
+    if bld.site_id ~= df.global.plotinfo.site_id then return nil end
     local rec = {
         id = bld.id,
         type = df.building_type[btype],
