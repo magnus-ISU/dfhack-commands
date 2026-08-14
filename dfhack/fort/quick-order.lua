@@ -211,6 +211,35 @@ local function reaction_product(r)
     end
 end
 
+-- The reactions THIS CIVILISATION may run, as a set of reaction indices. A reaction existing in
+-- the raws says nothing about whether your fort can run it: a modded civ's reactions are loaded
+-- for every world they are installed in, so a dwarf fort could be offered another race's recipes
+-- and queue an order no workshop of yours will ever take (a bone splint, say -- the craftsdwarf's
+-- shop exists, the recipe is simply not yours).
+-- `source_enid` is NOT the permission: it records which entity a reaction was GENERATED for, and
+-- every ordinary hand-written raw reaction carries -1. Reading -1 as "anyone may" offered 476 of
+-- this world's 1428 reactions where only 176 are legal.
+-- Two disjoint sources, both needed:
+--   * `entity_raw.workshops.permitted_reaction_id` -- the civ's [PERMITTED_REACTION:...] list,
+--     which is where brewing, tanning and soap live;
+--   * `historical_entity.resources.reaction_idx` -- the procedurally generated per-entity ones
+--     (this civ's own instrument parts), which never appear in the raw list.
+-- nil means "could not read either list", which leaves the vocabulary unfiltered rather than
+-- silently emptying it.
+local function permitted_reactions()
+    local ent = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not ent then return nil end
+    local set, any = {}, false
+    local function take(vec)
+        pcall(function()
+            for _, id in ipairs(vec) do set[id] = true; any = true end
+        end)
+    end
+    pcall(function() take(ent.entity_raw.workshops.permitted_reaction_id) end)
+    pcall(function() take(ent.resources.reaction_idx) end)
+    return any and set or nil
+end
+
 local vocab, vocab_civ  -- built once PER CIV: the permitted-subtype filter is civ-specific
 -- entry = {name, kind='job'|'reaction', job, item_type=-1, item_subtype=-1,
 --          reaction_name=nil, mat=nil, needs_mat=bool}
@@ -292,14 +321,14 @@ local function build_vocab()
             end
         end
     end
-    -- fort-orderable REACTIONS: permitted to this civ (source_enid -1 = universal,
-    -- or == our civ) and NOT an adventure-mode reaction (ADV_* category, e.g. the
-    -- "make wooden bed" carpentry ones -- fort furniture goes through the jobs above).
-    local civ = df.global.plotinfo.civ_id
+    -- fort-orderable REACTIONS: the ones this CIVILISATION is actually permitted, and NOT an
+    -- adventure-mode reaction (ADV_* category, e.g. the "make wooden bed" carpentry ones -- fort
+    -- furniture goes through the jobs above).
     local R = df.global.world.raws.reactions.reactions
+    local allowed = permitted_reactions()
     for i = 0, #R - 1 do
         local r = R[i]
-        if (r.source_enid == -1 or r.source_enid == civ)
+        if (not allowed or allowed[i])
             and r.name ~= '' and not r.category:match('^ADV') then
             v[#v + 1] = {name = norm(r.name), kind = 'reaction',
                          job = df.job_type.CustomReaction, reaction_name = r.code,
@@ -582,6 +611,20 @@ local SHIELD_T = df.item_type.SHIELD
 local CHAIN_T = df.item_type.CHAIN
 local CHAIN_SOFT = {cloth = true, silk = true, yarn = true}
 
+-- Hospital gear: a splint is one wood log at the carpenter's or one metal bar at a forge, and a
+-- crutch is a log or three bars. That is the whole list -- no stone (the mason's makes neither),
+-- and no bone, whatever a mod's own "make bone splint" reaction may offer another civilisation.
+local MEDICAL = {}
+for _, t in ipairs({'SPLINT', 'CRUTCH'}) do
+    if df.item_type[t] then MEDICAL[df.item_type[t]] = true end
+end
+
+local function is_wood(mat_type, mat_index)
+    local mi = dfhack.matinfo.decode(mat_type, mat_index)
+    local ok, w = pcall(function() return mi.material.flags.WOOD end)
+    return ok and w or false
+end
+
 -- weapons with the CAN_STONE flag (short sword, dagger, spear...) can be KNAPPED from
 -- stone at the craftsdwarf's -- so "obsidian short sword" is legal even though obsidian
 -- can't be forged. Cached per weapon subtype.
@@ -615,6 +658,8 @@ local function can_make_inorganic(item, mi)
         return f.IS_METAL or false                                    -- shields: metal (wood via category)
     elseif it == CHAIN_T then
         return (f.IS_METAL and f.ITEMS_HARD) or false                 -- chains are forged; stone can't
+    elseif MEDICAL[it] then
+        return (f.IS_METAL and f.ITEMS_HARD) or false                 -- metal bars only; no stone splints
     end
     -- everything else (furniture, crafts, containers, tools...): a METAL must be forgeable into
     -- hard items (ITEMS_HARD). Pure alloy-ingredient metals like bismuth (no ITEMS_HARD) can't --
@@ -631,6 +676,7 @@ end
 local function legal_material(item, m)
     local it = item.item_type
     local policed = WEAPONISH[it] or ARMOR_DEFVEC[it] or it == SHIELD_T or it == CHAIN_T
+        or MEDICAL[it]
     if m.kind == 'specific' or (m.kind == 'class' and m.picked) then
         local mt = m.kind == 'specific' and m.mat_type or m.picked.mat_type
         local mi = m.kind == 'specific' and m.mat_index or m.picked.mat_index
@@ -641,12 +687,21 @@ local function legal_material(item, m)
             end
             return true
         end
-        -- concrete non-inorganic (glass): fine for furniture/crafts, not for forged combat items
+        -- concrete non-inorganic: wood is a legal splint/crutch, everything else here (glass,
+        -- bone, shell, cloth...) is not; for forged combat gear none of it is
+        if MEDICAL[it] then
+            if is_wood(mt, mi) then return true end
+            return false, ('%s can only be wood or metal'):format(item.name)
+        end
         if policed then return false, ('%s cannot be made of that material'):format(item.name) end
         return true
     end
     if not policed then return true end          -- bare class/category on furniture/crafts: anything goes
     if m.kind == 'class' then                    -- no concrete pick: judge the class
+        if MEDICAL[it] then
+            if m.class ~= 'metal' then return false, item.name .. ' can only be wood or metal' end
+            return true
+        end
         if m.class == 'metal' then
             if ARMOR_DEFVEC[it] then local af = armor_flags(item); if af and not af.METAL then return false, item.name .. ' cannot be made of metal' end end
             return true
@@ -657,7 +712,19 @@ local function legal_material(item, m)
             return false, item.name .. ' cannot be made of ' .. m.class
         end
     elseif m.kind == 'category' then             -- wood / leather / cloth / silk / yarn
+        -- bolts are the exception among forged goods: the craftsdwarf's carves them from bone and
+        -- the carpenter turns them from wood, which is most forts' entire ammo supply
+        if it == df.item_type.AMMO then
+            if m.category ~= 'bone' and m.category ~= 'wood' then
+                return false, item.name .. ' can only be metal, bone or wood'
+            end
+            return true
+        end
         if WEAPONISH[it] then return false, item.name .. ' must be metal or stone' end
+        if MEDICAL[it] then                      -- a log at the carpenter's, nothing softer
+            if m.category ~= 'wood' then return false, item.name .. ' can only be wood or metal' end
+            return true
+        end
         if it == CHAIN_T then                    -- a woven rope: thread goods only
             if not CHAIN_SOFT[m.category] then
                 return false, item.name .. ' can only be metal, cloth, silk or yarn'
@@ -738,7 +805,8 @@ end
 -- bare (no-material) items that should default to WOOD -- either wood-only (bed) or
 -- containers that can't be made of stone (barrel/bucket/bin/cage)
 local DEFAULT_WOOD = {}
-for _, n in ipairs({'bed', 'barrel', 'bucket', 'bin', 'cage', 'weapon rack', 'armor stand'}) do
+for _, n in ipairs({'bed', 'barrel', 'bucket', 'bin', 'cage', 'weapon rack', 'armor stand',
+                    'splint', 'crutch'}) do   -- splint/crutch: a log, or bars if you say metal
     DEFAULT_WOOD[n] = true
 end
 local METAL_ITEMS = {}
@@ -1004,12 +1072,11 @@ function create_order(input)
     -- amount_total counts JOBS, not finished items. Some jobs yield several per run (stone/metal
     -- blocks 4, glass blocks 1, flasks + goblets/mugs 3), so divide the requested item count by the
     -- yield and round up: "197 blocks" -> 50 jobs (200 blocks), not 197 jobs (788 blocks).
-    -- REPEATING orders top up in batches of at most 10 ITEMS: the stock condition still targets
-    -- the full requested amount, but each (daily) trigger only queues ~10 -- "r200 blocks" keeps
-    -- the stock hovering at 200-209, instead of queueing 200 more and oscillating 200-399.
-    local batch = plan.amount
-    if plan.repeating and batch > 10 then batch = 10 end
-    local jobs = math.ceil(batch / order_yield(o))
+    -- A REPEATING order never queues more than 5 jobs per trigger: the stock condition still
+    -- targets the full requested amount, but each (daily) trigger tops up by 5 -- "r200 blocks"
+    -- keeps the stock hovering just over 200, instead of queueing 200 more and oscillating.
+    local jobs = math.ceil(plan.amount / order_yield(o))
+    if plan.repeating then jobs = math.min(jobs, 5) end
     o.amount_total, o.amount_left = jobs, jobs
     if plan.repeating then
         -- Repeating = "keep `amount` of the OUTPUT item in stock". Checked DAILY, but a stock
