@@ -266,21 +266,15 @@ local function message()
     local ok, s = pcall(survey)
     if not ok or not s then return end
 
-    local n = #s.missing
-    local g = #s.grim_missing
-    if n == 0 and g == 0 then return end
-
-    local parts = {}
-    if n > 0 then
-        parts[#parts + 1] = (n == 1)
-            and ('No ' .. s.missing[1] .. ' for a strange mood!')
-            or (('%d mood materials missing!'):format(n))
-    end
-    if g > 0 then
-        parts[#parts + 1] = (('%d stressed dwarf%s and no %s!'):format(
-            s.stressed, s.stressed == 1 and '' or 'ves', table.concat(s.grim_missing, ' or ')))
-    end
-    return table.concat(parts, '  ')
+    -- one list, one sentence: the remains/bones gap reads as just another thing a mood could
+    -- ask for and we haven't got. Naming them all only stays readable while there are a few,
+    -- so a long list collapses to a count and the panel shows the detail.
+    local gone = {}
+    for _, m in ipairs(s.missing) do gone[#gone + 1] = m end
+    for _, m in ipairs(s.grim_missing) do gone[#gone + 1] = m end
+    if #gone == 0 then return end
+    if #gone > 3 then return ('%d mood materials missing!'):format(#gone) end
+    return ('No %s for a mood'):format(table.concat(gone, ', '))
 end
 
 local function show_dialog()
@@ -291,13 +285,11 @@ local function show_dialog()
     end
     if #s.grim > 0 then
         lines[#lines + 1] = ''
-        lines[#lines + 1] = ('%d stressed dwarf%s -- a fell or macabre mood is possible:'):format(
+        lines[#lines + 1] = ('%d stressed dwarf%s -- a macabre mood is possible:'):format(
             s.stressed, s.stressed == 1 and '' or 'ves')
         for _, h in ipairs(s.grim) do
             lines[#lines + 1] = ('  %-16s %s'):format(h.label, h.n > 0 and ('%d'):format(h.n) or 'NONE')
         end
-        lines[#lines + 1] = ''
-        lines[#lines + 1] = 'A fell mood takes a corpse by murder -- nothing to stock for that.'
     end
     if #s.missing == 0 and #s.grim_missing == 0 then
         lines[#lines + 1] = ''
@@ -338,7 +330,7 @@ if not dfhack_flags.module then
     if ok and s then
         print(('  missing now: %s'):format(#s.missing > 0 and table.concat(s.missing, ', ') or 'nothing'))
         if s.stressed > 0 then
-            print(('  %d stressed dwarf(s); fell/macabre stock missing: %s'):format(
+            print(('  %d stressed dwarf(s); macabre stock missing: %s'):format(
                 s.stressed, #s.grim_missing > 0 and table.concat(s.grim_missing, ', ') or 'nothing'))
         end
     end
