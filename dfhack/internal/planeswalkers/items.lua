@@ -16,6 +16,17 @@ local function subtype_token(item)
     return ok and def and def.id or nil
 end
 
+-- how a building holds this item: 2 = construction component, 0 = stored/displayed
+local function holder_use_mode(item, bld_id)
+    local bld = df.building.find(bld_id)
+    if bld and df.building_actual:is_instance(bld) then
+        for _, ci in ipairs(bld.contained_items) do
+            if ci.item == item then return ci.use_mode end
+        end
+    end
+    return nil
+end
+
 local function race_token(race, caste)
     if not race or race < 0 then return nil end
     local craw = df.global.world.raws.creatures.all[race]
@@ -33,7 +44,6 @@ local function save_one(ctx, item)
         common.add_skip(ctx, skip)
         return nil
     end
-    if item.flags.in_building then return nil end       -- building components re-minted
     if item.flags.construction then return nil end
     if item.flags.garbage_collect then return nil end
     local mi = dfhack.matinfo.decode(item)
@@ -90,16 +100,35 @@ local function save_one(ctx, item)
             end
         end
     end
-    -- improvements (decorations) best-effort
+    if item.flags.in_building then
+        -- construction components (use_mode 2) are re-minted by the buildings
+        -- module; items merely stored or DISPLAYED in a building (use_mode 0)
+        -- -- artifacts on pedestals above all -- are cargo and must transfer
+        local use = rec.in_bld and holder_use_mode(item, rec.in_bld)
+        if use ~= 0 and not item.flags.artifact then return nil end
+    end
+    -- improvements (decorations): these ARE the item's description text
     local oki, imps = pcall(function() return item.improvements end)
     if oki and imps and #imps > 0 then
         rec.imp = {}
         for _, imp in ipairs(imps) do
             local imi = dfhack.matinfo.decode(imp.mat_type, imp.mat_index)
-            table.insert(rec.imp, {
-                t = tostring(imp._type):match('itemimprovement_(%w+)st') or 'generic',
+            local e = {
+                -- (.+)st> not (%w+): several type names contain underscores
+                t = tostring(imp._type):match('itemimprovement_(.+)st>') or 'generic',
                 mat = imi and imi:getToken() or nil,
-            })
+            }
+            if imp.quality > 0 then e.q = imp.quality end
+            if imp.skill_rating > 0 then e.sr = imp.skill_rating end
+            if df.itemimprovement_itemspecificst:is_instance(imp) then
+                e.spec = imp.type
+            elseif df.itemimprovement_threadst:is_instance(imp)
+                and imp.dye.mat_type >= 0 then
+                local dmi = dfhack.matinfo.decode(imp.dye.mat_type, imp.dye.mat_index)
+                e.dye = dmi and dmi:getToken() or nil
+                if imp.dye.quality > 0 then e.dq = imp.dye.quality end
+            end
+            table.insert(rec.imp, e)
         end
     end
     return rec
@@ -191,6 +220,60 @@ local function resolve_race(ctx, rtoken, ctoken)
     end
     ctx.race_cache[key] = false
     return nil
+end
+
+-- improvement types whose payload is world-local (art images, written content)
+-- cannot cross worlds; everything else is re-minted type+material+quality
+local IMP_SKIP = {
+    art_image = 'improvement-image-lost',
+    sewn_image = 'improvement-image-lost',
+    image_set = 'improvement-image-lost',
+    writing = 'improvement-writing-lost',
+    pages = 'improvement-writing-lost',
+    generic = 'improvement-type-unknown',
+}
+
+local function restore_improvements(ctx, rec, item)
+    if not rec.imp then return end
+    local ok0, imps = pcall(function() return item.improvements end)
+    if not ok0 or not imps then
+        common.add_skip(ctx, 'improvements-unsupported-on-item', rec.t)
+        return
+    end
+    for _, e in ipairs(rec.imp) do
+        local skip = IMP_SKIP[e.t or 'generic']
+        local cls = not skip and df['itemimprovement_' .. e.t .. 'st'] or nil
+        local minfo = e.mat and dfhack.matinfo.find(e.mat) or nil
+        if skip then
+            common.add_skip(ctx, skip, rec.t)
+        elseif not cls then
+            common.add_skip(ctx, 'improvement-type-unknown', e.t)
+        elseif e.mat and not minfo then
+            common.add_skip(ctx, 'improvement-mat-missing', e.mat)
+        else
+            local okc = pcall(function()
+                local imp = cls:new()
+                imp.mat_type = minfo and minfo.type or -1
+                imp.mat_index = minfo and minfo.index or -1
+                imp.maker = -1
+                imp.masterpiece_event = -1
+                imp.quality = math.min(e.q or 0, 5)
+                imp.skill_rating = e.sr or 0
+                if e.spec and df.itemimprovement_itemspecificst:is_instance(imp) then
+                    imp.type = e.spec
+                end
+                if df.itemimprovement_threadst:is_instance(imp) then
+                    local dm = e.dye and dfhack.matinfo.find(e.dye) or nil
+                    imp.dye.mat_type = dm and dm.type or -1
+                    imp.dye.mat_index = dm and dm.index or -1
+                    imp.dye.dyer = -1
+                    imp.dye.quality = e.dq or 0
+                end
+                imps:insert('#', imp)
+            end)
+            if not okc then common.add_skip(ctx, 'improvement-restore-failed', e.t) end
+        end
+    end
 end
 
 local function create_one(ctx, rec, is_retry)
@@ -286,6 +369,7 @@ local function create_one(ctx, rec, is_retry)
         f.hidden = rec.fl & 8 == 8
         f.rotten = rec.fl & 16 == 16
     end
+    restore_improvements(ctx, rec, item)
     return item
 end
 
@@ -296,7 +380,13 @@ local function place_one(ctx, rec, item)
         if container and dfhack.items.moveToContainer(item, container) then return end
     elseif rec.in_bld then
         local bld = ctx.bld_map and ctx.bld_map[rec.in_bld]
-        if bld and dfhack.items.moveToBuilding(item, bld, 0) then return end
+        if bld and dfhack.items.moveToBuilding(item, bld, 0) then
+            -- items on pedestals/display cases are also listed by id
+            if df.building_display_furniturest:is_instance(bld) then
+                bld.displayed_items:insert('#', item.id)
+            end
+            return
+        end
     elseif rec.on_unit then
         local u = ctx.unit_map and ctx.unit_map[rec.on_unit]
         if u and dfhack.items.moveToInventory(item, u, rec.mode or 0, rec.bp or -1) then
@@ -370,9 +460,7 @@ function load_phases(ctx)
         pos = function(job) return job.cursor end,
         step = function(job, deadline)
             local nwords = #df.global.world.raws.language.words
-            while job.cursor <= #job.arts.list do
-                local rec = job.arts.list[job.cursor]
-                job.cursor = job.cursor + 1
+            local function attach_one(rec)
                 local item = ctx.item_map[rec.item]
                 if item then
                     local ar = df.artifact_record:new()
@@ -403,6 +491,15 @@ function load_phases(ctx)
                     item.flags.artifact = true
                 else
                     common.add_skip(ctx, 'artifact-item-missing', rec.rendered)
+                end
+            end
+            while job.cursor <= #job.arts.list do
+                local rec = job.arts.list[job.cursor]
+                job.cursor = job.cursor + 1
+                -- one malformed record must not abort the whole restore
+                local ok, err = pcall(attach_one, rec)
+                if not ok then
+                    common.add_skip(ctx, 'artifact-attach-error', tostring(err))
                 end
                 if dfhack.getTickCount() >= deadline then return false end
             end

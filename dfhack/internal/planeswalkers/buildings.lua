@@ -33,8 +33,12 @@ local function save_one(ctx, bld)
     local btype = bld:getType()
     if btype == df.building_type.Wagon then return nil end
     -- world.buildings.all can contain buildings from OTHER previously-loaded
-    -- sites (adventurer travels); their coords belong to other maps
-    if bld.site_id ~= df.global.plotinfo.site_id then return nil end
+    -- sites (adventurer travels); their coords belong to other maps. Most of
+    -- the fort's own buildings carry site_id -1 (DF only stamps some paths),
+    -- so only a DIFFERENT non-negative site id marks a foreigner
+    if bld.site_id >= 0 and bld.site_id ~= df.global.plotinfo.site_id then
+        return nil
+    end
     local rec = {
         id = bld.id,
         type = df.building_type[btype],

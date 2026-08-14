@@ -84,8 +84,10 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 ### **`fort/planeswalkers`**
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
 terrain (with veins, sand/soil, adamantine), constructions, buildings, stockpiles with their
-settings, zones, items (with containment and quality), artifacts, and every unit with skills,
-personality, appearance, family ties, and the surrounding historical-figure web — into
+settings, zones, items (with containment, quality, and decorations), artifacts (named, with
+their descriptions, even on pedestals), retired adventurers (unretirable on arrival), and
+every unit with skills, personality, appearance, family ties, and the surrounding
+historical-figure web — into
 `dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world
 (same or larger embark size), `fort/planeswalkers load <name> --i-saved` wipes the footprint
 and rebuilds the fort there, dwarves and all. Everything is stored as raw tokens, so worlds

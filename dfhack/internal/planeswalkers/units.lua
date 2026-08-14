@@ -129,6 +129,22 @@ local function save_hf(ctx, hf, stub)
     return rec
 end
 
+-- "was ever an adventurer" lives on the nemesis record, nowhere else (see
+-- fort/rusty-legends). The flagarray may be unallocated: reading an index past
+-- its length SIGSEGVs through a NULL bits pointer, so length-check first.
+local function adventurer_bits(u)
+    local nem = dfhack.units.getNemesis(u)
+    if not nem then return nil end
+    local ok, n = pcall(function() return #nem.flags end)
+    if not ok or type(n) ~= 'number' then return nil end
+    local bits = 0
+    if n > df.nemesis_flags.ADVENTURER
+        and nem.flags[df.nemesis_flags.ADVENTURER] then bits = bits | 1 end
+    if n > df.nemesis_flags.ACTIVE_ADVENTURER
+        and nem.flags[df.nemesis_flags.ACTIVE_ADVENTURER] then bits = bits | 2 end
+    return bits > 0 and bits or nil
+end
+
 local function save_unit(ctx, u)
     local rtok, ctok, generated = race_tokens(u.race, u.caste)
     if not rtok then return nil end
@@ -142,6 +158,7 @@ local function save_unit(ctx, u)
         sex = u.sex,
         class = classify(u),
         age = math.max(0, ctx.src_year - u.birth_year),
+        adv = adventurer_bits(u),
         prof = df.profession[u.profession],
         cprof = #u.custom_profession > 0 and common.u(u.custom_profession) or nil,
         x = u.pos.x, y = u.pos.y, z = u.pos.z,
@@ -452,6 +469,21 @@ local function spawn_unit(ctx, rec)
     end
     write_skills(u, hf or nil, rec.skills)
     write_body(u, rec)
+    if rec.adv then
+        -- re-mark as a (retired) adventurer so DF's unretire list picks the
+        -- unit up again. Only ADVENTURER is restored: ACTIVE_ADVENTURER means
+        -- "being played right now" and must never be true in fort mode.
+        local nem = dfhack.units.getNemesis(u)
+        if nem then
+            if #nem.flags <= df.nemesis_flags.ADVENTURER then
+                nem.flags:resize(31)  -- same size DF allocates (modtools/create-unit)
+            end
+            nem.flags[df.nemesis_flags.ADVENTURER] = true
+        else
+            common.add_skip(ctx, 'adventurer-flag-lost-no-nemesis',
+                            rec.name and rec.name.rendered)
+        end
+    end
     return u, hf
 end
 
