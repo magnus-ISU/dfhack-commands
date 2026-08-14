@@ -301,12 +301,23 @@ local function load_one(ctx, rec)
         local item = mint_component(ctx, comp)
         if item then table.insert(items, item) end
     end
+    if #items == 0 then
+        -- some furniture buildings record no components; mint the obvious
+        -- matching item (Statue -> STATUE etc.) so the build has substance
+        local guess = df.item_type[rec.type:upper()] and rec.type:upper() or 'BOULDER'
+        local item = mint_component(ctx, {t = guess, mat = rec.mat})
+        if not item then
+            -- material may be missing/none (e.g. farm plots): any stone will do
+            item = mint_component(ctx, {t = 'BOULDER', mat = 'INORGANIC:MICROCLINE'})
+        end
+        if item then table.insert(items, item) end
+    end
     local args = {
         type = btype, subtype = rec.subtype, custom = custom, pos = pos,
         width = rec.w, height = rec.h,
+        items = items,  -- possibly empty; never abstract for actual buildings
     }
     if rec.direction then args.direction = rec.direction end
-    if #items > 0 then args.items = items else args.abstract = true end
     local bld, err = dfhack.buildings.constructBuilding(args)
     if not bld then
         for _, item in ipairs(items) do dfhack.items.remove(item) end

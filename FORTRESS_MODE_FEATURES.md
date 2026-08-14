@@ -38,6 +38,19 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ## Fortress Management
 
+### **`fort/planeswalkers`**
+Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
+terrain (with veins, sand/soil, adamantine), constructions, buildings, stockpiles with their
+settings, zones, items (with containment and quality), artifacts, and every unit with skills,
+personality, appearance, family ties, and the surrounding historical-figure web — into
+`dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world
+(same or larger embark size), `fort/planeswalkers load <name> --i-saved` wipes the footprint
+and rebuilds the fort there, dwarves and all. Everything is stored as raw tokens, so worlds
+with the same mod set restore near-losslessly; content the destination world lacks (modded
+materials, procedurally generated races, necromantic secrets) is substituted with the closest
+equivalent or skipped with a report. Make a manual DF save before loading — there is no
+rollback. `list`, `delete <name> --yes`, `status`, and `cancel` round out the set.
+
 ### **`fort/workshop-tools`**
 Puts a `+` on every queued workshop task that queues another one just like it, and sorts
 a shop's "Add new task" list so the jobs you can actually do come before the ones you can't.

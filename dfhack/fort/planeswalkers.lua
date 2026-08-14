@@ -112,6 +112,7 @@ local function do_save(name)
     local phases = terrain.save_phases(ctx)
     for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
+    for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
     common.start_job('save ' .. name, phases, ctx, function()
         common.write_json(ctx.dir .. '/legend.json',
             {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list})
@@ -208,6 +209,10 @@ local function do_load(name, ...)
     local cleanup = table.remove(phases)  -- map cleanup runs last of all
     if dfhack.filesystem.exists(dir .. '/buildings.json') then
         for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
+    end
+    if dfhack.filesystem.exists(dir .. '/units.json') then
+        -- units before items so unit-held items can be re-attached
+        for _, p in ipairs(req('units').load_phases(ctx)) do table.insert(phases, p) end
     end
     if dfhack.filesystem.exists(dir .. '/items.json') then
         for _, p in ipairs(req('items').load_phases(ctx)) do table.insert(phases, p) end

@@ -78,6 +78,16 @@ local function save_one(ctx, item)
             rec.in_bld = ref.building_id
         elseif df.general_ref_unit_holderst:is_instance(ref) then
             rec.on_unit = ref.unit_id
+            local holder = df.unit.find(ref.unit_id)
+            if holder then
+                for _, inv in ipairs(holder.inventory) do
+                    if inv.item == item then
+                        rec.mode = inv.mode
+                        rec.bp = inv.body_part_id
+                        break
+                    end
+                end
+            end
         end
     end
     -- improvements (decorations) best-effort
@@ -114,6 +124,8 @@ function save_phases(ctx)
                 if dfhack.getTickCount() >= deadline then return false end
             end
             common.write_json(ctx.dir .. '/items.json', job.items)
+            ctx.captured_items = {}
+            for _, rec in ipairs(job.items.list) do ctx.captured_items[rec.id] = true end
             ctx.manifest.counts.items = #job.items.list
             ctx.manifest.complete.items = true
             return true
@@ -122,8 +134,11 @@ function save_phases(ctx)
         name = 'artifacts',
         step = function(job)
             local out = {v = 1, list = {}}
+            -- only artifacts physically present in the fort; the rest of the
+            -- old world's artifacts (and their holders) stay behind
             for _, ar in ipairs(df.global.world.artifacts.all) do
-                if ar.item then
+                if ar.item and (not ctx.captured_items
+                                or ctx.captured_items[ar.item.id]) then
                     local words, pos = {}, {}
                     for i = 0, 6 do
                         words[i + 1] = ar.name.words[i]
@@ -178,7 +193,7 @@ local function resolve_race(ctx, rtoken, ctoken)
     return nil
 end
 
-local function create_one(ctx, rec)
+local function create_one(ctx, rec, is_retry)
     local itype = df.item_type[rec.t]
     if not itype then
         common.add_skip(ctx, 'item-type-unknown', rec.t)
@@ -208,10 +223,48 @@ local function create_one(ctx, rec)
     local items = dfhack.items.createItem(creator_unit(), itype, isub, mt, mx, false)
     local item = items and items[1]
     if type(item) == 'table' then item = item[1] end
+    if not item and itype == df.item_type.SEEDS
+        and not (ctx.type_ok_mat and ctx.type_ok_mat[itype]) then
+        -- createItem refuses many seed materials; probe the dest's plants for
+        -- one it accepts so the overwrite fallback below has a base
+        for _, plant in ipairs(df.global.world.raws.plants.all) do
+            local pm = dfhack.matinfo.find('PLANT:' .. plant.id .. ':SEED')
+            if pm then
+                local probe = dfhack.items.createItem(creator_unit(), itype, -1,
+                                                      pm.type, pm.index, false)
+                local pi = probe and probe[1]
+                if type(pi) == 'table' then pi = pi[1] end
+                if pi then
+                    dfhack.items.remove(pi)
+                    ctx.type_ok_mat = ctx.type_ok_mat or {}
+                    ctx.type_ok_mat[itype] = {pm.type, pm.index}
+                    break
+                end
+            end
+        end
+    end
+    if not item and ctx.type_ok_mat and ctx.type_ok_mat[itype] then
+        -- createItem refuses some valid materials (e.g. surface-plant seeds):
+        -- create with a known-good material for the type, then overwrite
+        local fb = ctx.type_ok_mat[itype]
+        items = dfhack.items.createItem(creator_unit(), itype, isub, fb[1], fb[2], false)
+        item = items and items[1]
+        if type(item) == 'table' then item = item[1] end
+        if item then
+            local okm = pcall(function()
+                item.mat_type = mt
+                item.mat_index = mx
+            end)
+            if not okm then common.add_skip(ctx, 'item-mat-overwrite-failed', rec.t) end
+        end
+    end
     if not item then
+        if not is_retry then return nil, 'retry' end
         common.add_skip(ctx, 'item-create-failed', rec.t)
         return nil
     end
+    ctx.type_ok_mat = ctx.type_ok_mat or {}
+    if not ctx.type_ok_mat[itype] then ctx.type_ok_mat[itype] = {mt, mx} end
     if rec.race then
         local r, c = resolve_race(ctx, rec.race, rec.caste)
         if r then
@@ -246,7 +299,9 @@ local function place_one(ctx, rec, item)
         if bld and dfhack.items.moveToBuilding(item, bld, 0) then return end
     elseif rec.on_unit then
         local u = ctx.unit_map and ctx.unit_map[rec.on_unit]
-        if u and dfhack.items.moveToInventory(item, u, 0) then return end
+        if u and dfhack.items.moveToInventory(item, u, rec.mode or 0, rec.bp or -1) then
+            return
+        end
         common.add_skip(ctx, 'unit-held-item-grounded')
     end
     local z = math.max(1, math.min(df.global.world.map.z_count - 2, rec.z + a.off_z))
@@ -279,17 +334,29 @@ function load_phases(ctx)
             while job.cursor <= #job.ordered do
                 local rec = job.ordered[job.cursor]
                 job.cursor = job.cursor + 1
-                local ok, item = pcall(create_one, ctx, rec)
+                local ok, item, why = pcall(create_one, ctx, rec, job.retrying)
                 if ok and item then
                     ctx.item_map[rec.id] = item
                     local okp, err = pcall(place_one, ctx, rec, item)
                     if not okp then
                         common.add_skip(ctx, 'item-place-error', tostring(err))
                     end
+                elseif ok and why == 'retry' then
+                    job.retry = job.retry or {}
+                    table.insert(job.retry, rec)
                 elseif not ok then
                     common.add_skip(ctx, 'item-load-error', tostring(item))
                 end
                 if dfhack.getTickCount() >= deadline then return false end
+            end
+            -- second chance for items whose material createItem refused: by now
+            -- a known-good material per type is usually on record
+            if not job.retrying and job.retry and #job.retry > 0 then
+                job.ordered = job.retry
+                job.retry = nil
+                job.cursor = 1
+                job.retrying = true
+                return false
             end
             return true
         end,

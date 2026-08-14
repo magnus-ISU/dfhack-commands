@@ -201,7 +201,10 @@ function add_skip(ctx, category, detail)
     ctx.skips = ctx.skips or {}
     local c = ctx.skips[category] or {n = 0, examples = {}}
     c.n = c.n + 1
-    if #c.examples < 3 and detail then table.insert(c.examples, detail) end
+    if #c.examples < 3 and detail then
+        detail = tostring(detail):gsub('%s+', ' '):sub(1, 100)
+        table.insert(c.examples, detail)
+    end
     ctx.skips[category] = c
 end
 
