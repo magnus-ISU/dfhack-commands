@@ -89,10 +89,14 @@ a shop's "Add new task" list so the jobs you can actually do come before the one
 Type plain text on the Work Orders screen to create a legal manager order, with "keep N in
 stock" repeats. Only offers subtypes your civilization actually knows how to make.
 
+![fort/quick-order demo](demos/fort-quick-order.gif)
+
 ### **`fort/planner-orders`**
 Warns of planned buildings nothing produces and offers the orders to make them. With a hospital
 up it also stocks the supplies one needs, traction benches included — the bench and its table,
 mechanism and chain each get their own ask.
+
+![fort/planner-orders demo](demos/fort-planner-orders.gif)
 
 ### **`fort/labor-groups`**
 Tidies the Labor screen and creates any missing crafting work details.
@@ -415,6 +419,8 @@ Do fort jobs in adventure mode — the self-contained, overlay-based successor t
   run. On the map, Enter does the selected action at the look cursor, opening
   look mode first if it isn't up. Ctrl+Q quick mode, Shift+R/T cycle jobs.
   `adv/fort` shows, `adv/fort hide` hides, jobs keep running.
+
+![adv/fort demo](demos/adv-fort.gif)
 
 ### **`adv/exhaustion-meter`** 
 Combat-exertion bar with the native blood meter's manners and placement:

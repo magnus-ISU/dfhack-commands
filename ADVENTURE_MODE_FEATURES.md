@@ -96,6 +96,8 @@ Do fort jobs in adventure mode — the self-contained, overlay-based successor t
   look mode first if it isn't up. Ctrl+Q quick mode, Shift+R/T cycle jobs.
   `adv/fort` shows, `adv/fort hide` hides, jobs keep running.
 
+![adv/fort demo](demos/adv-fort.gif)
+
 ### **`adv/exhaustion-meter`** 
 Combat-exertion bar with the native blood meter's manners and placement:
   invisible while you're fine, appearing in the blood meter's bottom-left

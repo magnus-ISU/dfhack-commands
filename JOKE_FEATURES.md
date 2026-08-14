@@ -31,6 +31,8 @@ The instant a citizen enters a martial trance, the game pauses, the view snaps t
 the Ultra Instinct theme plays in full. A martial trance is the best thing a dwarf can do and
 DF announces it in a line of grey text you will miss.
 
+![joke/super-saiyan demo](demos/joke-super-saiyan.gif)
+
     enable joke/super-saiyan     watch for martial trances
     disable joke/super-saiyan    stop watching
     super-saiyan                 status
