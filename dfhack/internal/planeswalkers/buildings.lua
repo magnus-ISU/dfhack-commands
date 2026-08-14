@@ -185,7 +185,8 @@ local function mint_component(ctx, comp)
         if minfo then mt, mi = minfo.type, minfo.index
         else common.add_skip(ctx, 'component-mat-missing', comp.mat) end
     end
-    local items = dfhack.items.createItem(creator_unit(), itype, isub, mt, mi, true)
+    -- no_floor=false: limbo-created items cannot be attached to buildings
+    local items = dfhack.items.createItem(creator_unit(), itype, isub, mt, mi, false)
     local item = items and items[1]
     if type(item) == 'table' then item = item[1] end
     return item
