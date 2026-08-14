@@ -841,3 +841,30 @@ churns inferior steel arms/armor into (eventually) masterwork:
 - Idempotent: don't re-mark an item already flagged, and don't pile up duplicate
   replacement orders (increment an existing matching order instead). Stop once
   everything steel is masterwork. Toggle persists with the fort.
+
+## planeswalkers spike findings (2026-08-14)
+
+All four cross-world-restore risk mechanisms validated on DF 53.16: mutate → quicksave →
+full DF process restart → reload from disk → 33/33 checks pass (`fort/planeswalkers spike 0`).
+
+- `dfhack.constructions.insert(df.construction:new())` works and persists; it only inserts
+  the RECORD — you must also write `block.tiletype` yourself (ConstructedFloor/Pillar) and
+  clear `designation.hidden`, then `enableBlockUpdates`. Insert returns false on an occupied
+  pos (delete your orphan object then).
+- `tiletypes_setTile` (require('plugins.tiletypes')) with `material=STONE, stone_material=
+  <inorganic idx>` mints the vein block_event itself; the resulting tile reads back as
+  tiletype material MINERAL (not STONE) with the right `tile-material` token. All 11 fields
+  of the option table must be present (-1 defaults) or the call misbehaves.
+- Artifact minting: `df.artifact_record:new()` + id from `artifact_next_id`, insert into
+  `world.artifacts.all`, `general_ref_is_artifactst` on the item + `item.flags.artifact`.
+  Survives reload; `translateName` renders stably.
+- Batch citizen spawn (create→pos→inactive=false→active-insert→teleport→makeown) + hand-built
+  `histfig_hf_link_spousest/motherst/childst` pairs + minimal dead stub `historical_figure`
+  records all survive reload.
+- **cp437 trap**: every DF string must go through `dfhack.df2utf()` before `json.encode_file`
+  — the json lib hard-rejects non-UTF8 on decode.
+- Reload-cycle automation: DFHack `quicksave` writes to the **autosave rotation slot**
+  (`autosave 1`), NOT the loaded folder; `die` exits DF cleanly; title-screen "Continue
+  active game" + save-list rows take fed clicks only if you also set
+  `gps.precise_mouse_x/y = cell * gps.tile_pixel_x/y`; the in-game Esc menu ignores fed
+  clicks entirely.
