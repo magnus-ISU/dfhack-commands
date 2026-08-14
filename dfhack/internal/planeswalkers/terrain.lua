@@ -124,6 +124,10 @@ local function save_block(ctx, block, bx, by, z)
                 -- here would clobber the constructed tiletype (seen: obsidian
                 -- hospital walls turning into the under-vein's stone)
             else
+                -- dispatch strictly by the tiletype's material category, the way
+                -- tile-material (and DF) resolve tiles: a stone cluster event
+                -- overlapping a FEATURE tile must NOT claim it (that bug recorded
+                -- most of an adamantine spire as gabbro)
                 local k = x * 16 + y
                 if mat_cat == df.tiletype_material.SOIL then
                     -- soil (incl. hidden sand/clay pockets): pin the layer material,
@@ -136,9 +140,11 @@ local function save_block(ctx, block, bx, by, z)
                         mat_idx = ctx.legend_mat:intern(tok)
                         flags = 1
                     end
-                elseif veins and veins[k] ~= nil then
-                    local tok = inorganic_token(veins[k])
-                    if tok then mat_idx = ctx.legend_mat:intern(tok) end
+                elseif mat_cat == df.tiletype_material.MINERAL then
+                    if veins and veins[k] ~= nil then
+                        local tok = inorganic_token(veins[k])
+                        if tok then mat_idx = ctx.legend_mat:intern(tok) end
+                    end
                 elseif mat_cat == df.tiletype_material.LAVA_STONE then
                     mat_idx = ctx.legend_mat:intern('INORGANIC:OBSIDIAN')
                 elseif mat_cat == df.tiletype_material.FEATURE then
