@@ -10,9 +10,9 @@ entry that drops the Dig tool and opens DF's stockpile placement screen (not a b
 Clicking an entry drives DF's OWN build menu straight to that building's native placement action:
 it drops the Dig tool, opens the build menu (the D_BUILDING toolbar key), then clicks through the
 category (and subcategory) to the building by matching the on-screen button text and injecting a
-real mouse click at it. So you land in the exact native placement/buildingplan flow -- including,
-for a SLAB, DF's own "which slab" chooser with no buildingplan interference (nothing special is
-done for slabs; the native flow already does the right thing).
+real mouse click at it. So you land in the exact native placement/buildingplan flow -- and for a
+SLAB, in the buildingplan planner with its "Engraved only" filter already on, so what you place is
+a slab an engraver has inscribed rather than a blank.
 
   (Why drive the native menu instead of jumping straight in? In v50 the build menu is entirely
   mouse/button-driven -- the HOTKEY_BUILDING_* interface keys are NOT wired to fed input, and
@@ -155,7 +155,10 @@ local ENTRIES = {
     {'Cabinet',      {'Furniture', 'Cabinet'}, {alias = {'dresser', 'wardrobe'}}},
     {'Coffin',       {'Furniture', 'Burial'}, {alias = {'sarcophagus', 'casket', 'tomb', 'grave'}}},
     {'Statue',       {'Furniture', 'Statue'}},
-    {'Slab',         {'Furniture', 'Slab'}, {noplan = true, alias = 'memorial'}},   -- native slab chooser (keep-building auto-toggle disabled: can't read its state yet)
+    -- Slab: the buildingplan planner, with its "Engraved only" filter set, so you place memorial
+    -- slabs your engravers have actually inscribed rather than picking blanks off DF's own list.
+    {'Slab',         {'Furniture', 'Slab'},
+                     {alias = 'memorial', special = {df.building_type.Slab, 'engraved', true}}},
     {'Traction bed', {'Furniture', 'Traction bench'}},
     {'Bookcase',     {'Furniture', 'Bookcase'}, {alias = 'bookshelf'}},
     {'Display case', {'Furniture', 'Display'}, {alias = 'pedestal'}},
@@ -306,7 +309,7 @@ end
 -- it reads "show Planner" the planner is HIDDEN (regular placement); "hide Planner" means it's
 -- SHOWN (the buildingplan filter panel). Ensure it matches `want`: click the toggle only when the
 -- current state differs. The state persists across placements, so this usually no-ops after the
--- first building. Slabs pass want=false so DF's own "which slab" chooser is used instead.
+-- first building.
 local function planner_toggle(want)
     local gps = df.global.gps
     local W, H = gps.dimx, gps.dimy
@@ -351,7 +354,8 @@ local return_state = 'idle'
 -- open the build menu and click through `path` (category -> [subcategory] -> building). Each step
 -- is deferred a few frames so DF re-renders the next level before we read/click it. Fed keys and
 -- injected clicks must run inside DF's frame loop, hence the timeouts. Once in placement, force the
--- buildingplan planner on (off for `noplan` items, e.g. slabs), and for `buildmore` items also turn
+-- buildingplan planner on (off for `noplan` items, which nothing uses today), and for `buildmore`
+-- items also turn
 -- on "keep building after placement". Two attempts absorb render lag.
 local function navigate(path, noplan, buildmore)
     mi().main_designation_selected = df.main_designation_type.NONE   -- drop the Dig tool
@@ -384,12 +388,25 @@ local function open_stockpile()
     dfhack.timeout(1, 'frames', function() gui.simulateInput(scr(), 'D_STOCKPILES') end)
 end
 
+-- Some buildings have a buildingplan FILTER worth arming before we get there -- a slab's "Engraved
+-- only". It is a stored per-building-type setting, so it is set as DATA through buildingplan's own
+-- API rather than by hunting the toggle on screen: the panel then renders already switched on, and
+-- it stays that way for later placements the same as if you had clicked it yourself.
+local function arm_special(opt)
+    if not (opt and opt.special) then return end
+    local btype, name, value = opt.special[1], opt.special[2], opt.special[3]
+    pcall(function()
+        require('plugins.buildingplan').setSpecial(btype, -1, -1, name, value)
+    end)
+end
+
 -- run the action for a picked entry: the stockpile tool for the special flag, else the build menu
 local function activate(e)
     local opt = e[3]
     if opt and opt.stockpile then
         open_stockpile()
     else
+        arm_special(opt)
         navigate(e[2], opt and opt.noplan, opt and opt.buildmore)
     end
 end
