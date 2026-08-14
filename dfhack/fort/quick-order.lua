@@ -16,8 +16,12 @@ Grammar:
                        silk thread when picked up). "collect sand" counts SAND-bearing bags
                        (native `sand_bearing` flag); "bin"/"barrel" count only EMPTY ones
                        (native `empty` flag), so a shelf full of packed bins doesn't satisfy
-                       it. Jobs with no countable product (mint coins, butcher...) are still
-                       REFUSED (make a one-time order instead).
+                       it. A REACTION counts the product its raws declare ("r200 brew drink
+                       from plant" -> while fewer than 200 drinks), pinning the material only
+                       when the item type alone can't name it (soap bars vs metal bars).
+                       Jobs whose output can't be named -- butcher, melt, milk, mill/process
+                       plants, whose product material is whatever went in -- are still REFUSED
+                       (make a one-time order instead).
   * amount: digits, rN, or a spelled number (one..twenty, a/an); default 1
   * material descriptor: a category (wood/wooden/cloth), a class (stone/rock/metal/
     glass), a specific material (gabbro/steel), and/or a property (magma safe)
@@ -132,32 +136,80 @@ local SPECIAL = {
     {job = 'CollectClay', nomat = true,     names = {'collect clay', 'gather clay'}},
     {job = 'CollectHiveProducts', nomat = true, names = {'collect hive products', 'collect honey', 'harvest hive', 'gather hive'}},
     {job = 'ButcherAnimal', nomat = true,   names = {'butcher animal', 'butcher an animal', 'butcher'}},
-    {job = 'WeaveCloth',      names = {'weave cloth', 'weave', 'make cloth'}},
-    {job = 'MakeCharcoal', nomat = true,    names = {'make charcoal', 'burn charcoal', 'charcoal'}},
-    {job = 'MakeAsh', nomat = true,         names = {'make ash', 'burn ash'}},
-    {job = 'MakeLye', nomat = true,         names = {'make lye', 'lye'}},
-    {job = 'MakePotashFromLye', nomat = true, names = {'make potash from lye', 'potash from lye'}},
-    {job = 'MakePotashFromAsh', nomat = true, names = {'make potash from ash', 'make potash', 'potash'}},
-    {job = 'ExtractMetalStrands', nomat = true, names = {'extract metal strands', 'extract strands', 'process adamantine'}},
-    {job = 'MintCoins',       names = {'mint coins', 'make coins', 'mint'}},
+    {job = 'WeaveCloth',      names = {'weave cloth', 'weave', 'make cloth'},
+                              product = {item_type = 'CLOTH'}},
+    {job = 'MakeCharcoal', nomat = true,    names = {'make charcoal', 'burn charcoal', 'charcoal'},
+                              product = {item_type = 'BAR', mat_token = 'COAL'}},
+    {job = 'MakeAsh', nomat = true,         names = {'make ash', 'burn ash'},
+                              product = {item_type = 'BAR', mat_token = 'ASH'}},
+    {job = 'MakeLye', nomat = true,         names = {'make lye', 'lye'},
+                              product = {item_type = 'LIQUID_MISC', mat_token = 'LYE'}},
+    {job = 'MakePotashFromLye', nomat = true, names = {'make potash from lye', 'potash from lye'},
+                              product = {item_type = 'BAR', mat_token = 'POTASH'}},
+    {job = 'MakePotashFromAsh', nomat = true, names = {'make potash from ash', 'make potash', 'potash'},
+                              product = {item_type = 'BAR', mat_token = 'POTASH'}},
+    {job = 'ExtractMetalStrands', nomat = true, names = {'extract metal strands', 'extract strands', 'process adamantine'},
+                              product = {item_type = 'THREAD', mat_token = 'INORGANIC:ADAMANTINE'}},
+    {job = 'MintCoins',       names = {'mint coins', 'make coins', 'mint'},
+                              product = {item_type = 'COIN'}},
     {job = 'MilkCreature', nomat = true,    names = {'milk creature', 'milk animal', 'milk'}},
-    {job = 'ShearCreature', nomat = true,   names = {'shear creature', 'shear animal', 'shear'}},
+    {job = 'ShearCreature', nomat = true,   names = {'shear creature', 'shear animal', 'shear'},
+                              product = {item_type = 'THREAD', flags2 = {'yarn'}}},
     {job = 'MeltMetalObject', nomat = true, names = {'melt metal object', 'melt object', 'melt item', 'melt'}},
-    {job = 'CutGems',         names = {'cut gems', 'cut gem', 'cut glass'}},
+    {job = 'CutGems',         names = {'cut gems', 'cut gem', 'cut glass'},
+                              product = {item_type = 'SMALLGEM'}},
     {job = 'EncrustWithGems', names = {'encrust with gems', 'encrust gems'}},
     {job = 'MillPlants',      names = {'mill plants', 'mill plant', 'mill'}},
     {job = 'ProcessPlants',   names = {'process plants', 'process plant'}},
     {job = 'ProcessPlantsBag',names = {'process plant to bag', 'process to bag'}},
     {job = 'ProcessPlantsVial',names = {'process plant to vial', 'extract to vial'}},
     {job = 'ProcessPlantsBarrel', names = {'process plant to barrel', 'extract to barrel'}},
-    {job = 'RenderFat', nomat = true,       names = {'render fat', 'make tallow', 'render'}},
-    {job = 'MakeCheese', nomat = true,      names = {'make cheese', 'cheese'}},
-    {job = 'PrepareRawFish', nomat = true,  names = {'prepare raw fish', 'prepare fish', 'clean fish'}},
+    {job = 'RenderFat', nomat = true,       names = {'render fat', 'make tallow', 'render'},
+                              product = {item_type = 'GLOB'}},
+    {job = 'MakeCheese', nomat = true,      names = {'make cheese', 'cheese'},
+                              product = {item_type = 'CHEESE'}},
+    {job = 'PrepareRawFish', nomat = true,  names = {'prepare raw fish', 'prepare fish', 'clean fish'},
+                              product = {item_type = 'FISH'}},
     {job = 'ExtractFromPlants',      names = {'extract from plants', 'extract plants'}},
     {job = 'ExtractFromRawFish', nomat = true,     names = {'extract from raw fish', 'extract fish'}},
     {job = 'ExtractFromLandAnimal', nomat = true,  names = {'extract from land animal', 'extract animal'}},
     {job = 'CatchLiveFish', nomat = true,   names = {'catch live fish', 'catch fish'}},
 }
+
+-- Item types whose MATERIAL is what actually names the thing: a BAR is soap or steel or coal,
+-- a GLOB is tallow or press cake. For these a stock condition must pin the material too, or
+-- "keep 20 soap" is satisfied by the metal bars already in the stockpile. Self-describing types
+-- (DRINK, CHEESE, SKIN_TANNED...) count fine on the item type alone.
+local AMBIGUOUS_PRODUCT = {}
+for _, t in ipairs({'BAR', 'GLOB', 'POWDER_MISC', 'LIQUID_MISC', 'THREAD', 'CLOTH'}) do
+    if df.item_type[t] then AMBIGUOUS_PRODUCT[df.item_type[t]] = true end
+end
+
+-- The countable OUTPUT of a reaction, read straight from its raws `products` -- this is what
+-- lets a reaction take a repeating "keep N in stock" order (brew drink from plant/fruit, tan a
+-- hide, make quicklime, the modded ones...). The first item product wins: raws list the real
+-- product first and byproducts after (brewing yields 5 drinks, then the seeds). Improvement
+-- products carry no item_type and are skipped, as are chancy ones (probability < 100).
+local function reaction_product(r)
+    for i = 0, #r.products - 1 do
+        local p = r.products[i]
+        local ok, it = pcall(function() return p.item_type end)
+        if ok and it and it >= 0 and p.probability >= 100 then
+            local spec = {item_type = it, item_subtype = p.item_subtype or -1}
+            if p.mat_type >= 0 then                    -- reaction pins the material (quicklime)
+                spec.mat_type, spec.mat_index = p.mat_type, p.mat_index
+            elseif AMBIGUOUS_PRODUCT[it] then
+                -- material comes from a reagent at run time, so there's no mat index to pin;
+                -- the raws do name its reaction-product class ("SOAP_MAT"), which DF's own
+                -- condition can match. Without one, this product isn't countable.
+                local pc = p.get_material.product_code
+                if pc == '' then return nil end
+                spec.reaction_product = pc
+            end
+            return spec
+        end
+    end
+end
 
 local vocab, vocab_civ  -- built once PER CIV: the permitted-subtype filter is civ-specific
 -- entry = {name, kind='job'|'reaction', job, item_type=-1, item_subtype=-1,
@@ -216,7 +268,10 @@ local function build_vocab()
             for _, nm in ipairs(ml.names) do
                 v[#v + 1] = {name = norm(nm), kind = 'job', job = df.job_type.PrepareMeal,
                     item_type = -1, item_subtype = -1, needs_mat = false,
-                    mat = {mat_type = ml.q, mat_index = -1}}
+                    mat = {mat_type = ml.q, mat_index = -1},
+                    -- prepared food; the quality lives in the ORDER's mat_type, not in the
+                    -- finished item, so a repeat counts meals of every quality
+                    product = {item_type = 'FOOD'}}
             end
         end
     end
@@ -231,7 +286,9 @@ local function build_vocab()
             if mi then
                 v[#v + 1] = {name = g[1], kind = 'job', job = df.job_type.MakeRawGlass,
                     item_type = -1, item_subtype = -1, needs_mat = false,
-                    mat = {mat_type = mi.type, mat_index = mi.index}}
+                    mat = {mat_type = mi.type, mat_index = mi.index},
+                    -- rough glass is a ROUGH gem item of that glass material
+                    product = {item_type = 'ROUGH', mat_type = mi.type, mat_index = mi.index}}
             end
         end
     end
@@ -246,7 +303,8 @@ local function build_vocab()
             and r.name ~= '' and not r.category:match('^ADV') then
             v[#v + 1] = {name = norm(r.name), kind = 'reaction',
                          job = df.job_type.CustomReaction, reaction_name = r.code,
-                         item_type = -1, item_subtype = -1, needs_mat = false}
+                         item_type = -1, item_subtype = -1, needs_mat = false,
+                         product = reaction_product(r)}
         end
     end
     -- cache each entry's name tokens + singulars once, so ranking never re-tokenizes
@@ -845,8 +903,12 @@ local COUNT_FLAG1 = {
 -- what item a repeating "keep N in stock" order should count. FIXED/SUBTYPED items count
 -- their own type+subtype; jobs in COUNT_FLAG1 add a native condition flag (empty bins/barrels,
 -- sand-bearing bags) -- collect sand counts ANY sand-bearing item (item_type -1 + the flag); a
--- SPECIAL job with a `product` spec (e.g. collect webs -> silk thread) counts that; everything else
--- (reactions, most gather/process jobs) has no countable product -> nil (repeat refused).
+-- `product` spec counts that instead (collect webs -> silk thread, make charcoal -> coal bars,
+-- and every REACTION, whose product is read from its raws). Jobs whose output can't be named
+-- (butcher, melt, milk, mill/process plants -- the product's material is the reagent's) have no
+-- spec -> nil, and the repeat is refused.
+-- A spec's mat_type/mat_index are nil unless the product pins a material; the caller falls back
+-- to the ORDER's own material then, so "keep 50 obsidian blocks" still counts only obsidian ones.
 local function count_spec(item)
     local f1 = COUNT_FLAG1[item.job]
     if (item.item_type or -1) >= 0 then
@@ -857,10 +919,21 @@ local function count_spec(item)
     end
     local p = item.product
     if p then
-        local it = df.item_type[p.item_type]
+        -- item_type is a token in the hand-written specs above, already numeric when it came
+        -- out of a reaction's raws
+        local it = type(p.item_type) == 'number' and p.item_type or df.item_type[p.item_type]
         if it then
+            local mt, mi = p.mat_type, p.mat_index
+            if not mt and p.mat_token then                -- e.g. charcoal -> COAL, strands -> adamantine
+                local b = df.builtin_mats[p.mat_token]    -- COAL/ASH/LYE/POTASH are builtins (index -1)
+                if b then mt, mi = b, -1
+                else
+                    local m = dfhack.matinfo.find(p.mat_token)
+                    if m then mt, mi = m.type, m.index end
+                end
+            end
             return {item_type = it, item_subtype = p.item_subtype or -1, flags2 = p.flags2,
-                    mat_type = p.mat_type or -1, mat_index = p.mat_index or -1}
+                    mat_type = mt, mat_index = mi, reaction_product = p.reaction_product}
         end
     end
     return nil
@@ -952,10 +1025,12 @@ function create_order(input)
         o.item_conditions:insert('#', {new = df.manager_order_condition_item,
             compare_type = df.logic_condition_type.LessThan, compare_val = plan.amount,
             item_type = cs.item_type, item_subtype = cs.item_subtype or -1,
-            -- count the order's OWN material: "keep 50 obsidian blocks" must not be satisfied by
-            -- 50 granite blocks. (For webs -> silk thread the order has no material; flags2 below
-            -- handles the material class instead.)
-            mat_type = o.mat_type, mat_index = o.mat_index, reaction_class = ''})
+            -- count the product's material where it has one of its own (charcoal -> coal bars),
+            -- else the order's OWN material: "keep 50 obsidian blocks" must not be satisfied by
+            -- 50 granite blocks. A reaction pins neither, so it counts its product in ANY material
+            -- ("r200 brew drink from plant" -> fewer than 200 drinks, whatever they're brewed from).
+            mat_type = cs.mat_type or o.mat_type, mat_index = cs.mat_index or o.mat_index,
+            reaction_class = '', has_material_reaction_product = cs.reaction_product or ''})
         if cs.flags2 then   -- material-class match (e.g. count only SILK thread, not plant thread)
             local cond = o.item_conditions[#o.item_conditions - 1]
             for _, fl in ipairs(cs.flags2) do cond.flags2[fl] = true end
