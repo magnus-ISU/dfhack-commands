@@ -4,6 +4,7 @@
 
 local common = reqscript('internal/planeswalkers/common')
 local tiletypes = require('plugins.tiletypes')
+local tilemat = require('tile-material')
 
 local PLANT_MATS = {
     [df.tiletype_material.TREE] = true,
@@ -40,23 +41,31 @@ function find_surface_z()
     return zs[math.max(1, #zs // 2)] or 0
 end
 
--- layer-stone token for an exposed tile, cached per (region, geolayer)
+-- layer-stone token for an exposed tile, cached per (region, geolayer).
+-- returns token, is_soil (is_soil = the inorganic really has the SOIL flag;
+-- deep cavern-floor tiles often have geolayers pointing at STONE layers)
 local function layer_mat_token(ctx, x, y, geolayer)
     local rx, ry = dfhack.maps.getTileBiomeRgn(xyz2pos(x, y, 0))
     if not rx then return nil end
     local key = rx .. ':' .. ry .. ':' .. geolayer
     local hit = ctx.layer_cache[key]
-    if hit ~= nil then return hit or nil end
-    local tok = nil
+    if hit ~= nil then
+        if hit then return hit.tok, hit.soil end
+        return nil
+    end
+    local tok, soil = nil, false
     local rgn = dfhack.maps.getRegionBiome(rx, ry)
     if rgn then
         local geo = df.world_geo_biome.find(rgn.geo_index)
         if geo and geo.layers[geolayer] then
-            tok = inorganic_token(geo.layers[geolayer].mat_index)
+            local midx = geo.layers[geolayer].mat_index
+            tok = inorganic_token(midx)
+            local raw = df.global.world.raws.inorganics.all[midx]
+            soil = raw and raw.flags.SOIL and true or false
         end
     end
-    ctx.layer_cache[key] = tok or false
-    return tok
+    ctx.layer_cache[key] = tok and {tok = tok, soil = soil} or false
+    return tok, soil
 end
 
 -- ---- save ------------------------------------------------------------------
@@ -99,7 +108,7 @@ local function save_block(ctx, block, bx, by, z)
             local d = dscol[y]
             local attrs = df.tiletype.attrs[tt]
             local mat_cat = attrs.material
-            local tt_out, mat_idx = tt, 0
+            local tt_out, mat_idx, flags = tt, 0, 0
             if PLANT_MATS[mat_cat] then
                 -- trees/plants don't transfer; degrade to what's underneath
                 ctx.plant_degraded = (ctx.plant_degraded or 0) + 1
@@ -110,25 +119,51 @@ local function save_block(ctx, block, bx, by, z)
                 else
                     tt_out = df.tiletype.OpenSpace
                 end
+            elseif mat_cat == df.tiletype_material.CONSTRUCTION then
+                -- the construction record carries the material; painting anything
+                -- here would clobber the constructed tiletype (seen: obsidian
+                -- hospital walls turning into the under-vein's stone)
             else
                 local k = x * 16 + y
-                if veins and veins[k] ~= nil then
+                if mat_cat == df.tiletype_material.SOIL then
+                    -- soil (incl. hidden sand/clay pockets): pin the layer material,
+                    -- restored by remapping the tile's geolayer in the destination.
+                    -- Only when the layer really is soil -- deep "soil" tiles with
+                    -- stone geolayers must not claim scarce soil layer slots.
+                    local tok, is_soil = layer_mat_token(ctx, bx * 16 + x, by * 16 + y,
+                                                         d.geolayer_index)
+                    if tok and is_soil then
+                        mat_idx = ctx.legend_mat:intern(tok)
+                        flags = 1
+                    end
+                elseif veins and veins[k] ~= nil then
                     local tok = inorganic_token(veins[k])
                     if tok then mat_idx = ctx.legend_mat:intern(tok) end
                 elseif mat_cat == df.tiletype_material.LAVA_STONE then
                     mat_idx = ctx.legend_mat:intern('INORGANIC:OBSIDIAN')
-                elseif not d.hidden and (mat_cat == df.tiletype_material.STONE
-                        or mat_cat == df.tiletype_material.SOIL) then
-                    -- exposed natural stone/soil: pin the source layer material
+                elseif mat_cat == df.tiletype_material.FEATURE then
+                    -- adamantine spires etc: restore as a mineable vein of the
+                    -- feature's material (the feature itself can't cross worlds)
+                    local ok, mi = pcall(tilemat.GetFeatureMat, bx * 16 + x, by * 16 + y, z)
+                    local tok
+                    if ok and mi then
+                        local ok2, t = pcall(function() return mi:getToken() end)
+                        if ok2 then tok = t end
+                    end
+                    if tok then
+                        mat_idx = ctx.legend_mat:intern(tok)
+                    else
+                        common.add_skip(ctx, 'feature-mat-unresolved')
+                    end
+                elseif not d.hidden and mat_cat == df.tiletype_material.STONE then
+                    -- exposed natural stone: pin the source layer material
                     local tok = layer_mat_token(ctx, bx * 16 + x, by * 16 + y, d.geolayer_index)
                     if tok then mat_idx = ctx.legend_mat:intern(tok) end
-                elseif mat_cat == df.tiletype_material.FEATURE then
-                    common.add_skip(ctx, 'feature-mat-left-native')
                 end
             end
             recs[#recs + 1] = string.pack(common.TILE_REC,
                 ctx.legend_tt:intern(df.tiletype[tt_out]),
-                mat_idx, common.pack_dsgn(d), 0)
+                mat_idx, common.pack_dsgn(d), flags)
         end
     end
     return table.concat(recs)
@@ -225,6 +260,113 @@ function compute_anchor(src_dims)
     }
 end
 
+-- find duplicate layers in each dest geo biome: tiles get remapped onto the
+-- first copy (identical material, no visual change), freeing the dup slots to
+-- be rewritten as source soil layers (geolayer_index is 4 bits -- 16 slots max)
+local function build_geo_remaps(ctx)
+    ctx.geo_remap, ctx.geo_free = {}, {}
+    for gi, geo in ipairs(df.global.world.world_data.geo_biomes) do
+        local seen, remap, free = {}, nil, {}
+        for i = 0, #geo.layers - 1 do
+            local l = geo.layers[i]
+            local raw = df.global.world.raws.inorganics.all[l.mat_index]
+            local bogus_soil = l.type == df.geo_layer_type.SOIL
+                and not (raw and raw.flags.SOIL)
+            local k = l.type .. ':' .. l.mat_index
+            if bogus_soil then
+                -- a SOIL-typed layer of stone (left by an earlier bad restore):
+                -- reclaim the slot outright
+                table.insert(free, i)
+            elseif seen[k] ~= nil then
+                remap = remap or {}
+                remap[i] = seen[k]
+                table.insert(free, i)
+            else
+                seen[k] = i
+            end
+        end
+        ctx.geo_remap[gi] = remap
+        ctx.geo_free[gi] = free
+    end
+end
+
+local function block_geo_index(bx, by)
+    local rx, ry = dfhack.maps.getTileBiomeRgn(xyz2pos(bx * 16 + 8, by * 16 + 8, 0))
+    if not rx then return nil end
+    local rgn = dfhack.maps.getRegionBiome(rx, ry)
+    return rgn and rgn.geo_index or nil
+end
+
+-- point a soil tile's geolayer at a dest geo-biome layer of the right material,
+-- appending a new layer to the geo biome if it has none (soil material is
+-- resolved through the geolayer -- vein events are IGNORED for soil tiles)
+local function set_soil_layer(ctx, x, y, z, midx)
+    local rx, ry = dfhack.maps.getTileBiomeRgn(xyz2pos(x, y, z))
+    if not rx then return false end
+    local rgn = dfhack.maps.getRegionBiome(rx, ry)
+    if not rgn then return false end
+    local key = rgn.geo_index .. ':' .. midx
+    ctx.geo_cache = ctx.geo_cache or {}
+    local li = ctx.geo_cache[key]
+    if li == nil then
+        local geo = df.world_geo_biome.find(rgn.geo_index)
+        if not geo then ctx.geo_cache[key] = false return false end
+        for i = 0, #geo.layers - 1 do
+            if geo.layers[i].mat_index == midx then li = i break end
+        end
+        if not li then
+            -- rewrite a freed duplicate slot as this exact soil
+            local free = ctx.geo_free and ctx.geo_free[rgn.geo_index]
+            if free and #free > 0 then
+                li = table.remove(free, 1)
+                local layer = geo.layers[li]
+                layer.type = df.geo_layer_type.SOIL
+                layer.mat_index = midx
+            end
+        end
+        if not li and #geo.layers < 16 then  -- geolayer_index is 4 bits
+            local layer = df.world_geo_layer:new()
+            layer.type = df.geo_layer_type.SOIL
+            layer.mat_index = midx
+            layer.top_height = 0
+            layer.bottom_height = -1
+            geo.layers:insert('#', layer)
+            li = #geo.layers - 1
+        end
+        if not li then
+            -- geo biome full: approximate with the nearest same-class soil layer
+            local want_sand = df.global.world.raws.inorganics.all[midx].flags.SOIL_SAND
+                and true or false
+            local soil_any
+            for i = 0, #geo.layers - 1 do
+                local l = geo.layers[i]
+                if l.type == df.geo_layer_type.SOIL then
+                    local raw = df.global.world.raws.inorganics.all[l.mat_index]
+                    soil_any = soil_any or i
+                    local is_sand = raw and raw.flags.SOIL_SAND and true or false
+                    if is_sand == want_sand then
+                        li = i
+                        break
+                    end
+                end
+            end
+            li = li or soil_any
+            if li then
+                common.add_skip(ctx, 'soil-mat-approximated', inorganic_token(midx))
+            else
+                common.add_skip(ctx, 'soil-mat-unrestorable', inorganic_token(midx))
+                li = false
+            end
+        end
+        ctx.geo_cache[key] = li
+    end
+    if li == false then return false end
+    local block = dfhack.maps.getTileBlock(x, y, z)
+    if not block then return false end
+    block.designation[x % 16][y % 16].geolayer_index = li
+    return true
+end
+
 local function resolve_mat(ctx, idx)
     if idx == 0 then return nil end
     local hit = ctx.mat_cache[idx]
@@ -264,12 +406,23 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
         ctx.no_block = (ctx.no_block or 0) + 1
         return
     end
+    -- dedup this block's geolayer references so hijacked dup slots are unused
+    local remap = ctx.geo_remap and ctx.geo_remap[block_geo_index(bx, by) or -1]
+    if remap then
+        for x = 0, 15 do
+            local dscol = block.designation[x]
+            for y = 0, 15 do
+                local r = remap[dscol[y].geolayer_index]
+                if r then dscol[y].geolayer_index = r end
+            end
+        end
+    end
     local off = 1
     local touched = false
     for x = 0, 15 do
         local ttcol, dscol = block.tiletype[x], block.designation[x]
         for y = 0, 15 do
-            local tt_idx, mat_idx, dbits = string.unpack(common.TILE_REC, data, off)
+            local tt_idx, mat_idx, dbits, rflags = string.unpack(common.TILE_REC, data, off)
             off = off + common.TILE_REC_SIZE
             local tt = resolve_tt(ctx, tt_idx)
             if tt then
@@ -287,7 +440,7 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
                 d.water_salt = bits.water_salt
                 if mat_idx ~= 0 then
                     ctx.paint_list[#ctx.paint_list + 1] =
-                        string.pack('<I2I2I2I2', bx * 16 + x, by * 16 + y, z, mat_idx)
+                        string.pack('<I2I2I2I2B', bx * 16 + x, by * 16 + y, z, mat_idx, rflags)
                 end
             end
         end
@@ -305,6 +458,7 @@ function load_phases(ctx)
             ctx.src = read_header(ctx.tiles_f)
             ctx.paint_list = {}
             ctx.mat_cache, ctx.tt_cache = {}, {}
+            build_geo_remaps(ctx)
             job.block_cursor = 0
             job.nb = ctx.src.bx * ctx.src.by * ctx.src.bz
         end,
@@ -334,19 +488,71 @@ function load_phases(ctx)
     })
 
     table.insert(phases, {
+        name = 'geolayer dedup (unrestored z)',
+        init = function(job)
+            -- z-levels the restore doesn't cover still reference the dup slots
+            -- we hijack; remap them too so hijacked layers change nothing there
+            job.zlist = {}
+            local a = ctx.anchor
+            for z = 0, df.global.world.map.z_count - 1 do
+                local sz = z - a.off_z
+                if sz < 0 or sz >= ctx.src.bz then table.insert(job.zlist, z) end
+            end
+            job.zi, job.bi = 1, 0
+        end,
+        total = function(job) return #job.zlist end,
+        pos = function(job) return job.zi end,
+        step = function(job, deadline)
+            local map = df.global.world.map
+            local nb = map.x_count_block * map.y_count_block
+            while job.zi <= #job.zlist do
+                local z = job.zlist[job.zi]
+                while job.bi < nb do
+                    local bx, by = job.bi % map.x_count_block, job.bi // map.x_count_block
+                    local remap = ctx.geo_remap[block_geo_index(bx, by) or -1]
+                    if remap then
+                        local block = dfhack.maps.getBlock(bx, by, z)
+                        if block then
+                            for x = 0, 15 do
+                                local dscol = block.designation[x]
+                                for y = 0, 15 do
+                                    local r = remap[dscol[y].geolayer_index]
+                                    if r then dscol[y].geolayer_index = r end
+                                end
+                            end
+                        end
+                    end
+                    job.bi = job.bi + 1
+                    if dfhack.getTickCount() >= deadline then return false end
+                end
+                job.bi = 0
+                job.zi = job.zi + 1
+            end
+            return true
+        end,
+    })
+
+    table.insert(phases, {
         name = 'materials/veins',
         init = function(job) job.paint_cursor = 1 end,
         total = function() return #ctx.paint_list end,
         pos = function(job) return job.paint_cursor end,
         step = function(job, deadline)
             while job.paint_cursor <= #ctx.paint_list do
-                local x, y, z, mat_idx = string.unpack('<I2I2I2I2',
+                local x, y, z, mat_idx, rflags = string.unpack('<I2I2I2I2B',
                     ctx.paint_list[job.paint_cursor])
                 job.paint_cursor = job.paint_cursor + 1
                 local midx = resolve_mat(ctx, mat_idx)
-                if midx then
+                if midx and rflags & 1 == 1 then
+                    -- soil: keep the soil tiletype, remap the tile's geolayer so
+                    -- the tile resolves as the source soil (e.g. sand)
+                    set_soil_layer(ctx, x, y, z, midx)
+                elseif midx then
                     local tt = dfhack.maps.getTileType(x, y, z)
                     local attrs = df.tiletype.attrs[tt]
+                    if attrs.material == df.tiletype_material.CONSTRUCTION then
+                        goto continue  -- never repaint a construction tile
+                    end
                     local d = select(1, dfhack.maps.getTileFlags(xyz2pos(x, y, z)))
                     tiletypes.tiletypes_setTile(xyz2pos(x, y, z), {
                         shape = attrs.shape,
@@ -363,6 +569,7 @@ function load_phases(ctx)
                         vein_type = df.inclusion_type.CLUSTER,
                     })
                 end
+                ::continue::
                 if dfhack.getTickCount() >= deadline then return false end
             end
             return true

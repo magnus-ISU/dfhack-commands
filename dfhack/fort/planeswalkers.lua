@@ -110,9 +110,14 @@ local function do_save(name)
     }
 
     local phases = terrain.save_phases(ctx)
+    for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
     common.start_job('save ' .. name, phases, ctx, function()
         common.write_json(ctx.dir .. '/legend.json',
             {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list})
+        ctx.manifest.skips = {}
+        for cat, c in pairs(ctx.skips or {}) do
+            ctx.manifest.skips[cat] = {n = c.n, examples = c.examples}
+        end
         common.write_json(ctx.dir .. '/manifest.json', ctx.manifest)
         common.print_skips(ctx)
         print(('planeswalkers: snapshot "%s" written to %s'):format(name, ctx.dir))
@@ -199,6 +204,11 @@ local function do_load(name, ...)
            anchor.off_bx, anchor.off_by, mf.dims.surface, anchor.dest_surface))
 
     local phases = terrain.load_phases(ctx)
+    local cleanup = table.remove(phases)  -- map cleanup runs last of all
+    if dfhack.filesystem.exists(dir .. '/buildings.json') then
+        for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
+    end
+    table.insert(phases, cleanup)
     common.start_job('load ' .. name, phases, ctx, function()
         dfhack.persistent.saveSiteData(GLOBAL_KEY,
             {state = 'done', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S')})
