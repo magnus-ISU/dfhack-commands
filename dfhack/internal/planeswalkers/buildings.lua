@@ -295,6 +295,39 @@ local function load_one(ctx, rec)
         return
     end
 
+    -- farm plots and roads are built from nothing: let the filters path make
+    -- the (item-less) construct job, then complete it
+    if btype == df.building_type.FarmPlot or btype == df.building_type.RoadPaved
+        or btype == df.building_type.RoadDirt then
+        local args = {
+            type = btype, subtype = rec.subtype, pos = pos,
+            width = rec.w, height = rec.h,
+            fields = {room = make_extents(rec, a)},
+        }
+        local bld, err = dfhack.buildings.constructBuilding(args)
+        if not bld then
+            common.add_skip(ctx, 'building-place-failed', rec.type .. ': ' .. tostring(err))
+            return
+        end
+        complete_build(bld, {})
+        if rec.name then bld.name = common.fromu(rec.name) end
+        if rec.crops and btype == df.building_type.FarmPlot then
+            for season = 0, 3 do
+                local pid = -1
+                local code = rec.crops[season + 1]
+                if code and code ~= '' then
+                    for i, plant in ipairs(df.global.world.raws.plants.all) do
+                        if plant.id == code then pid = i break end
+                    end
+                    if pid == -1 then common.add_skip(ctx, 'crop-missing-in-world', code) end
+                end
+                bld.plant_id[season] = pid
+            end
+        end
+        ctx.bld_map[rec.id] = bld
+        return
+    end
+
     -- regular building: mint its components and build instantly
     local items = {}
     for _, comp in ipairs(rec.components or {}) do
