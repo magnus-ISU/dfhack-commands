@@ -36,8 +36,9 @@ match, no action -- the click goes to DF untouched.
 
 The row's zones are read from the render too, not hardcoded. Every 4-wide block in the row
 (both buttons and all the room icons) is drawn from four CONSECUTIVE texture-atlas tiles,
-which makes the blocks self-identifying: cyan ones are DF's buttons, the plain ones after
-the last button are the room icons, in struct order -- office, bedroom, dining room, tomb.
+which makes the blocks self-identifying: the two that stand alone are DF's buttons, and the
+strip of them packed edge to edge after the last button is the room icons, in struct order --
+office, bedroom, dining room, tomb.
 So the layout is measured on the spot at whatever window size and column offsets DF is
 using, and a fifth icon (or any DF adds later) is left alone rather than guessed at.
 
@@ -67,22 +68,35 @@ local function line_text(y)
 end
 
 -- every 4-wide block of consecutive atlas tiles on this line, in x order. DF composes each
--- icon and each button out of tiles n, n+1, n+2, n+3, and nothing else on the row does that
--- -- panel background repeats one tile id, and glyphs are scattered around the atlas.
+-- icon and each button out of four neighbouring atlas tiles, and nothing else on the row does
+-- that -- panel background repeats one tile id, and the row's TEXT carries no tile at all (the
+-- glyphs ride on the background tile as characters), so prose cannot fake a block.
+--
+-- THE IDS RUN DOWNWARDS, n, n-1, n-2, n-3, which is the whole reason this was dead: the test
+-- used to be `t == prev + 1`, no run ever matched, every row came back with no blocks and so
+-- every click was handed straight back to DF.
+--
+-- A run is also not always one block. Where two icons sit edge to edge and happen to be
+-- neighbours in the atlas, their eight columns descend without a break and read as a single
+-- run -- so a run is CUT INTO 4-wide blocks rather than accepted or rejected whole. Anything
+-- left over past the last whole block is not a block and is dropped.
+local BLOCK_W = 4
+
 local function tile_blocks(y)
     local w = dfhack.screen.getWindowSize()
     local blocks, run_start, prev = {}, nil, nil
     local function close(at)
-        if run_start and at - run_start == 4 then
-            local p = dfhack.screen.readTile(run_start, y)
-            blocks[#blocks + 1] = {x1 = run_start, x2 = at - 1, fg = p and p.fg}
+        if not run_start then return end
+        for x1 = run_start, at - BLOCK_W, BLOCK_W do
+            local p = dfhack.screen.readTile(x1, y)
+            blocks[#blocks + 1] = {x1 = x1, x2 = x1 + BLOCK_W - 1, fg = p and p.fg}
         end
     end
     for x = 0, w - 1 do
         local p = dfhack.screen.readTile(x, y)
         local t = p and p.tile
-        if t and prev and t == prev + 1 then
-            -- still inside a run; a run longer than 4 is not a block, and close() drops it
+        if t and prev and t == prev - 1 then
+            -- still inside a run
         else
             close(x)
             run_start = t and x or nil
@@ -279,7 +293,7 @@ NobleClickOverlay.ATTRS{
     -- /Default only: while the candidate or symbol list is up, every click is DF's
     viewscreens = 'dwarfmode/Info/ADMINISTRATORS/Default',
     frame = {w = 1, h = 1},          -- draws nothing; onInput sees the whole screen anyway
-    version = 1,
+    version = 2,
 }
 
 function NobleClickOverlay:onInput(keys)
