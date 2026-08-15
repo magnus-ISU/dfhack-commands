@@ -40,18 +40,24 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ### **`fort/planeswalkers`**
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
-terrain (with veins, sand/soil, adamantine), constructions, buildings, stockpiles with their
-settings, zones, items (with containment, quality, and decorations), artifacts (named, with
-their descriptions, even on pedestals), retired adventurers (unretirable on arrival), and
+terrain (with veins, sand/soil, adamantine — but not the magma sea or the underworld, which
+each world keeps as its own), constructions, buildings, stockpiles with their
+settings, zones, items (with containment, quality, decorations, and maker), artifacts (named,
+with their descriptions and full artifact status — value, quality and the Objects screen —
+even on pedestals), retired adventurers (unretirable on arrival), and
 every unit with skills, personality, appearance, family ties, and the surrounding
 historical-figure web — into
 `dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world
-(same or larger embark size), `fort/planeswalkers load <name> --i-saved` wipes the footprint
+(same or larger embark size), `fort/planeswalkers load <name>` wipes the footprint
+(including the embark's own buildings — the wagon is dismantled, its supplies dropped)
 and rebuilds the fort there, dwarves and all. Everything is stored as raw tokens, so worlds
 with the same mod set restore near-losslessly; content the destination world lacks (modded
 materials, procedurally generated races, necromantic secrets) is substituted with the closest
 equivalent or skipped with a report. Make a manual DF save before loading — there is no
-rollback. `list`, `delete <name> --yes`, `status`, and `cancel` round out the set.
+rollback. An in-game announcement tells you when the save is written and when the fort has
+been restored. Run it with no arguments for a walkthrough, or `help fort/planeswalkers` for
+the full description. `list`, `delete <name> --yes` (deletes only the snapshot folder),
+`status`, and `cancel` round out the set.
 
 ### **`fort/workshop-tools`**
 Puts a `+` on every queued workshop task that queues another one just like it, and sorts

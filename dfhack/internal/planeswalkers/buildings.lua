@@ -385,6 +385,57 @@ local function load_one(ctx, rec)
     ctx.bld_map[rec.id] = bld
 end
 
+-- the destination embark comes with furniture of its own -- the wagon above
+-- all; with --force, a whole previous fort. Remove every building that
+-- predates the restore: stored items (the embark supplies) drop to the
+-- ground, construction components (the wagon's logs) are deleted outright.
+function clear_phase(ctx)
+    return {
+        name = 'clear old buildings',
+        init = function(job)
+            job.old = {}
+            for _, b in ipairs(df.global.world.buildings.all) do
+                table.insert(job.old, b)
+            end
+            job.cursor = 1
+        end,
+        total = function(job) return #job.old end,
+        pos = function(job) return job.cursor end,
+        step = function(job, deadline)
+            while job.cursor <= #job.old do
+                local bld = job.old[job.cursor]
+                job.cursor = job.cursor + 1
+                local ok, err = pcall(function()
+                    local pos = xyz2pos(bld.centerx, bld.centery, bld.z)
+                    if df.building_actual:is_instance(bld) then
+                        for i = #bld.contained_items - 1, 0, -1 do
+                            local ci = bld.contained_items[i]
+                            -- one stuck item must not strand the rest
+                            pcall(function()
+                                if ci.use_mode == 2 then
+                                    dfhack.items.remove(ci.item)
+                                else
+                                    dfhack.items.moveToGround(ci.item, pos)
+                                end
+                            end)
+                        end
+                        -- deconstruct() only QUEUES a dwarf job for a built
+                        -- building; zeroing the stage takes DFHack's
+                        -- immediate-destruction path instead
+                        pcall(function() bld.construction_stage = 0 end)
+                    end
+                    dfhack.buildings.deconstruct(bld)
+                end)
+                if not ok then
+                    common.add_skip(ctx, 'old-building-not-cleared', tostring(err))
+                end
+                if dfhack.getTickCount() >= deadline then return false end
+            end
+            return true
+        end,
+    }
+end
+
 function load_phases(ctx)
     local phases = {}
     table.insert(phases, {

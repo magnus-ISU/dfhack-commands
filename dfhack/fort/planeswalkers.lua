@@ -1,34 +1,102 @@
 -- Save a whole fort to disk and restore it in a different world.
 --@module = true
---[[
+--[====[
 fort/planeswalkers
+==================
 
-Snapshot the current fort (terrain, buildings, stockpiles, zones, units, items,
-artifacts, histfig web) into $DF/dfhack-config/scripts/data/planeswalkers/<name>/,
-and reconstruct a snapshot on a fresh embark in ANOTHER world. Cross-world identity
-is kept via raw token strings (never world-local numeric ids); procedurally
-generated content (forgotten beasts, necromancer secrets) is mapped best-effort to
-the destination world's own equivalents.
+Tags: fort | armok | map | units | buildings
 
-Both save and load run as chunked background jobs pumped from an overlay (the game
-stays paused and responsive); progress prints to the DFHack console.
+Command: "fort/planeswalkers"
+    Carry a whole fort between worlds.
+
+Carry a whole fort from one world to another. ``save`` writes the fort to disk;
+``load`` rebuilds it on a fresh embark in a *different* world, dwarves and all.
+
+What is carried
+---------------
+
+- **Terrain**: every tile of the fort's footprint -- stone layers, veins, sand,
+  soil, adamantine, water and magma, plus dug-out and smoothed tiles and the
+  hidden/light/outside flags. The magma sea and the underworld are NOT carried:
+  each world keeps its own (transplanting one world's hell into another's rock
+  breaches the underworld and lets its demons loose).
+- **Constructions and buildings**: walls, floors, ramps and stairs; workshops,
+  furnaces, doors, hatches, beds, tables, statues, wells, levers and traps, each
+  with its own material.
+- **Stockpiles and zones**, including stockpile category/material settings and
+  container limits, and zone types and their sizes.
+- **Items**: material, quality, wear, decorations, improvements, stack size, and
+  containment (what is in which bin/barrel/cabinet, on which pedestal).
+- **Artifacts**, named and described, and the historical figure that made them.
+- **Units**: every dwarf, animal and visitor -- skills and their experience,
+  attributes, personality, appearance, wounds, inventory, professions and
+  labours, plus the surrounding historical-figure web (parents, spouses,
+  children, kills, and retired adventurers, who stay unretirable on arrival).
+
+Identity is stored as raw token strings, never world-local numeric ids, so a
+destination world with the same raws/mods restores near-losslessly. Procedurally
+generated content -- forgotten beasts, necromancer secrets, modded materials the
+target world never generated -- is mapped to the closest local equivalent, or
+skipped. Everything substituted or dropped is counted and printed as a
+"skipped/degraded" report when the job finishes.
+
+How it runs
+-----------
+
+Both save and load are chunked background jobs pumped by an overlay widget, so
+DF stays responsive; the game is held paused for the duration. Progress prints
+to the DFHack console every couple of seconds, and an in-game announcement fires
+when a save or a load completes. ``status`` shows the current phase, ``cancel``
+aborts, and ``step`` pumps one chunk by hand (debug).
+
+Snapshots live in ``$DF/dfhack-config/scripts/data/planeswalkers/<name>/``.
+
+Walkthrough
+-----------
+
+1. In the fort you want to carry, run ``fort/planeswalkers save``. A name is
+   derived from the fort and the date unless you pass one. Wait for the "snapshot
+   saved" notification.
+2. Generate or load another world and embark. The new embark must be **at least
+   as large** as the source fort's, and should be a fresh one -- loading wipes
+   everything inside the old fort's footprint.
+3. **Save the game manually.** There is no rollback.
+4. ``fort/planeswalkers list`` to see what you have, then
+   ``fort/planeswalkers load <name>`` (the list number works too). When the
+   "fort restored" notification arrives, save and reload the fort so DF settles
+   units and jobs.
+
+Deleting snapshots you no longer want
+-------------------------------------
+
+``fort/planeswalkers list`` prints every snapshot with its world, embark size
+and date. To remove one::
+
+    fort/planeswalkers delete <name> --yes
+
+``--yes`` is mandatory and there is no undo: the command erases
+``dfhack-config/scripts/data/planeswalkers/<name>/`` and its contents. It only
+touches that folder -- a fort already restored from the snapshot, and your DF
+saves, are untouched. Snapshots are otherwise plain folders, so deleting one by
+hand from that directory works just as well. A snapshot from an aborted save is
+listed as ``PARTIAL`` and cannot be loaded; delete it the same way.
 
 Usage::
 
+    fort/planeswalkers                    show usage
     fort/planeswalkers save [name]        snapshot the current fort
-    fort/planeswalkers load               list snapshots
-    fort/planeswalkers load <name> --i-saved [--force]
-                                          restore <name> here (destination embark
-                                          must be at least as large as the source;
-                                          make a manual DF save first -- there is
-                                          no rollback)
     fort/planeswalkers list               list snapshots
-    fort/planeswalkers delete <name> --yes
+    fort/planeswalkers load               list snapshots
+    fort/planeswalkers load <name|number> [--force]
+                                          restore a snapshot onto this embark.
+                                          --force allows a same-world snapshot
+                                          or a fort that already has buildings
+    fort/planeswalkers delete <name> --yes  delete a snapshot
     fort/planeswalkers status             job progress / restored-from marker
     fort/planeswalkers cancel             abort the running job
     fort/planeswalkers step               pump the job once by hand (debug)
     fort/planeswalkers spike <n>          dev: run de-risk spike n
-]]
+]====]
 
 local overlay = require('plugins.overlay')
 
@@ -62,6 +130,14 @@ local function fort_name()
     local n = site and common.u(dfhack.translation.translateName(site.name)) or 'fort'
     n = n:lower():gsub('[^%w]+', '-'):gsub('^%-+', ''):gsub('%-+$', '')
     return n ~= '' and n or 'fort'
+end
+
+-- in-game notification (the console scrolls away while the job runs)
+local function notify(msg, color, popup)
+    print('planeswalkers: ' .. msg)
+    color = color or COLOR_LIGHTCYAN
+    pcall(dfhack.gui.showAnnouncement, 'planeswalkers: ' .. msg, color, true)
+    if popup then pcall(dfhack.gui.showPopupAnnouncement, msg, color, true) end
 end
 
 local function require_fort()
@@ -122,7 +198,9 @@ local function do_save(name)
         end
         common.write_json(ctx.dir .. '/manifest.json', ctx.manifest)
         common.print_skips(ctx)
-        print(('planeswalkers: snapshot "%s" written to %s'):format(name, ctx.dir))
+        notify(('snapshot "%s" saved (%s). Load it on a fresh embark in another ' ..
+                'world with: fort/planeswalkers load %s'):format(name, ctx.dir, name),
+               COLOR_LIGHTGREEN, true)
     end)
 end
 
@@ -147,7 +225,8 @@ local function do_load(name, ...)
     for _, a in ipairs({name, ...}) do flags[a] = true end
     if not name or name:match('^%-%-') then
         print_list()
-        print('\nload with: fort/planeswalkers load <name> --i-saved')
+        print('\nload with: fort/planeswalkers load <name>   (or its list number)')
+        print('make a manual DF save first -- there is NO rollback')
         return
     end
     require_fort()
@@ -170,10 +249,6 @@ local function do_load(name, ...)
     if mf.world == common.u(dfhack.translation.translateName(df.global.world.world_data.name))
         and not flags['--force'] then
         qerror('planeswalkers: this snapshot came from THIS world; --force to restore anyway')
-    end
-    if not flags['--i-saved'] then
-        qerror('planeswalkers: make a manual DF save first (there is NO rollback), then\n' ..
-               're-run with --i-saved:  fort/planeswalkers load ' .. name .. ' --i-saved')
     end
     if #df.global.world.buildings.all > 1 and not flags['--force'] then
         qerror(('planeswalkers: this fort already has %d buildings; load onto a FRESH ' ..
@@ -201,12 +276,15 @@ local function do_load(name, ...)
     dfhack.persistent.saveSiteData(GLOBAL_KEY,
         {state = 'loading', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S')})
 
-    print(('planeswalkers: restoring "%s" (%dx%d blocks) anchored at block %d,%d, ' ..
-           'surface z %d -> %d'):format(name, mf.dims.bx, mf.dims.by,
-           anchor.off_bx, anchor.off_by, mf.dims.surface, anchor.dest_surface))
+    notify(('restoring "%s" (%dx%d blocks) anchored at block %d,%d, surface z %d -> %d; ' ..
+            'the game stays paused until it finishes')
+           :format(name, mf.dims.bx, mf.dims.by, anchor.off_bx, anchor.off_by,
+                   mf.dims.surface, anchor.dest_surface))
 
     local phases = terrain.load_phases(ctx)
     local cleanup = table.remove(phases)  -- map cleanup runs last of all
+    -- the embark's own buildings (the wagon!) go first, before terrain repaint
+    table.insert(phases, 1, req('buildings').clear_phase(ctx))
     if dfhack.filesystem.exists(dir .. '/buildings.json') then
         for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
     end
@@ -225,8 +303,9 @@ local function do_load(name, ...)
         local cx = anchor.off_x + mf.dims.bx * 8
         local cy = anchor.off_y + mf.dims.by * 8
         dfhack.gui.revealInDwarfmodeMap(xyz2pos(cx, cy, anchor.dest_surface), true)
-        print(('planeswalkers: fort "%s" restored; SAVE NOW and reload to verify')
-            :format(name))
+        notify(('fort "%s" restored from world "%s". SAVE NOW and reload the fort to ' ..
+                'verify -- units and jobs settle on the next load.')
+               :format(name, mf.world or '?'), COLOR_LIGHTGREEN, true)
     end)
 end
 
@@ -272,18 +351,73 @@ local function do_spike(n, ...)
     req('spikes').run(tonumber(n) or qerror('spike: numeric spike id required'), ...)
 end
 
+local HELP = [[
+fort/planeswalkers -- carry a whole fort to another world.
+
+  It snapshots this fort to disk (terrain, buildings, stockpiles, zones, items,
+  artifacts, and every unit with its skills, personality and family), then
+  rebuilds it on a fresh embark in ANY other world. Everything is stored as raw
+  tokens, so anything the destination world also has comes back as itself;
+  what it lacks is substituted or skipped, and reported at the end.
+
+Doing it, start to finish:
+
+  1. In the fort you want to carry:
+         fort/planeswalkers save               (or: save <name>)
+     The game pauses and works through the fort in chunks; progress prints to
+     the console. You get a notification when the snapshot is written.
+
+  2. Start or load ANOTHER world and embark somewhere. The new embark must be
+     at least as large as the old one, and should be untouched -- loading wipes
+     the footprint the old fort occupied.
+
+  3. Save the game manually (there is NO rollback), then:
+         fort/planeswalkers list               see your snapshots
+         fort/planeswalkers load <name>        rebuild the fort here
+     <name> may also be the number shown by `list`. You get a notification when
+     the fort is restored; SAVE and reload it right away to let DF settle.
+
+Removing a snapshot:
+
+     fort/planeswalkers delete <name> --yes
+  That erases the snapshot folder under
+  dfhack-config/scripts/data/planeswalkers/<name>/ and nothing else -- it never
+  touches a fort you already restored. There is no undo; --yes is required.
+
+All commands:
+
+  fort/planeswalkers                     this help
+  fort/planeswalkers save [name]         snapshot the current fort
+  fort/planeswalkers list                list snapshots
+  fort/planeswalkers load                list snapshots
+  fort/planeswalkers load <name|number> [--force]
+                                         restore a snapshot onto this embark
+                                         (--force: allow a same-world snapshot
+                                         or a non-empty fort)
+  fort/planeswalkers delete <name> --yes  delete a snapshot
+  fort/planeswalkers status              job progress / restored-from marker
+  fort/planeswalkers cancel              abort the running save or load
+  fort/planeswalkers step                pump the job once by hand (debug)
+
+Run `help fort/planeswalkers` for the full description.
+]]
+
+local function do_help() print(HELP) end
+
 local ACTIONS = {
     save = do_save, load = do_load, list = print_list, delete = do_delete,
     status = do_status, cancel = do_cancel, step = do_step, spike = do_spike,
+    help = do_help, ['--help'] = do_help, ['-h'] = do_help,
 }
 
 if dfhack_flags and dfhack_flags.module then return end
 
 local args = {...}
-local action = args[1] or 'list'
+local action = args[1]
+if not action then do_help() return end
 local fn = ACTIONS[action]
 if not fn then
-    qerror(('planeswalkers: unknown action "%s" (save|load|list|delete|status|cancel)')
-        :format(action))
+    qerror(('planeswalkers: unknown action "%s" (save|load|list|delete|status|' ..
+            'cancel); run `fort/planeswalkers` for help'):format(action))
 end
 fn(table.unpack(args, 2))

@@ -22,6 +22,29 @@ local function inorganic_token(idx)
     return raw and ('INORGANIC:' .. raw.id) or nil
 end
 
+-- top of the world's deep structure (semi-molten rock / eerie pits): the
+-- magma sea and the underworld live at and below this z. Neither survives
+-- transplanting -- painting one world's hell into another's rock breaches
+-- the underworld and releases its demons -- so save and load both stop
+-- above it. Sampled like find_surface_z; +2 margin for the sea's surface.
+function find_deep_top_z()
+    local map = df.global.world.map
+    local top = -1
+    for x = 8, map.x_count - 1, 16 do
+        for y = 8, map.y_count - 1, 16 do
+            for z = math.min(map.z_count - 1, 80), 0, -1 do
+                if z <= top then break end
+                local tt = dfhack.maps.getTileType(x, y, z)
+                if tt == df.tiletype.SemiMoltenRock or tt == df.tiletype.EeriePit then
+                    top = z
+                    break
+                end
+            end
+        end
+    end
+    return top >= 0 and top + 2 or -1
+end
+
 -- median of sampled highest-non-empty z: the cross-world alignment anchor
 function find_surface_z()
     local map = df.global.world.map
@@ -184,6 +207,8 @@ function save_phases(ctx)
         name = 'terrain',
         init = function(job)
             ctx.layer_cache = {}
+            ctx.deep_top = find_deep_top_z()
+            ctx.manifest.dims.deep_top = ctx.deep_top
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'wb')
             ctx.tiles_f:write(string.pack(common.HEADER_FMT, 'PWT1',
                 map.x_count_block, map.y_count_block, map.z_count_block,
@@ -199,7 +224,12 @@ function save_phases(ctx)
                 local z = i // (bw * bh)
                 local by = (i % (bw * bh)) // bw
                 local bx = i % bw
-                ctx.tiles_f:write(save_block(ctx, dfhack.maps.getBlock(bx, by, z), bx, by, z))
+                if z <= ctx.deep_top then
+                    -- the magma sea and the underworld stay home
+                    ctx.tiles_f:write(common.ZERO_BLOCK)
+                else
+                    ctx.tiles_f:write(save_block(ctx, dfhack.maps.getBlock(bx, by, z), bx, by, z))
+                end
                 job.block_cursor = i + 1
                 if dfhack.getTickCount() >= deadline then return false end
             end
@@ -406,6 +436,11 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
         ctx.z_clipped = (ctx.z_clipped or 0) + 1
         return
     end
+    if z <= (ctx.dest_deep_top or -1) then
+        -- never touch THIS world's magma sea / underworld structure
+        ctx.deep_clipped = (ctx.deep_clipped or 0) + 1
+        return
+    end
     local bx, by = src_bx + anchor.off_bx, src_by + anchor.off_by
     local block = dfhack.maps.getBlock(bx, by, z)
     if not block then
@@ -431,6 +466,12 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
             local tt_idx, mat_idx, dbits, rflags = string.unpack(common.TILE_REC, data, off)
             off = off + common.TILE_REC_SIZE
             local tt = resolve_tt(ctx, tt_idx)
+            -- pre-guard snapshots carry the source's deep structure: importing
+            -- another world's hell breaches this one's -- drop those tiles
+            if tt == df.tiletype.SemiMoltenRock or tt == df.tiletype.EeriePit then
+                ctx.deep_dropped = (ctx.deep_dropped or 0) + 1
+                tt = nil
+            end
             if tt then
                 touched = true
                 ttcol[y] = tt
@@ -462,6 +503,7 @@ function load_phases(ctx)
         init = function(job)
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'rb')
             ctx.src = read_header(ctx.tiles_f)
+            ctx.dest_deep_top = find_deep_top_z()
             ctx.paint_list = {}
             ctx.mat_cache, ctx.tt_cache = {}, {}
             build_geo_remaps(ctx)
@@ -488,6 +530,14 @@ function load_phases(ctx)
             if ctx.z_clipped then
                 common.add_skip(ctx, 'blocks-clipped-at-z-edge')
                 ctx.skips['blocks-clipped-at-z-edge'].n = ctx.z_clipped
+            end
+            if ctx.deep_clipped then
+                common.add_skip(ctx, 'blocks-below-magma-sea-untouched')
+                ctx.skips['blocks-below-magma-sea-untouched'].n = ctx.deep_clipped
+            end
+            if ctx.deep_dropped then
+                common.add_skip(ctx, 'source-underworld-tiles-dropped')
+                ctx.skips['source-underworld-tiles-dropped'].n = ctx.deep_dropped
             end
             return true
         end,
@@ -596,7 +646,8 @@ function load_phases(ctx)
                 local c = job.cons.list[job.con_cursor]
                 job.con_cursor = job.con_cursor + 1
                 local z = c.z + a.off_z
-                if z >= 1 and z < df.global.world.map.z_count - 1 then
+                if z >= 1 and z < df.global.world.map.z_count - 1
+                    and z > (ctx.dest_deep_top or -1) then
                     local mi = c.mat and dfhack.matinfo.find(c.mat)
                     local con = df.construction:new()
                     con.pos.x, con.pos.y, con.pos.z = c.x + a.off_x, c.y + a.off_y, z

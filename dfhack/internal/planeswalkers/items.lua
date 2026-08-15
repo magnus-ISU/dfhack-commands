@@ -60,6 +60,9 @@ local function save_one(ctx, item)
     if q and q > 0 then rec.q = q end
     local okw, wear = pcall(function() return item.wear end)
     if okw and wear and wear > 0 then rec.wear = wear end
+    -- who made it (an hf id; resolved on load if that figure came along)
+    local okm, mk = pcall(function() return item.maker end)
+    if okm and mk and mk >= 0 then rec.mk = mk end
     -- race-bearing items (eggs, fish, remains, vermin...)
     local okr, race = pcall(function() return item.race end)
     if okr and race then
@@ -176,6 +179,9 @@ function save_phases(ctx)
                     table.insert(out.list, {
                         id = ar.id,
                         item = ar.item.id,
+                        -- true artifact vs merely-named object (kill-named sword)
+                        mood = ar.item.flags.artifact_mood,
+                        owner = ar.owner_hf >= 0 and ar.owner_hf or nil,
                         first = common.u(ar.name.first_name),
                         words = words,
                         pos = pos,
@@ -360,6 +366,14 @@ local function create_one(ctx, rec, is_retry)
     if rec.n then pcall(function() item:setStackSize(rec.n) end) end
     if rec.q then pcall(function() item:setQuality(math.min(rec.q, 5)) end) end
     if rec.wear then pcall(function() item.wear = rec.wear end) end
+    -- createItem stamps the creator unit as maker, which reads as a wrong
+    -- dwarf in descriptions: put the real maker back if they came along,
+    -- else "an unknown artist"
+    local okmk = pcall(function() return item.maker end)
+    if okmk then
+        local hf = rec.mk and ctx.hf_map and ctx.hf_map[rec.mk]
+        pcall(function() item.maker = hf and hf.id or -1 end)
+    end
     if rec.hand then pcall(function() item:setGloveHandedness(rec.hand) end) end
     if rec.fl then
         local f = item.flags
@@ -484,11 +498,30 @@ function load_phases(ctx)
                         ar.name.first_name = common.fromu(rec.rendered)
                         common.add_skip(ctx, 'artifact-name-literalized', rec.rendered)
                     end
+                    -- whereabouts: new() zero-inits these, which would point
+                    -- at site 0 / hf 0 -- mark all unknown, then place the
+                    -- artifact at THIS site so the Objects screen and legends
+                    -- see it before DF's own tracker catches up
+                    ar.site = df.global.plotinfo.site_id
+                    ar.structure_local, ar.subregion, ar.feature_layer = -1, -1, -1
+                    ar.last_local_bld_id, ar.site_building_profile = -1, -1
+                    ar.storage_site, ar.storage_structure_local = -1, -1
+                    ar.loss_region, ar.last_layer, ar.holder_hf = -1, -1, -1
+                    ar.year, ar.season_tick = -1, -1
+                    ar.abs_tile_x, ar.abs_tile_y, ar.abs_tile_z =
+                        -1000000, -1000000, -1000000
+                    local owner = rec.owner and ctx.hf_map and ctx.hf_map[rec.owner]
+                    ar.owner_hf = owner and owner.id or -1
                     df.global.world.artifacts.all:insert('#', ar)
                     local ref = df.general_ref_is_artifactst:new()
                     ref.artifact_id = ar.id
                     item.general_refs:insert('#', ref)
                     item.flags.artifact = true
+                    -- artifact_mood is what makes DF treat it as a true
+                    -- artifact: the 10x value multiplier over masterwork and
+                    -- the Objects->Artifacts listing (absent in old snapshots
+                    -- -> assume true; explicit false = kill-named object)
+                    item.flags.artifact_mood = rec.mood ~= false
                 else
                     common.add_skip(ctx, 'artifact-item-missing', rec.rendered)
                 end
