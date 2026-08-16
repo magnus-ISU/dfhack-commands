@@ -44,7 +44,9 @@ citizen, so one trance fires once. While the theme is playing a further trance i
 whole — sieges produce them in clusters and each one restarting the track would be a stutter,
 not a celebration.
 
-The sound needs the **`ssaudio`** plugin (`plugins/ssaudio`, built with `make build-ssaudio`),
+The sound needs the **`ssaudio`** plugin (`plugins/ssaudio`; `make install` downloads the
+prebuilt linux/windows binary from this repo's `ssaudio-v*` releases, or build it from source
+with `make build-ssaudio`),
 because DFHack's Lua sandbox has no audio call and no way out to a shell — `os.execute` and
 `io.popen` are both nil. It decodes an mp3 with minimp3 and plays it on its own SDL2 audio
 device. Without the plugin everything else still happens and the theme is silent; the status

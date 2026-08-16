@@ -4,7 +4,9 @@
 #
 #   1. install-scripts  dfhack/ -> $DF/dfhack-config/scripts/   (hot-reloads a running DF)
 #   2. install-mods     content-mods/high-adventure/* -> $DF/mods/, then prune-snapshots
-#   3. install-plugin   download + verify the df-smooth-movement binary into DFHack
+#   3. install-plugin   download + verify the prebuilt plugin binaries into DFHack:
+#                       df-smooth-movement (from $(REPO)) and ssaudio (from this repo's
+#                       ssaudio-v* releases; skipped with a warning until one exists)
 #
 # The local steps run FIRST so a network failure in step 3 cannot cost you a mod deploy.
 #
@@ -28,15 +30,17 @@
 #
 # Re-run after every DFHack update (plugins are ABI-specific to a DFHack version).
 
-REPO           ?= notliad/df-smooth-movement
+# Where the smooth-movement prebuilt releases come from. Tracks anmej's fork (branch main),
+# which the other-authors/df-smooth-movement submodule also points at.
+REPO           ?= anmej/df-smooth-movement
+# This repo's own GitHub releases carry the prebuilt ssaudio binaries (tags: ssaudio-v*),
+# built by .github/workflows/ssaudio-release.yml for both linux and windows.
+SSAUDIO_REPO   ?= magnus-ISU/dfhack-commands
 PLUGIN         ?= smooth-movement
-# The DFHack install directory (the folder that contains hack/plugins/). Override if yours differs;
-# on some setups DFHack lives inside the Dwarf Fortress folder instead of its own.
-DFHACK_DIR     ?= $(HOME)/.local/share/Steam/steamapps/common/DFHack
-# Which release to pull from: "latest" or a tag like v0.2.0.
+# Which release to pull from: "latest" or a tag like v0.5.1 (applies to smooth-movement).
 RELEASE        ?= latest
-# DFHack version the asset must match, e.g. 53.15-r2. Empty = auto-detect via dfhack-run when the
-# game is running, else fall back to the sole platform asset in the release.
+# DFHack version the asset must match, e.g. 53.16-r1.1. Empty = auto-detect via dfhack-run when
+# the game is running, else fall back to the newest platform asset in the release.
 DFHACK_VERSION ?=
 
 SHELL       := bash
@@ -46,9 +50,30 @@ SHELL       := bash
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
-DFRUN   := $(DFHACK_DIR)/dfhack-run
+# Platform + per-OS defaults. On Windows this Makefile expects a bash-flavored environment
+# (Git Bash or MSYS2 with make installed); $(OS) is set to Windows_NT by Windows itself, which
+# also covers MSYS/MINGW shells where uname reports MINGW64_NT-* rather than anything useful.
+ifeq ($(OS),Windows_NT)
+PLATFORM   := windows-x86_64
+PLUGEXT    := .plug.dll
+EXE        := .exe
+DFHACK_DIR ?= /c/Program Files (x86)/Steam/steamapps/common/DFHack
+else
+PLUGEXT    := .plug.so
+EXE        :=
+ifeq ($(UNAME_S)/$(UNAME_M),Linux/x86_64)
+PLATFORM   := linux-x86_64
+else
+PLATFORM   :=
+endif
+# The DFHack install directory (the folder that contains hack/plugins/). Override if yours differs;
+# on some setups DFHack lives inside the Dwarf Fortress folder instead of its own.
+DFHACK_DIR ?= $(HOME)/.local/share/Steam/steamapps/common/DFHack
+endif
+
+DFRUN   := $(DFHACK_DIR)/dfhack-run$(EXE)
 PLUGDIR := $(DFHACK_DIR)/hack/plugins
-SO      := $(PLUGDIR)/$(PLUGIN).plug.so
+SO      := $(PLUGDIR)/$(PLUGIN)$(PLUGEXT)
 
 # --- source build (make build) ---
 # Everything lives under build/ (gitignored): the DFHack source tree, its cmake build dir, and a
@@ -91,8 +116,15 @@ README_PARTS    := $(README_HEADER) $(README_SECTIONS)
 # DF_DIR is the game install (contains mods/ and dfhack-config/). B12_DIR is DF's USER data, a
 # different tree entirely: saves live there, and so do the per-world baked mod snapshots that
 # prune-snapshots cleans out. Both paths contain a space — every use must stay quoted.
+ifeq ($(OS),Windows_NT)
+DF_DIR      ?= /c/Program Files (x86)/Steam/steamapps/common/Dwarf Fortress
+# Windows DF keeps its user data (saves, baked mod snapshots) inside the game dir itself;
+# there is no separate "Bay 12 Games" tree like on Linux.
+B12_DIR     ?= $(DF_DIR)
+else
 DF_DIR      ?= $(HOME)/.local/share/Steam/steamapps/common/Dwarf Fortress
 B12_DIR     ?= $(HOME)/.local/share/Bay 12 Games/Dwarf Fortress
+endif
 MODS_SRC    := $(ROOT)/content-mods/high-adventure
 SCRIPTS_SRC := $(ROOT)/dfhack
 BUNDLE      := high-adventure
@@ -104,7 +136,7 @@ MERGED_SUBDIRS := objects graphics scripts_modactive
 # "current"), so never let -j interleave these.
 .NOTPARALLEL:
 .PHONY: help install install-scripts install-mods check-bundle prune-snapshots mods-status \
-        install-plugin build build-ssaudio enable disable status uninstall readme docs-todo
+        install-plugin fetch-plugin build build-ssaudio enable disable status uninstall readme docs-todo
 
 help:
 	@echo "dfhack-commands — make targets:"
@@ -117,8 +149,8 @@ help:
 	echo "                        THIS BREAKS SAVES made against those versions, by design."
 	echo "  make mods-status      repo vs deployed vs snapshot versions; changes nothing"
 	echo
-	echo "df-smooth-movement plugin:"
-	echo "  make install-plugin  download + checksum-verify the prebuilt plugin, install into DFHack"
+	echo "Prebuilt plugins (smooth-movement + ssaudio; linux and windows):"
+	echo "  make install-plugin  download + checksum-verify the prebuilt plugins, install into DFHack"
 	echo "  make build      compile the plugin from the submodule source (clones the DFHack"
 	echo "                  source tree into build/ on first run) and install it. Restart DF after."
 	echo "  make enable     load + enable it now (Dwarf Fortress must be running)"
@@ -287,7 +319,7 @@ prune-snapshots:
 	done
 	if [ "$$deleted" -gt 0 ]; then
 	  echo "  -> $$deleted stale snapshot(s) removed. Saves made against them will no longer load."
-	  if pgrep -x dwarfort >/dev/null 2>&1; then
+	  if command -v pgrep >/dev/null 2>&1 && pgrep -x dwarfort >/dev/null 2>&1; then
 	    echo "  -> Dwarf Fortress is RUNNING. If the world you have loaded used one of these,"
 	    echo "     do not count on reloading that save."
 	  fi
@@ -317,15 +349,28 @@ mods-status:
 	  printf '%-26s %-8s %-10s%s%s\n' "$$m" "$$r" "$$p" "$$s" "$$mark"
 	done
 
+# Both prebuilt plugins in one pass: smooth-movement from $(REPO), ssaudio (the sound backend
+# behind joke/super-saiyan) from this repo's own ssaudio-v* releases. ssaudio is best-effort —
+# until a ssaudio-v* release has been published (push a tag, CI builds it), it warns and moves
+# on instead of failing the whole deploy.
 install-plugin:
-	@platform=""
-	case "$(UNAME_S)/$(UNAME_M)" in
-	  Linux/x86_64) platform="linux-x86_64" ;;
-	  *)
-	    echo "No prebuilt binary for $(UNAME_S)/$(UNAME_M) (upstream ships linux-x86_64 and windows-x86_64)."
-	    echo "Build from source inside a DFHack tree — see other-authors/df-smooth-movement/README.md."
-	    exit 1 ;;
-	esac
+	@$(MAKE) --no-print-directory fetch-plugin \
+	  FETCH_PLUGIN=smooth-movement FETCH_REPO=$(REPO) FETCH_RELEASE=$(RELEASE) FETCH_ENABLE=1 FETCH_OPTIONAL=0
+	$(MAKE) --no-print-directory fetch-plugin \
+	  FETCH_PLUGIN=ssaudio FETCH_REPO=$(SSAUDIO_REPO) FETCH_RELEASE=latest FETCH_ENABLE=0 FETCH_OPTIONAL=1
+
+# Download one prebuilt plugin from a GitHub release and unpack it into $(DFHACK_DIR). Assets are
+# named <plugin>-<ver>-dfhack-<dfver>-<platform>.zip and contain hack/... paths, so they extract
+# straight over the DFHack dir. Parameters (set by install-plugin above): FETCH_PLUGIN, FETCH_REPO,
+# FETCH_RELEASE ("latest" or a tag), FETCH_ENABLE (also `enable` after loading), FETCH_OPTIONAL
+# (missing release = warning, not error).
+fetch-plugin:
+	@plugbin="$(PLUGDIR)/$(FETCH_PLUGIN)$(PLUGEXT)"
+	if [ -z "$(PLATFORM)" ]; then
+	  echo "No prebuilt $(FETCH_PLUGIN) binary for $(UNAME_S)/$(UNAME_M) (releases ship linux-x86_64 and windows-x86_64)."
+	  echo "Build from source instead — see 'make build' / 'make build-ssaudio' (linux only)."
+	  exit 1
+	fi
 	if [ ! -d "$(PLUGDIR)" ]; then
 	  echo "DFHack plugin dir not found: $(PLUGDIR)"
 	  echo "Point DFHACK_DIR at your DFHack install (the folder containing hack/plugins/):"
@@ -335,58 +380,87 @@ install-plugin:
 	# Resolve the DFHack version to match against asset names.
 	dfver="$(DFHACK_VERSION)"
 	if [ -z "$$dfver" ] && [ -x "$(DFRUN)" ]; then
-	  dfver="$$("$(DFRUN)" lua 'print(dfhack.getDFHackVersion())' 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+-r[0-9]+' || true)"
+	  dfver="$$("$(DFRUN)" lua 'print(dfhack.getDFHackVersion())' 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+-r[0-9.]+' || true)"
 	  [ -n "$$dfver" ] && echo "Detected running DFHack $$dfver."
 	fi
-	# Fetch the release metadata (public repo; GITHUB_TOKEN used only if set, to dodge rate limits).
-	if [ "$(RELEASE)" = "latest" ]; then api="https://api.github.com/repos/$(REPO)/releases/latest"; \
-	else api="https://api.github.com/repos/$(REPO)/releases/tags/$(RELEASE)"; fi
+	# Fetch the release metadata (public repos; GITHUB_TOKEN used only if set, to dodge rate
+	# limits). "latest" lists recent releases rather than hitting /releases/latest: the newest
+	# release by date may be a different plugin's (ssaudio shares this repo's release space) or a
+	# rolling one without our assets, and the asset-name filter below sorts that out.
+	if [ "$(FETCH_RELEASE)" = "latest" ]; then api="https://api.github.com/repos/$(FETCH_REPO)/releases?per_page=30"; \
+	else api="https://api.github.com/repos/$(FETCH_REPO)/releases/tags/$(FETCH_RELEASE)"; fi
 	curlargs=(-fsSL -H "Accept: application/vnd.github+json")
 	[ -n "$${GITHUB_TOKEN:-}" ] && curlargs+=(-H "Authorization: Bearer $$GITHUB_TOKEN")
 	echo "Querying $$api"
-	json="$$(curl "$${curlargs[@]}" "$$api")"
-	urls="$$(printf '%s' "$$json" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+"' | sed -E 's/.*"(https[^"]+)".*/\1/')"
-	# Candidate = the platform tarball(s); narrow by DFHack version when we know it.
-	cands="$$(printf '%s\n' "$$urls" | grep -E "$${platform}\.tar\.gz$$" || true)"
-	if [ -n "$$dfver" ]; then
-	  filtered="$$(printf '%s\n' "$$cands" | grep -F "dfhack$${dfver}-" || true)"
+	json="$$(curl "$${curlargs[@]}" "$$api" || true)"
+	urls="$$(printf '%s' "$$json" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+"' | sed -E 's/.*"(https[^"]+)".*/\1/' || true)"
+	# Candidates = this plugin's archives for this platform, newest release first (the API's
+	# order); narrow by DFHack version when we know it.
+	cands="$$(printf '%s\n' "$$urls" | grep -E "/$(FETCH_PLUGIN)-[^/]*$(PLATFORM)\.(zip|tar\.gz)$$" || true)"
+	if [ -n "$$dfver" ] && [ -n "$$cands" ]; then
+	  esc="$$(printf '%s' "$$dfver" | sed 's/\./\\./g')"
+	  filtered="$$(printf '%s\n' "$$cands" | grep -E "dfhack-?$${esc}[.-]" || true)"
 	  if [ -n "$$filtered" ]; then cands="$$filtered"; \
-	  else echo "warning: release has no asset for DFHack $$dfver; using the available $$platform asset instead."; fi
+	  else echo "warning: no $(FETCH_PLUGIN) asset for DFHack $$dfver; using the newest $(PLATFORM) asset instead."; fi
 	fi
-	n="$$(printf '%s\n' "$$cands" | grep -c . || true)"
-	if [ "$$n" -eq 0 ]; then
-	  echo "No $$platform asset in the $(RELEASE) release. Available assets:"
+	asset="$$(printf '%s\n' "$$cands" | head -1)"
+	if [ -z "$$asset" ]; then
+	  if [ "$(FETCH_OPTIONAL)" = "1" ]; then
+	    echo "No prebuilt $(FETCH_PLUGIN) release found in $(FETCH_REPO) — SKIPPING it."
+	    echo "  Publish one by pushing a tag: git tag ssaudio-v1.0.0 && git push origin ssaudio-v1.0.0"
+	    echo "  (CI builds linux+windows; see .github/workflows/ssaudio-release.yml)."
+	    echo "  Or build locally on linux: make build-ssaudio"
+	    exit 0
+	  fi
+	  echo "No $(PLATFORM) asset for $(FETCH_PLUGIN) in the $(FETCH_RELEASE) release(s). Available assets:"
 	  printf '%s\n' "$$urls" | sed -E 's#.*/##'
 	  exit 1
 	fi
-	if [ "$$n" -gt 1 ]; then
-	  echo "Multiple $$platform assets — pick one with DFHACK_VERSION=<ver>:"
-	  printf '  %s\n' $$(printf '%s\n' "$$cands" | sed -E 's#.*/##')
-	  exit 1
-	fi
-	asset="$$cands"
 	echo "Selected asset: $${asset##*/}"
-	# Download, verify checksum, extract into the DFHack dir.
+	# Download, verify checksum when one is published, extract into the DFHack dir.
 	tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT
-	curl -fSL --progress-bar -o "$$tmp/p.tar.gz" "$$asset"
-	if curl -fsSL -o "$$tmp/p.sha256" "$${asset}.sha256"; then
-	  exp="$$(awk '{print $$1}' "$$tmp/p.sha256")"
-	  act="$$(sha256sum "$$tmp/p.tar.gz" | awk '{print $$1}')"
+	pkg="$$tmp/$${asset##*/}"
+	curl -fSL --progress-bar -o "$$pkg" "$$asset"
+	if curl -fsSL -o "$$pkg.sha256" "$${asset}.sha256"; then
+	  exp="$$(awk '{print $$1}' "$$pkg.sha256")"
+	  act="$$(sha256sum "$$pkg" | awk '{print $$1}')"
 	  if [ "$$exp" != "$$act" ]; then echo "CHECKSUM MISMATCH: got $$act, expected $$exp"; exit 1; fi
 	  echo "Checksum OK ($$act)."
 	else
 	  echo "warning: no .sha256 published for this asset; skipping checksum verification."
 	fi
-	tar -C "$(DFHACK_DIR)" -xzf "$$tmp/p.tar.gz"
-	if [ ! -f "$(SO)" ]; then echo "Extraction did not produce $(SO)"; exit 1; fi
-	echo "Installed: $(SO)"
-	# If DF is running, load+enable it right away; otherwise it loads on next launch.
+	mkdir -p "$$tmp/x"
+	case "$$pkg" in
+	  *.zip)
+	    # Git Bash ships no unzip; Windows' own Expand-Archive covers that case.
+	    if command -v unzip >/dev/null 2>&1; then unzip -oq "$$pkg" -d "$$tmp/x"
+	    elif command -v powershell.exe >/dev/null 2>&1; then
+	      powershell.exe -NoProfile -Command "Expand-Archive -Force '$$(cygpath -w "$$pkg")' '$$(cygpath -w "$$tmp/x")'"
+	    else tar -C "$$tmp/x" -xf "$$pkg"; fi ;;
+	  *) tar -C "$$tmp/x" -xzf "$$pkg" ;;
+	esac
+	got="$$tmp/x/hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"
+	if [ ! -f "$$got" ]; then echo "Archive did not contain hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"; exit 1; fi
+	# Publish the binary by ATOMIC RENAME, never by extracting/cp'ing onto the live path: if DF
+	# has the old .so mapped, overwriting its inode in place crashes the game (hit twice; same
+	# rule as `make build`). The staging copy lives in PLUGDIR so the rename stays same-fs.
+	staged="$$plugbin.new.$$$$"
+	cp "$$got" "$$staged"
+	mv -f "$$staged" "$$plugbin"
+	# Any lua companions ride along under hack/lua/; pure lua, safe to copy in place.
+	if [ -d "$$tmp/x/hack/lua" ]; then
+	  mkdir -p "$(DFHACK_DIR)/hack/lua"
+	  cp -r "$$tmp/x/hack/lua/." "$(DFHACK_DIR)/hack/lua/"
+	fi
+	echo "Installed: $$plugbin"
+	# If DF is running, load (and for FETCH_ENABLE plugins, enable) it right away; otherwise it
+	# loads on next launch.
 	if [ -x "$(DFRUN)" ] && "$(DFRUN)" lua 'print(1)' >/dev/null 2>&1; then
-	  "$(DFRUN)" load $(PLUGIN) >/dev/null 2>&1 || true
-	  "$(DFRUN)" enable $(PLUGIN) || true
-	  echo "Loaded and enabled in the running game."
+	  "$(DFRUN)" load $(FETCH_PLUGIN) >/dev/null 2>&1 || true
+	  if [ "$(FETCH_ENABLE)" = "1" ]; then "$(DFRUN)" enable $(FETCH_PLUGIN) || true; fi
+	  echo "Loaded in the running game."
 	else
-	  echo "Start Dwarf Fortress to load it. 'magnus-scripts' enables it automatically,"
+	  echo "Start Dwarf Fortress to load it. 'magnus-scripts' enables smooth-movement automatically,"
 	  echo "or run 'make enable' while the game is running."
 	fi
 

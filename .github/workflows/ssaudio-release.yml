@@ -1,0 +1,79 @@
+# Build the ssaudio plugin (the sound backend behind joke/super-saiyan) for linux and windows
+# and publish both as a GitHub release. `make install` then downloads the newest ssaudio-v*
+# release's asset matching the host platform and the installed DFHack version.
+#
+# Trigger: push a tag like ssaudio-v1.0.0. Rebuild after every DFHack release (plugins are
+# ABI-specific) by pushing a fresh tag; the workflow always builds against the LATEST DFHack.
+#
+# Modeled on anmej/df-smooth-movement's release workflow — the windows binary comes from
+# DFHack's own build-win64-from-linux.sh (dockerized MSVC cross build).
+name: Build ssaudio release
+
+on:
+  push:
+    tags:
+      - 'ssaudio-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get the latest DFHack release
+        id: dfhack
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh api repos/DFHack/dfhack/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-11 g++-11 libxml-libxslt-perl libsdl2-dev zip
+
+      - name: Check out DFHack
+        env:
+          DFHACK_TAG: ${{ steps.dfhack.outputs.tag }}
+        run: git clone --depth 1 --branch "$DFHACK_TAG" --recurse-submodules https://github.com/DFHack/dfhack.git dfhack
+
+      - name: Add the plugin to DFHack
+        run: |
+          mkdir -p dfhack/plugins/external
+          cp -r plugins/ssaudio dfhack/plugins/external/ssaudio
+
+      - name: Build Linux plugin
+        run: |
+          cmake -S dfhack -B dfhack/build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF
+          cmake --build dfhack/build/linux --target ssaudio
+
+      - name: Build Windows plugin
+        run: (cd dfhack/build && ./build-win64-from-linux.sh)
+
+      - name: Package plugins
+        env:
+          DFHACK_TAG: ${{ steps.dfhack.outputs.tag }}
+        run: |
+          # Asset names must keep the ssaudio-...-dfhack-<ver>-...-<platform>.zip shape: the
+          # Makefile's fetch-plugin greps for exactly that.
+          release_tag="${GITHUB_REF_NAME#ssaudio-}-dfhack-$DFHACK_TAG"
+          for os in linux windows; do
+            mkdir -p "release/$os/hack/plugins" "release/$os/hack/lua/plugins"
+            # The lua companion rides along: without hack/lua/plugins/ssaudio.lua,
+            # require('plugins.ssaudio') fails even though the binary loads.
+            install -m644 plugins/ssaudio/lua/*.lua "release/$os/hack/lua/plugins/"
+          done
+          install -m755 dfhack/build/linux/plugins/external/ssaudio/ssaudio.plug.so release/linux/hack/plugins/
+          install -m755 dfhack/build/win64-cross/output/hack/plugins/ssaudio.plug.dll release/windows/hack/plugins/
+          (cd release/linux && zip -q -r "../ssaudio-$release_tag-linux-x86_64.zip" hack)
+          (cd release/windows && zip -q -r "../ssaudio-$release_tag-windows-x86_64.zip" hack)
+          (cd release && for z in *.zip; do unzip -t "$z" >/dev/null && sha256sum "$z" > "$z.sha256"; done)
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" release/*.zip release/*.sha256 --clobber
