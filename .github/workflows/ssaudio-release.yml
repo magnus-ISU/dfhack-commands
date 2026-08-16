@@ -37,20 +37,20 @@ jobs:
       - name: Check out DFHack
         env:
           DFHACK_TAG: ${{ steps.dfhack.outputs.tag }}
-        run: git clone --depth 1 --branch "$DFHACK_TAG" --recurse-submodules https://github.com/DFHack/dfhack.git dfhack
+        run: git clone --depth 1 --branch "$DFHACK_TAG" --recurse-submodules https://github.com/DFHack/dfhack.git dfhack-src
 
       - name: Add the plugin to DFHack
         run: |
-          mkdir -p dfhack/plugins/external
-          cp -r plugins/ssaudio dfhack/plugins/external/ssaudio
+          mkdir -p dfhack-src/plugins/external
+          cp -r plugins/ssaudio dfhack-src/plugins/external/ssaudio
 
       - name: Build Linux plugin
         run: |
-          cmake -S dfhack -B dfhack/build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF
-          cmake --build dfhack/build/linux --target ssaudio
+          cmake -S dfhack-src -B dfhack-src/build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_DOCS=OFF
+          cmake --build dfhack-src/build/linux --target ssaudio
 
       - name: Build Windows plugin
-        run: (cd dfhack/build && ./build-win64-from-linux.sh)
+        run: (cd dfhack-src/build && ./build-win64-from-linux.sh)
 
       - name: Package plugins
         env:
@@ -65,8 +65,8 @@ jobs:
             # require('plugins.ssaudio') fails even though the binary loads.
             install -m644 plugins/ssaudio/lua/*.lua "release/$os/hack/lua/plugins/"
           done
-          install -m755 dfhack/build/linux/plugins/external/ssaudio/ssaudio.plug.so release/linux/hack/plugins/
-          install -m755 dfhack/build/win64-cross/output/hack/plugins/ssaudio.plug.dll release/windows/hack/plugins/
+          install -m755 dfhack-src/build/linux/plugins/external/ssaudio/ssaudio.plug.so release/linux/hack/plugins/
+          install -m755 dfhack-src/build/win64-cross/output/hack/plugins/ssaudio.plug.dll release/windows/hack/plugins/
           (cd release/linux && zip -q -r "../ssaudio-$release_tag-linux-x86_64.zip" hack)
           (cd release/windows && zip -q -r "../ssaudio-$release_tag-windows-x86_64.zip" hack)
           (cd release && for z in *.zip; do unzip -t "$z" >/dev/null && sha256sum "$z" > "$z.sha256"; done)
