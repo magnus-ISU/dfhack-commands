@@ -3,39 +3,38 @@
      ADVENTURE_MODE_FEATURES.md and HIGH_ADVENTURE_FEATURES.md.
      Edit those instead; anything written here is overwritten on the next build. -->
 
-# dfhack-commands
-
 A personal pack of **DFHack scripts** for the latest Dwarf Fortress (0.53.x / Steam),
 plus the **Dwarf Fortress: High Adventure** content-mod suite.
 
-- Scripts live in [`dfhack/`](dfhack/), in folders that mirror the deployed tree —
-  `fort/`, `adv/`, `embark/`, `fix/`. The folder is the command prefix: `fort/auto-name`,
-  `adv/reveal`. Copy them into `dfhack-config/scripts/` and they become commands.
-- Content mods live in [`content-mods/high-adventure/`](content-mods/high-adventure/).
-- Things that don't work yet are kept out of this list — see
-  [`BROKEN_FEATURES.md`](BROKEN_FEATURES.md).
-- **Full command reference, implementation notes and TODOs:**
-  [`DEVNOTES.md`](DEVNOTES.md). Repo/workflow quickstart: [`instructions.md`](instructions.md).
-
-## Turning it all on — `magnus-scripts`
-
-`magnus-scripts` is the switchboard for the whole pack. Running it opens a window with four
-individually-scrollable columns — `fort/`, `adv/`, `embark/` and vanilla DFHack tools — with
-a checkbox per helper. Click a row to toggle it; the selection is saved (to
-`dfhack-config/magnus-scripts.json`) and re-applied automatically on every map load. Column
-headers toggle a whole column, `m` toggles all the mod columns at once, and `r` is the
-recommended master switch: everything on. On a fresh install everything starts enabled.
+## Install
 
 ```sh
-fort/magnus-scripts           # apply the saved selection, then open the GUI
-fort/magnus-scripts apply     # headless apply (what the auto-run line calls)
-fort/magnus-scripts disable   # everything off + remove the auto-run line
+git clone https://github.com/magnus-ISU/dfhack-commands
+cd dfhack-commands
+make install     # scripts + content mods + plugins
 ```
 
-It is safe to re-run at any time: each helper it starts is idempotent, and it disables and
-re-enables its own services rather than stacking them. Anything destructive or situational
-(no-pausing, embark-nobles, the one-shot commands) is deliberately left out and stays a
-command you run by hand.
+Then restart Dwarf Fortress, and in the DFHack console run:
+
+```sh
+fort/magnus-scripts
+```
+
+That opens the switchboard — a checkbox per helper in this pack. Click rows to turn things
+on or off; your choice is saved and re-applied on every map load, so it is a one-time setup.
+Press `r` if you just want everything on.
+
+Non-standard install path, installing individual scripts by hand, or the rest of the
+arguments: [`SETUP_INSTRUCTIONS.md`](SETUP_INSTRUCTIONS.md).
+
+## Where things are
+
+- Scripts: [`dfhack/`](dfhack/) — `fort/`, `adv/`, `embark/`, `fix/`. The feature lists
+  below cover what each one does.
+- Content mods: [`content-mods/high-adventure/`](content-mods/high-adventure/).
+- Things that don't work yet: [`BROKEN_FEATURES.md`](BROKEN_FEATURES.md).
+- Full command reference, implementation notes and TODOs: [`DEVNOTES.md`](DEVNOTES.md).
+  Repo/workflow quickstart: [`instructions.md`](instructions.md).
 
 ---
 
@@ -83,7 +82,8 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ### **`fort/planeswalkers`**
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
-terrain (with veins, sand/soil, adamantine — but not the magma sea or the underworld, which
+terrain (with veins, sand/soil, adamantine, and the grass cover — surface grasses and the
+cavern mosses, fungi and lichens alike — but not the magma sea or the underworld, which
 each world keeps as its own), constructions, buildings, stockpiles with their
 settings, zones, items (with containment, quality, decorations, and maker), artifacts (named,
 with their descriptions and full artifact status — value, quality and the Objects screen —
