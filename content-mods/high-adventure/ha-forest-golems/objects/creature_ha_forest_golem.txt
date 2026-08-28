@@ -34,8 +34,10 @@ thoughts/needs panels a playable civ is built around.
 	[OUTSIDER_CONTROLLABLE]
 	[PREFSTRING:silence]
 	[PREFSTRING:patience]
+	FORESTS is not a sphere. errorlog is the authority on this -- it names every
+	rejected token, and "Unrecognized Sphere Token: FORESTS" was the only sphere
+	the whole suite got rejected on. TREES is the token that means this.
 	[SPHERE:METALS]
-	[SPHERE:FORESTS]
 	[SPHERE:TREES]
 
 	--- construct physiology (bronze colossus, minus its mind tokens) ---
@@ -81,7 +83,10 @@ thoughts/needs panels a playable civ is built around.
 	[TISSUE_LAYER:BY_CATEGORY:GOLEM_HEART:GOLD]
 	[TISSUE:GLASS]
 		[TISSUE_NAME:glass:glass]
-		[TISSUE_MATERIAL:INORGANIC:GLASS_CLEAR]
+		clear glass is a BUILTIN material token, not an INORGANIC subtype --
+		INORGANIC:GLASS_CLEAR is "Unrecognized Inorganic Token" and fails the
+		creature's finalization, leaving the nozzle with no glass at all
+		[TISSUE_MATERIAL:GLASS_CLEAR:NONE]
 		[FUNCTIONAL]
 		[STRUCTURAL]
 		[RELATIVE_THICKNESS:1]

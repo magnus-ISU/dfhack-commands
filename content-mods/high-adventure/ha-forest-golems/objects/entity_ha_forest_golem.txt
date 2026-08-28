@@ -42,24 +42,51 @@ for either.
 	[TOOL:ITEM_TOOL_ALTAR]
 	[TOOL:ITEM_TOOL_MINECART]
 	[TOOL:ITEM_TOOL_WHEELBARROW]
-	[GEM_SHAPE:ALL]
-	[STONE_SHAPE:ALL]
+	GEM_SHAPE/STONE_SHAPE take explicit shape IDs from descriptor_shape_default --
+	there is no ALL wildcard. Passing ALL leaves BOTH lists empty and the entity
+	fails finalization ("Gem shape not found: ALL"), which is why this must stay a
+	written-out list like every other entity in the suite.
+	[STONE_SHAPE:OVAL_CABOCHON]
+	[STONE_SHAPE:ROUND_CABOCHON]
+	[STONE_SHAPE:CUSHION_CABOCHON]
+	[STONE_SHAPE:RECTANGULAR_CABOCHON]
+	[GEM_SHAPE:OVAL_CABOCHON]
+	[GEM_SHAPE:ROUND_CABOCHON]
+	[GEM_SHAPE:CUSHION_CABOCHON]
+	[GEM_SHAPE:RECTANGULAR_CABOCHON]
+	[GEM_SHAPE:POINT_CUT_GEM]
+	[GEM_SHAPE:TABLE_CUT_GEM]
+	[GEM_SHAPE:SINGLE_CUT_GEM]
+	[GEM_SHAPE:ROSE_CUT_GEM]
+	[GEM_SHAPE:BRIOLETTE_CUT_GEM]
+	[GEM_SHAPE:EMERALD_CUT_GEM]
+	[GEM_SHAPE:MARQUISE_CUT_GEM]
+	[GEM_SHAPE:OVAL_CUT_GEM]
+	[GEM_SHAPE:PEAR_CUT_GEM]
+	[GEM_SHAPE:SQUARE_BRILLIANT_CUT_GEM]
+	[GEM_SHAPE:RADIANT_CUT_GEM]
+	[GEM_SHAPE:TRILLION_CUT_GEM]
+	[GEM_SHAPE:ROUND_BRILLIANT_CUT_GEM]
+	[GEM_SHAPE:BAGUETTE_CUT_GEM]
+	[GEM_SHAPE:TAPERED_BAGUETTE_CUT_GEM]
+	[GEM_SHAPE:CUSHION_CUT_GEM]
+	[GEM_SHAPE:OCTAGON_CUT_GEM]
+	[GEM_SHAPE:SQUARE_CUT_GEM]
 
+	The only material-preference tokens DF recognises are METAL_PREF, STONE_PREF
+	and GEM_PREF; WOOD_PREF, METALWORKING, MELEE_EQUIPMENT, RANGED_EQUIPMENT,
+	SIEGE_ENGINEER, SOAP_MAKER and GENERATED were all rejected as unrecognised
+	entity tokens and are gone. WOOD_WEAPONS is the real "they work wood" token.
 	[METAL_PREF]
 	[STONE_PREF]
-	[WOOD_PREF]
+	[GEM_PREF]
 	[USE_ANIMAL_PRODUCTS]
 	[COMMON_DOMESTIC_PACK]
 	[COMMON_DOMESTIC_PULL]
 	[EQUIPMENT_IMPROVEMENTS]
 	[IMPROVED_BOWS]
-	[METALWORKING]
-	[MELEE_EQUIPMENT]
-	[RANGED_EQUIPMENT]
-	[SIEGE_ENGINEER]
-	[SOAP_MAKER]
+	[WOOD_WEAPONS]
 	[WOOD_ARMOR]
-	[GENERATED]
 	[BUILDS_OUTDOOR_TOMBS]
 
 	--- one grove, in the forest, forever ---
@@ -84,13 +111,15 @@ for either.
 	[PROGRESS_TRIGGER_POP_SIEGE:5]
 	[AT_PEACE_WITH_WILDLIFE]
 	[INVADERS_IGNORE_NEUTRALS]
+	there is no FORESTS sphere; TREES is the token that means this. errorlog names
+	every rejected token, which makes it the authority -- do not try to read the
+	sphere list out of the binary, most valid spheres are not there as literals.
 	[SPHERE_ALIGNMENT:METALS:512]
-	[SPHERE_ALIGNMENT:FORESTS:512]
+	[SPHERE_ALIGNMENT:TREES:512]
 	[SPHERE_ALIGNMENT:SILENCE:384]
 	[FRIENDLY_COLOR:6:0:0]
 
 	[SCHOLAR:ALL]
-	[SET_SCHOLAR_ON_VALUES_AND_JOBS]
 
 	--- ethics: guardians. They kill what enters the grove and nothing else. ---
 	[ETHIC:KILL_ENTITY_MEMBER:PUNISH_EXILE]

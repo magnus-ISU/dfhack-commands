@@ -44,3 +44,18 @@ Adds `HA_FOREST_GOLEM` (creature + entity) and two custom body modules.
    `ALL_MAIN_POPS_CONTROLLABLE` + `SITE_CONTROLLABLE` and the creature is
    `OUTSIDER_CONTROLLABLE`, but the roaming-histfig tokens are all absent by
    design and may prune background choices.
+
+## v0.2 — token fixes + art
+
+- **Graphics**: full art set — the vanilla bronze colossus sprites recoloured
+  iron-gray on our own tile pages (map sprite 3x2, list icon, corpse, statue,
+  96x96 portrait). The map sprite is LAYERED (`LAYER_SET`+`LAYER`), not a simple
+  `DEFAULT:LARGE_IMAGE`, so it is exempt from DF's status-grayscale and does not
+  flicker. No item layers on purpose: worn gear would land at random spots on a
+  3x2 sprite.
+- **Raw token fixes** (all named by errorlog): `SPHERE:FORESTS` → `TREES`;
+  glass tissue material `INORGANIC:GLASS_CLEAR` → builtin `GLASS_CLEAR:NONE`
+  (the bad token failed creature finalization, leaving the nozzle glassless);
+  `GEM_SHAPE:ALL`/`STONE_SHAPE:ALL` → written-out shape lists (no ALL wildcard
+  exists); dropped unrecognised entity tokens (`WOOD_PREF` etc.), added
+  `GEM_PREF`.
