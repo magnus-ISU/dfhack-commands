@@ -128,28 +128,6 @@ real armies, one of them 70 strong.
 A retry would need a positive test for "this member is a corpse, not an animated corpse", and a
 concrete symptom it repairs.
 
-### **`adv/makeown` — UNTESTED, never run against a live game**
-Recruits the selected unit into your adventure party without a conversation and without their
-consent — the mercenary who won't take your money, a freed prisoner, somebody else's war dog, a
-goblin who just lost a fight. Default is a full core party member (tactical-mode controllable,
-kept across retire/unretire); `-extra` is a follower you can't control, `-pet` (automatic for
-anything that can neither speak nor learn) an animal companion; `-unit <id>` targets by id and
-`-remove` dismisses. It writes the modern party lists on `df.global.adventure.interactions`,
-the nemesis `companions` / `group_leader_id` / `relationship_ids.GroupLeader` fields that
-actually drive following, reciprocal `histfig_hf_link_companionst` links, and clears
-hostility (invader/ambusher/visitor flags, army controller, enemy status cache, Conflict
-activities) so a unit recruited mid-fight stops fighting. Units with no nemesis record get one
-the way DFHack's `bodyswap` does it, and are erased from their site's populace list so they
-don't duplicate in `units.active` after travel.
-
-**It is here because nothing above has been observed working.** Every field name and call was
-checked against df-structures and against DFHack's own `bodyswap` / `advtools party` /
-`gui/companion-order` / `makeown`, and the file passes `luac -p` — but DF was not running when
-it was written, so no recruit has ever been made, no party list has been seen to update, and
-the travel-duplication and hostility-clearing claims are reasoned, not measured. Never run by
-`magnus-scripts`. Move it into `ADVENTURE_MODE_FEATURES.md` once it has been exercised on a
-live adventurer.
-
 ### **`fort/noble-warriors`**
 Assigns each fort noble's symbols of office as specific items in their squad uniform, so
 nobles wear their regalia into battle. Implemented and verified live, but **parked pending a
