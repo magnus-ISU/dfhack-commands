@@ -1,6 +1,6 @@
 [ID:HA_high_elves]
-[NUMERIC_VERSION:23]
-[DISPLAYED_VERSION:0.23]
+[NUMERIC_VERSION:24]
+[DISPLAYED_VERSION:0.24]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
 [AUTHOR:High Adventure (creature forked from vanilla elves; entity forked from vanilla elves + dwarven artifice)]
