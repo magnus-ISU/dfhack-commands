@@ -89,8 +89,13 @@ local function save_one(ctx, bld)
         end
     elseif btype == df.building_type.Civzone then
         rec.subtype_name = df.civzone_type[bld:getSubtype()]
-        local okf, flags = pcall(function() return bld.zone_flags.whole end)
-        if okf then rec.zone_flags = flags end
+        -- pen/pond/gather/archery/tomb settings live in the zone_settings
+        -- union (two ints); spec_sub_flag carries per-type UI toggles
+        pcall(function()
+            rec.zs1 = bld.zone_settings.whole.i1
+            rec.zs2 = bld.zone_settings.whole.i2
+            rec.spec = bld.spec_sub_flag.whole
+        end)
     elseif btype == df.building_type.Door then
         rec.door_flags = bld.door_flags.whole
     elseif btype == df.building_type.FarmPlot then
@@ -174,9 +179,7 @@ local function make_extents(rec, a)
             extents = buf}
 end
 
-local function creator_unit()
-    return dfhack.units.getCitizens(true)[1]
-end
+local creator_unit = common.creator_unit
 
 local function mint_component(ctx, comp)
     local itype = df.item_type[comp.t]
@@ -196,7 +199,7 @@ local function mint_component(ctx, comp)
     local items = dfhack.items.createItem(creator_unit(), itype, isub, mt, mi, false)
     local item = items and items[1]
     if type(item) == 'table' then item = item[1] end
-    return item
+    return common.unproject(item)
 end
 
 -- mirror of build-now.lua's instant completion
@@ -296,6 +299,11 @@ local function load_one(ctx, rec)
                 end
             end
         else
+            pcall(function()
+                if rec.zs1 then bld.zone_settings.whole.i1 = rec.zs1 end
+                if rec.zs2 then bld.zone_settings.whole.i2 = rec.zs2 end
+                if rec.spec then bld.spec_sub_flag.whole = rec.spec end
+            end)
             pcall(function() dfhack.buildings.notifyCivzoneModified(bld) end)
         end
         ctx.bld_map[rec.id] = bld
@@ -471,6 +479,12 @@ function load_phases(ctx)
             for _, rec in ipairs(job.blds.list) do
                 local bld = ctx.bld_map[rec.id]
                 if bld then
+                    -- a zone placed before the furniture inside it never saw
+                    -- that furniture: re-notify every zone now that all
+                    -- buildings exist so contained_buildings/relations link up
+                    if df.building_civzonest:is_instance(bld) then
+                        pcall(function() dfhack.buildings.notifyCivzoneModified(bld) end)
+                    end
                     for _, tid in ipairs(rec.give_to or {}) do
                         local target = ctx.bld_map[tid]
                         if target then

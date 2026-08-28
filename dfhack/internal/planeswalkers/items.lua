@@ -200,9 +200,7 @@ end
 
 -- ---- load ------------------------------------------------------------------
 
-local function creator_unit()
-    return dfhack.units.getCitizens(true)[1]
-end
+local creator_unit = common.creator_unit
 
 local function resolve_race(ctx, rtoken, ctoken)
     ctx.race_cache = ctx.race_cache or {}
@@ -282,6 +280,17 @@ local function restore_improvements(ctx, rec, item)
     end
 end
 
+-- DF adds items to plotinfo.equipment.items_unassigned only at natural
+-- creation/pickup, and every assignment picker (military specific weapons,
+-- pedestal/display-case items, ...) is built from those id vectors -- an
+-- unregistered item can never be assigned to anything. Restored ids ascend,
+-- so appending keeps each bucket sorted (DF binary-searches them).
+local function register_item(item)
+    pcall(function()
+        df.global.plotinfo.equipment.items_unassigned[item:getType()]:insert('#', item.id)
+    end)
+end
+
 local function create_one(ctx, rec, is_retry)
     local itype = df.item_type[rec.t]
     if not itype then
@@ -352,6 +361,7 @@ local function create_one(ctx, rec, is_retry)
         common.add_skip(ctx, 'item-create-failed', rec.t)
         return nil
     end
+    common.unproject(item)
     ctx.type_ok_mat = ctx.type_ok_mat or {}
     if not ctx.type_ok_mat[itype] then ctx.type_ok_mat[itype] = {mt, mx} end
     if rec.race then
@@ -374,6 +384,7 @@ local function create_one(ctx, rec, is_retry)
         local hf = rec.mk and ctx.hf_map and ctx.hf_map[rec.mk]
         pcall(function() item.maker = hf and hf.id or -1 end)
     end
+    register_item(item)
     if rec.hand then pcall(function() item:setGloveHandedness(rec.hand) end) end
     if rec.fl then
         local f = item.flags
@@ -462,6 +473,10 @@ function load_phases(ctx)
                 job.retrying = true
                 return false
             end
+            -- have DF re-validate its assignment registries now that they
+            -- contain every restored item
+            local upd = df.global.plotinfo.equipment.update
+            for k in pairs(upd) do pcall(function() upd[k] = true end) end
             return true
         end,
     }, {
