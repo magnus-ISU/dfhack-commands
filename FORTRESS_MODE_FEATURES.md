@@ -40,7 +40,8 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ### **`fort/planeswalkers`**
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
-terrain (with veins, sand/soil, adamantine — but not the magma sea or the underworld, which
+terrain (with veins, sand/soil, adamantine, and the grass cover — surface grasses and the
+cavern mosses, fungi and lichens alike — but not the magma sea or the underworld, which
 each world keeps as its own), constructions, buildings, stockpiles with their
 settings, zones, items (with containment, quality, decorations, and maker), artifacts (named,
 with their descriptions and full artifact status — value, quality and the Objects screen —

@@ -6,11 +6,21 @@ local common = reqscript('internal/planeswalkers/common')
 local tiletypes = require('plugins.tiletypes')
 local tilemat = require('tile-material')
 
+-- trees and shrubs are world-local plant instances that cannot cross; their
+-- tiles degrade to what is underneath
 local PLANT_MATS = {
     [df.tiletype_material.TREE] = true,
     [df.tiletype_material.MUSHROOM] = true,
     [df.tiletype_material.ROOT] = true,
     [df.tiletype_material.PLANT] = true,
+}
+
+-- grass DOES cross: the tiletype is generic (GrassLightFloor1 &c) and the plant
+-- behind it is a per-block block_square_event_grassst, saved to grass.bin. This
+-- covers surface grass and the subterranean grasses alike -- cave moss, floor
+-- fungi and underlichen are all [GRASS] plant raws, so a cavern floor carries
+-- its moss over the same way a meadow carries its bentgrass.
+local GRASS_MATS = {
     [df.tiletype_material.GRASS_LIGHT] = true,
     [df.tiletype_material.GRASS_DARK] = true,
     [df.tiletype_material.GRASS_DRY] = true,
@@ -22,27 +32,34 @@ local function inorganic_token(idx)
     return raw and ('INORGANIC:' .. raw.id) or nil
 end
 
--- top of the world's deep structure (semi-molten rock / eerie pits): the
--- magma sea and the underworld live at and below this z. Neither survives
--- transplanting -- painting one world's hell into another's rock breaches
--- the underworld and releases its demons -- so save and load both stop
--- above it. Sampled like find_surface_z; +2 margin for the sea's surface.
+-- the hell ceiling: the world's bottom is slade floor, then the open
+-- underworld (demons!), capped by a semi-molten-rock ceiling, with the magma
+-- sea band above that. The magma sea band is fair game -- a fort's deepest
+-- workshops and tombs live there, and the save's own layers replace it on
+-- load -- but nothing may ever open a path into the underworld: one open
+-- tile punched through its ceiling releases the destination's demons.
+-- Per column the ceiling is the first semi-molten tile scanning UP from the
+-- bottom; it undulates several z across the map, so return both extremes:
+-- everything at or below the LOWEST sampled ceiling is hard off-limits, and
+-- the band up to the HIGHEST needs per-tile care (see load_block).
+-- Returns max_ceiling_z, min_ceiling_z (-1, -1 if the world has no deep).
 function find_deep_top_z()
     local map = df.global.world.map
-    local top = -1
+    local maxc, minc = -1, math.huge
     for x = 8, map.x_count - 1, 16 do
         for y = 8, map.y_count - 1, 16 do
-            for z = math.min(map.z_count - 1, 80), 0, -1 do
-                if z <= top then break end
+            for z = 0, math.min(map.z_count - 1, 80) do
                 local tt = dfhack.maps.getTileType(x, y, z)
-                if tt == df.tiletype.SemiMoltenRock or tt == df.tiletype.EeriePit then
-                    top = z
+                if tt == df.tiletype.SemiMoltenRock then
+                    if z > maxc then maxc = z end
+                    if z < minc then minc = z end
                     break
                 end
             end
         end
     end
-    return top >= 0 and top + 2 or -1
+    if maxc < 0 then return -1, -1 end
+    return maxc, minc
 end
 
 -- median of sampled highest-non-empty z: the cross-world alignment anchor
@@ -119,8 +136,40 @@ local function vein_grid(block)
     return grid
 end
 
+-- one grass.bin record per grass event in this block that actually covers
+-- something (worldgen leaves plenty of all-zero events behind)
+local function save_grass(ctx, block, bx, by, z)
+    if not ctx.grass_f then return end
+    for _, ev in ipairs(block.block_events) do
+        if df.block_square_event_grassst:is_instance(ev) then
+            local pr = df.plant_raw.find(ev.plant_index)
+            if pr then
+                local rows, any = {}, false
+                for x = 0, 15 do
+                    local col = ev.amount[x]
+                    local row = {}
+                    for y = 0, 15 do
+                        local a = col[y]
+                        if a > 0 then any = true end
+                        row[y + 1] = a
+                    end
+                    rows[x + 1] = string.char(table.unpack(row))
+                end
+                if any then
+                    ctx.grass_f:write(string.pack(common.GRASS_REC, bx, by, z,
+                        ctx.legend_plant:intern(pr.id),
+                        math.max(0, math.min(255, pr.underground_depth_min))))
+                    ctx.grass_f:write(table.concat(rows))
+                    ctx.grass_count = (ctx.grass_count or 0) + 1
+                end
+            end
+        end
+    end
+end
+
 local function save_block(ctx, block, bx, by, z)
     if not block then return common.ZERO_BLOCK end
+    save_grass(ctx, block, bx, by, z)
     local veins = vein_grid(block)
     local recs = {}
     local surface = ctx.manifest.dims.surface
@@ -132,7 +181,19 @@ local function save_block(ctx, block, bx, by, z)
             local attrs = df.tiletype.attrs[tt]
             local mat_cat = attrs.material
             local tt_out, mat_idx, flags = tt, 0, 0
-            if PLANT_MATS[mat_cat] then
+            if GRASS_MATS[mat_cat] then
+                -- keep the grass tiletype as it stands (grass.bin carries the
+                -- plant behind it) and pin the soil under it the same way a
+                -- bare soil tile is pinned -- but ONLY when the layer really is
+                -- soil, because a non-soil pin takes the vein-paint path, which
+                -- would repaint the tile as plain stone and eat the grass
+                local tok, is_soil = layer_mat_token(ctx, bx * 16 + x, by * 16 + y,
+                                                     d.geolayer_index)
+                if tok and is_soil then
+                    mat_idx = ctx.legend_mat:intern(tok)
+                    flags = 1
+                end
+            elseif PLANT_MATS[mat_cat] then
                 -- trees/plants don't transfer; degrade to what's underneath
                 ctx.plant_degraded = (ctx.plant_degraded or 0) + 1
                 local shape = attrs.shape
@@ -207,9 +268,13 @@ function save_phases(ctx)
         name = 'terrain',
         init = function(job)
             ctx.layer_cache = {}
-            ctx.deep_top = find_deep_top_z()
+            -- everything is saved, hell included; the loader decides what may
+            -- be applied. The lowest hell-ceiling z is the cross-world
+            -- alignment datum for same-size (underworld-anchored) restores.
+            ctx.deep_top = select(2, find_deep_top_z())
             ctx.manifest.dims.deep_top = ctx.deep_top
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'wb')
+            ctx.grass_f = io.open(ctx.dir .. '/grass.bin', 'wb')
             ctx.tiles_f:write(string.pack(common.HEADER_FMT, 'PWT1',
                 map.x_count_block, map.y_count_block, map.z_count_block,
                 ctx.manifest.dims.surface, 0))
@@ -224,21 +289,20 @@ function save_phases(ctx)
                 local z = i // (bw * bh)
                 local by = (i % (bw * bh)) // bw
                 local bx = i % bw
-                if z <= ctx.deep_top then
-                    -- the magma sea and the underworld stay home
-                    ctx.tiles_f:write(common.ZERO_BLOCK)
-                else
-                    ctx.tiles_f:write(save_block(ctx, dfhack.maps.getBlock(bx, by, z), bx, by, z))
-                end
+                ctx.tiles_f:write(save_block(ctx, dfhack.maps.getBlock(bx, by, z), bx, by, z))
                 job.block_cursor = i + 1
                 if dfhack.getTickCount() >= deadline then return false end
             end
             ctx.tiles_f:close()
             ctx.tiles_f = nil
+            ctx.grass_f:close()
+            ctx.grass_f = nil
             if ctx.plant_degraded and ctx.plant_degraded > 0 then
                 common.add_skip(ctx, 'plant-tiles-degraded (regrow naturally)', nil)
                 ctx.skips['plant-tiles-degraded (regrow naturally)'].n = ctx.plant_degraded
             end
+            ctx.manifest.counts.grass = ctx.grass_count or 0
+            ctx.manifest.complete.grass = true
             ctx.manifest.complete.terrain = true
             return true
         end,
@@ -277,13 +341,69 @@ local function read_header(f)
     return {bx = bx, by = by, bz = bz, surface = surface, flags = flags}
 end
 
+-- the source's lowest hell-ceiling z, for underworld alignment: stored in
+-- the manifest at save time; older snapshots are scanned for the first
+-- z-slab of tiles.bin that contains a semi-molten tile
+local function src_deep_top(src_dims, dir, legend_tt)
+    if src_dims.deep_top and src_dims.deep_top >= 0 then return src_dims.deep_top end
+    local smr
+    for i, tok in ipairs(legend_tt and legend_tt.list or {}) do
+        if tok == 'SemiMoltenRock' then smr = i break end
+    end
+    if not smr then return nil end
+    local f = io.open(dir .. '/tiles.bin', 'rb')
+    if not f then return nil end
+    f:read(common.HEADER_SIZE)
+    local per_z = src_dims.bx * src_dims.by
+    local needle = string.pack('<I2', smr)
+    for z = 0, src_dims.bz - 1 do
+        local slab = f:read(common.BLOCK_SIZE * per_z)
+        if not slab then break end
+        local at = 1
+        while true do
+            at = slab:find(needle, at, true)
+            if not at then break end
+            -- the tiletype index is the first field of each 7-byte record;
+            -- reject matches that straddle other fields
+            if (at - 1) % common.TILE_REC_SIZE == 0 then
+                f:close()
+                return z
+            end
+            at = at + 1
+        end
+    end
+    f:close()
+    return nil
+end
+
 -- compute placement of the source volume in the destination map.
 -- returns offsets in tiles (block-aligned horizontally) or nil, err.
-function compute_anchor(src_dims)
+--
+-- Same-size embarks anchor at the UNDERWORLD, not the surface: both hells
+-- sit at the same z, the whole footprint is replaced column for column
+-- (anchor.full), and the destination keeps its own underworld feature and
+-- demons while taking the source's geometry. The surface then lands wherever
+-- the source's column height puts it -- edge cliffs against the neighbouring
+-- world tiles are the accepted cost. Mismatched sizes fall back to surface
+-- anchoring with the hell-ceiling guards.
+function compute_anchor(src_dims, dir, legend_tt)
     local map = df.global.world.map
     if map.x_count_block < src_dims.bx or map.y_count_block < src_dims.by then
         return nil, ('destination embark (%dx%d blocks) is smaller than the source (%dx%d)')
             :format(map.x_count_block, map.y_count_block, src_dims.bx, src_dims.by)
+    end
+    if map.x_count_block == src_dims.bx and map.y_count_block == src_dims.by then
+        local _, dest_min = find_deep_top_z()
+        local src_min = src_deep_top(src_dims, dir, legend_tt)
+        if dest_min and dest_min >= 0 and src_min then
+            local off_z = dest_min - src_min
+            return {
+                off_x = 0, off_y = 0, off_bx = 0, off_by = 0,
+                off_z = off_z,
+                dest_surface = src_dims.surface + off_z,
+                full = true,
+            }
+        end
     end
     local off_bx = (map.x_count_block - src_dims.bx) // 2
     local off_by = (map.y_count_block - src_dims.by) // 2
@@ -429,6 +549,26 @@ local function resolve_tt(ctx, idx)
     return v
 end
 
+-- this column's own hell ceiling (first semi-molten tile from the bottom),
+-- cached; -1 = no ceiling found below the mixed band (adamantine spire tube
+-- or the like) -- treated as "structure unknown, hands off"
+local function column_ceiling(ctx, x, y)
+    ctx.ceil_cache = ctx.ceil_cache or {}
+    local k = x * 65536 + y
+    local c = ctx.ceil_cache[k]
+    if c == nil then
+        c = -1
+        for z = 0, (ctx.dest_deep_top or -1) + 1 do
+            if dfhack.maps.getTileType(x, y, z) == df.tiletype.SemiMoltenRock then
+                c = z
+                break
+            end
+        end
+        ctx.ceil_cache[k] = c
+    end
+    return c
+end
+
 local function load_block(ctx, data, src_bx, src_by, src_z)
     local anchor = ctx.anchor
     local z = src_z + anchor.off_z
@@ -436,10 +576,19 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
         ctx.z_clipped = (ctx.z_clipped or 0) + 1
         return
     end
-    if z <= (ctx.dest_deep_top or -1) then
-        -- never touch THIS world's magma sea / underworld structure
-        ctx.deep_clipped = (ctx.deep_clipped or 0) + 1
-        return
+    local mixed = false
+    if not ctx.anchor.full then
+        -- surface-anchored (mismatched sizes): the two hells sit at different
+        -- z, so the destination's must be protected tile by tile
+        if z <= (ctx.dest_deep_min or -1) then
+            -- at or below the lowest hell ceiling: never touched at all
+            ctx.deep_clipped = (ctx.deep_clipped or 0) + 1
+            return
+        end
+        -- the mixed band: above the lowest sampled ceiling but not safely
+        -- above the highest (+1 margin for undulation the sampling missed);
+        -- writes here go per-tile, strictly above each column's own ceiling
+        mixed = z <= (ctx.dest_deep_top or -1) + 1
     end
     local bx, by = src_bx + anchor.off_bx, src_by + anchor.off_by
     local block = dfhack.maps.getBlock(bx, by, z)
@@ -466,11 +615,24 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
             local tt_idx, mat_idx, dbits, rflags = string.unpack(common.TILE_REC, data, off)
             off = off + common.TILE_REC_SIZE
             local tt = resolve_tt(ctx, tt_idx)
-            -- pre-guard snapshots carry the source's deep structure: importing
-            -- another world's hell breaches this one's -- drop those tiles
-            if tt == df.tiletype.SemiMoltenRock or tt == df.tiletype.EeriePit then
+            -- surface-anchored mode only: the source's underworld shape would
+            -- land mid-rock as a second hell, so its glowing-pit tiles are
+            -- dropped (semi-molten rock still transfers as solid filler). In
+            -- full (underworld-anchored) mode the hells overlap, so the
+            -- source's hell geometry replaces the destination's outright.
+            if tt == df.tiletype.EeriePit and not ctx.anchor.full then
                 ctx.deep_dropped = (ctx.deep_dropped or 0) + 1
                 tt = nil
+            end
+            if tt and mixed then
+                -- write only strictly ABOVE this column's own ceiling: the
+                -- ceiling tile itself stays unmineable semi-molten rock and
+                -- the hell interior below it is never entered
+                local c = column_ceiling(ctx, bx * 16 + x, by * 16 + y)
+                if c < 0 or z <= c then
+                    ctx.hell_guarded = (ctx.hell_guarded or 0) + 1
+                    tt = nil
+                end
             end
             if tt then
                 touched = true
@@ -492,7 +654,75 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
             end
         end
     end
-    if touched then dfhack.maps.enableBlockUpdates(block, true, true) end
+    if touched then
+        -- the destination's own grass sat on terrain that no longer exists; left
+        -- in place it would regrow through the imported fort (and colour tiles
+        -- the source never had grass on). The grass phase writes the source's
+        -- own coverage back over these blocks.
+        for _, ev in ipairs(block.block_events) do
+            if df.block_square_event_grassst:is_instance(ev) then
+                for x = 0, 15 do
+                    local col = ev.amount[x]
+                    for y = 0, 15 do col[y] = 0 end
+                end
+            end
+        end
+        dfhack.maps.enableBlockUpdates(block, true, true)
+    end
+end
+
+-- destination plant index for a saved grass legend entry. A world that never
+-- generated the exact plant gets the closest local grass of the same depth band
+-- (surface vs cavern layer), so imported moss stays moss.
+local function resolve_plant(ctx, idx, depth)
+    local hit = ctx.plant_cache[idx]
+    if hit ~= nil then return hit or nil end
+    local id = ctx.legend_plant:get(idx)
+    local pi = id and ctx.plant_by_id[id]
+    if not pi then
+        local same_band
+        for _, g in ipairs(ctx.grass_plants) do
+            if g.depth == depth then pi = g.idx break end
+            if not same_band and (g.depth > 0) == (depth > 0) then same_band = g.idx end
+        end
+        pi = pi or same_band
+        common.add_skip(ctx, pi and 'grass-plant-substituted'
+                                or 'grass-plant-missing-in-world', id)
+    end
+    ctx.plant_cache[idx] = pi or false
+    return pi
+end
+
+local function apply_grass(ctx, bx, by, src_z, plant_index, amounts)
+    local a = ctx.anchor
+    local z = src_z + a.off_z
+    if z < 1 or z >= df.global.world.map.z_count - 1 then return end
+    if not a.full and z <= (ctx.dest_deep_min or -1) then return end
+    local block = dfhack.maps.getBlock(bx + a.off_bx, by + a.off_by, z)
+    if not block then return end
+    local ev
+    for _, e in ipairs(block.block_events) do
+        if df.block_square_event_grassst:is_instance(e) and e.plant_index == plant_index then
+            ev = e
+            break
+        end
+    end
+    if not ev then
+        ev = df.block_square_event_grassst:new()
+        ev.plant_index = plant_index
+        block.block_events:insert('#', ev)
+    end
+    -- merge rather than assign: two source grasses can substitute onto the same
+    -- destination plant, and the second must not erase the first's coverage
+    local i = 1
+    for x = 0, 15 do
+        local col = ev.amount[x]
+        for y = 0, 15 do
+            local a = amounts:byte(i)
+            if a > col[y] then col[y] = a end
+            i = i + 1
+        end
+    end
 end
 
 function load_phases(ctx)
@@ -503,7 +733,7 @@ function load_phases(ctx)
         init = function(job)
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'rb')
             ctx.src = read_header(ctx.tiles_f)
-            ctx.dest_deep_top = find_deep_top_z()
+            ctx.dest_deep_top, ctx.dest_deep_min = find_deep_top_z()
             ctx.paint_list = {}
             ctx.mat_cache, ctx.tt_cache = {}, {}
             build_geo_remaps(ctx)
@@ -532,16 +762,73 @@ function load_phases(ctx)
                 ctx.skips['blocks-clipped-at-z-edge'].n = ctx.z_clipped
             end
             if ctx.deep_clipped then
-                common.add_skip(ctx, 'blocks-below-magma-sea-untouched')
-                ctx.skips['blocks-below-magma-sea-untouched'].n = ctx.deep_clipped
+                common.add_skip(ctx, 'blocks-below-hell-ceiling-untouched')
+                ctx.skips['blocks-below-hell-ceiling-untouched'].n = ctx.deep_clipped
             end
             if ctx.deep_dropped then
                 common.add_skip(ctx, 'source-underworld-tiles-dropped')
                 ctx.skips['source-underworld-tiles-dropped'].n = ctx.deep_dropped
             end
+            if ctx.hell_guarded then
+                common.add_skip(ctx, 'tiles-at-hell-ceiling-guarded')
+                ctx.skips['tiles-at-hell-ceiling-guarded'].n = ctx.hell_guarded
+            end
             return true
         end,
     })
+
+    if ctx.anchor.full then
+        -- underworld anchoring can drop the whole source column relative to
+        -- the destination's original terrain; anything of the destination
+        -- left above the source's coverage would float in the imported sky
+        table.insert(phases, {
+            name = 'clear sky above coverage',
+            init = function(job)
+                job.z0 = math.max(1, ctx.src.bz + ctx.anchor.off_z)
+                job.zi = job.z0
+                job.bi = 0
+            end,
+            total = function(job)
+                return math.max(0, df.global.world.map.z_count - job.z0)
+            end,
+            pos = function(job) return job.zi - job.z0 end,
+            step = function(job, deadline)
+                local map = df.global.world.map
+                local nb = map.x_count_block * map.y_count_block
+                while job.zi < map.z_count do
+                    while job.bi < nb do
+                        local bx, by = job.bi % map.x_count_block, job.bi // map.x_count_block
+                        local block = dfhack.maps.getBlock(bx, by, job.zi)
+                        if block then
+                            local touched = false
+                            for x = 0, 15 do
+                                local ttcol, dscol = block.tiletype[x], block.designation[x]
+                                for y = 0, 15 do
+                                    local attrs = df.tiletype.attrs[ttcol[y]]
+                                    if attrs.shape ~= df.tiletype_shape.EMPTY then
+                                        touched = true
+                                        ttcol[y] = df.tiletype.OpenSpace
+                                        local d = dscol[y]
+                                        d.flow_size = 0
+                                        d.hidden = false
+                                        d.subterranean = false
+                                        d.outside = true
+                                        d.light = true
+                                    end
+                                end
+                            end
+                            if touched then dfhack.maps.enableBlockUpdates(block, true, true) end
+                        end
+                        job.bi = job.bi + 1
+                        if dfhack.getTickCount() >= deadline then return false end
+                    end
+                    job.bi = 0
+                    job.zi = job.zi + 1
+                end
+                return true
+            end,
+        })
+    end
 
     table.insert(phases, {
         name = 'geolayer dedup (unrestored z)',
@@ -599,6 +886,13 @@ function load_phases(ctx)
                     ctx.paint_list[job.paint_cursor])
                 job.paint_cursor = job.paint_cursor + 1
                 local midx = resolve_mat(ctx, mat_idx)
+                if midx and ctx.anchor.full then
+                    -- imported slade keeps its FEATURE tiletype and resolves
+                    -- through the destination's own underworld feature;
+                    -- painting it as a vein would make hell's floor mineable
+                    local raw = df.global.world.raws.inorganics.all[midx]
+                    if raw and raw.id == 'SLADE' then goto continue end
+                end
                 if midx and rflags & 1 == 1 then
                     -- soil: keep the soil tiletype, remap the tile's geolayer so
                     -- the tile resolves as the source soil (e.g. sand)
@@ -633,6 +927,47 @@ function load_phases(ctx)
     })
 
     table.insert(phases, {
+        name = 'grass/moss',
+        init = function(job)
+            ctx.grass_f = io.open(ctx.dir .. '/grass.bin', 'rb')  -- absent pre-grass snapshot
+            ctx.plant_cache, ctx.plant_by_id, ctx.grass_plants = {}, {}, {}
+            for i, pr in ipairs(df.global.world.raws.plants.all) do
+                ctx.plant_by_id[pr.id] = i
+                if pr.flags.GRASS then
+                    table.insert(ctx.grass_plants,
+                                 {idx = i, depth = pr.underground_depth_min})
+                end
+            end
+            job.grass_done = 0
+        end,
+        total = function()
+            return (ctx.manifest.counts and ctx.manifest.counts.grass) or 0
+        end,
+        pos = function(job) return job.grass_done end,
+        step = function(job, deadline)
+            while ctx.grass_f do
+                local head = ctx.grass_f:read(common.GRASS_REC_SIZE)
+                if not head or #head < common.GRASS_REC_SIZE then break end
+                local amounts = ctx.grass_f:read(common.GRASS_AMOUNT_SIZE)
+                if not amounts or #amounts < common.GRASS_AMOUNT_SIZE then break end
+                local bx, by, z, pidx, depth = string.unpack(common.GRASS_REC, head)
+                job.grass_done = job.grass_done + 1
+                local plant_index = resolve_plant(ctx, pidx, depth)
+                if plant_index then
+                    apply_grass(ctx, bx, by, z, plant_index, amounts)
+                    ctx.grass_applied = (ctx.grass_applied or 0) + 1
+                end
+                if dfhack.getTickCount() >= deadline then return false end
+            end
+            if ctx.grass_f then
+                ctx.grass_f:close()
+                ctx.grass_f = nil
+            end
+            return true
+        end,
+    })
+
+    table.insert(phases, {
         name = 'constructions',
         init = function(job)
             job.cons = common.read_json(ctx.dir .. '/constructions.json') or {list = {}}
@@ -646,8 +981,17 @@ function load_phases(ctx)
                 local c = job.cons.list[job.con_cursor]
                 job.con_cursor = job.con_cursor + 1
                 local z = c.z + a.off_z
+                local deep_ok = true
+                if not a.full then
+                    deep_ok = z > (ctx.dest_deep_min or -1)
+                    if deep_ok and z <= (ctx.dest_deep_top or -1) + 1 then
+                        -- mixed band: same per-column ceiling rule as tiles
+                        local cc = column_ceiling(ctx, c.x + a.off_x, c.y + a.off_y)
+                        deep_ok = cc >= 0 and z > cc
+                    end
+                end
                 if z >= 1 and z < df.global.world.map.z_count - 1
-                    and z > (ctx.dest_deep_top or -1) then
+                    and deep_ok then
                     local mi = c.mat and dfhack.matinfo.find(c.mat)
                     local con = df.construction:new()
                     con.pos.x, con.pos.y, con.pos.z = c.x + a.off_x, c.y + a.off_y, z
@@ -676,22 +1020,65 @@ function load_phases(ctx)
         step = function(job)
             -- the destination's own units can end up inside the restored
             -- terrain (the surface shape changed under them) -- dig them out
+            local function open_at(x, y, z)
+                local t = dfhack.maps.getTileType(x, y, z)
+                return t and df.tiletype.attrs[t].shape ~= df.tiletype_shape.WALL
+            end
+            -- surface unsticking must land units ON something: a unit parked
+            -- in mid-air makes every item minted at its feet a falling
+            -- projectile (in_job), which building construction refuses
+            local function walkable_at(x, y, z)
+                local t = dfhack.maps.getTileType(x, y, z)
+                if not t then return false end
+                return df.tiletype_shape.attrs[df.tiletype.attrs[t].shape].walkable
+            end
+            -- a unit stuck deep down (an entombed demon above all) must stay
+            -- down there: search sideways/downwards for open hell, never lift
+            -- it up into the fort
+            local function unstick_deep(u)
+                for z = u.pos.z, math.max(1, u.pos.z - 4), -1 do
+                    if z ~= u.pos.z and open_at(u.pos.x, u.pos.y, z) then
+                        dfhack.units.teleport(u, xyz2pos(u.pos.x, u.pos.y, z))
+                        return true
+                    end
+                    for r = 1, 12 do
+                        for _, d in ipairs({{r,0},{-r,0},{0,r},{0,-r},{r,r},{r,-r},{-r,r},{-r,-r}}) do
+                            if open_at(u.pos.x + d[1], u.pos.y + d[2], z) then
+                                dfhack.units.teleport(u, xyz2pos(u.pos.x + d[1], u.pos.y + d[2], z))
+                                return true
+                            end
+                        end
+                    end
+                end
+                return false
+            end
+            local deep_z = (ctx.dest_deep_top or -1) + 1
             for _, u in ipairs(df.global.world.units.active) do
                 local tt = dfhack.maps.getTileType(u.pos.x, u.pos.y, u.pos.z)
                 if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.WALL then
-                    local moved = false
-                    for z = u.pos.z + 1, df.global.world.map.z_count - 2 do
-                        local t2 = dfhack.maps.getTileType(u.pos.x, u.pos.y, z)
-                        if t2 and df.tiletype.attrs[t2].shape ~= df.tiletype_shape.WALL then
-                            dfhack.units.teleport(u, xyz2pos(u.pos.x, u.pos.y, z))
-                            moved = true
-                            break
+                    if u.pos.z <= deep_z then
+                        -- a deep unit (an entombed demon above all) must NEVER
+                        -- be lifted toward the fort: sideways or down into open
+                        -- hell, or it stays walled in where it can hurt no one
+                        if unstick_deep(u) then
+                            common.add_skip(ctx, 'unit-unstuck-from-wall')
+                        else
+                            common.add_skip(ctx, 'deep-unit-left-entombed')
                         end
+                    else
+                        local moved = false
+                        for z = u.pos.z + 1, df.global.world.map.z_count - 2 do
+                            if walkable_at(u.pos.x, u.pos.y, z) then
+                                dfhack.units.teleport(u, xyz2pos(u.pos.x, u.pos.y, z))
+                                moved = true
+                                break
+                            end
+                        end
+                        if not moved and ctx.spawn_anchor then
+                            dfhack.units.teleport(u, ctx.spawn_anchor)
+                        end
+                        common.add_skip(ctx, 'unit-unstuck-from-wall')
                     end
-                    if not moved and ctx.spawn_anchor then
-                        dfhack.units.teleport(u, ctx.spawn_anchor)
-                    end
-                    common.add_skip(ctx, 'unit-unstuck-from-wall')
                 end
             end
             df.global.world.reindex_pathfinding = true

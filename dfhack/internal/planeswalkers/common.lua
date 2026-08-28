@@ -83,6 +83,16 @@ HEADER_FMT = '<c4I2I2I2I2I2'
 HEADER_SIZE = 14
 ZERO_BLOCK = string.rep(string.pack(TILE_REC, 0, 0, 0, 0), 256)
 
+-- grass.bin: one record per (block, grass plant) that has any coverage.
+-- header '<I2 I2 I2 I2 B' = block x, block y, z, plant legend idx,
+-- the plant's underground_depth_min (for substituting a same-depth grass when
+-- the destination world lacks the exact plant), then 256 raw amount bytes in
+-- x-major order. Grass lives in block_square_event_grassst, not in the tile
+-- record, so it rides in its own file rather than widening TILE_REC.
+GRASS_REC = '<I2I2I2I2B'
+GRASS_REC_SIZE = 9
+GRASS_AMOUNT_SIZE = 256
+
 -- designation bit packing (16 bits)
 function pack_dsgn(d)
     return d.flow_size
@@ -116,7 +126,34 @@ end
 
 local function jobs() return dfhack.internal end
 
-function current_job() return jobs().planeswalkers_job end
+-- dfhack.internal outlives the world, which is what keeps a job alive across a
+-- script reload -- but it also means a job left behind by world A is still sitting
+-- there when world B loads. The overlay pump runs every frame in dwarfmode, so on
+-- the next embark it would resume that job against a ctx full of freed world-A
+-- handles, forcing pause_state=true every frame while it did. Stamp every job with
+-- a token that is replaced on each map load; a job whose token no longer matches is
+-- from a dead world and gets dropped instead of pumped.
+function new_world_token()
+    jobs().planeswalkers_world_token = {}
+    return jobs().planeswalkers_world_token
+end
+
+function world_token()
+    return jobs().planeswalkers_world_token or new_world_token()
+end
+
+function current_job()
+    local j = jobs().planeswalkers_job
+    if not j then return nil end
+    if j.world_token ~= world_token() then
+        jobs().planeswalkers_job = nil
+        if j.ctx and j.ctx.close_all then pcall(j.ctx.close_all, j.ctx) end
+        dfhack.printerr(('planeswalkers: dropped stale job %q left over from a ' ..
+            'previous world'):format(tostring(j.label)))
+        return nil
+    end
+    return j
+end
 
 function cancel_job()
     local j = current_job()
@@ -131,6 +168,7 @@ function start_job(label, phases, ctx, on_done)
         label = label, phases = phases, ctx = ctx, on_done = on_done,
         phase_idx = 1, inited = false, last_report = dfhack.getTickCount(),
         started = dfhack.getTickCount(), keep_paused = true,
+        world_token = world_token(),
     }
     print(('planeswalkers: %s started (%d phases); game stays paused until done')
         :format(label, #phases))
@@ -141,6 +179,11 @@ BUDGET_MS = 30
 function pump(budget_ms)
     local job = current_job()
     if not job then return false end
+    -- every phase reads the live map/unit/item vectors; pumping without them is
+    -- how a half-finished job turns into a freeze rather than an error
+    if not dfhack.world.isFortressMode() or not dfhack.isMapLoaded() then
+        return false
+    end
     if job.keep_paused then df.global.pause_state = true end
     local deadline = dfhack.getTickCount() + (budget_ms or BUDGET_MS)
     local ok, err = pcall(function()
@@ -194,6 +237,53 @@ function job_status()
     local phase = job.phases[job.phase_idx]
     return ('%s: phase %d/%d (%s)'):format(job.label, job.phase_idx, #job.phases,
                                            phase and phase.name or '?')
+end
+
+-- ---- item minting helpers ----------------------------------------------------
+
+-- Items are created at their creator's feet. A creator left hovering over open
+-- space (the terrain was just rewritten under everyone) turns every minted
+-- item into a FALLING PROJECTILE flagged in_job -- and building construction
+-- refuses in_job items, which once silently failed all 1000+ buildings of a
+-- restore. Mint at a unit standing on walkable ground whenever one exists.
+function creator_unit()
+    local fallback
+    for _, u in ipairs(dfhack.units.getCitizens(true)) do
+        fallback = fallback or u
+        local tt = dfhack.maps.getTileType(u.pos.x, u.pos.y, u.pos.z)
+        local shape = tt and df.tiletype.attrs[tt].shape
+        if shape and df.tiletype_shape.attrs[shape].walkable then
+            return u
+        end
+    end
+    return fallback
+end
+
+-- strip falling-projectile state off a freshly minted item (all candidate
+-- creators airborne): unlink its projectile record and clear in_job so it can
+-- be attached to buildings, containers and inventories again
+function unproject(item)
+    if not item or not item.flags.in_job then return item end
+    local prev = df.global.world.projectiles.all
+    local cur = prev.next
+    while cur do
+        if cur.item and cur.item.item == item then
+            prev.next = cur.next
+            if cur.next then cur.next.prev = prev end
+            cur.item:delete()
+            cur:delete()
+            break
+        end
+        prev, cur = cur, cur.next
+    end
+    for i = #item.general_refs - 1, 0, -1 do
+        if df.general_ref_projectile:is_instance(item.general_refs[i]) then
+            item.general_refs[i]:delete()
+            item.general_refs:erase(i)
+        end
+    end
+    item.flags.in_job = false
+    return item
 end
 
 -- report accumulator: ctx.report is {line, line, ...}; skips grouped by reason

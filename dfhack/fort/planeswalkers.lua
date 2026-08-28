@@ -17,9 +17,16 @@ What is carried
 
 - **Terrain**: every tile of the fort's footprint -- stone layers, veins, sand,
   soil, adamantine, water and magma, plus dug-out and smoothed tiles and the
-  hidden/light/outside flags. The magma sea and the underworld are NOT carried:
-  each world keeps its own (transplanting one world's hell into another's rock
-  breaches the underworld and lets its demons loose).
+  hidden/light/outside flags. Grass cover comes along too, surface grasses and
+  the subterranean ones (cave moss, floor fungi, underlichen) alike, each tile
+  keeping how much of it had grown; a destination world missing a particular
+  grass gets the closest local one of the same depth. Trees and shrubs do not
+  transfer and regrow on their own. On a same-size embark the fort is aligned at the
+  underworld and the whole column is carried, magma sea and hell geometry
+  included -- the destination keeps its own demons and its underworld stays
+  sealed, but the surface may sit a few levels off from the surrounding world
+  tiles. On a differently-sized embark the fort is aligned at the surface
+  instead and the destination's deep structure is preserved.
 - **Constructions and buildings**: walls, floors, ramps and stairs; workshops,
   furnaces, doors, hatches, beds, tables, statues, wells, levers and traps, each
   with its own material.
@@ -123,6 +130,24 @@ end
 
 OVERLAY_WIDGETS = {pump = PumpOverlay}
 
+-- A job lives in dfhack.internal so a script reload cannot orphan it, which also
+-- means nothing about unloading a world clears it on its own. Without this hook a
+-- job abandoned in one fort is still there when the next one embarks, and the pump
+-- above -- default_enabled, dwarfmode, no frequency cap -- resumes it every frame
+-- against the old world's data. Retire the job on the way out and hand the new
+-- world a fresh token so any straggler is recognised as stale.
+dfhack.onStateChange[GLOBAL_KEY] = function(sc)
+    if sc == SC_MAP_UNLOADED or sc == SC_WORLD_UNLOADED then
+        if common.cancel_job() then
+            print('planeswalkers: job cancelled -- the world it was running against '
+                  .. 'is being unloaded')
+        end
+        common.new_world_token()
+    elseif sc == SC_MAP_LOADED then
+        common.new_world_token()
+    end
+end
+
 -- ---- actions ---------------------------------------------------------------
 
 local function fort_name()
@@ -164,6 +189,7 @@ local function do_save(name)
         dir = common.snap_dir(name),
         legend_tt = common.Legend.new(),
         legend_mat = common.Legend.new(),
+        legend_plant = common.Legend.new(),
         skips = {},
         manifest = {
             v = 1,
@@ -182,6 +208,7 @@ local function do_save(name)
         },
         close_all = function(self)
             if self.tiles_f then self.tiles_f:close(); self.tiles_f = nil end
+            if self.grass_f then self.grass_f:close(); self.grass_f = nil end
         end,
     }
 
@@ -191,7 +218,8 @@ local function do_save(name)
     for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
     common.start_job('save ' .. name, phases, ctx, function()
         common.write_json(ctx.dir .. '/legend.json',
-            {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list})
+            {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list,
+             plants = ctx.legend_plant.list})
         ctx.manifest.skips = {}
         for cat, c in pairs(ctx.skips or {}) do
             ctx.manifest.skips[cat] = {n = c.n, examples = c.examples}
@@ -255,31 +283,35 @@ local function do_load(name, ...)
                 'embark, or --force to overwrite anyway'):format(#df.global.world.buildings.all))
     end
 
+    local legends = common.read_json(dir .. '/legend.json') or {}
+    local legend_tt = common.Legend.new(legends.tiletypes)
     local terrain = req('terrain')
-    local anchor, err = terrain.compute_anchor(mf.dims)
+    local anchor, err = terrain.compute_anchor(mf.dims, dir, legend_tt)
     if not anchor then qerror('planeswalkers: ' .. err) end
 
-    local legends = common.read_json(dir .. '/legend.json') or {}
     local ctx = {
         name = name,
         dir = dir,
         manifest = mf,
         anchor = anchor,
-        legend_tt = common.Legend.new(legends.tiletypes),
+        legend_tt = legend_tt,
         legend_mat = common.Legend.new(legends.mats),
+        legend_plant = common.Legend.new(legends.plants),
         skips = {},
         close_all = function(self)
             if self.tiles_f then self.tiles_f:close(); self.tiles_f = nil end
+            if self.grass_f then self.grass_f:close(); self.grass_f = nil end
         end,
     }
 
     dfhack.persistent.saveSiteData(GLOBAL_KEY,
         {state = 'loading', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S')})
 
-    notify(('restoring "%s" (%dx%d blocks) anchored at block %d,%d, surface z %d -> %d; ' ..
+    notify(('restoring "%s" (%dx%d blocks) anchored at block %d,%d, surface z %d -> %d%s; ' ..
             'the game stays paused until it finishes')
            :format(name, mf.dims.bx, mf.dims.by, anchor.off_bx, anchor.off_by,
-                   mf.dims.surface, anchor.dest_surface))
+                   mf.dims.surface, anchor.dest_surface,
+                   anchor.full and ' (same-size: aligned at the underworld)' or ''))
 
     local phases = terrain.load_phases(ctx)
     local cleanup = table.remove(phases)  -- map cleanup runs last of all
