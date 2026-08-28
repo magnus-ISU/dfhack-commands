@@ -549,19 +549,7 @@ Automatically dismiss "you haven't acted in a while" for long-running move
 ![adv/im-sure demo](demos/adv-im-sure.gif)
 
 ### **`adv/makeown`** 
-Recruit the selected unit into your party without asking them — the mercenary who won't take
-your money, a prisoner you freed, somebody else's war dog, a goblin who just lost a fight. They
-join as a full core party member: tactical-mode controllable, and kept when you retire and
-unretire. `-extra` makes them a follower you can't take control of (`advtools party` promotes
-one later), and `-pet` an animal companion — automatic for anything that can neither speak nor
-learn. Hostility is cleared rather than ignored, so a unit recruited mid-fight actually stops
-fighting: invader/ambusher/visitor flags, the army controller, the enemy status cache and every
-Conflict activity are all dropped. Units with no historical figure get a nemesis record created
-the way DFHack's own `bodyswap` does it, and are pulled out of their site's populace list so
-they don't turn up twice after you travel. `-unit <id>` targets by id; `-remove` dismisses them
-again, as does `gui/companion-order`'s Leave order. The vanilla talk menu usually won't offer
-"part ways" — nobody signed a join agreement, they are in your party by data rather than by
-diplomacy.
+Recruit the selected unit as a core party member, preserved after retiring. `-extra` makes them a follower you can't take control of.
 
 ## Adventure mode embark features
 
