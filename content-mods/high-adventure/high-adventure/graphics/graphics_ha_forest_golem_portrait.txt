@@ -1,0 +1,12 @@
+graphics_ha_forest_golem_portrait
+
+[OBJECT:GRAPHICS]
+
+Forest golem portrait: the vanilla bronze colossus portrait desaturated to
+iron-gray, on our own 96x96 page.
+
+[CREATURE_GRAPHICS:HA_FOREST_GOLEM]
+	[LAYER_SET:PORTRAIT]
+		[LAYER_GROUP]
+		[LAYER:MAIN:HA_FOREST_GOLEM_PORTRAIT:0:0]
+		[END_LAYER_GROUP]

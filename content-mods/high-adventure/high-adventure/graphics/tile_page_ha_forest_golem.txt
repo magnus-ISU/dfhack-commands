@@ -1,0 +1,35 @@
+tile_page_ha_forest_golem
+
+[OBJECT:TILE_PAGE]
+
+Forest golem art: the vanilla bronze colossus sprites (creatures_megabeast.png,
+its statue sheet and its portrait) recoloured to iron-gray. The PNGs are ours,
+extracted and desaturated -- palette recolouring over a vanilla tile page does
+not work (palettes remap by colour match, so the vanilla bronze would render
+unchanged). Declared PAGE_DIM_PIXELS must match the real PNG exactly or the
+compositor reads out of bounds and corrupts the heap.
+
+[TILE_PAGE:HA_FOREST_GOLEM96]
+	[FILE:images/forest-golem-96x64.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:96:64]
+
+[TILE_PAGE:HA_FOREST_GOLEM32]
+	[FILE:images/forest-golem-icon-32x32.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_FOREST_GOLEM_DEAD]
+	[FILE:images/forest-golem-corpse-32x32.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:32]
+
+[TILE_PAGE:HA_FOREST_GOLEM_STATUE]
+	[FILE:images/forest-golem-statue-32x64.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:32:64]
+
+[TILE_PAGE:HA_FOREST_GOLEM_PORTRAIT]
+	[FILE:images/forest-golem-portrait-96x96.png]
+	[TILE_DIM:96:96]
+	[PAGE_DIM_PIXELS:96:96]

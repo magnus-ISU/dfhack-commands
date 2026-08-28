@@ -96,7 +96,9 @@ behind each block.
 	[GEM_PREF]
 	[IMPROVED_BOWS]
 	[EQUIPMENT_IMPROVEMENTS]
-	[METAL_ARMOR_LEVELS]
+	METAL_ARMOR_LEVELS is not a DF entity token -- it was rejected as unrecognised
+	every load and did nothing. Metal armour tiering comes from the ARMOR items'
+	own [METAL_ARMOR_LEVELS] in the itemdef, not from the entity.
 
 	[PERMITTED_BUILDING:HA_HE_SHAPING_TREE]
 	[PERMITTED_JOB:MINER]

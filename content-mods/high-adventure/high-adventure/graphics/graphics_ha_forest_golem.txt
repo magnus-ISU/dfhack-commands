@@ -1,0 +1,24 @@
+graphics_ha_forest_golem
+
+[OBJECT:GRAPHICS]
+
+Forest golem: the bronze colossus 3x2 sprite recoloured iron-gray. It MUST be
+a LAYERED graphic (LAYER_SET + LAYER), not a simple DEFAULT with LARGE_IMAGE:
+DF renders a creature in grayscale whenever it flashes it (status/legendary
+indicator) or it is underwater, but LAYERED graphics are exempt and stay in
+colour -- a simple large sprite flickers. Same fix as the drider.
+
+Deliberately NO item layers (no CONDITION_ITEM_WORN / WIELD): worn clothing,
+armor and weapons are only drawn where the graphic defines a layer for them,
+and humanoid item layers would land at random spots on the 3x2 sprite.
+
+[CREATURE_GRAPHICS:HA_FOREST_GOLEM]
+	[LIST_ICON:HA_FOREST_GOLEM32:0:0]
+	[CORPSE:HA_FOREST_GOLEM_DEAD:0:0:AS_IS]
+	[LAYER_SET:DEFAULT]
+		[LAYER_GROUP]
+		[LAYER:BODY:HA_FOREST_GOLEM96:LARGE_IMAGE:0:0:2:1]
+		[END_LAYER_GROUP]
+
+[STATUE_CREATURE_GRAPHICS:HA_FOREST_GOLEM]
+	[DEFAULT:HA_FOREST_GOLEM_STATUE:0:0:0:1]
