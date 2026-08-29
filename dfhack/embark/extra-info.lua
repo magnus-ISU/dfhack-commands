@@ -91,6 +91,12 @@ origin civ's own `relations.diplomacy.state` entry for that group --
 at all -> no contact.  Population is the sum of the civ's `entity_population`
 records.
 
+It shows **only on the final placement step** -- the one that says "Click on the
+map to embark!" and offers Abort instead of Embark.  Everything here describes a
+specific rectangle, and before that step the rectangle is just wherever the mouse
+is skimming over the world map; announcing NO ADAMANTIUM for a tile nobody has
+chosen is noise.
+
 Overlay `embark/extra-info.panel`, enabled by default; reposition or disable it
 with gui/control-panel (Overlays).
 
@@ -774,9 +780,11 @@ ExtraInfo.ATTRS{
 function ExtraInfo:overlay_onupdate()
     self.show = false
     local scr = scr_if_embark()
-    -- the readout describes a specific world tile, which only exists once the
-    -- map is zoomed in; on the whole-world view there is nothing to describe
-    if not scr or not scr.zoomed_in then return end
+    -- ONLY on the final placement step -- the one where the button row reads
+    -- Abort rather than Embark.  Before that the "embark" is just wherever the
+    -- mouse happens to be over the world map, and reporting NO ADAMANTIUM for a
+    -- tile nobody has chosen is noise.
+    if not scr or not scr.choosing_embark then return end
     -- how many rows fit in the gap under DF's panel, from the box measured on
     -- the last rendered frame.  A gap too small to be worth using means the
     -- panel is going to the corner instead, where it gets the full screen.

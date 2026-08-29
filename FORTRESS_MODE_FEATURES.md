@@ -249,15 +249,17 @@ Opens a new fortress for you: skips the tutorial prompt, commits a dwarven origi
 the map on a scored spot near its halls, and clicks Embark. You place the fortress.
 
 ### **`embark/extra-info`**
-Embark-screen panel under DF's own: whether adamantine is missing, salt or fresh water, the seven
-commonest stones (flux, coal and plaster called out), commonest wood, the wildlife, and **every**
-civ that can reach you — not vanilla's four.
+Panel under DF's own, on the final placement step only: `NO ADAMANTIUM` when there is none, salt
+or fresh water, the seven commonest stones (flux, coal and plaster called out) plus a count of
+the rest, commonest wood, the wildlife, and **every** civ that can reach you — not vanilla's four.
 
 ### **`embark/assistant`**
-Site finder, replacing the retired `embark-assistant` plugin. `embark/assistant flux coal river
-fresh` sweeps the whole world and ranks what matches; `goto <n>` centres the map on one.
-`embark/assistant help` lists every filter. Cannot search aquifers or adamantine — neither is
-world-wide data.
+Site finder, replacing the retired `embark-assistant` plugin. Bare `embark/assistant` opens a
+window: type filters, press Enter, press Enter on a result to jump the map there. Filters cover
+flux, coal, plaster, ore, soil, rivers, aquifers, volcanoes, biome, savagery, evil, neighbouring
+civs and towers. `s` runs a deep survey that adds **magma pools by cavern level** and
+**adamantine**, which are not world-wide data. Also works from the console —
+`embark/assistant help`.
 
 ## One-time-commands
 
