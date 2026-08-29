@@ -27,7 +27,6 @@ Filters (all AND-ed, all optional)
     aquifer / lightaq / noaquifer
     volcano / volcanoN      a volcano on the tile, or within N tiles
     magma / magmaN          magma pool (needs `survey`); magma1 = cavern 1
-    adamantine / noadamantine   (needs `survey`)
     calm / savage   savagery under 33 / 66 and over
     good / evil     evilness under 33 / 66 and over
     near=<RACE>     a civilization of that creature id with a site within 30
@@ -49,14 +48,27 @@ volcano on the world map -- and aquifers fall out of the geology column, a layer
 bottoming at -3 or deeper whose stone carries the `AQUIFER` flag (a non-soil one
 being the heavy kind).  Both are the original plugin's own rules.
 
-**Magma pools and adamantine are not.**  Those live in `region_details.features`,
-which DF loads per world tile, so they need `embark/assistant survey` once.  The
-original embark-assistant solved this by driving DF's own cursor across all 4,225
-tiles with `feed_key(CURSOR_*)`, surveying each as DF loaded it; this does the
-same thing more cheaply, because pointing the camera somewhere makes DF load a
-whole ~10x6 block of region details AND keep them.  Roughly a hundred camera
-stops cover the world.  Magma levels are the original's: 3 volcano, 2 a pool
-reaching cavern 1, 1 cavern 2, 0 cavern 3.
+**Magma pools are not.**  A world tile's feature list is only filled in once DF
+has had that tile in focus, so `embark/assistant survey` walks the camera over
+the map to fill them.  The original embark-assistant did the same thing by
+driving DF's own cursor across all 4,225 tiles with `feed_key(CURSOR_*)`; this
+covers ~50 tiles per stop instead of one, so it is ~128 stops rather than 4,225.
+Magma levels are the original's: 3 volcano, 2 a pool reaching cavern 1, 1 cavern
+2, 0 cavern 3.
+
+The 16x16 `feature_map` shell is NOT the unit to survey by, which is worth
+recording because it looks like it should be.  A shell does become resident as a
+whole, but the per-world-tile `feature_init` vectors inside it fill in
+separately, with the viewport: measured 50 of 256 filled in a freshly resident
+shell.  So the number of camera stops is set by how much one viewport covers, not
+by the shell size, and aligning the walk to shells buys nothing.
+
+**Adamantine is deliberately not a filter here.**  It cannot be read the cheap
+way -- a world tile lists sixty-four *candidate* tubes whatever the tile is, so
+it has to be resolved per embark tile through `region_details` -- and at
+world-tile granularity the answer is "yes" almost everywhere (1,648 of 1,648
+embarkable tiles in the test world), which makes it useless as a filter.
+`embark/extra-info` answers it for the rectangle you actually pick.
 
 Speed comes from the same observation: geology is per `geo_index`, not per tile,
 and a world has a few dozen of those against thousands of tiles.  Every column is
@@ -220,7 +232,7 @@ local function nearest(list, wx, wy, land)
 end
 
 
--- ---- the deep survey: magma pools and adamantine ------------------------------
+-- ---- the magma survey --------------------------------------------------------
 --
 -- These two are NOT world-wide data.  They live in `region_details.features`,
 -- which DF loads per world tile -- and that is exactly why the original
@@ -236,11 +248,9 @@ end
 -- 2, 0 cavern 3 -- higher is shallower.  `2 - start_depth` on a magma pool,
 -- since layer_type is Cavern1=0, Cavern2=1, Cavern3=2.
 
-deep = deep or {}            -- [wx*4096+wy] = {magma = n|nil, adam = bool}
+deep = deep or {}            -- [wx*4096+wy] = {magma = n|nil}
 deep_world = deep_world or nil
 deep_count = deep_count or 0
-
-local HARVEST_PER_FRAME = 40
 
 local function world_key()
     local ok, k = pcall(function()
@@ -254,52 +264,58 @@ local function reset_deep()
     deep, deep_count, deep_world = {}, 0, world_key()
 end
 
--- Read one world tile's features out of a loaded region_details record.
-local function absorb(d)
-    local wx, wy = d.pos.x, d.pos.y
+-- Read one world tile's magma from its feature list.
+--
+-- This reads `feature_init` directly rather than going through
+-- `region_details.features`, and the difference is worth stating because the
+-- adamantine code deliberately does NOT do this.  A world tile's feature list
+-- contains sixty-four *candidate* deep-special-tubes whatever the tile is, so
+-- adamantine has to be resolved per embark tile through `region_details`.
+-- Volcanoes and magma pools are not like that: they appear in the list only
+-- where they are real.  Checked on all 4,225 tiles of a 65x65 world against the
+-- region_details answer -- 4,225 agreements, zero disagreements -- which is what
+-- lets this skip the 16x16 walk that made the first version of the survey take
+-- minutes.
+local function absorb_tile(wx, wy)
     local key = wx * 4096 + wy
     if deep[key] then return false end
-    local rec = {magma = nil, adam = false}
+    local got = false
     pcall(function()
         local sx, sy = wx // 16, wy // 16
         local shell = wd().feature_map[sx]:_displace(sy)
         if not shell or not shell.features or shell.x ~= sx or shell.y ~= sy then return end
         local inits = shell.features.feature_init[wx % 16][wy % 16]
-        local n = #inits
-        for ex = 0, 15 do
-            for ey = 0, 15 do
-                local list = d.features[ex][ey]
-                for i = 0, #list - 1 do
-                    local idx = list[i].feature_idx
-                    if idx >= 0 and idx < n then
-                        local f = inits[idx]
-                        if df.feature_init_deep_special_tubest:is_instance(f) then
-                            rec.adam = true
-                        elseif df.feature_init_volcanost:is_instance(f) then
-                            rec.magma = 3
-                        elseif df.feature_init_magma_poolst:is_instance(f) then
-                            local lv = 2 - f.start_depth
-                            if not rec.magma or lv > rec.magma then rec.magma = lv end
-                        end
-                    end
-                end
+        -- an empty vector means DF has not put this tile in focus yet: no data,
+        -- not "no magma".  Leave it uncached so a later pass picks it up.
+        if #inits == 0 then return end
+        local magma
+        for i = 0, #inits - 1 do
+            local f = inits[i]
+            if df.feature_init_volcanost:is_instance(f) then
+                magma = 3
+            elseif df.feature_init_magma_poolst:is_instance(f) then
+                local lv = 2 - f.start_depth
+                if not magma or lv > magma then magma = lv end
             end
         end
+        deep[key] = {magma = magma}
+        deep_count = deep_count + 1
+        got = true
     end)
-    deep[key] = rec
-    deep_count = deep_count + 1
-    return true
+    return got
 end
 
--- Pull in whatever DF has loaded since last time, bounded so no single frame
--- stalls: each record is a 16x16 walk and there can be hundreds waiting.
-local function harvest(budget)
-    local done = 0
-    for _, d in ipairs(wd().midmap_data.region_details) do
-        if done >= (budget or HARVEST_PER_FRAME) then break end
-        if absorb(d) then done = done + 1 end
+-- Sweep the whole world for tiles whose feature list DF has filled in since last
+-- time.  Cheap now: one short list per world tile, no nested 16x16 walk.
+local function harvest()
+    local w = wd()
+    local got = 0
+    for wx = 0, w.world_width - 1 do
+        for wy = 0, w.world_height - 1 do
+            if absorb_tile(wx, wy) then got = got + 1 end
+        end
     end
-    return done
+    return got
 end
 
 local function every_frame(fn)
@@ -339,7 +355,7 @@ function deep_survey(cont)
         i = i + 1
         if i > #stops then
             -- drain anything still queued, then put the view back
-            for _ = 1, 40 do if harvest(200) == 0 then break end end
+            harvest()
             -- the grid leaves a handful of edge tiles unvisited; go get them
             if not gap_pass then
                 gap_pass = true
@@ -361,7 +377,7 @@ function deep_survey(cont)
             scr.zoom_cent_x, scr.zoom_cent_y = saved.zx, saved.zy
             scr.zoomed_in, scr.choosing_embark = saved.zoom, saved.embark
             print(('embark/assistant: deep survey done -- %d of %d world tiles ' ..
-                   'now carry magma and adamantine data.')
+                   'now carry magma data.')
                 :format(deep_count, W * H))
             if cont then cont() end
             return true
@@ -382,7 +398,7 @@ embark/assistant -- find embark sites matching what you want.
 
   embark/assistant [filter ...]     sweep the world, print the best matches
   embark/assistant goto <n>         centre the map on result <n>
-  embark/assistant survey           deep pass: magma pools and adamantine
+  embark/assistant survey           deep pass: fill in the magma data
   embark/assistant help             this text
 
 Filters are AND-ed; with none at all it simply ranks the whole world.
@@ -403,7 +419,6 @@ Filters are AND-ed; with none at all it simply ranks the whole world.
                      magma     any magma pool           }  these two need
                      magmaN    a pool reaching cavern N  }  "survey" first
                                magma1 = up in cavern 1 (best), magma3 = anywhere
-                     adamantine / noadamantine          }  needs "survey" too
   Surroundings       biome=X   Swamp Desert Forest Mountains Ocean Lake
                                Glacier Tundra Steppe Grassland Hills
                      calm      savagery under 33
@@ -423,11 +438,13 @@ Examples:
   embark/assistant magma1 flux             -- magma in cavern 1, and flux
   embark/assistant goto 3
 
-Volcanoes and aquifers are world-wide and always available. Magma pools and
-adamantine are not: they live in `region_details`, which DF loads per world tile,
-so "survey" walks the camera over the map once to collect them. That is the same
-thing the original embark-assistant did by driving DF's cursor, just in ~100
-camera stops instead of one per tile.]=]
+Volcanoes and aquifers are world-wide and always available. Magma pools are not:
+a tile's feature list only fills in once DF has had it in focus, so "survey"
+walks the camera over the map once. Same idea as the original embark-assistant
+driving DF's cursor, but ~50 tiles per stop instead of one.
+
+Adamantine is not a filter: at world-tile granularity it is true almost
+everywhere. Use embark/extra-info on the rectangle you pick.]=]
 
 local function usage() print(USAGE) end
 
@@ -454,7 +471,6 @@ function parse(args)
             or a == 'river' or a == 'brook' or a == 'fresh' or a == 'calm'
             or a == 'savage' or a == 'good' or a == 'evil' or a == 'notower'
             or a == 'aquifer' or a == 'noaquifer' or a == 'lightaq'
-            or a == 'adamantine' or a == 'noadamantine'
         then f[a] = true
         else
             usage()
@@ -471,7 +487,7 @@ function sweep(f)
     local geo = classify_geology()
     local civs, towers = survey_sites()
     local volcanoes = volcano_peaks()
-    local needs_deep = f.magma ~= nil or f.adamantine or f.noadamantine
+    local needs_deep = f.magma ~= nil
     local W, H = w.world_width, w.world_height
 
     -- embarkability of every tile, computed once: the elbow-room term reads it
@@ -528,8 +544,6 @@ function sweep(f)
                         if f.magma and not (dp.magma and dp.magma >= f.magma) then
                             keep = false
                         end
-                        if f.adamantine and not dp.adam then keep = false end
-                        if f.noadamantine and dp.adam then keep = false end
                     end
                 end
 
@@ -562,7 +576,6 @@ function sweep(f)
                     if g.aquifer then score = score - (g.aq_heavy and 8 or 2) end
                     if volc_d == 0 then score = score + 12 end
                     if dp and dp.magma then score = score + 2 * dp.magma end
-                    if dp and dp.adam then score = score + 4 end
                     score = score - (rme.savagery // 20)
                     score = score - (rme.evilness // 20)
                     if dwarf_d then score = score - math.min(dwarf_d, RANGE_CIV) end
@@ -576,7 +589,7 @@ function sweep(f)
                         savagery = rme.savagery, evilness = rme.evilness,
                         aquifer = g.aquifer, aq_heavy = g.aq_heavy,
                         volcano = volc_d, magma = dp and dp.magma,
-                        adam = dp and dp.adam, surveyed = dp ~= nil,
+                        surveyed = dp ~= nil,
                     }
                 end
             end
@@ -604,7 +617,6 @@ function describe(r)
     end
     if r.magma == 3 then bits[#bits + 1] = 'magma: volcano'
     elseif r.magma then bits[#bits + 1] = ('magma: cavern %d'):format(3 - r.magma) end
-    if r.adam then bits[#bits + 1] = 'adamantine' end
     if r.aquifer then bits[#bits + 1] = r.aq_heavy and 'heavy aquifer' or 'light aquifer' end
     bits[#bits + 1] = r.soil .. ' soil'
     if r.salinity < 33 then bits[#bits + 1] = 'fresh' end
@@ -655,10 +667,10 @@ function run(args)
         qerror('embark/assistant: no world is loaded.')
     end
     local f = parse(args)
-    local needs_deep = f.magma ~= nil or f.adamantine or f.noadamantine
+    local needs_deep = f.magma ~= nil
     if needs_deep and deep_count == 0 then
-        print('embark/assistant: magma and adamantine are not world-wide data -- ' ..
-              'run "embark/assistant survey" once first.')
+        print('embark/assistant: magma is not world-wide data -- run ' ..
+              '"embark/assistant survey" once first.')
         return
     end
     if needs_deep then
@@ -698,8 +710,8 @@ local gui = require('gui')
 local widgets = require('gui.widgets')
 
 local HINT = 'flux coal casts ore soilN river brook fresh aquifer lightaq ' ..
-             'noaquifer volcano volcanoN magma magmaN adamantine ' ..
-             'noadamantine biome=X calm savage good evil near=RACE notower'
+             'noaquifer volcano volcanoN magma magmaN biome=X calm savage ' ..
+             'good evil near=RACE notower'
 
 AssistantWindow = defclass(AssistantWindow, widgets.Window)
 AssistantWindow.ATTRS{
@@ -735,7 +747,7 @@ function AssistantWindow:init()
         widgets.HotkeyLabel{
             frame = {b = 1, l = 0},
             key = 'CUSTOM_S',
-            label = 'deep survey (magma + adamantine)',
+            label = 'survey for magma pools',
             on_activate = function() self:survey() end,
         },
         widgets.Label{
@@ -761,9 +773,8 @@ function AssistantWindow:search(text)
         return
     end
     local f = err
-    if (f.magma ~= nil or f.adamantine or f.noadamantine) and deep_count == 0 then
-        self:set_status('magma and adamantine need the deep survey first -- press s.',
-                        COLOR_YELLOW)
+    if f.magma ~= nil and deep_count == 0 then
+        self:set_status('magma needs the survey first -- press s.', COLOR_YELLOW)
         return
     end
     local t0 = dfhack.getTickCount()
@@ -800,7 +811,7 @@ function AssistantWindow:survey()
                     COLOR_YELLOW)
     local win = self
     deep_survey(function()
-        win:set_status(('deep survey done: %d tiles carry magma and adamantine data.')
+        win:set_status(('survey done: %d tiles carry magma data.')
             :format(deep_count), COLOR_LIGHTGREEN)
     end)
 end
