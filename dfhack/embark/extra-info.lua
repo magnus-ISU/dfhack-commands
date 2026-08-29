@@ -16,10 +16,11 @@ frames live in, and a field of identical terrain tiles reads as a border run.)
 
 What it adds
 ------------
-**Adamantine, and salt vs fresh water**, on one line: `raw adamantine, fresh
-water`.  The material is named rather than assumed, since a modded world can put
-something else in the spire; when the embark has no spire under it the line is
-just the water.
+**Adamantine and water**, on one line.  Adamantine is reported by its *absence*:
+having a spire is the ordinary case and tells you nothing, so a tile with one
+says only `fresh water`, and a tile without one says `NO ADAMANTIUM, fresh
+water`.  A spire made of something that is not adamantine -- a modded world
+doing something unusual -- is still named outright.
 
 Getting the adamantine right is the whole trick.  A world tile's
 `feature_map` entry lists **sixty-four deep-special-tube candidates whatever the
@@ -40,8 +41,9 @@ pulled up regardless of thickness because they decide what you can build rather
 than how much rock there is: the biggest **flux** layer (steel), **lignite or
 bituminous coal** (fuel without a magma sea), and anything with the **GYPSUM**
 reaction class (plaster, so casts for broken bones).  Those three are tagged in
-the list.  Veins and clusters are read as well as layers, since coal and gypsum
-usually arrive as seams.
+the list, and the count of everything else in the column follows it as
+`(+N more)`.  Veins and clusters are read as well as layers, since coal and
+gypsum usually arrive as seams.
 
 Then the trees, with **featherwood** named outright when the region has it.  DF
 gives no honest "commonest tree" pre-embark -- every tree population is recorded
@@ -259,9 +261,13 @@ local function stone_summary(wtiles)
                         layer_weight[idx] = (layer_weight[idx] or 0) + thick
                         present[idx] = true
                     end
+                    -- veins carry the gem clusters too, and a gem is not a
+                    -- stone type: counting them turned "38 other stones" into
+                    -- "114 more", which is just noise
                     for j = 0, #L.vein_mat - 1 do
                         local v = L.vein_mat[j]
-                        if v >= 0 then present[v] = true end
+                        local vm = v >= 0 and inor[v]
+                        if vm and vm.material.flags.IS_STONE then present[v] = true end
                     end
                 end
             end
@@ -308,6 +314,9 @@ local function stone_summary(wtiles)
         if best[key] then force(best[key].idx, key) end
     end
 
+    local total = 0
+    for _ in pairs(present) do total = total + 1 end
+
     local out, used = {}, {}
     local function push(idx)
         if used[idx] or #out >= MAX_STONE then return end
@@ -317,7 +326,7 @@ local function stone_summary(wtiles)
     end
     for _, idx in ipairs(forced) do push(idx) end
     for _, idx in ipairs(order) do push(idx) end
-    return out
+    return out, total
 end
 
 -- The trees the region can grow.  DF gives no honest "most common" here: every
@@ -600,16 +609,26 @@ function build_lines(scr, maxrows)
         lines[#lines + 1] = ty .. (nm ~= '' and (': ' .. nm) or '')
     end
 
+    -- Adamantine is reported by its ABSENCE.  Having it is the normal case and
+    -- says nothing useful; not having it is the thing that changes where you
+    -- embark, so that is what gets shouted.  A spire of something other than
+    -- adamantine is a modded world doing something unusual and still gets named.
     local parts = {}
     local tube = adamantine(etiles)
-    if tube then parts[#parts + 1] = tube end
+    if not tube then
+        parts[#parts + 1] = 'NO ADAMANTIUM'
+    elseif not tube:find('adamantine', 1, true) then
+        parts[#parts + 1] = tube
+    end
     local water = water_word(wtiles)
     if water then parts[#parts + 1] = water end
     if #parts > 0 then lines[#lines + 1] = table.concat(parts, ', ') end
 
-    local stones = stone_summary(wtiles)
+    local stones, stone_total = stone_summary(wtiles)
     if stones and #stones > 0 then
-        wrap(lines, 'Stone: ' .. table.concat(stones, ', '), '')
+        local rest = (stone_total or #stones) - #stones
+        wrap(lines, 'Stone: ' .. table.concat(stones, ', ')
+            .. (rest > 0 and (' (+%d more)'):format(rest) or ''), '')
     end
 
     local wood = wood_summary(wtiles)

@@ -133,29 +133,3 @@ Assigns each fort noble's symbols of office as specific items in their squad uni
 nobles wear their regalia into battle. Implemented and verified live, but **parked pending a
 decision on whether it is actually wanted**. Never runs automatically — one-shot only, and
 `noble-warriors dry` previews.
-
-### **`embark/assistant`**
-A site finder for the embark screen, reimplementing the old DFHack `embark-assistant` plugin
-that no longer ships. Give it what you refuse to embark without — `flux coal river fresh`,
-`biome=Forest soil3 calm near=DWARF`, `notower` — and it sweeps the whole world map, ranks what
-matches and prints the best; `embark/assistant goto <n>` centres the map on one. With no filters
-it still ranks the world on elbow room, rivers, soil, flux, coal, savagery and distance from the
-nearest dwarven hall. Geology is classified once per `geo_index` rather than per tile, which is
-what makes a full-world sweep affordable: 4,225 tiles in ~1.3 s on a 65×65 world.
-
-**Written and exercised, but parked.** It runs, the numbers look right, and `goto` lands where
-it says — but "looks right" is all it is: nothing has been checked against an actual embark, and
-a site finder that quietly mis-ranks is worse than none.
-
-Two real limits, both structural:
-
-- **It cannot see aquifers or adamantine.** Both live in `region_details`, which DF loads only
-  for the 16×16 world-tile shell the embark cursor is in; reading another shell is documented as
-  crash-prone and did kill the game once during development. The sweep is therefore built purely
-  from `region_map` and `world_data.geo_biomes`, which are complete world-wide. Move the cursor
-  to a result and `embark/extra-info` answers the adamantine question for that tile.
-- **~1.3 s is 1.3 s of frozen main thread.** Fine for a one-shot search, and it is bounded and
-  measured rather than a blind map scan, but it is not something to run from an overlay.
-
-`near=` matches on creature id (`near=DWARF`), which is the filter that matters — that civ is
-your caravan.
