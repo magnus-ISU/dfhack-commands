@@ -2,7 +2,7 @@ entity_ha_forest_golem
 
 [OBJECT:ENTITY]
 
-Forest golems: a civilization that founds ONE forest retreat and never founds
+Ancient golems: a civilization that founds ONE forest retreat and never founds
 another. The placement layout is the same one ha-high-elves uses -- see the
 comments there -- and the reasoning bears repeating: BIOME_SUPPORT is not what
 limits expansion. SETTLEMENT_BIOME and START_BIOME are what grant the right to

@@ -2,7 +2,7 @@ body_ha_forest_golem
 
 [OBJECT:BODY]
 
-Two custom parts for the forest golem. Both exist so that a body part CATEGORY
+Two custom parts for the ancient golem. Both exist so that a body part CATEGORY
 can be targeted -- vanilla categories are shared (both hands are CATEGORY:HAND),
 and CDI:BP_REQUIRED and TISSUE_LAYER both select by category.
 

@@ -2,7 +2,7 @@ creature_ha_forest_golem
 
 [OBJECT:CREATURE]
 
-Forest golem: an iron construct that lives in forest retreats deep in the woods.
+Ancient golem: an iron construct that lives in forest retreats deep in the woods.
 Built from the vanilla bronze colossus's physical model (one metal tissue over
 every part, no organs, no blood, no bones) but INTELLIGENT and civ-capable, so
 they hold sites, take professions and can be played in fort and adventure mode.
@@ -23,8 +23,8 @@ thoughts/needs panels a playable civ is built around.
 
 [CREATURE:HA_FOREST_GOLEM]
 	[DESCRIPTION:A towering figure of wrought iron, grown through with moss and old roots. Something molten glows behind the seams of its chest. Its left hand ends in a bulb of clouded glass.]
-	[NAME:forest golem:forest golems:forest golem]
-	[CASTE_NAME:forest golem:forest golems:forest golem]
+	[NAME:ancient golem:ancient golems:ancient golem]
+	[CASTE_NAME:ancient golem:ancient golems:ancient golem]
 	[CREATURE_TILE:'G'][COLOR:6:0:0]
 	[CREATURE_SOLDIER_TILE:'G']
 	[CREATURE_CLASS:HUMANOID_TRACKING_SYMBOL]

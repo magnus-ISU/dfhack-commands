@@ -2,7 +2,7 @@ graphics_ha_forest_golem
 
 [OBJECT:GRAPHICS]
 
-Forest golem: the bronze colossus 3x2 sprite recoloured iron-gray. It MUST be
+Ancient golem: the bronze colossus 3x2 sprite recoloured iron-gray. It MUST be
 a LAYERED graphic (LAYER_SET + LAYER), not a simple DEFAULT with LARGE_IMAGE:
 DF renders a creature in grayscale whenever it flashes it (status/legendary
 indicator) or it is underwater, but LAYERED graphics are exempt and stay in

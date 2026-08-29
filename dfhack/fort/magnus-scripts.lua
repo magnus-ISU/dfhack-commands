@@ -410,6 +410,12 @@ local COLUMNS = {
         {key = 'embark-map', label = 'adventurer-map',
          enable = overlay_set('enable', 'embark/adventurer-map.map'),
          disable = overlay_set('disable', 'embark/adventurer-map.map')},
+        {key = 'embark-fast-dwarves', label = 'fast-dwarves',
+         enable = overlay_set('enable', 'embark/fast-dwarves.auto'),
+         disable = overlay_set('disable', 'embark/fast-dwarves.auto')},
+        {key = 'embark-extra-info', label = 'extra-info',
+         enable = overlay_set('enable', 'embark/extra-info.panel'),
+         disable = overlay_set('disable', 'embark/extra-info.panel')},
         -- fort/-prefixed but lives here: a title-screen helper, like the rest
         -- of this column it matters before any game is loaded
         {key = 'old-saves', label = 'old-saves',

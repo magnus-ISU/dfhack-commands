@@ -286,6 +286,15 @@ Tracks squads out raiding with a rough ETA, and unsticks them weekly.
 ### **`fort/embark-prep`**
 Prepare-carefully buttons that give a dwarf the office skills, plus a preferences view.
 
+### **`embark/fast-dwarves`**
+Opens a new fortress for you: skips the tutorial prompt, commits a dwarven origin civ, centres
+the map on a scored spot near its halls, and clicks Embark. You place the fortress.
+
+### **`embark/extra-info`**
+Embark-screen panel under DF's own: adamantine, salt or fresh water, the seven commonest stones
+(flux, coal and plaster called out), commonest wood, the wildlife, and **every** civ that can
+reach you — not vanilla's four.
+
 ## One-time-commands
 
 ### **`fort/civilian-militia`**

@@ -2,7 +2,7 @@ tile_page_ha_forest_golem
 
 [OBJECT:TILE_PAGE]
 
-Forest golem art: the vanilla bronze colossus sprites (creatures_megabeast.png,
+Ancient golem art: the vanilla bronze colossus sprites (creatures_megabeast.png,
 its statue sheet and its portrait) recoloured to iron-gray. The PNGs are ours,
 extracted and desaturated -- palette recolouring over a vanilla tile page does
 not work (palettes remap by colour match, so the vanilla bronze would render

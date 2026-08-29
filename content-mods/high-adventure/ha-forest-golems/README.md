@@ -1,4 +1,4 @@
-# HA — Forest Golems
+# HA — Ancient Golems
 
 Ancient iron constructs holding a handful of forest retreats. They start where
 elves start and compete for the same groves, but each civ founds exactly **one**
