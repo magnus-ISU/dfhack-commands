@@ -193,6 +193,19 @@ in the Standing Orders UI. One claim in the header is also unverified: whether D
 with obsidian restricted at all. The world checked had it already free, which would make that
 half of the tool a no-op.
 
+### **`fort/initial-standing-orders` — UNTESTED, never run in a fort**
+Sets the two standing orders a new fort should have started with: children stop hauling refuse
+and corpses (`labor_info.chores[HAUL_REFUSE]` / `[HAUL_BODY]` — DF has no separate burial chore,
+hauling a corpse to its coffin *is* the burial job), and obsidian is released from the fort's
+stone-use restrictions (`plotinfo.economic_stone`). Idempotent, touches nothing else on the
+Standing Orders screen, and `fort/initial-standing-orders status` reports without changing.
+
+The field reads were verified against the running game — `status` prints correct values live —
+but no fort was loaded, so the two **writes** have never executed and nothing has been confirmed
+in the Standing Orders UI. One claim in the header is also unverified: whether DF starts a fort
+with obsidian restricted at all. The world checked had it already free, which would make that
+half of the tool a no-op.
+
 ### **`fort/choose-labor-icon` — UNTESTED, never opened in a fort**
 A picker for a work detail's icon: your details on the left, all nineteen icons on the right,
 drawn as DF draws them (each is a 4x3 tile rectangle on the `INTERFACE_BITS_LABOR` page, at

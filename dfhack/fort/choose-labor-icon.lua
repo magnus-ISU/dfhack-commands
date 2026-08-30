@@ -12,7 +12,23 @@ you click.
     RIGHT  every icon, 4x3 tiles each, the current one framed
 
 Click a detail, click an icon, done -- the change is written straight to
-`work_detail.icon` and shows on the Labor screen immediately.
+`work_detail.icon`.
+
+DF DOES NOT REDRAW ITS OWN LIST
+  Measured on a live fort: setting `work_detail.icon` updates the data and the
+  Labor screen keeps drawing the sprite it drew before. Every visible row was
+  checked against its stored value -- seven matched, and the only ones that did
+  not were the ones changed from outside DF. The list is built with the icon
+  baked in, and nothing tried so far makes DF rebuild it: bouncing
+  `info.cur_idx` to another tab and back, toggling `info.open`, setting and
+  clearing `labor.search_string`, and feeding clicks at the Work Details /
+  Standing orders sub-tabs all left the stale sprite in place. The widget that
+  owns the row is a `shared_ptr` child that DFHack's lua binding will not
+  dereference, so the cached texpos cannot be written directly either.
+
+  So the change IS applied -- the data is correct, and a save and reload shows
+  the right icon -- but the Labor screen may keep showing the old one for the
+  rest of the session. This window's own list always shows the stored truth.
 
     fort/choose-labor-icon
 
@@ -32,6 +48,7 @@ ASCII
 ]]
 
 local gui = require('gui')
+local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 
 -- Tile pages checked before vanilla's for the CUSTOM_1..8 slots, in order. A
@@ -42,7 +59,10 @@ OVERRIDE_PAGES = {'INTERFACE_BITS_LABOR_WD'}
 local VANILLA_PAGE = 'INTERFACE_BITS_LABOR'
 
 local ICON_W, ICON_H = 4, 3          -- every icon is a 4x3 tile rectangle
-local CELL_W, CELL_H = 5, 4          -- plus a one-tile gutter
+-- one tile of border on every side, so the marker for the current icon can be a
+-- box drawn AROUND it. The old marker was an underline along the icon's bottom
+-- row, which painted over the bottom of the art it was pointing at.
+local CELL_W, CELL_H = ICON_W + 2, ICON_H + 2
 local COLS = 5
 local TEXT_CELL_W = 20               -- name-only rows when the sprites do not resolve
 
@@ -115,6 +135,9 @@ IconGrid.ATTRS{
 }
 
 local PEN_BLANK = dfhack.pen.parse{fg = COLOR_WHITE, bg = COLOR_BLACK}
+local CH_NW, CH_NE, CH_SW, CH_SE = string.char(218), string.char(191),
+                                   string.char(192), string.char(217)
+local CH_H, CH_V = string.char(196), string.char(179)
 local PEN_FRAME = dfhack.pen.parse{fg = COLOR_LIGHTGREEN, bg = COLOR_BLACK}
 local PEN_NAME = dfhack.pen.parse{fg = COLOR_GREY, bg = COLOR_BLACK}
 local PEN_NAME_CUR = dfhack.pen.parse{fg = COLOR_LIGHTGREEN, bg = COLOR_BLACK}
@@ -141,9 +164,28 @@ function IconGrid:hit(x, y)
     local cw, ch, cols, gfx = self:geom()
     local col, row = x // cw, y // ch
     if col >= cols then return end
-    if gfx and (x % cw >= ICON_W or y % ch >= ICON_H) then return end   -- gutter
+    -- the whole cell is clickable, border included: a one-tile target ring
+    -- around a 4x3 icon is easier to hit than the icon alone
     local idx = row * cols + col + 1
     if ICONS[idx] then return idx end
+end
+
+-- a box around the icon, in the gutter, touching none of the art
+function IconGrid:draw_border(dc, ox, oy)
+    local x2, y2 = ox + ICON_W + 1, oy + ICON_H + 1
+    dc:pen(PEN_FRAME)
+    dc:seek(ox, oy):char(CH_NW)
+    dc:seek(x2, oy):char(CH_NE)
+    dc:seek(ox, y2):char(CH_SW)
+    dc:seek(x2, y2):char(CH_SE)
+    for dx = 1, ICON_W do
+        dc:seek(ox + dx, oy):char(CH_H)
+        dc:seek(ox + dx, y2):char(CH_H)
+    end
+    for dy = 1, ICON_H do
+        dc:seek(ox, oy + dy):char(CH_V)
+        dc:seek(x2, oy + dy):char(CH_V)
+    end
 end
 
 function IconGrid:onRenderBody(dc)
@@ -157,15 +199,11 @@ function IconGrid:onRenderBody(dc)
                 for dx = 0, ICON_W - 1 do
                     local t = tile_at(entry, dx, dy)
                     if t then
-                        dc:seek(ox + dx, oy + dy):tile(' ', t, PEN_BLANK)
+                        dc:seek(ox + 1 + dx, oy + 1 + dy):tile(' ', t, PEN_BLANK)
                     end
                 end
             end
-            if is_cur then
-                for dx = 0, ICON_W - 1 do
-                    dc:seek(ox + dx, oy + ICON_H - 1):pen(PEN_FRAME):char('_')
-                end
-            end
+            if is_cur then self:draw_border(dc, ox, oy) end
         else
             local label = entry.name == 'NONE' and '(none)' or entry.name:lower()
             dc:seek(ox, oy):pen(is_cur and PEN_NAME_CUR or PEN_NAME)
@@ -191,8 +229,9 @@ end
 ChooseIcon = defclass(ChooseIcon, widgets.Window)
 ChooseIcon.ATTRS{
     frame_title = 'Work detail icons',
-    frame = {w = 62, h = 24},
+    frame = {w = 62, h = 27},
     resizable = true,
+    start_idx = DEFAULT_NIL,   -- work detail to open on, 0-based
 }
 
 function ChooseIcon:init()
@@ -222,6 +261,13 @@ function ChooseIcon:init()
         },
     }
     self:refresh()
+    if self.start_idx then
+        -- rows are built in work_details order, so the list index is the detail
+        -- index plus one; jump the cursor there rather than making the player
+        -- find the detail they were already looking at
+        self.subviews.details:setSelected(self.start_idx + 1)
+        self:show_status()
+    end
 end
 
 function ChooseIcon:selected_detail()
@@ -260,10 +306,99 @@ function ChooseIcon:set_icon(value, name)
     self.subviews.status:setText(('%s: %s'):format(d.name, name))
 end
 
+-- DF's own labor list caches the icon it drew for each row and does not re-read
+-- work_detail.icon afterwards, so a change made here does not show up over
+-- there until DF rebuilds that list -- see the header. This window at least
+-- never lies about the current state: the rows are rebuilt every frame, so the
+-- name beside each detail is always what is actually stored.
+function ChooseIcon:onRenderFrame(dc, rect)
+    ChooseIcon.super.onRenderFrame(self, dc, rect)
+    local sig = {}
+    for i, d in ipairs(work_details()) do
+        sig[#sig + 1] = i .. ':' .. tostring(d.icon)
+    end
+    sig = table.concat(sig, ',')
+    if sig ~= self.last_sig then
+        self.last_sig = sig
+        self:refresh()
+    end
+end
+
 ChooseIconScreen = defclass(ChooseIconScreen, gui.ZScreen)
-ChooseIconScreen.ATTRS{focus_path = 'choose-labor-icon'}
-function ChooseIconScreen:init() self:addviews{ChooseIcon{}} end
+ChooseIconScreen.ATTRS{
+    focus_path = 'choose-labor-icon',
+    start_idx = DEFAULT_NIL,
+    pass_movement_keys = true,
+}
+function ChooseIconScreen:init()
+    self:addviews{ChooseIcon{start_idx = self.start_idx}}
+end
 function ChooseIconScreen:onDismiss() view = nil end
+
+
+-- ---------------------------------------------------------------------------
+-- [Change Icon] button on the work detail screen
+-- ---------------------------------------------------------------------------
+--
+-- DF draws the selected detail's own icon and the configure gear as two 4x3
+-- sprites on the work detail header row; this sits immediately right of them.
+--
+-- Which detail is selected cannot be read from the game state on this build:
+-- main_interface.info.labor is a widget whose children are shared_ptrs that
+-- DFHack's lua binding cannot dereference, and df-structures has mapped only
+-- the generic widget fields on labor_work_details_interfacest -- no selection
+-- index exists to read. So the name DF prints on that header row is read off
+-- the screen instead and matched against plotinfo.labor_info.work_details.
+-- Renaming two details to the same string makes the first one win; nothing
+-- worse happens.
+local HEADER_ROW = 11        -- 0-based screen row DF draws the header on
+local NAME_START = 39        -- where the detail name begins on that row
+
+local function read_row_text(y, x1, x2)
+    local chars = {}
+    for x = x1, x2 do
+        local ok, pen = pcall(dfhack.screen.readTile, x, y)
+        local ch = (ok and pen and pen.ch) or 0
+        chars[#chars + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    end
+    return (table.concat(chars):gsub('%s+$', ''):gsub('^%s+', ''))
+end
+
+-- index (0-based) of the work detail whose name DF is showing, or nil
+function selected_detail_idx()
+    local name = read_row_text(HEADER_ROW, NAME_START, NAME_START + 40)
+    if #name == 0 then return end
+    for i, d in ipairs(work_details()) do
+        if d.name == name then return i end
+    end
+end
+
+ChangeIconOverlay = defclass(ChangeIconOverlay, overlay.OverlayWidget)
+ChangeIconOverlay.ATTRS{
+    desc = 'Adds a [Change Icon] button to the work detail screen.',
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Info/LABOR/WORK_DETAILS',
+    default_pos = {x = 90, y = 12},
+    frame = {w = 13, h = 1},
+}
+
+local PEN_BUTTON = dfhack.pen.parse{fg = COLOR_LIGHTCYAN, bg = COLOR_BLACK}
+
+function ChangeIconOverlay:onRenderBody(dc)
+    dc:seek(0, 0):pen(PEN_BUTTON):string('[Change Icon]')
+end
+
+function ChangeIconOverlay:onInput(keys)
+    if not keys._MOUSE_L then return false end
+    if not self:getMousePos() then return false end
+    if #work_details() == 0 then return false end
+    if view then view:raise() else
+        view = ChooseIconScreen{start_idx = selected_detail_idx()}:show()
+    end
+    return true
+end
+
+OVERLAY_WIDGETS = {button = ChangeIconOverlay}
 
 if dfhack_flags and dfhack_flags.module then return end
 
@@ -274,4 +409,5 @@ if #work_details() == 0 then
     qerror('this fort has no work details yet')
 end
 
-view = view and view:raise() or ChooseIconScreen{}:show()
+view = view and view:raise()
+    or ChooseIconScreen{start_idx = selected_detail_idx()}:show()
