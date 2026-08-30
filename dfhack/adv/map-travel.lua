@@ -31,8 +31,22 @@ changing, the journey aborts with a console note rather than wander.
 - The greater map (`m`) is left alone.
 
 Screen decoding as in adv/read-the-map: the map renders through
-`gps.main_map_port` in square cells of window_px_width/dim_x pixels, and the
-player is always drawn at the center cell `(screen_x, screen_y)`.
+`gps.main_map_port`, a `dim_x x dim_y` grid of cells, and the player is drawn
+at the CENTRE of that grid, `(dim_x//2, dim_y//2)`.
+
+Two things here were wrong for anyone whose display is not the one this was
+written on, and both misplace clicks rather than failing outright:
+
+- The cell size was taken from the x axis alone and reused for y. That needs
+  square pixel cells and a window that is a whole number of tiles wide. An
+  ASCII font is usually taller than it is wide, so the vertical decode slipped
+  further with every row down the screen; a rescaled window loses the
+  remainder. Each axis is now measured on its own from `gps.screen_pixel_x/y`.
+- The player's draw cell was read from `mp.screen_x/screen_y`. That pair
+  belongs to the LOCAL map and drifts from the grid centre as soon as the local
+  camera clamps at a map edge -- inside a site, everything was offset by the
+  drift. adv/read-the-map hit this and verified the centre against
+  `screentexpos_army`; this now uses the centre too.
 
 What sits at that center cell is NOT always the player army.  DF creates the
 army only once the journey starts; on a travel map you have just opened,
@@ -94,20 +108,51 @@ local function cell_scale()
     return df.global.adventure.site_level_zoom ~= 0 and 1 or 3
 end
 
+-- Port geometry: pixels per map cell, measured PER AXIS.
+--
+-- The old decode took one cell size from the x axis -- (dimx * tile_pixel_x) //
+-- dim_x -- and used it for both. That holds only where cells are square in
+-- pixels AND the window is an exact multiple of the tile size. Neither is
+-- guaranteed: an ASCII font is typically taller than it is wide (8x12), so the
+-- vertical decode drifts one cell further off for every ~2 rows down the screen,
+-- which is why a click near the top lands right and one near the bottom does
+-- not. Reconstructing the window width from dimx * tile_pixel_x also throws away
+-- the remainder on a window that is not a whole number of tiles wide -- the
+-- "weirdly scaled screen" case. gps.screen_pixel_x/y is the real pixel size, so
+-- divide each axis by its own dimension and let the rounding fall where DF put
+-- it.
+local function cell_px()
+    local gps = df.global.gps
+    local mp = gps.main_map_port
+    if not mp or mp.dim_x <= 0 or mp.dim_y <= 0 then return end
+    local w = gps.screen_pixel_x > 0 and gps.screen_pixel_x or gps.dimx * gps.tile_pixel_x
+    local h = gps.screen_pixel_y > 0 and gps.screen_pixel_y or gps.dimy * gps.tile_pixel_y
+    return mp, math.max(1, w // mp.dim_x), math.max(1, h // mp.dim_y)
+end
+
 -- mouse position -> map-port cell, or nil off the map / in the edge guard
 local function mouse_cell(guard)
     local gps = df.global.gps
-    local mp = gps.main_map_port
-    if mp.dim_x <= 0 or mp.dim_y <= 0 then return end
-    local cellpx = math.max(1, (gps.dimx * gps.tile_pixel_x) // mp.dim_x)
-    local cx = gps.precise_mouse_x // cellpx
-    local cy = gps.precise_mouse_y // cellpx
+    local mp, cw, ch = cell_px()
+    if not mp then return end
+    local cx = gps.precise_mouse_x // cw
+    local cy = gps.precise_mouse_y // ch
     if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
     if guard and (cx < EDGE_GUARD or cx >= mp.dim_x - EDGE_GUARD
             or cy < EDGE_GUARD or cy >= mp.dim_y - EDGE_GUARD) then
         return
     end
     return cx, cy
+end
+
+-- The cell the player is drawn in: the CENTRE OF THE GRID, not mp.screen_x/y.
+-- That pair is the LOCAL map's player-draw cell; it equals the centre only while
+-- the local camera is free to recentre, and drifts once the local view clamps at
+-- a map edge (read (62,40) against a marker at (60,33) inside a site). Every
+-- click and the destination X were offset by that drift. adv/read-the-map hit
+-- the same bug and verified the centre against screentexpos_army.
+local function center_cell(mp)
+    return mp.dim_x // 2, mp.dim_y // 2
 end
 
 local function stop_journey(why)
@@ -178,10 +223,11 @@ function MapTravel:onInput(keys)
         local cx, cy = mouse_cell(true)     -- guarded: edge clicks fall through
         if not cx then return false end
         local mp = df.global.gps.main_map_port
+        local ccx, ccy = center_cell(mp)
         local s = cell_scale()
         dest = {
-            ax = ax + (cx - mp.screen_x) * s,
-            ay = ay + (cy - mp.screen_y) * s,
+            ax = ax + (cx - ccx) * s,
+            ay = ay + (cy - ccy) * s,
         }
         stuck, last_pos, next_step_at = 0, nil, 0
         return true
@@ -199,15 +245,17 @@ function MapTravel:onRenderFrame(dc, rect)
         local ax, ay = center_pos()
         if not ax then return end
         local gps = df.global.gps
-        local mp = gps.main_map_port
+        local mp, cw, chp = cell_px()
+        if not mp then return end
         local s = cell_scale()
-        local cellpx = math.max(1, (gps.dimx * gps.tile_pixel_x) // mp.dim_x)
-        local cx = mp.screen_x + (dest.ax // s - ax // s)
-        local cy = mp.screen_y + (dest.ay // s - ay // s)
+        local ccx, ccy = center_cell(mp)
+        local cx = ccx + (dest.ax // s - ax // s)
+        local cy = ccy + (dest.ay // s - ay // s)
         if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
-        -- map cells span cellpx/tile_pixel text cells; mark the cell's middle
-        local tx = (cx * cellpx + cellpx // 2) // gps.tile_pixel_x
-        local ty = (cy * cellpx + cellpx // 2) // gps.tile_pixel_y
+        -- map cells span cw/ch pixels; mark the middle of the cell, converted to
+        -- text cells on each axis with that axis's own tile size
+        local tx = (cx * cw + cw // 2) // gps.tile_pixel_x
+        local ty = (cy * chp + chp // 2) // gps.tile_pixel_y
         dfhack.screen.paintString(PEN_MARK, tx, ty, 'X')
     end)
 end
