@@ -12,6 +12,10 @@ hovering the lesser map pops a tooltip for whatever your cursor is directly
 over -- any site whose footprint covers the hovered tile, plus any army
 standing there.
 
+Nothing is shown while the cursor sits in the outer SIX screen tiles on any
+side.  DF's own travel interface lives in that band, and a card drawn over it
+hides controls you are about to click.
+
 Site cards lead with the occupier's race, so a conquered site reads as such
 ("Human Dark Fortress: ..." for a taken pit):
 
@@ -117,6 +121,7 @@ local MAX_DWELLERS = 3     -- lair dwellers shown
 local MAX_ARMY_NAMES = 3   -- named army members shown
 local LEGEND_PTS = 15000   -- worldgen skill points = level x 1000; 15 = Legendary
 local MAX_WIDTH = 90       -- tooltip line clamp, in text cells (full titled-dragon headlines fit)
+local BORDER_TILES = 6     -- dead band, in screen tiles, along every screen edge
 
 -- world_site_type -> what a player calls it ("LairShrine" is the lair marker;
 -- Monument is resolved by monument_kind below)
@@ -818,6 +823,14 @@ local function paint()
     local ax, ay = center_pos()
     if not ax then return end
     local gps = df.global.gps
+    -- Nothing is identified while the cursor is in the outer BORDER_TILES band of
+    -- the screen. That band is where DF's own travel interface lives -- the
+    -- buttons, the sleep/wait row, the DFHack overlay launcher -- and a card
+    -- popping up over them makes them unreadable and unclickable.
+    if gps.mouse_x < BORDER_TILES or gps.mouse_x >= gps.dimx - BORDER_TILES
+            or gps.mouse_y < BORDER_TILES or gps.mouse_y >= gps.dimy - BORDER_TILES then
+        return
+    end
     local mp = gps.main_map_port
     if mp.dim_x <= 0 or mp.dim_y <= 0 then return end
     -- map cells are square: window pixel width / dim_x (16px at this window size)
