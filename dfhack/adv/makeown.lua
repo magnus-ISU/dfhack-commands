@@ -94,10 +94,23 @@ local function is_animal(unit)
     return not (flags.CAN_SPEAK or flags.CAN_LEARN)
 end
 
+-- create_nemesis(important, inplay, just_born). The third argument is newer than
+-- stock bodyswap.lua's two-argument call, and DFHack's lua binding rejects a wrong
+-- argument count outright ("cannot invoke unit.create_nemesis(): invalid argument
+-- count"), so try the current signature first and fall back to the old one rather
+-- than pinning either.
+local function create_nemesis(unit)
+    local ok, nem = pcall(function() return unit:create_nemesis(1, 1, false) end)
+    if ok then return nem end
+    local ok2, nem2 = pcall(function() return unit:create_nemesis(1, 1) end)
+    if ok2 then return nem2 end
+    qerror('create_nemesis failed on this DFHack build: ' .. tostring(nem))
+end
+
 local function get_or_create_nemesis(unit)
     local nem = dfhack.units.getNemesis(unit)
     if nem then return nem end
-    nem = unit:create_nemesis(1, 1)
+    nem = create_nemesis(unit)
     if nem and nem.figure then
         nem.figure.flags.never_cull = true
     end
