@@ -128,6 +128,35 @@ real armies, one of them 70 strong.
 A retry would need a positive test for "this member is a corpse, not an animated corpse", and a
 concrete symptom it repairs.
 
+### **`fort/initial-standing-orders` — UNTESTED, never run in a fort**
+Sets the two standing orders a new fort should have started with: children stop hauling refuse
+and corpses (`labor_info.chores[HAUL_REFUSE]` / `[HAUL_BODY]` — DF has no separate burial chore,
+hauling a corpse to its coffin *is* the burial job), and obsidian is released from the fort's
+stone-use restrictions (`plotinfo.economic_stone`). Idempotent, touches nothing else on the
+Standing Orders screen, and `fort/initial-standing-orders status` reports without changing.
+
+The field reads were verified against the running game — `status` prints correct values live —
+but no fort was loaded, so the two **writes** have never executed and nothing has been confirmed
+in the Standing Orders UI. One claim in the header is also unverified: whether DF starts a fort
+with obsidian restricted at all. The world checked had it already free, which would make that
+half of the tool a no-op.
+
+### **`fort/choose-labor-icon` — UNTESTED, never opened in a fort**
+A picker for a work detail's icon: your details on the left, all nineteen icons on the right,
+drawn as DF draws them (each is a 4x3 tile rectangle on the `INTERFACE_BITS_LABOR` page, at
+coordinates read out of vanilla's `graphics_interface.txt`). Click a detail, click an icon, and
+`work_detail.icon` is written. `OVERRIDE_PAGES` lists tile pages consulted before vanilla's for
+the `CUSTOM_1..8` slots, so a mod that rebinds those identifiers — the Steam Workshop *Work
+Detail Icons* mod is the one it ships knowing about — shows its art in the picker too.
+
+**Two reasons it is here.** No fort was loaded while it was written, so the window has never
+been opened: the list, the click targets and the write are unverified. Worse, on the machine it
+was written on `dfhack.screen.findGraphicsTile` returned nil for *every* page tried, including
+`CURSORS`, which stock scripts use successfully — so the sprite path may never run and the
+picker may always fall back to its name-only list. That fallback is functional (same clicks,
+same result) but it is not what the tool is for. Confirm in a fort, in graphics mode, before
+promoting this.
+
 ### **`fort/noble-warriors`**
 Assigns each fort noble's symbols of office as specific items in their squad uniform, so
 nobles wear their regalia into battle. Implemented and verified live, but **parked pending a

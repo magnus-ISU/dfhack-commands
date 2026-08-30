@@ -256,8 +256,9 @@ the rest, commonest wood, the wildlife, and **every** civ that can reach you —
 ### **`embark/assistant`**
 Site finder, replacing the retired `embark-assistant` plugin. Bare `embark/assistant` opens a
 window: type filters, press Enter, press Enter on a result to jump the map there. Filters cover
-flux, coal, plaster, ore, soil, rivers, aquifers, volcanoes, biome, savagery, evil, neighbouring
-civs and towers. `s` runs an ~11 s survey that adds **magma pools by cavern level**, which is not
+flux, coal, plaster, named metals and minerals, sand, clay, soil, rivers, aquifers, volcanoes,
+biome, tree density, freezing, evil weather, savagery, evil, and neighbouring civs and towers by
+name or count. `s` runs an ~11 s survey that adds **magma pools by cavern level**, which is not
 world-wide data. Also works from the console — `embark/assistant help`.
 
 ## One-time-commands

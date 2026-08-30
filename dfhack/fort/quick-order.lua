@@ -765,7 +765,14 @@ local function stock_counts(class, constraint)
                      and df.inorganic_raw.find(it.mat_index).material.flags.IS_METAL))
             then
                 fallback[it.mat_index] = (fallback[it.mat_index] or 0) + it.stack_size
-                if not (econ and econ[it.mat_index]) then
+                -- economic_stone holds 0/1, not booleans, and 0 is TRUTHY in Lua:
+                -- `not econ[i]` was false for every stone, so counts stayed empty
+                -- and every stone order fell through to the fallback tally --
+                -- which is the one that still contains the restricted ores, flux
+                -- and gems this split exists to avoid. Compare against 1.
+                local restricted = econ and it.mat_index < #econ
+                    and econ[it.mat_index] == 1
+                if not restricted then
                     counts[it.mat_index] = (counts[it.mat_index] or 0) + it.stack_size
                 end
             end

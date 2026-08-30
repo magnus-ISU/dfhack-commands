@@ -22,11 +22,20 @@ Filters (all AND-ed, all optional)
     river / brook   running water on the tile
     fresh           salinity under 33 and not an ocean tile
     soilN           at least N soil layers, e.g. soil3
-    biome=<Name>    Swamp Desert Forest Mountains Ocean Lake Glacier Tundra
+    biome=<Name,...> Swamp Desert Forest Mountains Ocean Lake Glacier Tundra
                     Grassland Hills
+    sand / nosand / clay / noclay
+    metal= / mineral= / economic=   by raw id, comma separated
+    maxsoilN                 at most N soil layers
+    trees=N / maxtrees=N     density band 0 none .. 4 heavily forested
+    freezing / somefreeze / nofreeze
+    blood / syndrome / reanimating / noevilweather
+    midsavage / midevil      the middle band
+    nonear=<RACE>            that race NOT in range
+    civs= / maxcivs= / towers= / maxtowers=
     aquifer / lightaq / noaquifer
     volcano / volcanoN      a volcano on the tile, or within N tiles
-    magma / magmaN          magma pool (needs `survey`); magma1 = cavern 1
+    magma / magmaN / maxmagmaN   magma pool (needs `survey`); magma1 = cavern 1
     calm / savage   savagery under 33 / 66 and over
     good / evil     evilness under 33 / 66 and over
     near=<RACE>     a civilization of that creature id with a site within 30
@@ -69,6 +78,24 @@ it has to be resolved per embark tile through `region_details` -- and at
 world-tile granularity the answer is "yes" almost everywhere (1,648 of 1,648
 embarkable tiles in the test world), which makes it useless as a filter.
 `embark/extra-info` answers it for the rectangle you actually pick.
+
+Still missing against the original
+----------------------------------
+Everything left needs per-embark-tile data -- `region_details`, one world tile at
+a time -- which is the walk this deliberately does not do:
+
+- **river size** (brook / stream / minor / medium / major) and **waterfall
+  height**: from `rivers_vertical/horizontal` widths and elevation deltas.  Only
+  river/brook presence is available world-wide.
+- **flat**, and "N soil *everywhere*" rather than somewhere: both need the
+  elevation and soil of each embark tile.
+- **biome count** on the embark, and matching against your chosen `x_dim`/`y_dim`
+  rectangle.  The original scored the actual rectangle; this scores whole world
+  tiles.
+- **`biome_type`** (51 values, "Temperate Broadleaf Forest") as opposed to
+  `world_region_type` (10 values, "Forest"), which is what `biome=` filters on.
+  The fine-grained one is per embark tile.
+- **adamantine spire count** -- see above for why adamantine is not here at all.
 
 Speed comes from the same observation: geology is per `geo_index`, not per tile,
 and a world has a few dozen of those against thousands of tiles.  Every column is
@@ -127,18 +154,38 @@ end
 -- One pass over every geology column in the world, classified into the handful
 -- of yes/no answers the filters ask about.  A world has a few dozen columns and
 -- thousands of tiles pointing at them, so this is the whole performance story.
+-- The reaction index that marks a stone as clay-bearing.  The original plugin
+-- looked up MAKE_CLAY_BRICKS in `economic_uses` exactly like this.
+local function clay_reaction()
+    for i, r in ipairs(df.global.world.raws.reactions.reactions) do
+        if r.code == 'MAKE_CLAY_BRICKS' then return i - 1 end
+    end
+end
+
+local SOIL_LAYERS = {SOIL = true, SOIL_OCEAN = true, SOIL_SAND = true}
+
+-- One pass over every geology column in the world, classified into the answers
+-- the filters ask about.  A world has a few dozen columns and thousands of tiles
+-- pointing at them, so this is the whole performance story.
+--
+-- `metals` is keyed by the metal an ore YIELDS, not by the ore: DF records that
+-- on the ore as `metal_ore.mat_index`, so hematite contributes IRON.  `minerals`
+-- is every layer or vein stone by id, and `economics` is anything with a
+-- non-empty `economic_uses`.  All three are the original plugin's definitions.
 local function classify_geology()
     local inor = df.global.world.raws.inorganics.all
+    local clay_rx = clay_reaction()
     local out = {}
     local biomes = wd().geo_biomes
     for gi = 0, #biomes - 1 do
         local g = {flux = false, coal = false, casts = false, ore = false, soil = 0,
-                   aquifer = false, aq_heavy = false}
+                   aquifer = false, aq_heavy = false, sand = false, clay = false,
+                   metals = {}, minerals = {}, economics = {}}
         pcall(function()
             local gb = biomes[gi]
             for i = 0, #gb.layers - 1 do
                 local L = gb.layers[i]
-                local is_soil = df.geo_layer_type[L.type] == 'SOIL'
+                local is_soil = SOIL_LAYERS[df.geo_layer_type[L.type]] or false
                 if is_soil then g.soil = g.soil + 1 end
                 -- the old plugin's rule: a layer bottoming at -3 or deeper whose
                 -- stone carries the AQUIFER flag.  A non-soil one is the heavy
@@ -148,15 +195,31 @@ local function classify_geology()
                     g.aquifer = true
                     if not is_soil then g.aq_heavy = true end
                 end
+                if is_soil and lm and lm.flags and lm.flags.SOIL_SAND then
+                    g.sand = true
+                end
                 local mats = {L.mat_index}
                 for j = 0, #L.vein_mat - 1 do mats[#mats + 1] = L.vein_mat[j] end
                 for _, idx in ipairs(mats) do
                     local m = idx >= 0 and inor[idx]
                     if m then
+                        g.minerals[m.id] = true
                         if has_class(m, 'FLUX') then g.flux = true end
                         if has_class(m, 'GYPSUM') then g.casts = true end
                         if COAL_IDS[m.id] then g.coal = true end
                         if m.flags and m.flags.METAL_ORE then g.ore = true end
+                        if #m.economic_uses > 0 then
+                            g.economics[m.id] = true
+                            for e = 0, #m.economic_uses - 1 do
+                                if clay_rx and m.economic_uses[e] == clay_rx then
+                                    g.clay = true
+                                end
+                            end
+                        end
+                        for e = 0, #m.metal_ore.mat_index - 1 do
+                            local mm = inor[m.metal_ore.mat_index[e]]
+                            if mm then g.metals[mm.id] = true end
+                        end
                     end
                 end
             end
@@ -169,6 +232,68 @@ end
 local function landmass_at(wx, wy)
     local rme = region_entry(wx, wy)
     return rme and rme.landmass_id or nil
+end
+
+-- Blood rain, syndrome rain, thralling and reanimation, per world REGION.  DF
+-- keeps these as `world.interaction_instances`, each naming a region, so this is
+-- world-wide and costs one pass -- the original plugin's `survey_evil_weather`
+-- by the same route.  A corpse-target ANIMATE effect is reanimation; a material
+-- target whose syndrome flashes a tile is thralling; other syndrome effects are
+-- syndrome rain; anything else from a REGION source is blood rain.
+local function survey_weather()
+    local out = {}
+    local ok, err = pcall(function()
+        local raws = df.global.world.raws
+        for _, inst in ipairs(df.global.world.interaction_instances.all) do
+            -- `interactions` is a handler, not a vector, and the region moved
+            -- into `source_context` -- the original plugin read
+            -- `instance->region_index` directly, which no longer exists here.
+            local ir = raws.interactions.all[inst.interaction_id]
+            local ri = inst.source_context.region_index
+            if ir and ri >= 0 and #ir.sources > 0
+                and df.interaction_source_type[ir.sources[0]:getType()] == 'REGION'
+            then
+                local w = out[ri] or {}
+                local classified = false
+                for _, tgt in ipairs(ir.targets) do
+                    local tt = df.interaction_target_type[tgt:getType()]
+                    if tt == 'CORPSE' then
+                        for _, ef in ipairs(ir.effects) do
+                            if df.interaction_effect_type[ef:getType()] == 'ANIMATE' then
+                                w.reanimating = true
+                                classified = true
+                            end
+                        end
+                    elseif tt == 'MATERIAL' then
+                        -- Syndrome rain is an INORGANIC material carrying
+                        -- syndromes -- the original checked isInorganic() for
+                        -- exactly this reason.  A creature material here is the
+                        -- rain itself, so blood is blood.  (`material.syndrome`
+                        -- is only a vector on inorganics; on a creature material
+                        -- it is a different struct entirely, and taking its
+                        -- length throws.)
+                        local mi = dfhack.matinfo.decode(tgt.mat_type, tgt.mat_index)
+                        if mi and mi.inorganic then
+                            local syn = mi.inorganic.material.syndrome
+                            if #syn > 0 then
+                                w.syndrome = true
+                                classified = true
+                            end
+                        elseif mi and mi.creature then
+                            w.blood = true
+                            classified = true
+                        end
+                    end
+                end
+                if not classified then w.blood = true end
+                out[ri] = w
+            end
+        end
+    end)
+    if not ok then
+        dfhack.printerr('embark/assistant: weather survey failed: ' .. tostring(err))
+    end
+    return out
 end
 
 -- Volcanoes are world-wide data and cost nothing: DF keeps every named peak in
@@ -391,6 +516,71 @@ function deep_survey(cont)
     end)
 end
 
+-- The original's tree bands, off `region_map_entry.vegetation`: 0 none, 1-9 very
+-- scarce, 10-32 scarce, 33-65 woodland, 66+ heavily forested -- and always none
+-- on glacier, lake, mountain or ocean.
+-- Freezing, the original plugin's model.  `region_map_entry.temperature` is a
+-- -60..100 scale, not Urists, and 0 is the freezing point; the summer maximum is
+-- a 3/4 scaling of it and the winter minimum drops away from that by latitude,
+-- with per-world-height divisors DF does not expose (hence the table).  A world
+-- of a non-standard height has no formula, so it is treated as never thawing
+-- below its maximum -- same as the original.
+local function max_temperature(t)
+    local neg = t < 0
+    if neg then t = -t end
+    local m = (t // 4) * 3
+    if t % 4 > 1 then m = m + t % 4 - 1 end
+    return neg and -m or m
+end
+
+local function min_temperature(maxt, latitude)
+    local w = wd()
+    -- the field is `pole_type`: None / North / South / Both
+    local flip = df.pole_type[w.flip_latitude]
+    if flip == 'None' then return maxt end
+    local steps, lat
+    if flip == 'North' or flip == 'South' then
+        steps = w.world_height // 2
+        lat = (latitude > steps) and (w.world_height - 1 - latitude) or latitude
+    else
+        steps = w.world_height // 4
+        if latitude < steps then lat = latitude
+        elseif latitude <= steps * 2 then lat = steps * 2 - latitude
+        elseif latitude <= steps * 3 then lat = latitude - steps * 2
+        else lat = w.world_height - latitude end
+    end
+    if steps == 0 then return maxt end
+    local divisor
+    local h = w.world_height
+    if h == 17 then divisor = math.floor((lat * 57) / steps + 0.4)
+    elseif h == 33 then divisor = math.floor((lat * 61) / steps + 0.1)
+    elseif h == 65 then divisor = (lat * 63) // steps
+    elseif h == 129 or h == 257 then divisor = (lat * 64) // steps
+    else return maxt end
+    return maxt - math.ceil(divisor * 3 / 4)
+end
+
+-- 'permanent' = never thaws, 'never' = never freezes, 'partial' = seasonal
+local function freeze_band(temp, wy)
+    local hi = max_temperature(temp)
+    local lo = min_temperature(hi, wy)
+    if hi <= 0 then return 'permanent' end
+    if lo > 0 then return 'never' end
+    return 'partial'
+end
+
+local TREELESS = {Glacier = true, Lake = true, Mountains = true, Ocean = true}
+local function tree_level(region_type, vegetation)
+    if TREELESS[region_type] then return 0 end
+    if vegetation == 0 then return 0 end
+    if vegetation <= 9 then return 1 end
+    if vegetation <= 32 then return 2 end
+    if vegetation <= 65 then return 3 end
+    return 4
+end
+local TREE_WORD = {[0] = 'no trees', 'very scarce trees', 'scarce trees',
+                   'woodland', 'heavily forested'}
+
 -- ---- filters -----------------------------------------------------------------
 
 local USAGE = [=[
@@ -406,8 +596,14 @@ Filters are AND-ed; with none at all it simply ranks the whole world.
   Underground        flux      a flux stone in the column (steel)
                      coal      lignite or bituminous coal (fuel, no magma needed)
                      casts     a GYPSUM stone (plaster, so casts for broken bones)
-                     ore       an economic metal ore in the veins
-                     soilN     at least N soil layers, e.g. soil3
+                     ore       any economic metal ore in the veins
+                     sand / nosand      sand (glass)
+                     clay / noclay      clay-bearing stone
+                     metal=X,Y          ore yielding these metals, e.g.
+                                        metal=IRON,SILVER  (all of them)
+                     mineral=X,Y        these stones present, by raw id
+                     economic=X,Y       these economic stones, by raw id
+                     soilN / maxsoilN   at least / at most N soil layers
   Water              river     a river on the tile
                      brook     a brook on the tile
                      fresh     salinity under 33 and not ocean
@@ -419,19 +615,30 @@ Filters are AND-ed; with none at all it simply ranks the whole world.
                      magma     any magma pool           }  these two need
                      magmaN    a pool reaching cavern N  }  "survey" first
                                magma1 = up in cavern 1 (best), magma3 = anywhere
-  Surroundings       biome=X   Swamp Desert Forest Mountains Ocean Lake
-                               Glacier Tundra Steppe Grassland Hills
-                     calm      savagery under 33
-                     savage    savagery 66 and over
-                     good      evilness under 33
-                     evil      evilness 66 and over
-  Neighbours         near=RACE a civ of that creature id with a site within 30
-                               world tiles -- near=DWARF is your caravan
-                     notower   no necromancer tower within its 10-tile reach
+                     maxmagmaN no shallower than cavern N
+  Surroundings       biome=X,Y Swamp Desert Forest Mountains Ocean Lake
+                               Glacier Tundra Grassland Hills (any of them)
+                     calm / midsavage / savage   savagery band
+                     good / midevil / evil       evilness band
+                     trees=N / maxtrees=N  density band 0-4: none, very
+                                        scarce, scarce, woodland, heavily
+                                        forested
+                     freezing   frozen all year
+                     somefreeze freezes at least in winter
+                     nofreeze   never freezes
+                     blood / syndrome / reanimating  evil weather here
+                     noevilweather   none of those
+  Neighbours         near=RACE   a civ of that creature id with a site within
+                                 30 world tiles -- near=DWARF is your caravan
+                     nonear=RACE that race NOT in range
+                     civs=N / maxcivs=N       how many civs in range
+                     towers=N / maxtowers=N   how many necro towers in range
+                     notower     no necromancer tower within its 10-tile reach
   Output             n=<count> how many to print (default 10)
 
 Examples:
-  embark/assistant flux coal river fresh noaquifer
+  embark/assistant flux coal river fresh noaquifer sand clay
+  embark/assistant metal=IRON,SILVER trees=3 nofreeze
   embark/assistant biome=Forest soil3 calm near=DWARF notower
   embark/assistant volcano                 -- embark on the volcano itself
   embark/assistant survey                  -- then:
@@ -452,10 +659,29 @@ function parse(args)
     local f = {n = 10}
     for _, a in ipairs(args) do
         local k, v = a:match('^(%w+)=(.+)$')
-        if k == 'biome' then f.biome = v
+        if k == 'biome' then
+            f.biomes = {}
+            for one in v:gmatch('[^,]+') do f.biomes[one] = true end
         elseif k == 'near' then f.near = v:upper()
+        elseif k == 'nonear' then f.nonear = v:upper()
+        elseif k == 'metal' then
+            f.metals = {}
+            for one in v:upper():gmatch('[^,]+') do f.metals[#f.metals + 1] = one end
+        elseif k == 'mineral' then
+            f.minerals = {}
+            for one in v:upper():gmatch('[^,]+') do f.minerals[#f.minerals + 1] = one end
+        elseif k == 'economic' then
+            f.economics = {}
+            for one in v:upper():gmatch('[^,]+') do f.economics[#f.economics + 1] = one end
+        elseif k == 'civs' then f.civs_min = tonumber(v)
+        elseif k == 'maxcivs' then f.civs_max = tonumber(v)
+        elseif k == 'towers' then f.towers_min = tonumber(v)
+        elseif k == 'maxtowers' then f.towers_max = tonumber(v)
+        elseif k == 'trees' then f.trees_min = tonumber(v)
+        elseif k == 'maxtrees' then f.trees_max = tonumber(v)
         elseif k == 'n' then f.n = tonumber(v) or 10
         elseif a:match('^soil%d+$') then f.soil = tonumber(a:match('%d+'))
+        elseif a:match('^maxsoil%d+$') then f.soil_max = tonumber(a:match('%d+'))
         elseif a:match('^magma%d$') then
             -- the argument is a CAVERN number (1 shallowest), the internal
             -- level is 2 - start_depth (cavern 1 -> 2), so they invert
@@ -467,10 +693,20 @@ function parse(args)
         elseif a:match('^volcano%d+$') then f.volcano = tonumber(a:match('%d+'))
         elseif a == 'volcano' then f.volcano = 0
         elseif a == 'magma' then f.magma = 0   -- any pool at all
+        elseif a:match('^maxmagma%d$') then
+            local cav = tonumber(a:match('%d'))
+            if cav < 1 or cav > 3 then
+                qerror('embark/assistant: maxmagmaN takes a cavern 1-3.')
+            end
+            f.magma_max = 3 - cav
         elseif a == 'flux' or a == 'coal' or a == 'casts' or a == 'ore'
             or a == 'river' or a == 'brook' or a == 'fresh' or a == 'calm'
             or a == 'savage' or a == 'good' or a == 'evil' or a == 'notower'
             or a == 'aquifer' or a == 'noaquifer' or a == 'lightaq'
+            or a == 'sand' or a == 'nosand' or a == 'clay' or a == 'noclay'
+            or a == 'freezing' or a == 'somefreeze' or a == 'nofreeze'
+            or a == 'blood' or a == 'syndrome' or a == 'reanimating'
+            or a == 'noevilweather' or a == 'midsavage' or a == 'midevil'
         then f[a] = true
         else
             usage()
@@ -487,6 +723,7 @@ function sweep(f)
     local geo = classify_geology()
     local civs, towers = survey_sites()
     local volcanoes = volcano_peaks()
+    local weather = survey_weather()
     local needs_deep = f.magma ~= nil
     local W, H = w.world_width, w.world_height
 
@@ -524,14 +761,49 @@ function sweep(f)
                 if f.river and not river then keep = false end
                 if f.brook and not brook then keep = false end
                 if f.fresh and (rme.salinity >= 33 or t == 'Ocean') then keep = false end
-                if f.biome and t ~= f.biome then keep = false end
+                if f.biomes and not f.biomes[t] then keep = false end
+                if f.sand and not g.sand then keep = false end
+                if f.nosand and g.sand then keep = false end
+                if f.clay and not g.clay then keep = false end
+                if f.noclay and g.clay then keep = false end
+                if f.soil_max and g.soil > f.soil_max then keep = false end
+                if f.metals then
+                    for _, id in ipairs(f.metals) do
+                        if not g.metals[id] then keep = false end end
+                end
+                if f.minerals then
+                    for _, id in ipairs(f.minerals) do
+                        if not g.minerals[id] then keep = false end end
+                end
+                if f.economics then
+                    for _, id in ipairs(f.economics) do
+                        if not g.economics[id] then keep = false end end
+                end
                 if f.aquifer and not g.aquifer then keep = false end
                 if f.noaquifer and g.aquifer then keep = false end
                 if f.lightaq and (not g.aquifer or g.aq_heavy) then keep = false end
                 if f.calm and rme.savagery >= 33 then keep = false end
+                if f.midsavage and (rme.savagery < 33 or rme.savagery >= 66) then
+                    keep = false end
                 if f.savage and rme.savagery < 66 then keep = false end
                 if f.good and rme.evilness >= 33 then keep = false end
+                if f.midevil and (rme.evilness < 33 or rme.evilness >= 66) then
+                    keep = false end
                 if f.evil and rme.evilness < 66 then keep = false end
+                local fz = freeze_band(rme.temperature, wy)
+                if f.freezing and fz ~= 'permanent' then keep = false end
+                if f.somefreeze and fz == 'never' then keep = false end
+                if f.nofreeze and fz ~= 'never' then keep = false end
+
+                local tl = tree_level(t, rme.vegetation)
+                if f.trees_min and tl < f.trees_min then keep = false end
+                if f.trees_max and tl > f.trees_max then keep = false end
+
+                local wthr = weather[rme.region_id]
+                if f.blood and not (wthr and wthr.blood) then keep = false end
+                if f.syndrome and not (wthr and wthr.syndrome) then keep = false end
+                if f.reanimating and not (wthr and wthr.reanimating) then keep = false end
+                if f.noevilweather and wthr then keep = false end
 
                 local land = rme.landmass_id
                 local volc_d = keep and nearest(volcanoes, wx, wy) or nil
@@ -544,6 +816,9 @@ function sweep(f)
                         if f.magma and not (dp.magma and dp.magma >= f.magma) then
                             keep = false
                         end
+                        if f.magma_max and dp.magma and dp.magma > f.magma_max then
+                            keep = false
+                        end
                     end
                 end
 
@@ -554,6 +829,28 @@ function sweep(f)
                 if keep and f.near then
                     near_d = nearest(civs[f.near], wx, wy, land)
                     if not near_d or near_d > RANGE_CIV then keep = false end
+                end
+                if keep and f.nonear then
+                    local d = nearest(civs[f.nonear], wx, wy, land)
+                    if d and d <= RANGE_CIV then keep = false end
+                end
+
+                -- how many distinct civs and towers are actually in range
+                local civ_n, tower_n = 0, 0
+                if keep and (f.civs_min or f.civs_max or f.towers_min or f.towers_max) then
+                    for _, list in pairs(civs) do
+                        local d = nearest(list, wx, wy, land)
+                        if d and d <= RANGE_CIV then civ_n = civ_n + 1 end
+                    end
+                    for _, tw in ipairs(towers) do
+                        if tw.land == land and
+                            math.max(math.abs(tw.x - wx), math.abs(tw.y - wy)) <= RANGE_TOWER
+                        then tower_n = tower_n + 1 end
+                    end
+                    if f.civs_min and civ_n < f.civs_min then keep = false end
+                    if f.civs_max and civ_n > f.civs_max then keep = false end
+                    if f.towers_min and tower_n < f.towers_min then keep = false end
+                    if f.towers_max and tower_n > f.towers_max then keep = false end
                 end
 
                 if keep then
@@ -588,6 +885,8 @@ function sweep(f)
                         dwarf = dwarf_d, salinity = rme.salinity,
                         savagery = rme.savagery, evilness = rme.evilness,
                         aquifer = g.aquifer, aq_heavy = g.aq_heavy,
+                        sand = g.sand, clay = g.clay, trees = tl, weather = wthr,
+                        freeze = fz,
                         volcano = volc_d, magma = dp and dp.magma,
                         surveyed = dp ~= nil,
                     }
@@ -618,7 +917,17 @@ function describe(r)
     if r.magma == 3 then bits[#bits + 1] = 'magma: volcano'
     elseif r.magma then bits[#bits + 1] = ('magma: cavern %d'):format(3 - r.magma) end
     if r.aquifer then bits[#bits + 1] = r.aq_heavy and 'heavy aquifer' or 'light aquifer' end
+    if r.sand then bits[#bits + 1] = 'sand' end
+    if r.clay then bits[#bits + 1] = 'clay' end
     bits[#bits + 1] = r.soil .. ' soil'
+    if r.trees then bits[#bits + 1] = TREE_WORD[r.trees] end
+    if r.freeze == 'permanent' then bits[#bits + 1] = 'FROZEN'
+    elseif r.freeze == 'partial' then bits[#bits + 1] = 'freezes in winter' end
+    if r.weather then
+        if r.weather.reanimating then bits[#bits + 1] = 'REANIMATING' end
+        if r.weather.syndrome then bits[#bits + 1] = 'syndrome rain' end
+        if r.weather.blood then bits[#bits + 1] = 'blood rain' end
+    end
     if r.salinity < 33 then bits[#bits + 1] = 'fresh' end
     if r.savagery >= 66 then bits[#bits + 1] = 'savage' end
     if r.evilness >= 66 then bits[#bits + 1] = 'evil' end
@@ -710,8 +1019,11 @@ local gui = require('gui')
 local widgets = require('gui.widgets')
 
 local HINT = 'flux coal casts ore soilN river brook fresh aquifer lightaq ' ..
-             'noaquifer volcano volcanoN magma magmaN biome=X calm savage ' ..
-             'good evil near=RACE notower'
+             'noaquifer sand clay metal= mineral= economic= maxsoilN trees=N ' ..
+             'maxtrees=N freezing somefreeze nofreeze blood syndrome ' ..
+             'reanimating noevilweather volcano volcanoN magma magmaN ' ..
+             'maxmagmaN biome=X,Y calm midsavage savage good midevil evil ' ..
+             'near=RACE nonear=RACE civs=N maxcivs=N towers=N maxtowers=N notower'
 
 AssistantWindow = defclass(AssistantWindow, widgets.Window)
 AssistantWindow.ATTRS{
