@@ -34,8 +34,8 @@ Screen decoding as in adv/read-the-map: the map renders through
 `gps.main_map_port`, a `dim_x x dim_y` grid of cells, and the player is drawn
 at the CENTRE of that grid, `(dim_x//2, dim_y//2)`.
 
-Two things here were wrong for anyone whose display is not the one this was
-written on, and both misplace clicks rather than failing outright:
+Three things here were wrong for anyone whose display is not the one this was
+written on, and all of them misplace things rather than failing outright:
 
 - The cell size was taken from the x axis alone and reused for y. That needs
   square pixel cells and a window that is a whole number of tiles wide. An
@@ -46,7 +46,18 @@ written on, and both misplace clicks rather than failing outright:
   belongs to the LOCAL map and drifts from the grid centre as soon as the local
   camera clamps at a map edge -- inside a site, everything was offset by the
   drift. adv/read-the-map hit this and verified the centre against
-  `screentexpos_army`; this now uses the centre too.
+  `screentexpos_army`; this now uses the centre too. (Read live in a fort: the
+  pair was 70,33 against a grid centre of 60,34.)
+- Pixels per cell was rounded to an integer. Cells are not a whole number of
+  pixels: measured on the display this was reported from, 120x68 cells over a
+  1920x1080 window is 16.000 x 15.882 pixels per cell, and rounding 15.882 down
+  to 15 loses most of a pixel per cell. The error grows with distance from the
+  top of the screen -- two cells wrong at y=300, four at y=900 -- in the mouse
+  decode AND, mirrored, in where the destination X is drawn. That last one is
+  what made the X appear to slide toward the traveller as they moved: it was
+  always drawn short of where it belonged, by an amount that shrank as the
+  target approached the middle of the screen. Both directions are now exact
+  integer ratios with no rounding of the cell size.
 
 What sits at that center cell is NOT always the player army.  DF creates the
 army only once the journey starts; on a travel map you have just opened,
@@ -108,35 +119,50 @@ local function cell_scale()
     return df.global.adventure.site_level_zoom ~= 0 and 1 or 3
 end
 
--- Port geometry: pixels per map cell, measured PER AXIS.
+-- Cell geometry. Cells are NOT a whole number of pixels, and that is the whole
+-- problem: on the display this bug was reported from, the map port is 120x68
+-- cells across a 1920x1080 window, so a cell is 16.000 x 15.882 pixels. Taking
+-- pixels-per-cell as an integer (15) loses 0.88px per cell, and the error
+-- compounds with distance from the top of the screen -- measured on that
+-- display, a mouse at y=300 decodes two cells off and at y=900 four cells off.
 --
--- The old decode took one cell size from the x axis -- (dimx * tile_pixel_x) //
--- dim_x -- and used it for both. That holds only where cells are square in
--- pixels AND the window is an exact multiple of the tile size. Neither is
--- guaranteed: an ASCII font is typically taller than it is wide (8x12), so the
--- vertical decode drifts one cell further off for every ~2 rows down the screen,
--- which is why a click near the top lands right and one near the bottom does
--- not. Reconstructing the window width from dimx * tile_pixel_x also throws away
--- the remainder on a window that is not a whole number of tiles wide -- the
--- "weirdly scaled screen" case. gps.screen_pixel_x/y is the real pixel size, so
--- divide each axis by its own dimension and let the rounding fall where DF put
--- it.
-local function cell_px()
+-- The same error runs the other way when drawing the destination marker, and
+-- that is what made the X appear to creep toward the traveller: the marker's
+-- cell index shrinks as you approach, so its error shrinks too, and the X slides
+-- inward faster than the ground does. It is not the world-coordinate maths
+-- drifting -- it is the marker being drawn increasingly less wrong.
+--
+-- So neither direction rounds the cell size. Both scale by the exact ratio
+-- (window pixels : cells) in integer arithmetic, which is exact everywhere on
+-- the screen and needs no correction term.
+local function port()
     local gps = df.global.gps
     local mp = gps.main_map_port
     if not mp or mp.dim_x <= 0 or mp.dim_y <= 0 then return end
     local w = gps.screen_pixel_x > 0 and gps.screen_pixel_x or gps.dimx * gps.tile_pixel_x
     local h = gps.screen_pixel_y > 0 and gps.screen_pixel_y or gps.dimy * gps.tile_pixel_y
-    return mp, math.max(1, w // mp.dim_x), math.max(1, h // mp.dim_y)
+    return mp, w, h
+end
+
+-- pixel -> cell, exactly: cell = floor(px * dim / window_px)
+local function px_to_cell(px, dim, window_px)
+    return (px * dim) // window_px
+end
+
+-- cell -> the text cell its middle falls in, exactly:
+--   floor(((cell + 0.5) * window_px / dim) / tile_px)
+-- kept in integers by doubling through the halves
+local function cell_to_text(cell, dim, window_px, tile_px)
+    return ((2 * cell + 1) * window_px) // (2 * dim * tile_px)
 end
 
 -- mouse position -> map-port cell, or nil off the map / in the edge guard
 local function mouse_cell(guard)
     local gps = df.global.gps
-    local mp, cw, ch = cell_px()
+    local mp, w, h = port()
     if not mp then return end
-    local cx = gps.precise_mouse_x // cw
-    local cy = gps.precise_mouse_y // ch
+    local cx = px_to_cell(gps.precise_mouse_x, mp.dim_x, w)
+    local cy = px_to_cell(gps.precise_mouse_y, mp.dim_y, h)
     if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
     if guard and (cx < EDGE_GUARD or cx >= mp.dim_x - EDGE_GUARD
             or cy < EDGE_GUARD or cy >= mp.dim_y - EDGE_GUARD) then
@@ -172,9 +198,10 @@ local function step()
     local ax, ay = center_pos()
     if not ax then stop_journey(nil) return end
     local s = cell_scale()
-    local mx, my = ax // s, ay // s
-    local tx, ty = dest.ax // s, dest.ay // s
-    if mx == tx and my == ty then
+    -- same reasoning as the marker: measure the separation, then divide. These
+    -- are cells REMAINING, so arrival is simply zero on both axes.
+    local tx, ty = (dest.ax - ax) // s, (dest.ay - ay) // s
+    if tx == 0 and ty == 0 then
         journeys = journeys + 1
         stop_journey('arrived.')
         return
@@ -189,8 +216,8 @@ local function step()
     else
         stuck, last_pos = 0, pos_key
     end
-    local dx = tx > mx and 1 or tx < mx and -1 or 0
-    local dy = ty > my and 1 or ty < my and -1 or 0
+    local dx = tx > 0 and 1 or tx < 0 and -1 or 0
+    local dy = ty > 0 and 1 or ty < 0 and -1 or 0
     local key = DIR_KEYS[dy] and DIR_KEYS[dy][dx]
     if not key then stop_journey(nil) return end
     gui.simulateInput(dfhack.gui.getCurViewscreen(true), key)
@@ -245,17 +272,18 @@ function MapTravel:onRenderFrame(dc, rect)
         local ax, ay = center_pos()
         if not ax then return end
         local gps = df.global.gps
-        local mp, cw, chp = cell_px()
+        local mp, w, h = port()
         if not mp then return end
         local s = cell_scale()
         local ccx, ccy = center_cell(mp)
-        local cx = ccx + (dest.ax // s - ax // s)
-        local cy = ccy + (dest.ay // s - ay // s)
+        -- the difference of the positions, floored once -- not the difference of
+        -- two separately floored positions, which shifts by a cell depending on
+        -- where the traveller happens to sit inside their own cell
+        local cx = ccx + (dest.ax - ax) // s
+        local cy = ccy + (dest.ay - ay) // s
         if cx < 0 or cx >= mp.dim_x or cy < 0 or cy >= mp.dim_y then return end
-        -- map cells span cw/ch pixels; mark the middle of the cell, converted to
-        -- text cells on each axis with that axis's own tile size
-        local tx = (cx * cw + cw // 2) // gps.tile_pixel_x
-        local ty = (cy * chp + chp // 2) // gps.tile_pixel_y
+        local tx = cell_to_text(cx, mp.dim_x, w, gps.tile_pixel_x)
+        local ty = cell_to_text(cy, mp.dim_y, h, gps.tile_pixel_y)
         dfhack.screen.paintString(PEN_MARK, tx, ty, 'X')
     end)
 end

@@ -128,6 +128,58 @@ real armies, one of them 70 strong.
 A retry would need a positive test for "this member is a corpse, not an animated corpse", and a
 concrete symptom it repairs.
 
+### **`fort/channel-safely` — UNTESTED in a fort**
+Holds every channel designation in marker mode except those on the highest z-level that still
+has channelling to do, releasing the next level down as each finishes. Priority-1 designations
+are never held — that is the manual override.
+
+Cave-in protection is a real connectivity search, run once per level rather than once per tile:
+pretend the whole active channel set is dug, flood out from the walls across everything still
+standing, and hold back any channel tile touching what the flood never reached. It is still not
+a guarantee, and the header says where it stops — support running off the edge of the examined
+box is assumed anchored, areas over 10,000 tiles skip the check entirely (reported by `status`),
+and it reasons about one z-level.
+
+Performance was measured rather than assumed, and three findings shaped the code: `getTileType`
+costs ~190µs per call, so 2,500 tiles read that way is 474ms of frozen game — reading straight
+from cached map blocks is 4ms. Resolving `df.tiletype.attrs[tt].shape` per tile costs 1491ms
+per 10,000 tiles against 8ms through a precomputed table. String `"x,y,z"` keys in the flood
+cost more than the map reads did; integer grid indices took the same flood from 473ms to 8ms.
+The whole check at its 10,000-tile cap now measures ~16ms, and is cached until the designation
+set changes.
+
+Marks are recorded in dfhack persistence so it only ever releases tiles *it* marked, and
+`disable` releases everything it holds. Scanning is cheap because `block_flags.designated`
+narrows the 25,056-block map to the handful with designations before any tile is read.
+
+Verified: module loads and reloads clean, the block-flag scan runs against the live map, the
+timings above are real measurements from the running game, and every structure field
+(`occupancy.dig_marked`, the `designation_priority` block event at priority×1000,
+`tiletype_shape_basic`) was checked against df-structures. Never run in a fort — no designation
+has been held or released, and the flood has never been run against a real excavation.
+
+### **`fort/quickfort` — UNTESTED in a fort**
+A replacement quickfort front end that lists each blueprint **once** (stock lists one row per
+section) and then applies its sections itself, per tile, in dependency order: dig → smooth →
+engrave/carve → build, with stockpiles and zones placed once every tile they cover is ready.
+Each tile advances independently, so furniture lands on its own square as soon as that square is
+floor. Zones are never placed over existing zones (one announcement, then skipped). There is no
+give-up timer — on a real fort that fires mostly on jobs that were about to continue, when the
+beds simply are not built yet — so running jobs are listed in the window with their progress and
+can be cancelled there. Progress is read back off the map rather than stored, so a save/load or
+script reload re-derives it exactly.
+
+Verified offline against the real blueprint library: `housing.csv` decomposes to 651 tiles with
+363 dig + 651 smooth + 318 engrave steps, 207 buildings and a 30-cell zone; `Noble Suite.csv` to
+81 tiles, 29 buildings (23 single-tile, 2 two-tile, 4 three-tile) and a zone. Two bugs were found
+and fixed that way — hidden sections had to be included (library blueprints keep their real
+content in `hidden()` sections behind a `#meta`) and contiguous same-code build cells had to be
+grouped, or a 3x3 workshop would have been requested as nine 1x1 workshops.
+
+Not verified: the GUI has never been opened, and **nothing has ever been applied to a map** — no
+designation, no building, no zone. The overlap refusal, the job list and the per-tile readiness
+checks are all unexercised.
+
 ### **`fort/initial-standing-orders` — UNTESTED, never run in a fort**
 Sets the two standing orders a new fort should have started with: children stop hauling refuse
 and corpses (`labor_info.chores[HAUL_REFUSE]` / `[HAUL_BODY]` — DF has no separate burial chore,
