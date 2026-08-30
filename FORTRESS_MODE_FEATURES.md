@@ -249,8 +249,8 @@ Opens a new fortress for you: skips the tutorial prompt, commits a dwarven origi
 the map on a scored spot near its halls, and clicks Embark. You place the fortress.
 
 ### **`embark/extra-info`**
-Panel under DF's own, on the final placement step only: `NO ADAMANTIUM` when there is none, salt
-or fresh water, the seven commonest stones (flux, coal and plaster called out) plus a count of
+Panel under DF's own, on the final placement step only: the adamantine spire count (or
+`NO ADAMANTIUM` when there is none), salt or fresh water, the seven commonest stones (flux, coal and plaster called out) plus a count of
 the rest, commonest wood, the wildlife, and **every** civ that can reach you — not vanilla's four.
 
 ### **`embark/assistant`**

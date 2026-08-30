@@ -16,11 +16,21 @@ frames live in, and a field of identical terrain tiles reads as a border run.)
 
 What it adds
 ------------
-**Adamantine and water**, on one line.  Adamantine is reported by its *absence*:
-having a spire is the ordinary case and tells you nothing, so a tile with one
-says only `fresh water`, and a tile without one says `NO ADAMANTIUM, fresh
-water`.  A spire made of something that is not adamantine -- a modded world
-doing something unusual -- is still named outright.
+**Adamantine and water**, on one line: `3 spires, fresh water`, or
+`NO ADAMANTIUM, fresh water` when there is none.  The count is of distinct
+spires, not of tiles that touch one -- a spire spans several embark tiles, and
+the `feature_idx` identifying it is per world tile, so an embark straddling two
+of them is keyed by both.  "3 spires" is deliberately unexplained: it means
+nothing to a new player and everything to one who knows what a spire is, and the
+number is the part that varies between embarks.  A spire made of something that
+is not adamantine -- a modded world doing something unusual -- is named outright.
+
+Confirmed against DF itself: on a 4x4 embark straddling world tiles 41 and 42,
+this counts 4 spires, and the loaded fortress's own `world.features.map_features`
+holds exactly 4 `feature_init_deep_special_tubest` entries whose footprints match
+one for one ([14..15,12..13] in tile 41; [0..1,10..11], [0..1,12..13] and
+[0..1,14..15] in tile 42).  The straddle is the part worth testing -- a first
+attempt that used one world tile's index list for the whole rectangle answered 2.
 
 Getting the adamantine right is the whole trick.  A world tile's
 `feature_map` entry lists **sixty-four deep-special-tube candidates whatever the
@@ -189,10 +199,14 @@ local function feature_inits(wx, wy)
     return shell.features.feature_init[wx % 16][wy % 16]
 end
 
--- The featstone of a deep special tube that REALLY sits under one of the embark
--- tiles, or nil.  See the header for why the candidate list cannot be used.
+-- How many distinct adamantine spires really sit under the embark, and what
+-- their featstone is.  See the header for why the candidate list cannot be used.
+--
+-- A spire spans several embark tiles, so the count is of distinct
+-- `feature_idx` values, not of tiles that hit one -- and the index is per WORLD
+-- tile, so an embark straddling two of them keys by both.
 local function adamantine(etiles)
-    local found
+    local mat, seen, spires = nil, {}, 0
     pcall(function()
         local details, inits = {}, {}
         for _, t in ipairs(etiles) do
@@ -210,179 +224,22 @@ local function adamantine(etiles)
                     if idx >= 0 and idx < #init then
                         local f = init[idx]
                         if df.feature_init_deep_special_tubest:is_instance(f) then
-                            local mi = dfhack.matinfo.decode(f.mat_type, f.mat_index)
-                            found = mi and mi:toString() or 'unknown deep stone'
-                            return
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    return found
-end
-
--- ---- stone and wood ----------------------------------------------------------
-
-local MAX_STONE = 7
-
-local function inorganics() return df.global.world.raws.inorganics.all end
-
-local function has_class(m, class)
-    for i = 0, #m.material.reaction_class - 1 do
-        if m.material.reaction_class[i].value == class then return true end
-    end
-    return false
-end
-
-local COAL_IDS = {LIGNITE = true, BITUMINOUS_COAL = true}
-
--- What the embark is made of, from the geology column its world tiles point at.
--- Layer stones are ranked by how many z-levels they occupy (that is what "most
--- common" means when you are digging); veins and clusters are collected too, but
--- only surface in the guaranteed slots below, because a vein is a seam and not a
--- stone you cut a fortress out of.
---
--- Three things are pulled up into the list whatever their thickness, because
--- they decide what you can build rather than how much rock there is: the biggest
--- FLUX layer (steel), lignite or bituminous coal (fuel without a magma sea), and
--- anything with the GYPSUM reaction class (plaster, so casts for broken bones).
-local function stone_summary(wtiles)
-    local inor = inorganics()
-    local layer_weight, order = {}, {}
-    local present = {}                      -- everything, layer or vein
-    local seen_geo = {}
-    pcall(function()
-        for _, t in ipairs(wtiles) do
-            local rme = region_entry(t.x, t.y)
-            if rme and not seen_geo[rme.geo_index] then
-                seen_geo[rme.geo_index] = true
-                local gb = wd().geo_biomes[rme.geo_index]
-                for i = 0, #gb.layers - 1 do
-                    local L = gb.layers[i]
-                    local idx = L.mat_index
-                    if idx >= 0 then
-                        local thick = math.max(1, L.top_height - L.bottom_height + 1)
-                        if not layer_weight[idx] then order[#order + 1] = idx end
-                        layer_weight[idx] = (layer_weight[idx] or 0) + thick
-                        present[idx] = true
-                    end
-                    -- veins carry the gem clusters too, and a gem is not a
-                    -- stone type: counting them turned "38 other stones" into
-                    -- "114 more", which is just noise
-                    for j = 0, #L.vein_mat - 1 do
-                        local v = L.vein_mat[j]
-                        local vm = v >= 0 and inor[v]
-                        if vm and vm.material.flags.IS_STONE then present[v] = true end
-                    end
-                end
-            end
-        end
-    end)
-    if #order == 0 then return end
-
-    local function name_of(idx)
-        local m = inor[idx]
-        if not m then return nil end
-        local nm = m.material.state_name.Solid
-        return (nm ~= '' and nm) or m.id:lower():gsub('_', ' ')
-    end
-
-    table.sort(order, function(a, b)
-        if layer_weight[a] ~= layer_weight[b] then return layer_weight[a] > layer_weight[b] end
-        return (name_of(a) or '') < (name_of(b) or '')
-    end)
-
-    -- the guaranteed entries, tagged so they are recognisable in the list
-    local tag, forced = {}, {}
-    local function force(idx, label)
-        if not idx or tag[idx] then return end
-        tag[idx] = label
-        forced[#forced + 1] = idx
-    end
-    -- one representative per category, not all of them: a column with gypsum,
-    -- alabaster, selenite and satinspar would otherwise spend four of the seven
-    -- slots saying the same thing
-    local best = {}
-    local function nominate(key, idx)
-        local w = layer_weight[idx] or 0
-        if not best[key] or w > best[key].w then best[key] = {idx = idx, w = w} end
-    end
-    for idx in pairs(present) do
-        local m = inor[idx]
-        if m then
-            if has_class(m, 'FLUX') then nominate('flux', idx) end
-            if has_class(m, 'GYPSUM') then nominate('casts', idx) end
-            if COAL_IDS[m.id] then nominate('coal', idx) end
-        end
-    end
-    for _, key in ipairs{'flux', 'coal', 'casts'} do
-        if best[key] then force(best[key].idx, key) end
-    end
-
-    local total = 0
-    for _ in pairs(present) do total = total + 1 end
-
-    local out, used = {}, {}
-    local function push(idx)
-        if used[idx] or #out >= MAX_STONE then return end
-        used[idx] = true
-        local nm = name_of(idx)
-        if nm then out[#out + 1] = tag[idx] and (nm .. ' (' .. tag[idx] .. ')') or nm end
-    end
-    for _, idx in ipairs(forced) do push(idx) end
-    for _, idx in ipairs(order) do push(idx) end
-    return out, total
-end
-
--- The trees the region can grow.  DF gives no honest "most common" here: every
--- tree population is recorded as unlimited and vanilla sets FREQUENCY:50 on all
--- of them, so the pick is by `plant_raw.frequency` (the right field) and is only
--- meaningful where a mod varies it.  Featherwood is called out by name because
--- it is worth going out of your way for.
-local function wood_summary(wtiles)
-    local plants = df.global.world.raws.plants.all
-    local seen_region, trees, seen_id = {}, {}, {}
-    local feather
-    for _, t in ipairs(wtiles) do
-        local rme = region_entry(t.x, t.y)
-        local r = rme and region_of(rme)
-        if r and not seen_region[r.index] then
-            seen_region[r.index] = true
-            pcall(function()
-                for i = 0, #r.population - 1 do
-                    local p = r.population[i]
-                    if df.world_population_type[p.type] == 'Tree' then
-                        local pl = plants[p.plant]
-                        if pl and not seen_id[pl.id] then
-                            seen_id[pl.id] = true
-                            local nm = (pl.name ~= '' and pl.name) or pl.id:lower()
-                            -- how many biomes the species is declared for: a
-                            -- generalist is what you will actually be cutting
-                            local spread = 0
-                            for k, v in pairs(pl.flags) do
-                                if v == true and tostring(k):sub(1, 6) == 'BIOME_' then
-                                    spread = spread + 1
+                            local id = key .. ':' .. idx
+                            if not seen[id] then
+                                seen[id] = true
+                                spires = spires + 1
+                                if not mat then
+                                    local mi = dfhack.matinfo.decode(f.mat_type, f.mat_index)
+                                    mat = mi and mi:toString() or 'unknown deep stone'
                                 end
                             end
-                            trees[#trees + 1] =
-                                {name = nm, freq = pl.frequency or 0, spread = spread}
-                            if pl.id:find('FEATHER') or nm:find('feather') then feather = nm end
                         end
                     end
                 end
-            end)
+            end
         end
-    end
-    if #trees == 0 then return end
-    table.sort(trees, function(a, b)
-        if a.freq ~= b.freq then return a.freq > b.freq end
-        if a.spread ~= b.spread then return a.spread > b.spread end
-        return a.name < b.name
     end)
-    local line = ('Wood: %s (%d species)'):format(trees[1].name, #trees)
-    if feather and feather ~= trees[1].name then line = line .. ' + ' .. feather end
-    return line
+    return spires, mat
 end
 
 -- ---- water -------------------------------------------------------------------
@@ -615,16 +472,22 @@ function build_lines(scr, maxrows)
         lines[#lines + 1] = ty .. (nm ~= '' and (': ' .. nm) or '')
     end
 
-    -- Adamantine is reported by its ABSENCE.  Having it is the normal case and
-    -- says nothing useful; not having it is the thing that changes where you
-    -- embark, so that is what gets shouted.  A spire of something other than
-    -- adamantine is a modded world doing something unusual and still gets named.
+    -- Adamantine is reported as a SPIRE COUNT, or by its absence.  "3 spires"
+    -- means nothing to a new player and everything to one who knows what a spire
+    -- is, which is the right shape for this: it is never in the way, and the
+    -- number is the part that actually varies between embarks.  A spire of
+    -- something other than adamantine is a modded world doing something unusual
+    -- and gets named outright.
     local parts = {}
-    local tube = adamantine(etiles)
-    if not tube then
+    local spires, tube = adamantine(etiles)
+    if spires == 0 then
         parts[#parts + 1] = 'NO ADAMANTIUM'
-    elseif not tube:find('adamantine', 1, true) then
-        parts[#parts + 1] = tube
+    else
+        local word = ('%d spire%s'):format(spires, spires == 1 and '' or 's')
+        if tube and not tube:find('adamantine', 1, true) then
+            word = word .. ' of ' .. tube
+        end
+        parts[#parts + 1] = word
     end
     local water = water_word(wtiles)
     if water then parts[#parts + 1] = water end

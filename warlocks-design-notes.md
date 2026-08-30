@@ -26,6 +26,53 @@ butcher object on the brain — `[EXTRA_BUTCHER_OBJECT:BY_TYPE:THOUGHT][EBO_ITEM
 In v50 that can be applied to existing creatures with `[SELECT_CREATURE:X]`, the same mechanism
 `ha-succubi/objects/creature_edits.txt` already uses.
 
+## Gargoyles — scope locked
+
+Three only: **ice**, **fire**, **melee**.
+
+- **Melee** — the bulky red-eyed stone golem. Costs **15 boulders, any stone, nothing else.**
+- **Ice** — the teal-crystal one.
+- **Fire** — the flame one.
+- Ice and fire each cost **15 boulders + one extra reagent** (see below).
+
+One thing to confirm when we cut the art: by my reading of the cheat-sheet row (left group of
+six read in rows, then the middle pair, then the armed pair, then the golem) the golem is 10th,
+but ice lands at 4 and fire at 6/8 rather than 3 and 8. The sprites themselves aren't ambiguous
+— teal crystal, flame, golem — so this only matters when someone is counting tiles in
+`content-mods/warlocks/art/crop_garg3.png`.
+
+All three are `[IMMOBILE]` pasturable pets; ice and fire get their breath weapon from a
+`[CAN_DO_INTERACTION]` + `CDI` block, the golem just gets natural attacks.
+
+## Magic reagents
+
+**In the standalone (1.0), we don't know the gargoyle recipe** — no raws survive. What the
+cheat sheet does state is the general currency: *"Most [workshops] requires totems, slabs and
+souls to be build."* Plus the Gargoyle Mason's own line, "great to dump excess boulders", and
+the player report of ~15 boulders per gargoyle. So the standalone's vocabulary of magic
+ingredients is **souls, totems, slabs, bones, ash and blood** — all obtainable from corpses and
+a craftsdwarf's workshop, with no separate reagent industry.
+
+**In the MDF ancestor it was a full production chain**, and the raws for it survive
+(`content-mods/warlocks/mdf-raws/reaction_warlock.txt`):
+
+1. **Souls** — butcher anything. Stored by the Soul Syphon as a **phylactery** (soul + hourglass).
+2. **Dusts** — the four *Shredders* (Wood / Ore / Plant / Gem) grind raw material into
+   `POWDER_<x>` tagged with a reaction class: `TREE_DUST`, `METAL_DUST` / `METAL_DUST_GREATER`,
+   `PLANT_DUST` / `PLANT_DUST_FOUL`, `GEM_DUST`. This is the "strip-mine the whole map" tier —
+   every gem, ore, log and weed goes in.
+3. **Ritual reagents** — the *Alchemist* mixes three bags of 150 dust into a tool item:
+   bag of herbs, bag of foul herbs, incense, circle of protection, greater circle of protection,
+   gem sigil, eerie flame, scrying mirror, philosopher's stone, eternal rose.
+4. **Organics** — the *Herbalist* makes totems (from skull fronds), bonemeal, glue, netherleather,
+   papyrus and three acids; the *Chemist* makes pearlash, brimstone, saltpeter, oils and acids.
+
+Nothing in that chain is bought — it is all butchery plus grinding. For our version, which drops
+plants, potions and the whole alchemy tier, the standalone's own shorter list is the right one:
+**a soul** as the universal magic cost, plus **a totem** (a skull at the craftsdwarf's) or a
+**slab** where a second ingredient makes the recipe read better. That keeps ice/fire gargoyles
+gated behind killing something without introducing a reagent industry.
+
 ## Squad size
 
 **Yes, it is moddable — it's a raw token, not an engine constant.** Squad size is the first
