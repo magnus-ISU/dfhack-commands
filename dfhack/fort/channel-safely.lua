@@ -84,6 +84,17 @@ CAVE-IN PROTECTION IS CHEAP, NOT A GUARANTEE
   recomputed only when the designation set changes, so a pass that finds the
   same set as the last one is nearly free.
 
+A TRAP WORTH KNOWING ABOUT, IF YOU EVER TOUCH THIS CODE
+  `block_flags.designated` means "this block has designation JOBS", and a
+  designation in marker mode has no job. So the flag goes FALSE on a block as
+  soon as the last of its designations is one this tool is holding -- and a scan
+  filtered on that flag loses sight of precisely the tiles it suspended. They
+  can never be re-examined, never released, and sit as "planned" forever, which
+  is what a stuck job looks like from the player's side. Confirmed on a live
+  fort: a block with three marker-mode channel designations reported
+  `designated = false`. The scan therefore always examines the blocks holding
+  its own marks as well, which persistence knows.
+
 WHEN IT GETS IN ITS OWN WAY
   "Never strand a tile" and "always finish the job" can contradict each other: a
   shaft designated from the inside has no safe first tile, and in a ring every
@@ -91,6 +102,10 @@ WHEN IT GETS IN ITS OWN WAY
   suspended forever, which is indistinguishable from the tool being broken. So
   when nothing on the active level is workable, exactly one tile is let through
   -- whichever is the last foothold for the fewest others -- and you get told.
+  That release is sticky: a pass runs every couple of seconds and a dwarf takes
+  far longer to walk over, so re-deciding the tile each pass would re-hold it
+  before anyone could dig it and it would flicker between planned and active
+  instead of getting done.
 
 ANNOUNCEMENTS
   Three situations raise a fortress announcement, once each, cleared when the
@@ -572,8 +587,22 @@ local function clear_warning(id) warned[id] = nil end
 -- so the 256-tile read only happens on the handful that matter.
 local scan = nil
 
+-- Blocks holding a designation WE put into marker mode. This set is the whole
+-- reason the scan below is not a straight flags.designated filter: see there.
+local function marked_blocks()
+    local set = {}
+    for k in pairs(get_state().marks) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        if x then
+            set[(tonumber(x) // 16) .. ',' .. (tonumber(y) // 16) .. ',' .. z] = true
+        end
+    end
+    return set
+end
+
 local function start_scan()
-    scan = {i = 0, blocks = df.global.world.map.map_blocks, found = {}, top = nil}
+    scan = {i = 0, blocks = df.global.world.map.map_blocks, found = {}, top = nil,
+            marked = marked_blocks()}
 end
 
 -- returns true when the scan finished this call
@@ -584,7 +613,20 @@ local function step_scan()
     while scan.i < last do
         local block = blocks[scan.i]
         scan.i = scan.i + 1
-        if block and block.flags.designated then
+        -- flags.designated means "has designation JOBS", and a designation in
+        -- marker mode has no job -- so the flag goes FALSE on a block once the
+        -- last of its designations is one we are holding. Filtering on the flag
+        -- alone therefore loses sight of exactly the tiles this tool is
+        -- suspending: they can never be re-examined, never released, and sit in
+        -- "planned" forever. Measured on a live fort: a block with three
+        -- marker-mode channel designations reported designated = false. So the
+        -- blocks holding our own marks are always examined too.
+        local wanted = block and block.flags.designated
+        if block and not wanted then
+            wanted = scan.marked[(block.map_pos.x // 16) .. ',' ..
+                                 (block.map_pos.y // 16) .. ',' .. block.map_pos.z]
+        end
+        if wanted then
             for bx = 0, 15 do
                 for by = 0, 15 do
                     if block.designation[bx][by].dig == df.tile_dig_designation.Channel then
@@ -651,10 +693,13 @@ local function apply(found, top)
         clear_warning('stranded')
     end
 
+    -- Counted as TOTALS, not as changes made this pass: a pass that alters
+    -- nothing was reporting "0 held" while two designations sat suspended.
     local held, freed, released_here = 0, 0, 0
     local function decide(pos)
         local k = key(pos)
         if priority_of(pos) <= EXEMPT_PRIORITY then return 'release' end
+        if s.valve == k then return 'release' end   -- let through by the valve
         if pos.z < top then return 'hold' end          -- rule 1
         if select(1, is_unsafe(pos, cut_set, hanging)) then return 'hold' end
         if critical[k] then return 'hold' end          -- rule 4
@@ -665,10 +710,12 @@ local function apply(found, top)
     for _, pos in ipairs(found) do
         local what = decide(pos)
         if what == 'hold' then
-            if hold(pos) then held = held + 1 end
+            hold(pos)
+            held = held + 1
             if pos.z == top then all_held[#all_held + 1] = pos end
         else
-            if release(pos) then freed = freed + 1 end
+            release(pos)
+            freed = freed + 1
             if pos.z == top then released_here = released_here + 1 end
         end
     end
@@ -695,6 +742,12 @@ local function apply(found, top)
         end
         best = best or all_held[1]
         release(best)
+        released_here = released_here + 1
+        -- Sticky. A pass runs every couple of seconds and a dwarf takes far
+        -- longer than that to walk over, so re-deciding this tile on the next
+        -- pass would re-hold it before anyone could dig it, and it would
+        -- flicker between planned and active forever instead of getting done.
+        s.valve = key(best)
         freed = freed + 1
         held = math.max(0, held - 1)
         announce('deadlock', ('every channel designation on this level would strand '
@@ -721,6 +774,12 @@ local function apply(found, top)
             set_marked(pos, false)
             s.marks[k] = nil
         end
+    end
+    if s.valve and not is_channel({
+            x = tonumber(s.valve:match('^(-?%d+)')),
+            y = tonumber(s.valve:match('^-?%d+,(-?%d+)')),
+            z = tonumber(s.valve:match('(-?%d+)$'))}) then
+        s.valve = nil          -- the tile it let through has been dug
     end
 
     save_state()
