@@ -133,12 +133,20 @@ Holds every channel designation in marker mode except those on the highest z-lev
 has channelling to do, releasing the next level down as each finishes. Priority-1 designations
 are never held — that is the manual override.
 
-Cave-in protection is a real connectivity search, run once per level rather than once per tile:
-pretend the whole active channel set is dug, flood out from the walls across everything still
-standing, and hold back any channel tile touching what the flood never reached. It is still not
-a guarantee, and the header says where it stops — support running off the edge of the examined
-box is assumed anchored, areas over 10,000 tiles skip the check entirely (reported by `status`),
-and it reasons about one z-level.
+Cave-in protection asks which single tile removals would drop the floor they hold up —
+articulation points in the standing rock, anchored at the walls, computed against the map as it
+stands. The first version asked whether the *finished* excavation left anything hanging, which
+flags almost nothing (at the end of a channel job almost nothing is left standing) and let a
+fort cave in on the first attempt; the danger is the intermediate states, when a ring is one
+tile from closing. It is still not a guarantee: only single removals are checked and dwarves dig
+concurrently, support running off the edge of the examined box is assumed anchored, areas over
+10,000 tiles skip the check, and it reasons about one z-level.
+
+A fourth rule holds any tile that is the last place a dwarf can stand to dig another pending
+tile, so the job is always finishable; reachability is DF's own walkability group, an integer
+compare rather than a path search. Three situations raise a fortress announcement: designations
+that cannot be reached at all, the deadlock escape valve firing, and the area being too large
+for the cave-in check.
 
 Performance was measured rather than assumed, and three findings shaped the code: `getTileType`
 costs ~190µs per call, so 2,500 tiles read that way is 474ms of frozen game — reading straight
@@ -152,11 +160,15 @@ Marks are recorded in dfhack persistence so it only ever releases tiles *it* mar
 `disable` releases everything it holds. Scanning is cheap because `block_flags.designated`
 narrows the 25,056-block map to the handful with designations before any tile is read.
 
-Verified: module loads and reloads clean, the block-flag scan runs against the live map, the
-timings above are real measurements from the running game, and every structure field
-(`occupancy.dig_marked`, the `designation_priority` block event at priority×1000,
-`tiletype_shape_basic`) was checked against df-structures. Never run in a fort — no designation
-has been held or released, and the flood has never been run against a real excavation.
+Verified live: a six-level project (462 designations) staged correctly, holding 390 on the five
+lower levels and leaving 72 active on top. The cave-in rule was then tested against the ring
+shape that actually collapsed a fort — with 15 of 16 ring tiles dug it holds the last one
+("digging it would drop the floor it holds up"), and it identifies exactly the 9 interior tiles
+as what would fall. The reachability rule was tested against a real chokepoint: the tile serving
+as another pending tile's only foothold is held. Analysis of 9,025 tiles measures 21ms.
+
+Still unverified: a full pass with both new rules active on a live excavation, and the
+announcements have never fired in a real game.
 
 ### **`fort/quickfort` — UNTESTED in a fort**
 A replacement quickfort front end that lists each blueprint **once** (stock lists one row per
