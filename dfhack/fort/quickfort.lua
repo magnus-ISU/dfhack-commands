@@ -560,6 +560,65 @@ end
 -- GUI
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- placement preview
+-- ---------------------------------------------------------------------------
+--
+-- The preview comes from this tool's own planner, not from quickfort's preview
+-- pass, and that is a deliberate difference. Asked to preview `housing.csv` on
+-- undug ground, quickfort reports 651 invalid smoothing tiles, 318 invalid
+-- carves and 207 invalid buildings -- measured, on a real fort -- because none
+-- of that ground is dug YET. Every one of those tiles is perfectly fine by the
+-- time its turn comes, so painting them red would be a lie about the only
+-- blueprint shape this tool exists to handle.
+--
+-- Instead the preview shows the footprint coloured by WHEN each tile is due:
+-- green for work that starts immediately, blue for work that waits its turn.
+--
+-- It is also built once, when placement begins, as offsets from the cursor --
+-- re-parsing the blueprint on every mouse move would read the file dozens of
+-- times a second.
+local function build_footprint(entry)
+    local job = {name = entry.path, pos = {x = 0, y = 0, z = 0}, sections = {}}
+    for _, sec in ipairs(entry.sections) do
+        job.sections[#job.sections + 1] = {name = sec.name, mode = sec.mode}
+    end
+    local ok, plan = pcall(build_plan, job)
+    if not ok or not plan then return {offsets = {}, now = 0, later = 0} end
+
+    local offsets, now, later = {}, 0, 0
+    local function add(pos, immediate)
+        offsets[#offsets + 1] = {dx = pos.x, dy = pos.y, dz = pos.z, now = immediate}
+        if immediate then now = now + 1 else later = later + 1 end
+    end
+    for _, t in pairs(plan.tiles) do
+        local first = t.steps[1]
+        add(t.pos, first and first.stage == STAGE.dig)
+    end
+    for _, region in ipairs(plan.regions) do
+        for _, c in ipairs(region.cells) do add(c.pos, false) end
+    end
+    return {offsets = offsets, now = now, later = later, total = plan.total}
+end
+
+-- footprint offsets -> the tile lookup and bounds renderMapOverlay wants
+local function place_footprint(footprint, cursor)
+    local tiles, bounds = {}, {}
+    for _, o in ipairs(footprint.offsets) do
+        local x, y, z = cursor.x + o.dx, cursor.y + o.dy, cursor.z + o.dz
+        local row = ensure_keys(tiles, z, y)
+        if row[x] == nil or o.now then row[x] = o.now end
+        local b = ensure_key(bounds, z, {x1 = x, x2 = x, y1 = y, y2 = y})
+        b.x1, b.x2 = math.min(b.x1, x), math.max(b.x2, x)
+        b.y1, b.y2 = math.min(b.y1, y), math.max(b.y2, y)
+    end
+    return tiles, bounds
+end
+
+local function same_pos(a, b)
+    return a and b and a.x == b.x and a.y == b.y and a.z == b.z
+end
+
 QuickfortWindow = defclass(QuickfortWindow, widgets.Window)
 QuickfortWindow.ATTRS{
     frame_title = 'Quickfort (sequenced)',
@@ -569,32 +628,35 @@ QuickfortWindow.ATTRS{
 
 function QuickfortWindow:init()
     self.blueprints = list_blueprints()
+    self.list_frame = {w = 80, h = 32}
     self:addviews{
         widgets.FilteredList{
             view_id = 'list',
             frame = {l = 0, t = 0, w = 44, b = 8},
             edit_key = 'CUSTOM_ALT_S',
             on_select = function() self:show_detail() end,
-            choices = self:make_choices(),
+            on_submit = function() self:enter_placement() end,
         },
         widgets.Label{
             view_id = 'detail',
             frame = {l = 46, t = 0, b = 8},
             text = '',
         },
-        widgets.HotkeyLabel{
-            frame = {l = 0, b = 6},
-            key = 'CUSTOM_CTRL_S',
-            label = 'Start at cursor',
-            on_activate = function() self:start_here() end,
+        widgets.Label{
+            view_id = 'place_help',
+            frame = {l = 0, t = 0, b = 8},
+            visible = false,
+            text = '',
         },
         widgets.HotkeyLabel{
+            view_id = 'cancel_btn',
             frame = {l = 30, b = 6},
             key = 'CUSTOM_CTRL_X',
             label = 'Cancel selected job',
             on_activate = function() self:cancel_selected() end,
         },
         widgets.Label{
+            view_id = 'jobs_label',
             frame = {l = 0, b = 5},
             text = 'Running jobs:',
         },
@@ -609,6 +671,11 @@ function QuickfortWindow:init()
             text = '',
         },
     }
+    -- Choices are set AFTER addviews, never as a constructor field: setChoices
+    -- selects a row, which fires on_select, which runs self:show_detail() --
+    -- and during init self.subviews does not exist yet, so the callback died on
+    -- a nil 'list' before the window ever opened.
+    self.subviews.list:setChoices(self:make_choices())
     self:show_detail()
 end
 
@@ -625,7 +692,9 @@ function QuickfortWindow:make_choices()
 end
 
 function QuickfortWindow:selected()
-    local _, choice = self.subviews.list:getSelected()
+    local list = self.subviews and self.subviews.list
+    if not list then return end
+    local _, choice = list:getSelected()
     return choice and choice.entry
 end
 
@@ -634,6 +703,8 @@ function QuickfortWindow:set_status(msg)
 end
 
 function QuickfortWindow:show_detail()
+    local detail = self.subviews and self.subviews.detail
+    if not detail then return end
     local e = self:selected()
     if not e then
         self.subviews.detail:setText('no blueprints found')
@@ -650,17 +721,81 @@ function QuickfortWindow:show_detail()
     self.subviews.detail:setText(table.concat(lines, NEWLINE))
 end
 
-function QuickfortWindow:start_here()
+-- ---- placement mode -------------------------------------------------------
+--
+-- Clicking a blueprint does not start it. It switches the window into placement
+-- mode, where the blueprint is drawn on the map under the mouse and a click on
+-- the map commits it. That is the same shape as gui/quickfort's placement step,
+-- and it exists for the same reason: a blueprint applied at the wrong cursor is
+-- tedious to undo, and this one keeps working for hours afterwards.
+
+-- Everything except the help text is hidden while placing, and the window
+-- shrinks into the top-left corner. At its list size it covers the middle of
+-- the screen, which is exactly where you are trying to look when deciding where
+-- the blueprint goes.
+local PLACING_FRAME = {w = 34, h = 13, l = 1, t = 1}
+
+function QuickfortWindow:set_chrome(placing)
+    for _, id in ipairs({'list', 'detail', 'cancel_btn', 'jobs_label', 'jobs', 'status'}) do
+        local v = self.subviews[id]
+        if v then v.visible = not placing end
+    end
+    self.subviews.place_help.visible = placing
+    self.frame = placing and copyall(PLACING_FRAME) or copyall(self.list_frame)
+    self:updateLayout()
+end
+
+function QuickfortWindow:enter_placement()
     local e = self:selected()
     if not e then return end
-    local pos = guidm.getCursorPos() or dfhack.gui.getMousePos()
-    if not pos then
-        self:set_status('put the keyboard cursor (or the mouse) on the map first')
-        return
-    end
-    local job = start_job(e, pos)
-    self:set_status(('started %s at %d,%d,%d -- %d steps')
-        :format(e.label, pos.x, pos.y, pos.z, job.plan.total))
+    -- While placing, a click on the map is the commit, so the screen must not
+    -- defocus itself when the mouse goes out there. Restored on the way out, so
+    -- in list mode clicking the map hands control straight back to the game.
+    local screen = self.parent_view
+    if screen then screen.defocusable, screen.defocused = false, false end
+    self.placing = e
+    self.footprint = build_footprint(e)
+    self.preview = nil
+    self.preview_at = nil
+    self:set_chrome(true)
+    self:set_status('')
+end
+
+function QuickfortWindow:leave_placement(msg)
+    local screen = self.parent_view
+    if screen then screen.defocusable = true end
+    self.placing = nil
+    self.footprint = nil
+    self.preview = nil
+    self.preview_at = nil
+    self:set_chrome(false)
+    if msg then self:set_status(msg) end
+end
+
+function QuickfortWindow:update_preview(cursor)
+    if same_pos(self.preview_at, cursor) then return end
+    self.preview_at = copyall(cursor)
+    local tiles, bounds = place_footprint(self.footprint, cursor)
+    self.preview = {tiles = tiles, bounds = bounds}
+    local f = self.footprint
+    self.subviews.place_help:setText(table.concat({
+        self.placing.label,
+        '',
+        'Move the mouse to position it.',
+        'LEFT CLICK on the map to start it here.',
+        'RIGHT CLICK or Esc to go back.',
+        '',
+        ('at %d, %d, %d'):format(cursor.x, cursor.y, cursor.z),
+        ('%d tiles dug first (green)'):format(f.now),
+        ('%d follow as those finish (blue)'):format(f.later),
+    }, NEWLINE))
+end
+
+function QuickfortWindow:commit_placement(cursor)
+    local e = self.placing
+    local job = start_job(e, cursor)
+    self:leave_placement(('started %s at %d,%d,%d -- %d steps')
+        :format(e.label, cursor.x, cursor.y, cursor.z, job.plan.total))
 end
 
 function QuickfortWindow:cancel_selected()
@@ -694,13 +829,65 @@ function QuickfortWindow:refresh_jobs()
     list:setChoices(choices, math.min(sel, #choices))
 end
 
+local to_pen = dfhack.pen.parse
+local NOW_PEN = to_pen{ch = 'x', fg = COLOR_GREEN,
+                       tile = dfhack.screen.findGraphicsTile('CURSORS', 1, 2)}
+local LATER_PEN = to_pen{ch = '+', fg = COLOR_LIGHTBLUE,
+                         tile = dfhack.screen.findGraphicsTile('CURSORS', 0, 0)}
+
 function QuickfortWindow:onRenderFrame(dc, rect)
     QuickfortWindow.super.onRenderFrame(self, dc, rect)
     self:refresh_jobs()
+    if not self.placing then return end
+
+    local cursor = dfhack.gui.getMousePos()
+    if not cursor then return end
+    self:update_preview(cursor)
+
+    -- in ASCII the overlay would hide the map under it, so blink it like
+    -- gui/quickfort does
+    if not dfhack.screen.inGraphicsMode() and not gui.blink_visible(500) then
+        return
+    end
+    local tiles = self.preview and self.preview.tiles
+    local bounds = tiles and self.preview.bounds[cursor.z]
+    if not bounds then return end
+    guidm.renderMapOverlay(function(pos)
+        local t = safe_index(tiles, pos.z, pos.y, pos.x)
+        if t == nil then return end
+        return t and NOW_PEN or LATER_PEN
+    end, bounds)
+end
+
+function QuickfortWindow:onInput(keys)
+    if self.placing then
+        if keys.LEAVESCREEN or keys._MOUSE_R then
+            self:leave_placement('cancelled')
+            return true
+        end
+        if keys._MOUSE_L and not self:getMouseFramePos() then
+            -- getMousePos is nil anywhere that is not the map -- the minimap,
+            -- DF's own panels -- so those clicks fall through and keep working
+            local cursor = dfhack.gui.getMousePos()
+            if cursor then
+                self:commit_placement(cursor)
+                return true
+            end
+        end
+    end
+    return QuickfortWindow.super.onInput(self, keys)
 end
 
 QuickfortScreen = defclass(QuickfortScreen, gui.ZScreen)
-QuickfortScreen.ATTRS{focus_path = 'quickfort-seq'}
+QuickfortScreen.ATTRS{
+    focus_path = 'quickfort-seq',
+    -- A ZScreen eats map movement keys unless told not to, which left the map
+    -- frozen under the window. Mouse clicks outside the window already fall
+    -- through to DF (that is the default), so with these two the map scrolls by
+    -- keyboard, by dragging, and by the minimap while this is open.
+    pass_movement_keys = true,
+    pass_mouse_clicks = true,
+}
 function QuickfortScreen:init() self:addviews{QuickfortWindow{}} end
 function QuickfortScreen:onDismiss() view = nil end
 
