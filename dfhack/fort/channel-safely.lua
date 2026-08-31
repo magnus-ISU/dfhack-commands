@@ -33,8 +33,22 @@ DEFAULT DENY, WHICH IS THE POINT
   a flicker: a freshly drawn area shows as planned for a moment before the safe
   parts are released.
 
-  A tile that did reach a job before this saw it is accepted as lost and planned
-  around -- treated as a hole that already exists. Jobs are read, never written.
+  A job issued for a tile this has not yet cleared is TAKEN BACK: the job is
+  removed and the tile written straight back as a suspended designation, which
+  is the planned state you see on the map. That happens a frame later, from a
+  timeout, never inside the event callback -- removing a job while DFHack's
+  event manager still holds it is a SIGSEGV in Core::onUpdate, confirmed here
+  with a crash log. Everything is re-checked when the frame comes round, since
+  the job may have been taken or finished in between.
+
+  A job that already has a worker is left strictly alone, and that tile is
+  accepted as lost and planned around.
+
+ONE AT A TIME
+  Nothing is released next to a channel job already under way. Two adjacent
+  tiles dug at the same moment can drop a floor that neither would alone, and
+  the analysis reasons about the map rather than about what two miners happen to
+  be doing at once. It costs digging speed and buys the guarantee.
 
 PRIORITY IS THE ESCAPE HATCH
   A channel designation at priority 1 (DF's highest, `d1` in quickfort or the
@@ -206,7 +220,7 @@ local BLOCKS_PER_PASS = 800
 local state = nil
 
 local function default_state()
-    return {enabled = false, marks = {}, allowed = {}}
+    return {enabled = false, marks = {}, allowed = {}, watch = {}}
 end
 
 local function get_state()
@@ -214,6 +228,7 @@ local function get_state()
         state = dfhack.persistent.getSiteData(GLOBAL_KEY, default_state())
         state.marks = state.marks or {}
         state.allowed = state.allowed or {}
+        state.watch = state.watch or {}
     end
     return state
 end
@@ -671,28 +686,46 @@ end
 local function set_marked(pos, marked)
     local block, bx, by = tile_parts(pos)
     if not block then return false end
-    if block.occupancy[bx][by].dig_marked == marked then return false end
+    local changed = block.occupancy[bx][by].dig_marked ~= marked
     block.occupancy[bx][by].dig_marked = marked
-    return true
+    -- Un-suspending is not enough on its own. block_flags.designated is how DF
+    -- knows a block has designation work to schedule, and it stays FALSE after
+    -- this tool clears a marker -- so the tile sits designated, unsuspended and
+    -- untouched, with no job ever created for it. Seen live on 70,75,13: dig =
+    -- Channel, marker cleared, and no dwarf ever came. Raising the flag is what
+    -- quickfort's own dig code does after writing a designation, for the same
+    -- reason.
+    if not marked then block.flags.designated = true end
+    return changed
 end
 
 local function hold(pos)
     local s = get_state()
-    if set_marked(pos, true) then
-        s.marks[key(pos)] = true
-        return true
-    end
-    -- already in marker mode: if it is not ours, leave it alone forever
-    return false
+    set_marked(pos, true)
+    s.marks[key(pos)] = true       -- recorded even if the bit was already set
+    return true
 end
 
+-- Authoritative, and that is a deliberate change from tracking ownership.
+--
+-- Release used to clear the marker only for tiles recorded as ours, so that a
+-- suspension set by hand was never undone. That bookkeeping cannot be kept
+-- honest: a tile ended up marked while its record was missing, and from there
+-- nothing could free it -- the sweep skipped it as "already suspended, not
+-- ours", release skipped it as "not ours", and it sat planned for good while
+-- every pass cheerfully reported it released. Watched live on 70,75,13.
+--
+-- So a decision to release now clears the bit whatever the records say. The
+-- cost is real and worth stating: suspending a channel designation by hand no
+-- longer sticks while this is enabled, because the tile will be judged and
+-- released if it is safe. Priority 1 is how to say hands off, and `disable`
+-- hands everything back.
 local function release(pos)
     local s = get_state()
     local k = key(pos)
-    if not s.marks[k] then return false end
-    set_marked(pos, false)
+    local changed = set_marked(pos, false)
     s.marks[k] = nil
-    return true
+    return changed
 end
 
 function release_all()
@@ -768,11 +801,24 @@ end
 -- so the 256-tile read only happens on the handful that matter.
 local scan = nil
 
--- Blocks holding a designation WE put into marker mode. This set is the whole
--- reason the scan below is not a straight flags.designated filter: see there.
-local function marked_blocks()
+-- BLOCKS THAT MUST BE READ IN FULL, whatever their flags say.
+--
+-- block_flags.designated cannot be trusted as "this block contains
+-- designations". DF sets it when a block has designation work to schedule and
+-- clears it once it has processed the block -- INCLUDING when some designations
+-- in that block did not become jobs. Measured in a live fort: a block holding
+-- an active channel designation at 70,75,13 and a claimed job at 70,76,13
+-- reported designated = false, so the sweep reported zero channel designations
+-- while one sat there in plain view, never judged and free to be dug.
+--
+-- So every block this tool has ever seen channel work in is remembered, and
+-- those are always read in full. The flag is still used as the cheap way to
+-- notice work in blocks it has never looked at.
+local function watched_blocks()
+    local s = get_state()
     local set = {}
-    for k in pairs(get_state().marks) do
+    for k in pairs(s.watch) do set[k] = true end
+    for k in pairs(s.marks) do
         local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
         if x then
             set[(tonumber(x) // 16) .. ',' .. (tonumber(y) // 16) .. ',' .. z] = true
@@ -781,9 +827,13 @@ local function marked_blocks()
     return set
 end
 
+local function block_key(pos)
+    return (pos.x // 16) .. ',' .. (pos.y // 16) .. ',' .. pos.z
+end
+
 local function start_scan()
     scan = {i = 0, blocks = df.global.world.map.map_blocks, found = {}, top = nil,
-            marked = marked_blocks()}
+            marked = watched_blocks(), seen = {}}
 end
 
 -- returns true when the scan finished this call
@@ -816,6 +866,7 @@ local function step_scan()
                                      z = block.map_pos.z}
                         scan.found[#scan.found + 1] = pos
                         if not scan.top or pos.z > scan.top then scan.top = pos.z end
+                        scan.seen[block_key(pos)] = true
                         deny_on_sight(pos, block, bx, by)
                     end
                 end
@@ -879,29 +930,61 @@ local function apply(found, top)
     -- Counted as TOTALS, not as changes made this pass: a pass that alters
     -- nothing was reporting "0 held" while two designations sat suspended.
     local held, freed, released_here = 0, 0, 0
+    -- Nothing is released beside a channel job already under way. Two adjacent
+    -- tiles dug at the same moment can drop a floor that neither would alone,
+    -- and the analysis reasons about the map, not about what two miners happen
+    -- to be doing at once. Waiting for the neighbour to finish costs digging
+    -- speed and buys the one guarantee this tool exists for.
+    local busy = inflight_channels()
+    local function next_to_work(pos)
+        for _, d in ipairs(NEIGHBOURS) do
+            if busy[('%d,%d,%d'):format(pos.x + d.x, pos.y + d.y, pos.z)] then return true end
+        end
+        return false
+    end
+
     local function decide(pos)
         local k = key(pos)
         if priority_of(pos) <= EXEMPT_PRIORITY then return 'release' end
         if pos.z < top then return 'hold' end          -- rule 1
-        -- Support first, and it is absolute. The escape valve exists for tiles
-        -- that block each other's ACCESS; letting it override a support hold
-        -- would mean eventually releasing the tile that closes a ring, which is
-        -- the collapse this tool exists to prevent.
+
+        -- Order matters, and getting it wrong is how a tile beside a running
+        -- job came to be released: the valve was consulted before the rules it
+        -- has no business overriding. It exists for ONE situation -- tiles that
+        -- block each other's access with no safe first move -- so it is checked
+        -- last, inside that case alone. It may not override support, and it may
+        -- not override waiting for a neighbour's job to finish.
         if support_holds[k] then return 'support' end
         if select(1, is_unsafe(pos, cut_set, hanging)) then return 'support' end
-        if s.valve == k then return 'release' end      -- let through by the valve
-        if critical[k] then return 'hold' end          -- rule 4
+        -- 'wait' rather than 'hold': waiting on a neighbour's job resolves
+        -- itself in seconds, so it must not count as the kind of deadlock the
+        -- escape valve exists to break. Treating it as one had the valve fire
+        -- on a single tile beside a running job and release the very thing it
+        -- was told to wait for.
+        if next_to_work(pos) then return 'wait' end
+        if critical[k] then
+            if s.valve == k then return 'release' end
+            return 'hold'
+        end
         return 'release'
     end
+
+    -- Rebuilt from scratch every pass. Left to accumulate, a tile cleared once
+    -- stayed cleared for good: the fort owner watched a 2x1 where the safe tile
+    -- was taken and its neighbour -- judged safe in an earlier pass, when the
+    -- neighbour was still solid -- was never reconsidered.
+    s.allowed = {}
 
     local all_held, support_blocked = {}, 0
     for _, pos in ipairs(found) do
         local what = decide(pos)
-        if what == 'support' then
+        if what == 'support' or what == 'wait' then
             s.allowed[key(pos)] = nil
             hold(pos)
             held = held + 1
-            if pos.z == top then support_blocked = support_blocked + 1 end
+            if pos.z == top and what == 'support' then
+                support_blocked = support_blocked + 1
+            end
         elseif what == 'hold' then
             s.allowed[key(pos)] = nil
             hold(pos)
@@ -995,12 +1078,15 @@ end
 
 last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
 last_pass_blocked = last_pass_blocked or 0
+reclaimed = reclaimed or 0
 
 -- one pump step; returns true when a full pass completed
 function pump()
     if not step_scan() then return false end
-    local found, top = scan.found, scan.top
+    local found, top, scan_seen = scan.found, scan.top, scan.seen
     scan = nil
+    -- the watch list is exactly the blocks this sweep found work in
+    get_state().watch = scan_seen or {}
     local held, freed = apply(found, top or 0)
     last_pass = {held = held, freed = freed, channels = #found, top = top}
     return true
@@ -1013,6 +1099,93 @@ function run_once()
         guard = guard + 1
     until pump() or guard > 10000
     return last_pass
+end
+
+
+-- ---------------------------------------------------------------------------
+-- taking a job back before anybody works it
+-- ---------------------------------------------------------------------------
+--
+-- Sweeping cannot win on its own. DF issues a job for a fresh designation on
+-- its own schedule, and the instant it does the tile's dig field is cleared --
+-- so a designation drawn and scheduled between two sweeps is gone before it was
+-- ever seen. Measured in a live fort: three channel designations, all three
+-- already claimed by miners, none of them ever visible to the scan.
+--
+-- eventful fires onJobInitiated the moment a job is issued, which is the one
+-- point where this can be caught. An unjudged channel job is removed and the
+-- tile written back as a SUSPENDED designation -- dig = Channel plus the marker
+-- bit -- which is the "planned" state the player sees, and the state this tool
+-- can then reason about at leisure.
+--
+-- Nothing is lost by that: removeJob on its own does destroy the plan (the tile
+-- comes back with no designation and no job, measured), which is exactly why
+-- the designation is written back in the same breath. The dig priority lives on
+-- the block, not the job, so it survives untouched.
+--
+-- A job that already has a worker is left strictly alone. Mutating a job a
+-- dwarf is working is the thing this repo has crashed on, and it is not worth
+-- it: that tile is accepted as lost and planned around instead.
+-- NEVER from inside the callback. Removing the job there destroys it while
+-- DFHack's event manager is still holding it, which is a SIGSEGV inside
+-- Core::onUpdate -- confirmed the hard way, with a crash log to match. The hook
+-- only writes down an id; the work happens a frame later, from a timeout, at a
+-- clean point in the update cycle.
+local pending_reclaim = {}
+local process_reclaims          -- forward declaration
+
+local function reclaim_job(job)
+    local s = get_state()
+    if not s.enabled then return end
+    if job.job_type ~= df.job_type.DigChannel then return end
+    local pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}
+    if s.allowed[key(pos)] then return end            -- already judged safe
+    if priority_of(pos) <= EXEMPT_PRIORITY then return end
+    pending_reclaim[#pending_reclaim + 1] = {id = job.id, pos = pos}
+    dfhack.timeout(1, 'frames', function() pcall(process_reclaims) end)
+end
+
+function process_reclaims()
+    local s = get_state()
+    local queue = pending_reclaim
+    pending_reclaim = {}
+    for _, item in ipairs(queue) do
+        local job = df.job.find(item.id)
+        -- everything is re-checked: a frame has passed, and the job may have
+        -- been taken, finished or cancelled in the meantime
+        if job and job.job_type == df.job_type.DigChannel
+                and not dfhack.job.getWorker(job)
+                and not s.allowed[key(item.pos)] then
+            if pcall(dfhack.job.removeJob, job) then
+                local block, bx, by = tile_parts(item.pos)
+                if block then
+                    block.designation[bx][by].dig = df.tile_dig_designation.Channel
+                    block.occupancy[bx][by].dig_marked = true
+                    block.flags.designated = true
+                    s.marks[key(item.pos)] = true
+                    s.watch[block_key(item.pos)] = true
+                    reclaimed = (reclaimed or 0) + 1
+                end
+            end
+        end
+    end
+    save_state()
+end
+
+local function register_hooks()
+    local ok, ev = pcall(require, 'plugins.eventful')
+    if not ok then return end
+    ev.onJobInitiated.channel_safely = reclaim_job
+    ev.onUnload.channel_safely = function()
+        ev.onJobInitiated.channel_safely = nil
+    end
+end
+
+local function unregister_hooks()
+    local ok, ev = pcall(require, 'plugins.eventful')
+    if not ok then return end
+    ev.onJobInitiated.channel_safely = nil
+    ev.onUnload.channel_safely = nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -1056,6 +1229,7 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
         state, scan = nil, nil
     elseif sc == SC_MAP_LOADED then
         state, scan = nil, nil
+        if get_state().enabled then register_hooks() end
     end
 end
 
@@ -1074,6 +1248,10 @@ function status()
             :format(last_pass.channels, last_pass.top, last_pass.held, last_pass.freed))
     end
     print(('  priority %d designations are never held'):format(EXEMPT_PRIORITY))
+    if (reclaimed or 0) > 0 then
+        print(('  %d job%s taken back and re-planned since load')
+            :format(reclaimed, reclaimed == 1 and '' or 's'))
+    end
     if (last_pass_blocked or 0) > 0 then
         print(('  %d designation%s cannot be dug in any order without dropping '
             .. 'unsupported floor; they stay planned')
@@ -1096,11 +1274,13 @@ local arg = ({...})[1]
 if arg == 'enable' then
     get_state().enabled = true
     save_state()
+    register_hooks()
     run_once()
     print(('fort/channel-safely: enabled -- %d held, %d released')
         :format(last_pass.held, last_pass.freed))
 elseif arg == 'disable' then
     get_state().enabled = false
+    unregister_hooks()
     local n = release_all()
     print(('fort/channel-safely: disabled -- released %d designation%s')
         :format(n, n == 1 and '' or 's'))

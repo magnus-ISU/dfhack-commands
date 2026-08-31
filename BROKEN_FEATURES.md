@@ -23,6 +23,34 @@ Known residuals on top of that: a soldier with the **mining labor** can't be uni
 (a DF conflict), and one civilian-squad manager's **cloak** slot refuses every assignable
 cloak. Run by `magnus-scripts` every session, which also registers its Equip-screen overlay.
 
+### **`fort/channel-safely` — still causes cave-ins**
+Stages channel designations so only the top level is worked, holds anything whose removal would
+drop unsupported floor, holds the last foothold of a tile still to be dug, and waits for a
+neighbour's job to finish before releasing beside it. **Enabled every session by
+`magnus-scripts`**, so it is acting on live forts.
+
+The plumbing is finally right, after a long evening of it looking correct from the console while
+doing nothing in the game. What was wrong, all of it verified live and all of it now fixed:
+DF **consumes a designation into a job** and clears the tile's `dig` field, so anything judged
+after the fact is unreachable — the tool now suspends on sight and reclaims unjudged jobs a frame
+later via `eventful.onJobInitiated` (never inside the callback: doing that destroys the job while
+the event manager holds it, `SIGSEGV` in `Core::onUpdate`, crash log to match); `block_flags
+.designated` is false for blocks DF has already processed, which made the sweep blind, and must
+be re-raised when a marker is cleared or DF never schedules the tile; the escape valve outranked
+the safety rules and released a tile beside a running job; and ownership tracking left tiles
+marked with no record, stuck planned forever while every pass reported them released.
+
+**What is still broken:** a fresh designation still caved a fort in. The analysis is reactive —
+each pass judges the tiles as they stand and releases what looks safe *now* — so a plan that is
+safe tile-by-tile can still arrive at a collapse, and two miners working at once can strand a
+floor neither would alone. The fix is not another rule: it needs to compute an excavation ORDER
+for the whole designated shape up front, and release strictly along it, rather than re-deciding
+every couple of seconds. Revisit with that in mind.
+
+Also worth knowing while it is enabled: it **owns** `occupancy.dig_marked` for channel
+designations, so suspending one by hand does not stick — priority 1 is the way to say hands off,
+and `disable` hands everything back.
+
 ### **`fort/tarrasque`**
 Each winter solstice, a dead megabeast may return and attack again, so the world's megabeasts
 never go extinct. **Enabled by `magnus-scripts`.**
@@ -127,48 +155,6 @@ real armies, one of them 70 strong.
 
 A retry would need a positive test for "this member is a corpse, not an animated corpse", and a
 concrete symptom it repairs.
-
-### **`fort/channel-safely` — UNTESTED in a fort**
-Holds every channel designation in marker mode except those on the highest z-level that still
-has channelling to do, releasing the next level down as each finishes. Priority-1 designations
-are never held — that is the manual override.
-
-Cave-in protection asks which single tile removals would drop the floor they hold up —
-articulation points in the standing rock, anchored at the walls, computed against the map as it
-stands. The first version asked whether the *finished* excavation left anything hanging, which
-flags almost nothing (at the end of a channel job almost nothing is left standing) and let a
-fort cave in on the first attempt; the danger is the intermediate states, when a ring is one
-tile from closing. It is still not a guarantee: only single removals are checked and dwarves dig
-concurrently, support running off the edge of the examined box is assumed anchored, areas over
-10,000 tiles skip the check, and it reasons about one z-level.
-
-A fourth rule holds any tile that is the last place a dwarf can stand to dig another pending
-tile, so the job is always finishable; reachability is DF's own walkability group, an integer
-compare rather than a path search. Three situations raise a fortress announcement: designations
-that cannot be reached at all, the deadlock escape valve firing, and the area being too large
-for the cave-in check.
-
-Performance was measured rather than assumed, and three findings shaped the code: `getTileType`
-costs ~190µs per call, so 2,500 tiles read that way is 474ms of frozen game — reading straight
-from cached map blocks is 4ms. Resolving `df.tiletype.attrs[tt].shape` per tile costs 1491ms
-per 10,000 tiles against 8ms through a precomputed table. String `"x,y,z"` keys in the flood
-cost more than the map reads did; integer grid indices took the same flood from 473ms to 8ms.
-The whole check at its 10,000-tile cap now measures ~16ms, and is cached until the designation
-set changes.
-
-Marks are recorded in dfhack persistence so it only ever releases tiles *it* marked, and
-`disable` releases everything it holds. Scanning is cheap because `block_flags.designated`
-narrows the 25,056-block map to the handful with designations before any tile is read.
-
-Verified live: a six-level project (462 designations) staged correctly, holding 390 on the five
-lower levels and leaving 72 active on top. The cave-in rule was then tested against the ring
-shape that actually collapsed a fort — with 15 of 16 ring tiles dug it holds the last one
-("digging it would drop the floor it holds up"), and it identifies exactly the 9 interior tiles
-as what would fall. The reachability rule was tested against a real chokepoint: the tile serving
-as another pending tile's only foothold is held. Analysis of 9,025 tiles measures 21ms.
-
-Still unverified: a full pass with both new rules active on a live excavation, and the
-announcements have never fired in a real game.
 
 ### **`fort/quickfort` — UNTESTED in a fort**
 A replacement quickfort front end that lists each blueprint **once** (stock lists one row per

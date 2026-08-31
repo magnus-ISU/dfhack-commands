@@ -165,6 +165,12 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-tomb'), disable = cmd('disable', 'fort/auto-tomb')},
         {key = 'auto-elf-chop', label = 'auto-elf-chop',
          enable = cmd('enable', 'fort/auto-elf-chop'), disable = cmd('disable', 'fort/auto-elf-chop')},
+        -- takes its state as a plain argument rather than through DFHack's
+        -- enable API, so this is `fort/channel-safely enable`, not
+        -- `enable fort/channel-safely`
+        {key = 'channel-safely', label = 'channel-safely',
+         enable = cmd('fort/channel-safely', 'enable'),
+         disable = cmd('fort/channel-safely', 'disable')},
         {key = 'auto-name', label = 'auto-name',
          enable = cmd('enable', 'fort/auto-name'), disable = cmd('disable', 'fort/auto-name')},
         {key = 'statue-redirect', label = 'statue-redirect',
