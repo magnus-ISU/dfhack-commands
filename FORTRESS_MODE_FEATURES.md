@@ -2,6 +2,21 @@
 
 ## Mining, Building, and Zones
 
+### **`fort/channel-safely`**
+Channel a big hole without caving your fort in. Every channel designation is suspended the
+instant it appears, then fed back to the miners a few tiles at a time in an order the tool can
+prove is safe: at most eight tiles out of the blueprint at once, never two of them touching, and
+each one picked with the previous ones imagined as already channelled out. A tile is only let
+out if digging it leaves nothing without support — support runs along the four sides and up from
+the rock below, never through a corner — and if every other designated tile still has somewhere
+to stand that connects out of the excavation. Tiles that are out get restricted traffic so
+nobody wanders onto them, and their old traffic setting is restored afterwards. A shape with no
+safe order, like a ring drawn around floor that is not itself designated, simply stays planned.
+Priority 1 designations are never touched, and `fort/channel-safely why <x> <y> <z>` explains
+any tile's verdict. Enabled by `magnus-scripts`.
+
+![fort/channel-safely demo](demos/fort-channel-safely.gif)
+
 ### **`fort/dig-shapes`**
 Right-click to dig; drag shapes that automatically become staircases, constructions, mining,
 chopping or removal.

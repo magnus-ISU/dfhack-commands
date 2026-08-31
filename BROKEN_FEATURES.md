@@ -23,34 +23,6 @@ Known residuals on top of that: a soldier with the **mining labor** can't be uni
 (a DF conflict), and one civilian-squad manager's **cloak** slot refuses every assignable
 cloak. Run by `magnus-scripts` every session, which also registers its Equip-screen overlay.
 
-### **`fort/channel-safely` — still causes cave-ins**
-Stages channel designations so only the top level is worked, holds anything whose removal would
-drop unsupported floor, holds the last foothold of a tile still to be dug, and waits for a
-neighbour's job to finish before releasing beside it. **Enabled every session by
-`magnus-scripts`**, so it is acting on live forts.
-
-The plumbing is finally right, after a long evening of it looking correct from the console while
-doing nothing in the game. What was wrong, all of it verified live and all of it now fixed:
-DF **consumes a designation into a job** and clears the tile's `dig` field, so anything judged
-after the fact is unreachable — the tool now suspends on sight and reclaims unjudged jobs a frame
-later via `eventful.onJobInitiated` (never inside the callback: doing that destroys the job while
-the event manager holds it, `SIGSEGV` in `Core::onUpdate`, crash log to match); `block_flags
-.designated` is false for blocks DF has already processed, which made the sweep blind, and must
-be re-raised when a marker is cleared or DF never schedules the tile; the escape valve outranked
-the safety rules and released a tile beside a running job; and ownership tracking left tiles
-marked with no record, stuck planned forever while every pass reported them released.
-
-**What is still broken:** a fresh designation still caved a fort in. The analysis is reactive —
-each pass judges the tiles as they stand and releases what looks safe *now* — so a plan that is
-safe tile-by-tile can still arrive at a collapse, and two miners working at once can strand a
-floor neither would alone. The fix is not another rule: it needs to compute an excavation ORDER
-for the whole designated shape up front, and release strictly along it, rather than re-deciding
-every couple of seconds. Revisit with that in mind.
-
-Also worth knowing while it is enabled: it **owns** `occupancy.dig_marked` for channel
-designations, so suspending one by hand does not stick — priority 1 is the way to say hands off,
-and `disable` hands everything back.
-
 ### **`fort/tarrasque`**
 Each winter solstice, a dead megabeast may return and attack again, so the world's megabeasts
 never go extinct. **Enabled by `magnus-scripts`.**

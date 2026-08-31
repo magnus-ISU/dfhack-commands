@@ -55,6 +55,12 @@ PRIORITY 1 IS THE ESCAPE HATCH
   now, I know what I am doing".
 
 WHAT IT TOUCHES
+  `designation.traffic` on tiles it lets out: a tile about to become a hole is
+  set to restricted so nobody walks over it while it is being cut. Whatever the
+  tile had before is remembered and put back if it returns to the blueprint or
+  the designation is cancelled, so a route deliberately marked low or high is
+  not quietly rewritten.
+
   `occupancy.dig_marked`, DF's marker-mode bit, and `block_flags.designated`,
   which has to be re-raised whenever a marker is cleared or DF never schedules
   the tile. While enabled it OWNS the marker bit for channel designations, so a
@@ -98,7 +104,7 @@ local BLOCKS_PER_PASS = 800
 local state = nil
 
 local function default_state()
-    return {enabled = false, marks = {}, allowed = {}, watch = {}}
+    return {enabled = false, marks = {}, allowed = {}, watch = {}, traffic = {}}
 end
 
 local function get_state()
@@ -107,6 +113,7 @@ local function get_state()
         state.marks = state.marks or {}
         state.allowed = state.allowed or {}
         state.watch = state.watch or {}
+        state.traffic = state.traffic or {}
     end
     return state
 end
@@ -198,7 +205,13 @@ end
 -- individually plausible picks.
 local MAX_CONCURRENT = 8
 
-local MARGIN = 3
+-- How far past the designation the support search looks. Tiles on the EDGE of
+-- that box are assumed anchored, because support usually does continue outside
+-- it -- so the margin is really "how far away that assumption is made". At 3 it
+-- was being made right next to the work, which is exactly where a designation
+-- beside an existing pit gets a false anchor and a candidate is cleared on the
+-- strength of it.
+local MARGIN = 8
 local MAX_AREA = 10000         -- a 100x100 excavation; measured at ~16ms
 
 local SHAPE_OPEN, SHAPE_WALL, SHAPE_SUPPORT = 0, 1, 2
@@ -228,6 +241,14 @@ for dx = -1, 1 do
         if dx ~= 0 or dy ~= 0 then NEIGHBOURS[#NEIGHBOURS + 1] = {x = dx, y = dy} end
     end
 end
+
+-- Support travels along the four sides ONLY. A floor touching another floor at
+-- the corner is not held up by it -- which is exactly the mistake that made
+-- this clear tiles that then fell, since an 8-connected flood finds support
+-- paths through diagonals that do not carry any weight. The 8-way set above is
+-- still right for two other things: keeping jobs out of all eight neighbours,
+-- and walking, because dwarves do move diagonally.
+local ORTHO = {{x = 1, y = 0}, {x = -1, y = 0}, {x = 0, y = 1}, {x = 0, y = -1}}
 
 -- WHAT WOULD FALL IF ONE MORE TILE WENT
 --
@@ -291,19 +312,38 @@ function analyse(active, removed)
         end
     end
 
-    -- Anchored tiles are those touching a wall, plus standing tiles on the edge
-    -- of the examined box (support may well continue outside it). Treat them all
-    -- as hanging off one virtual root: "still attached to the rock" then means
-    -- "still reachable from that root".
+    -- The level BELOW, read the same way. A floor sitting straight on top of
+    -- rock is held up by that rock no matter what its own neighbours do, so
+    -- without this the search calls solid ground unsupported and refuses work
+    -- it should allow.
+    local below, bblocks = {}, {}
+    for ix = 0, w - 1 do
+        for iy = 0, h - 1 do
+            local x, y = x0 + ix, y0 + iy
+            local bk = (x // 16) * 4096 + (y // 16)
+            local b = bblocks[bk]
+            if b == nil then
+                b = dfhack.maps.getTileBlock({x = x, y = y, z = z - 1}) or false
+                bblocks[bk] = b
+            end
+            below[ix * h + iy] = b and (codes[b.tiletype[x % 16][y % 16]] or SHAPE_OPEN)
+                                   or SHAPE_OPEN
+        end
+    end
+
+    -- What holds a tile up: rock along one of its four SIDES, rock directly
+    -- underneath it, or running off the edge of the box (where support usually
+    -- does continue). Corners hold up nothing.
     local adj_root = {}
     for ix = 0, w - 1 do
         for iy = 0, h - 1 do
             local i = ix * h + iy
             if grid[i] == SHAPE_SUPPORT then
-                if ix == 0 or iy == 0 or ix == w - 1 or iy == h - 1 then
+                if ix == 0 or iy == 0 or ix == w - 1 or iy == h - 1
+                        or below[i] == SHAPE_WALL then
                     adj_root[i] = true
                 else
-                    for _, d in ipairs(NEIGHBOURS) do
+                    for _, d in ipairs(ORTHO) do
                         local nx, ny = ix + d.x, iy + d.y
                         if nx >= 0 and ny >= 0 and nx < w and ny < h
                                 and grid[nx * h + ny] == SHAPE_WALL then
@@ -329,8 +369,8 @@ function analyse(active, removed)
             local top = stack[#stack]
             local u = top.node
             top.ni = top.ni + 1
-            if top.ni <= #NEIGHBOURS then
-                local d = NEIGHBOURS[top.ni]
+            if top.ni <= #ORTHO then
+                local d = ORTHO[top.ni]
                 local nx, ny = (u // h) + d.x, (u % h) + d.y
                 if nx >= 0 and ny >= 0 and nx < w and ny < h then
                     local v = nx * h + ny
@@ -588,10 +628,38 @@ local function set_marked(pos, marked)
     return changed
 end
 
+-- A tile that has been let out is about to become a hole, so keep dwarves off
+-- it: restrict traffic while it is out, and put the old setting back if it goes
+-- back into the blueprint. Whatever the tile had before is remembered, so a
+-- route deliberately marked low or high is not quietly rewritten to normal.
+local function set_traffic(pos, value)
+    local block, bx, by = tile_parts(pos)
+    if not block then return end
+    block.designation[bx][by].traffic = value
+end
+
+local function restrict(pos)
+    local s, k = get_state(), key(pos)
+    local block, bx, by = tile_parts(pos)
+    if not block then return end
+    if s.traffic[k] == nil then
+        s.traffic[k] = block.designation[bx][by].traffic
+    end
+    set_traffic(pos, df.tile_traffic.Restricted)
+end
+
+local function unrestrict(pos)
+    local s, k = get_state(), key(pos)
+    if s.traffic[k] == nil then return end
+    set_traffic(pos, s.traffic[k])
+    s.traffic[k] = nil
+end
+
 local function hold(pos)
     local s = get_state()
     set_marked(pos, true)
     s.marks[key(pos)] = true       -- recorded even if the bit was already set
+    unrestrict(pos)                -- back in the blueprint: walk on it again
     return true
 end
 
@@ -614,6 +682,7 @@ local function release(pos)
     local k = key(pos)
     local changed = set_marked(pos, false)
     s.marks[k] = nil
+    restrict(pos)
     return changed
 end
 
@@ -801,7 +870,7 @@ end
 
 -- Tiles let out but not yet dug: still designated, or gone from the map into a
 -- job somebody is carrying. Until this is empty, nothing else is released.
-local function outstanding(s)
+function outstanding(s)
     local jobs = inflight_channels()
     local out = {}
     for k in pairs(s.released or {}) do
@@ -907,6 +976,17 @@ function choose_release(active, phantom, group)
     end)
 
     for _, cand in ipairs(order) do
+        -- Anything standing on the tile, or on the tile above it, comes down
+        -- with the floor. This check existed, then was dropped in a rewrite and
+        -- nothing called it for several versions -- restored, and now looking
+        -- up as well, since a construction one level above loses its floor just
+        -- as surely as one standing on the tile itself.
+        local above = {x = cand.x, y = cand.y, z = cand.z + 1}
+        if has_building(cand) or has_building(above)
+                or has_building({x = cand.x, y = cand.y, z = cand.z - 1}) then
+            goto continue
+        end
+
         -- never beside work already out: two adjacent tiles dug at the same
         -- moment can drop a floor that neither would alone, and no amount of
         -- per-tile reasoning sees that coming
@@ -963,6 +1043,15 @@ local function apply(found, top)
 
     -- forget released tiles that are done with
     local out = outstanding(s)
+
+    -- Restrict everything currently out, from the `out` set rather than from
+    -- the designation list: once DF turns a released tile into a job the tile
+    -- has no designation any more, so it is not in `found` at all -- which is
+    -- exactly the window when a dwarf must not be standing on it.
+    for k in pairs(out) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        if x then restrict({x = tonumber(x), y = tonumber(y), z = tonumber(z)}) end
+    end
     for k in pairs(s.released) do
         if not out[k] then s.released[k] = nil end
     end
@@ -993,7 +1082,11 @@ local function apply(found, top)
             s.released[k] = true
             freed = freed + 1
         elseif out[k] then
-            freed = freed + 1            -- already out; leave it alone
+            -- already out from an earlier pass: keep it restricted, since the
+            -- restriction has to hold for as long as the tile is a hole waiting
+            -- to happen, not just for the pass that let it out
+            restrict(pos)
+            freed = freed + 1
         else
             hold(pos); held = held + 1
         end
@@ -1007,6 +1100,14 @@ local function apply(found, top)
         if pos and not is_channel(pos) then
             set_marked(pos, false)
             s.marks[k] = nil
+        end
+    end
+    for k in pairs(s.traffic) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+        -- dug, or the designation was cancelled: hand the setting back
+        if pos and not is_channel(pos) and not (s.released and s.released[k]) then
+            unrestrict(pos)
         end
     end
 
@@ -1237,6 +1338,68 @@ function status()
     end
 end
 
+-- `fort/channel-safely why <x> <y> <z>` -- the verdict for one tile, with the
+-- reason. Written because "it caused a cave-in" is impossible to act on without
+-- knowing which test cleared the tile that did it.
+function why(x, y, z)
+    local pos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+    if not (pos.x and pos.y and pos.z) then
+        qerror('usage: fort/channel-safely why <x> <y> <z>')
+    end
+    local s = get_state()
+    local k = key(pos)
+    print(('fort/channel-safely: %d,%d,%d'):format(pos.x, pos.y, pos.z))
+    print(('  designated: %s   suspended: %s'):format(
+        tostring(is_channel(pos)),
+        tostring(select(2, designation_of(pos)) and
+                 select(2, designation_of(pos)).dig_marked)))
+    print(('  priority %d%s'):format(priority_of(pos),
+        priority_of(pos) <= EXEMPT_PRIORITY and '  (never touched)' or ''))
+    print(('  ours: %s   released by us: %s'):format(
+        tostring(s.marks[k] ~= nil), tostring(s.released and s.released[k] ~= nil)))
+    print(('  building on it: %s   above: %s   below: %s'):format(
+        tostring(has_building(pos)),
+        tostring(has_building({x = pos.x, y = pos.y, z = pos.z + 1})),
+        tostring(has_building({x = pos.x, y = pos.y, z = pos.z - 1}))))
+
+    local out = outstanding(s)
+    local beside = {}
+    for _, d in ipairs(NEIGHBOURS) do
+        local nk = ('%d,%d,%d'):format(pos.x + d.x, pos.y + d.y, pos.z)
+        if out[nk] then beside[#beside + 1] = nk end
+    end
+    print(('  beside work already out: %s'):format(
+        #beside == 0 and 'no' or table.concat(beside, ' ')))
+
+    -- support: what would digging it leave hanging
+    local active = {pos}
+    local hyp = {}
+    for kk in pairs(out) do hyp[kk] = true end
+    hyp[k] = true
+    local _, base = analyse({pos}, out)
+    local _, after = analyse({pos}, hyp)
+    if not after then
+        print('  support: area over budget, not checked')
+    else
+        local nb, na = 0, 0
+        for _ in pairs(base or {}) do nb = nb + 1 end
+        for _ in pairs(after) do na = na + 1 end
+        print(('  support: %d hanging before, %d after -> %s'):format(nb, na,
+            na <= nb and 'no new drop' or 'WOULD DROP FLOOR'))
+        if na > nb then
+            local shown = 0
+            for kk in pairs(after) do
+                if not (base and base[kk]) and shown < 6 then
+                    print('     would hang: ' .. kk)
+                    shown = shown + 1
+                end
+            end
+        end
+    end
+    print(('  reachability: %s'):format(
+        strands_work({pos}, hyp, fort_group()) and 'WOULD STRAND WORK' or 'fine'))
+end
+
 if dfhack_flags and dfhack_flags.module then return end
 
 if not dfhack.world.isFortressMode() then
@@ -1257,6 +1420,9 @@ elseif arg == 'disable' then
     local n = release_all()
     print(('fort/channel-safely: disabled -- released %d designation%s')
         :format(n, n == 1 and '' or 's'))
+elseif arg == 'why' then
+    local a = {...}
+    why(a[2], a[3], a[4])
 elseif arg == 'once' then
     run_once()
     print(('fort/channel-safely: one pass -- %d channel tiles, %d held, %d released')
