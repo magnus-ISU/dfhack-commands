@@ -68,8 +68,23 @@ CAVE-IN PROTECTION IS CHEAP, NOT A GUARANTEE
   Support holds are absolute: the escape valve below may not override them. A
   valve that can eventually release the tile which closes a ring is just a
   slower way to cave the fort in. When every remaining designation is held for
-  support, the plan genuinely cannot be finished as drawn, and that is
-  announced rather than forced through.
+  support, the plan cannot be finished as drawn and it simply stays suspended --
+  quietly. The tiles sit visibly planned on the map, which says it better than
+  a message would, and the only thing to do about it is to designate the floor
+  they enclose. `status` counts them if you ask.
+
+JOBS, NOT JUST DESIGNATIONS
+  Marker mode stops DF posting NEW jobs for a designation; it does nothing about
+  a job already on the list, which gets taken and dug regardless. So a tile
+  decided against between two passes was dug anyway -- polling every couple of
+  seconds against dwarves who act continuously is a race, and the analysis
+  cannot win it on its own.
+
+  Every tick, channel jobs standing on held tiles are removed, provided nobody
+  has taken them yet. That is the narrow, safe version: removeJob on the job a
+  unit is actually working is the known way to crash DF, so a claimed job is
+  left alone and instead treated as a hole that already exists when the next
+  plan is computed.
 
   An earlier version asked only the first question, and then only the second,
   and a fort caved in each time.
@@ -461,14 +476,52 @@ end
 -- that already exists.
 local MAX_SETTLE = 5
 
+-- world.jobs.list is a LINKED LIST of job_list_link, not a vector. The first
+-- version of this iterated it with ipairs, which silently walks nothing at all,
+-- so every "count the jobs already under way" check quietly saw zero.
+local function each_job(fn)
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        local nxt = link.next
+        if job then fn(job) end
+        link = nxt
+    end
+end
+
 local function inflight_channels()
     local set = {}
-    for _, job in ipairs(df.global.world.jobs.list) do
-        if job.job_type == df.job_type.DigChannel then
-            set[key(job.pos)] = true
-        end
-    end
+    each_job(function(job)
+        if job.job_type == df.job_type.DigChannel then set[key(job.pos)] = true end
+    end)
     return set
+end
+
+-- Cancel channel jobs posted on tiles we are holding, while nobody has taken
+-- them yet.
+--
+-- This is the part marker mode cannot do. Suspending a designation stops DF
+-- posting NEW jobs for it, but a job already on the list stays there and gets
+-- taken, so a tile decided against between two passes is dug anyway. Removing
+-- the job closes that window.
+--
+-- Only unclaimed jobs. removeJob on the job a unit is actually working is the
+-- known way to crash the game, so anything with a worker is left alone and
+-- treated as a hole that already exists when the next plan is computed.
+local function veto_jobs()
+    local s = get_state()
+    local killed = 0
+    local doomed = {}
+    each_job(function(job)
+        if job.job_type == df.job_type.DigChannel and s.marks[key(job.pos)]
+                and not dfhack.job.getWorker(job) then
+            doomed[#doomed + 1] = job
+        end
+    end)
+    for _, job in ipairs(doomed) do
+        if pcall(dfhack.job.removeJob, job) then killed = killed + 1 end
+    end
+    return killed
 end
 
 -- returns: support_holds (set), cut set, hanging set, or nil when over budget
@@ -821,14 +874,11 @@ local function apply(found, top)
     -- the tool being broken. So when nothing on the active level is workable,
     -- one tile is let through: the one that is the last foothold for the fewest
     -- others, breaking ties by priority.
-    if released_here == 0 and #all_held == 0 and support_blocked > 0 then
-        announce('unfinishable', ('%d channel designation%s left, and digging any of '
-            .. 'them would drop floor that nothing holds up -- designate the floor '
-            .. 'they enclose as well, or dig those last tiles by hand')
-            :format(support_blocked, support_blocked == 1 and '' or 's'))
-    else
-        clear_warning('unfinishable')
-    end
+    -- A plan with no safe order -- a ring around floor that is not itself
+    -- designated -- simply stays suspended. It is not announced: the tiles are
+    -- visibly planned on the map, which says it better than a message would,
+    -- and there is nothing to do about it beyond designating the floor inside.
+    last_pass_blocked = support_blocked
 
     if released_here == 0 and #all_held > 0 then
         local best, best_cost
@@ -890,6 +940,7 @@ local function apply(found, top)
 end
 
 last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
+last_pass_blocked = last_pass_blocked or 0
 
 -- one pump step; returns true when a full pass completed
 function pump()
@@ -926,8 +977,24 @@ ChannelPump.ATTRS{
 
 next_pass_at = next_pass_at or 0
 
+-- Resolved through reqscript on every tick, deliberately. An overlay widget is
+-- an object created when overlays were last rescanned, and its methods keep
+-- resolving names in the module environment they were BORN in -- so after this
+-- file is edited and copied into place, the command line runs the new code
+-- while the widget in the running game quietly keeps running the old. That is
+-- invisible from the outside: the tool looks live, reports sensible things when
+-- asked, and behaves in the fort like the version you replaced.
 function ChannelPump:overlay_onupdate()
+    local live = reqscript('fort/channel-safely')
+    if live ~= _ENV and live.tick then return live.tick() end
+    return tick()
+end
+
+function tick()
     if not get_state().enabled then return end
+    -- cheap, and it has to be quick: a job posted on a held tile has to go
+    -- before somebody picks it up
+    pcall(veto_jobs)
     local now = dfhack.getTickCount()
     if scan then
         pcall(pump)
@@ -963,6 +1030,11 @@ function status()
             :format(last_pass.channels, last_pass.top, last_pass.held, last_pass.freed))
     end
     print(('  priority %d designations are never held'):format(EXEMPT_PRIORITY))
+    if (last_pass_blocked or 0) > 0 then
+        print(('  %d designation%s cannot be dug in any order without dropping '
+            .. 'unsupported floor; they stay planned')
+            :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's'))
+    end
     if hanging_cache.skipped then
         print(('  support check SKIPPED: the active level spans more than %d tiles')
             :format(MAX_AREA))
