@@ -8,6 +8,86 @@ Masterwork-era ancestor raws, the manual pages, and the thread's full art set in
 
 Nothing here is built yet. This is the answer sheet for the questions raised while scoping it.
 
+## OPEN — decisions still needed before anything can be built
+
+Ordered by how much else depends on them.
+
+### 1. How souls are produced, and what a soul *is*  (blocking everything)
+Every price in this document is denominated in souls and nothing about them is settled.
+
+- **Production.** Meph hung `[EXTRA_BUTCHER_OBJECT:BY_TYPE:THOUGHT][EBO_ITEM:...]` off each
+  creature's brain. Copying that means `SELECT_CREATURE` edits to *every butcherable vanilla
+  creature* — the single most invasive thing the project's ground rules forbid, and a guaranteed
+  collision with any other mod that edits the same creatures. Three ways out:
+  1. **A lua hook on butchery** (`JOB_COMPLETED` on `job_type.ButcherAnimal`) that mints a soul
+     at the shop. Zero raw edits, works on every creature including ones added by other mods.
+     **Recommended.**
+  2. A workshop reaction that eats a corpse and yields a soul — clean, but adds a hauling step
+     and changes the feel.
+  3. The EBO edits. Rejected unless 1 and 2 both fail.
+- **Sapient corpses.** Fortress mode will not butcher a sapient corpse at all, so goblins and
+  elves killed at the wall yield *nothing* under any butchery-based scheme. Either souls come
+  from **kills** rather than butchery, or invader corpses are worthless and the economy runs on
+  animals and non-sapient prisoners only. This is a balance decision, not a technical one.
+- **What item class?** There is no vanilla "soul" item, so something must be defined. `PLANT`
+  (Meph's choice) collides with "no new plants". Candidates: a new `INORGANIC` issued as a
+  `BAR` (bins, easy stacking, reads oddly) or as `POWDER_MISC` in bags, or a single new
+  `ITEM_TOOL`. **Needs a call** — it determines stockpiling, hauling and every reagent line.
+
+### 2. Summoned units — the spawn pipeline is the project's biggest risk
+Skeletons, elementals and bone golems are all *created* units. `dfhack.units.create` +
+pos-seed + active-insert + teleport + `makeown` is known to work, but **emigration destroys
+created units** — and a civ with no migrants whose entire population is summoned is maximally
+exposed to exactly that. Needs a mitigation plan and a long-running test before the design
+leans on it. Everything else here is comparatively easy.
+
+### 3. Are elementals citizens or pets?
+"Powerful warrior, no labour" only works as a **citizen** — pets cannot be put in squads. That
+means a caste of the warlock creature with labours suppressed (per-caste labour disabling does
+not exist in raws; `ha-illithids` already manipulates labours from lua, so the same trick
+inverted). Same question for bone golems, which additionally want a large body size — see the
+armour-sizing notes in `[[df-armor-sizing-specdata-race]]` before committing.
+
+### 4. Gargoyles cannot walk to a pasture
+`[IMMOBILE]` and "pasture it where you want it" are contradictory: an immobile creature cannot
+be led anywhere, and DF moves pastured animals by walking them. The original claimed pasturing
+worked; unverified and suspicious. Options: spawn the gargoyle **at a player-chosen tile** via
+the script (we already teleport created units), ship it in a cage and release, or make gargoyles
+*buildings* rather than creatures and give them the attack via a different route. **Needs a
+decision and a test.**
+
+### 5. Unspecified costs and content
+- **Obsidian Factory**: inputs never specified. Magma-powered, like the original? Free boulders?
+- **Embark**: how many warlocks, and with what? The original started with 13 and no migrants.
+- **Food and drink**: the original made alcohol optional and replaced it with potions, which we
+  cut. So warlocks eat and drink normally?
+- **Adventure mode**: the suite is *High Adventure* and this has only ever been discussed as a
+  fortress race. Playable outsider or not?
+
+### 6. Art: recoverable, but check the licence
+Good news, measured rather than assumed: the cheat sheet is **1:1 pixel scale on a 32 px grid**
+(column runs measured at 30–32 px, rows in a 96 px band = three 32 px rows), so the gargoyle,
+mephit and prisoner sprites can be cut out of `art/cheatsheet_white.png` at native resolution
+instead of being redrawn.
+
+**But the licence is not ours to assume.** Meph credits the sprites to himself, Vordak,
+Redshrike (OpenGameArt, attribution required) and Denzi (**CC-BY-SA 3.0** — attribution *and*
+share-alike). We cannot tell which sprite came from whom, and share-alike is infectious. Decide
+before shipping: attribute broadly and accept CC-BY-SA on the mod's art, or redraw.
+
+Sizing rules that already bit us elsewhere and apply here: portraits are 96×96, `LARGE_IMAGE`
+needs layered sets (3×2 max), and a large caste sprite that is not wrapped in a `LAYER_SET`
+flashes grey under status greying — see `[[df-large-sprite-grayscale-flash]]` and
+`[[ha-graphics-grammar]]`.
+
+### 7. Still unverified from earlier sections
+- `[SQUAD:n]` with n ≠ 10 on the Steam build (needed for nothing critical now, since the
+  Horsemen use `[SQUAD:1]`, but the Death Knight's squad size assumes it).
+- Forcing a caravan from a **hostile** civ (the goblin-caravan case).
+- Erasing `Migrants` timed events as the no-migrants mechanism.
+- Whether `[CAN_USE_ARTIFACT]` + `HAS_TOOL_USE:CONTAIN_WRITING` actually pulls an artifact book
+  to a construction site.
+
 ## Creatures we do and don't need to add
 
 | Wanted | Vanilla already has | Verdict |
