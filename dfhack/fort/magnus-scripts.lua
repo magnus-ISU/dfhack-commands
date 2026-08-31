@@ -439,8 +439,9 @@ local COLUMNS = {
          enable = cmd('enable', 'hide-tutorials'), disable = cmd('disable', 'hide-tutorials')},
         -- 3rd-party C++ plugin (notliad; vendored + built by `make build`). Fort mode
         -- opts into the free camera, adventure mode into the world-tile slide.
-        {key = 'smooth-movement', label = 'smooth-movement', mode = 'any',
+        {key = 'smooth-movement', label = 'smooth-movement', mode = 'fort',
          enable = function()
+            if not dfhack.isMapLoaded() then return end
             pcall(dfhack.run_command, 'load', 'smooth-movement')
             dfhack.run_command('enable', 'smooth-movement')
             if dfhack.world.isAdventureMode() then
@@ -532,10 +533,10 @@ local COLUMNS = {
 local function item_mode(col, item) return item.mode or col.mode end
 
 local function mode_active(m)
-    if m == 'any' then return dfhack.world.isFortressMode() or dfhack.world.isAdventureMode() end
-    if m == 'fort' then return dfhack.world.isFortressMode() end
-    if m == 'adv' then return dfhack.world.isAdventureMode() end
-    return false
+    if m == 'any' then return true end
+    if m == 'fort' then return dfhack.world.isFortressMode() and dfhack.isMapLoaded() end
+    if m == 'adv' then return dfhack.world.isAdventureMode() and dfhack.isMapLoaded() end
+    return true
 end
 
 -- every key in an opt_in column defaults to OFF (see is_on)
@@ -559,12 +560,7 @@ local function apply_item(col, item)
 end
 
 local function apply_all()
-    if not (dfhack.world.isFortressMode() or dfhack.world.isAdventureMode()) then
-        print('magnus-scripts: no fort or adventurer loaded; nothing applied.')
-        return
-    end
-    print('magnus-scripts: applying saved selection ('
-        .. (dfhack.world.isFortressMode() and 'fort' or 'adventure') .. ' mode)...')
+    print('magnus-scripts: applying saved selection...')
     -- make sure freshly-copied overlay widgets are discoverable before enabling them
     try('overlay rescan', function() require('plugins.overlay').rescan() end)
     for _, col in ipairs(COLUMNS) do
@@ -757,7 +753,7 @@ function MagnusWindow:refresh()
 end
 
 MagnusScreen = defclass(MagnusScreen, gui.ZScreen)
-MagnusScreen.ATTRS{focus_path = 'magnus-scripts'}
+MagnusScreen.ATTRS{focus_path = 'magnus-scripts', def_actions = {dismiss = 'LEAVESCREEN'}}
 
 function MagnusScreen:init()
     self:addviews{MagnusWindow{}}
