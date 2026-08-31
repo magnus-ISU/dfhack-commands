@@ -49,15 +49,30 @@ CAVE-IN PROTECTION IS CHEAP, NOT A GUARANTEE
        dug from both ends and the tile that would close it waits until the floor
        inside has gone.
 
-  The first version of rule 4 asked the wrong question, and a fort caved in on
-  the first attempt because of it. It simulated the entire active channel set as
-  already dug and looked for what was left hanging -- but at the end of a
-  full-level channel job almost nothing is left standing, so almost nothing was
-  ever flagged. The danger is not the final state, it is every state on the way
-  there: dwarves take the released designations in whatever order suits them,
-  and the instant one completes a ring the floor inside drops. Asking instead
-  which single tile removals would strand something answers that.
+  Rule 4 asks TWO questions, because either one alone lets a fort collapse.
 
+    * "If everything I am about to release were dug, what would be left
+      hanging?" -- this is the one that catches a ring before a single tile is
+      cut. It runs to a fixpoint: tiles next to something that would be left
+      hanging are held, which shrinks the set that will be dug, which can make
+      other tiles safe, so it is asked again until it settles.
+    * "Which single removal would strand something, given the map as it is?" --
+      this is the one that still works once digging is under way and the
+      remaining designations no longer enclose anything.
+
+  In-flight dig jobs count as already gone in both. Marker mode does not cancel
+  a job a dwarf has already taken, and cancelling one outright risks the crash
+  that removeJob on a live job is known for, so whatever has a job is planned
+  around as a hole that already exists.
+
+  Support holds are absolute: the escape valve below may not override them. A
+  valve that can eventually release the tile which closes a ring is just a
+  slower way to cave the fort in. When every remaining designation is held for
+  support, the plan genuinely cannot be finished as drawn, and that is
+  announced rather than forced through.
+
+  An earlier version asked only the first question, and then only the second,
+  and a fort caved in each time.
   Rule 4 is a real connectivity search, not a neighbour count, so it catches an
   unanchored region of any shape -- but it is bounded, and those bounds are
   where it stops being a guarantee:
@@ -422,6 +437,74 @@ function analyse(active, removed)
     return cut_set, hanging
 end
 
+
+-- BOTH QUESTIONS, BECAUSE NEITHER IS ENOUGH ON ITS OWN
+--
+-- "Which single removal strands something" finds nothing on a freshly
+-- designated plan: while the rock is still solid there are no articulation
+-- points, so a ring is released whole and the miners are free to close it in
+-- whatever order they like. Measured on a fresh 5x5 ring: 0 tiles held.
+--
+-- "If the whole plan were dug, what would be left hanging" answers that one --
+-- the same ring reports the 9 tiles inside it as doomed before a single tile
+-- is cut -- but it says nothing once digging is under way, because by then the
+-- remaining designations no longer enclose anything.
+--
+-- So both are asked. The second runs to a fixpoint: tiles next to something
+-- that would be left hanging are held, which shrinks the set that is going to
+-- be dug, which can make other tiles safe, so it is re-asked until it settles.
+--
+-- In-flight dig jobs count as already gone. Putting a designation into marker
+-- mode does not cancel a job a dwarf has already taken, and cancelling one
+-- outright risks the crash that removeJob on a live job is known for, so the
+-- honest thing is to plan around them: whatever has a job is treated as a hole
+-- that already exists.
+local MAX_SETTLE = 5
+
+local function inflight_channels()
+    local set = {}
+    for _, job in ipairs(df.global.world.jobs.list) do
+        if job.job_type == df.job_type.DigChannel then
+            set[key(job.pos)] = true
+        end
+    end
+    return set
+end
+
+-- returns: support_holds (set), cut set, hanging set, or nil when over budget
+function plan_support_holds(active)
+    local inflight = inflight_channels()
+
+    -- everything that could be dug, minus what we decide to hold
+    local doomed = {}
+    for _, p in ipairs(active) do doomed[key(p)] = true end
+    for k in pairs(inflight) do doomed[k] = true end
+
+    local holds = {}
+    for _ = 1, MAX_SETTLE do
+        local cut, hanging = analyse(active, doomed)
+        if not cut then return nil end
+        local changed = false
+        for _, p in ipairs(active) do
+            local k = key(p)
+            if doomed[k] and not holds[k] and not inflight[k] then
+                for _, d in ipairs(NEIGHBOURS) do
+                    if hanging[('%d,%d,%d'):format(p.x + d.x, p.y + d.y, p.z)] then
+                        holds[k], doomed[k], changed = true, nil, true
+                        break
+                    end
+                end
+            end
+        end
+        if not changed then break end
+    end
+
+    -- and the single-removal question, against the map as it stands plus
+    -- whatever the miners are already part way through
+    local cut_now, hanging_now = analyse(active, inflight)
+    return holds, cut_now, hanging_now
+end
+
 -- rule 2, plus the answers computed above
 local function is_unsafe(pos, cut_set, hanging)
     if has_building(pos) then return true, 'a building stands on it' end
@@ -670,11 +753,12 @@ local function apply(found, top)
     -- one tile at a time, so most passes look at the same set as the last one
     -- and the flood would return the same answer for the same cost.
     if hanging_cache.set ~= sig then
-        local cut_set, hanging = analyse(active)
-        hanging_cache.cut, hanging_cache.hanging = cut_set, hanging
-        hanging_cache.skipped = cut_set == nil
+        local holds, cut_set, hanging = plan_support_holds(active)
+        hanging_cache.holds, hanging_cache.cut, hanging_cache.hanging = holds, cut_set, hanging
+        hanging_cache.skipped = holds == nil
         hanging_cache.set = sig
     end
+    local support_holds = hanging_cache.holds or {}
     local cut_set, hanging = hanging_cache.cut, hanging_cache.hanging
 
     -- rule 4 looks at the whole active level, priority 1 tiles included: those
@@ -699,19 +783,29 @@ local function apply(found, top)
     local function decide(pos)
         local k = key(pos)
         if priority_of(pos) <= EXEMPT_PRIORITY then return 'release' end
-        if s.valve == k then return 'release' end   -- let through by the valve
         if pos.z < top then return 'hold' end          -- rule 1
-        if select(1, is_unsafe(pos, cut_set, hanging)) then return 'hold' end
+        -- Support first, and it is absolute. The escape valve exists for tiles
+        -- that block each other's ACCESS; letting it override a support hold
+        -- would mean eventually releasing the tile that closes a ring, which is
+        -- the collapse this tool exists to prevent.
+        if support_holds[k] then return 'support' end
+        if select(1, is_unsafe(pos, cut_set, hanging)) then return 'support' end
+        if s.valve == k then return 'release' end      -- let through by the valve
         if critical[k] then return 'hold' end          -- rule 4
         return 'release'
     end
 
-    local all_held = {}
+    local all_held, support_blocked = {}, 0
     for _, pos in ipairs(found) do
         local what = decide(pos)
-        if what == 'hold' then
+        if what == 'support' then
             hold(pos)
             held = held + 1
+            if pos.z == top then support_blocked = support_blocked + 1 end
+        elseif what == 'hold' then
+            hold(pos)
+            held = held + 1
+            -- only ACCESS holds are valve candidates
             if pos.z == top then all_held[#all_held + 1] = pos end
         else
             release(pos)
@@ -727,6 +821,15 @@ local function apply(found, top)
     -- the tool being broken. So when nothing on the active level is workable,
     -- one tile is let through: the one that is the last foothold for the fewest
     -- others, breaking ties by priority.
+    if released_here == 0 and #all_held == 0 and support_blocked > 0 then
+        announce('unfinishable', ('%d channel designation%s left, and digging any of '
+            .. 'them would drop floor that nothing holds up -- designate the floor '
+            .. 'they enclose as well, or dig those last tiles by hand')
+            :format(support_blocked, support_blocked == 1 and '' or 's'))
+    else
+        clear_warning('unfinishable')
+    end
+
     if released_here == 0 and #all_held > 0 then
         local best, best_cost
         for _, pos in ipairs(all_held) do
