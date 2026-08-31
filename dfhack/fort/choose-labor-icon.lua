@@ -229,7 +229,7 @@ end
 ChooseIcon = defclass(ChooseIcon, widgets.Window)
 ChooseIcon.ATTRS{
     frame_title = 'Work detail icons',
-    frame = {w = 62, h = 27},
+    frame = {w = 68, h = 30},
     resizable = true,
     start_idx = DEFAULT_NIL,   -- work detail to open on, 0-based
 }
@@ -247,7 +247,13 @@ function ChooseIcon:init()
         },
         IconGrid{
             view_id = 'grid',
-            frame = {l = 30, t = 2, r = 0, b = 3},
+            -- Sized explicitly rather than stretched to r/b. The grid needs
+            -- exactly COLS x CELL_W by rows x CELL_H, and letting the layout
+            -- decide left it a tile short in each direction, which clipped the
+            -- right edge and bottom of the last row and column of icons.
+            frame = {l = 30, t = 2,
+                     w = COLS * CELL_W,
+                     h = math.ceil(#ICONS / COLS) * CELL_H},
             get_current = function()
                 local d = self:selected_detail()
                 return d and d.icon
