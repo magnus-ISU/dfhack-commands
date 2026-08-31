@@ -82,16 +82,7 @@ Tidies the Labor screen and creates any missing crafting work details.
 
 ### **`fort/choose-labor-icon`**
 Pick a work detail's icon from a grid of the actual icons instead of cycling DF's little
-selector one at a time. A **[Change Icon]** button appears on the work detail screen, right of
-the configure gear; it opens the picker with the detail you were looking at already selected.
-All nineteen icons are drawn as DF draws them, the current one boxed, and clicking one writes
-it. `fort/choose-labor-icon` opens the same window on its own.
-
-Two things worth knowing. `CUSTOM_1`–`CUSTOM_8` are vanilla's roman numerals I–VIII unless a
-graphics mod rebinds them (the picker reads any such mod's tile page, so its art shows up here
-too). And DF caches the icon it drew for each row of its own Labor list: a change made here is
-stored correctly and shows on reload, but DF's list may keep drawing the old sprite until that
-panel is rebuilt — the picker's own list always shows what is actually stored.
+selector one at a time.
 
 ![fort/choose-labor-icon demo](demos/fort-choose-labor-icon.png)
 
