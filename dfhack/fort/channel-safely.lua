@@ -15,6 +15,27 @@ finishes.
     fort/channel-safely disable    stop, and release every designation it holds
     fort/channel-safely once       run a single pass now, then stop
 
+DEFAULT DENY, WHICH IS THE POINT
+  A channel designation is suspended the instant it is SEEN, before anything is
+  known about it, and released again only once the checks below have cleared it.
+
+  That inversion is the whole reason this works. DF turns a designation into a
+  job promptly, and the moment it does, the tile's dig field is CLEARED -- the
+  work stops living on the map and lives in the job, where marker mode cannot
+  reach it and where the two ways of intervening are both unacceptable
+  (removeJob destroys the plan outright; writing to a job a dwarf is working is
+  live-job mutation this repo has crashed on). Deciding at leisure and
+  suspending afterwards therefore loses every tile the scheduler gets to first,
+  which is what let a fort channel itself into a collapse three times over.
+
+  Judging first and releasing second means DF can only ever build a job out of a
+  tile already cleared, and there is no window left to lose. The visible cost is
+  a flicker: a freshly drawn area shows as planned for a moment before the safe
+  parts are released.
+
+  A tile that did reach a job before this saw it is accepted as lost and planned
+  around -- treated as a hole that already exists. Jobs are read, never written.
+
 PRIORITY IS THE ESCAPE HATCH
   A channel designation at priority 1 (DF's highest, `d1` in quickfort or the
   priority selector in-game) is never held back. Set a tile to priority 1 when
@@ -171,8 +192,11 @@ local GLOBAL_KEY = 'channel-safely'
 local EXEMPT_PRIORITY = 1
 local DEFAULT_PRIORITY = 4      -- what DF uses when a block has no priority event
 
-local BLOCKS_PER_PASS = 400     -- blocks examined per pump, to keep frames cheap
-local PASS_INTERVAL_MS = 2000   -- wall-clock gap between passes
+-- Blocks examined per frame. The sweep never idles -- an idle gap is a window
+-- in which a fresh designation can become a job before it is seen -- so this is
+-- the only thing bounding the per-frame cost. 800 pointer tests a frame sweeps
+-- a 25,000 block map about twice a second.
+local BLOCKS_PER_PASS = 800
 
 -- ---------------------------------------------------------------------------
 -- state
@@ -182,13 +206,14 @@ local PASS_INTERVAL_MS = 2000   -- wall-clock gap between passes
 local state = nil
 
 local function default_state()
-    return {enabled = false, marks = {}}
+    return {enabled = false, marks = {}, allowed = {}}
 end
 
 local function get_state()
     if not state then
         state = dfhack.persistent.getSiteData(GLOBAL_KEY, default_state())
         state.marks = state.marks or {}
+        state.allowed = state.allowed or {}
     end
     return state
 end
@@ -497,32 +522,19 @@ local function inflight_channels()
     return set
 end
 
--- Cancel channel jobs posted on tiles we are holding, while nobody has taken
--- them yet.
+-- Jobs are READ, never written.
 --
--- This is the part marker mode cannot do. Suspending a designation stops DF
--- posting NEW jobs for it, but a job already on the list stays there and gets
--- taken, so a tile decided against between two passes is dug anyway. Removing
--- the job closes that window.
+-- Once DF turns a designation into a job the tile's dig field is cleared, so
+-- there is nothing left to suspend and the work is out of reach. Two ways to
+-- reach into it were tried and both are off the table: removeJob destroys the
+-- work outright (measured -- the tile came back with no designation and no job,
+-- the plan simply gone), and writing flags.suspend on a job a dwarf is actively
+-- working is the kind of live-job mutation this repo has crashed on before.
 --
--- Only unclaimed jobs. removeJob on the job a unit is actually working is the
--- known way to crash the game, so anything with a worker is left alone and
--- treated as a hole that already exists when the next plan is computed.
-local function veto_jobs()
-    local s = get_state()
-    local killed = 0
-    local doomed = {}
-    each_job(function(job)
-        if job.job_type == df.job_type.DigChannel and s.marks[key(job.pos)]
-                and not dfhack.job.getWorker(job) then
-            doomed[#doomed + 1] = job
-        end
-    end)
-    for _, job in ipairs(doomed) do
-        if pcall(dfhack.job.removeJob, job) then killed = killed + 1 end
-    end
-    return killed
-end
+-- So a tile that reached a job is accepted as lost to us and planned around --
+-- treated as a hole that already exists. The answer to the race is not to
+-- reach into jobs, it is to never let an unjudged tile become one: see
+-- "default deny" below.
 
 -- returns: support_holds (set), cut set, hanging set, or nil when over budget
 function plan_support_holds(active)
@@ -714,6 +726,39 @@ end
 
 local function clear_warning(id) warned[id] = nil end
 
+
+-- DEFAULT DENY
+--
+-- The whole reason this tool kept failing in a live fort: it decided at its own
+-- pace, once every couple of seconds, while DF turns designations into jobs
+-- promptly -- and the moment a designation becomes a job, the tile's dig field
+-- is cleared and the work is beyond reach. Anything not yet judged could be
+-- gone before the judging happened.
+--
+-- So the order is inverted. A channel designation is suspended the instant it
+-- is SEEN, before anything is known about it, and released later only if the
+-- analysis clears it. DF can then only ever build a job out of a tile that has
+-- already been judged safe, and there is no window left to lose.
+--
+-- The visible cost is a flicker: a freshly drawn area shows as planned for the
+-- fraction of a second before the safe parts are released. That is the trade
+-- the fort owner asked for, and it beats losing tiles to the scheduler.
+--
+-- Tiles already released stay released (state.allowed), or the next sweep would
+-- re-suspend everything and nothing would ever be dug. Marker mode set by the
+-- player is never touched: only marks this tool made are in state.marks.
+local function deny_on_sight(pos, block, bx, by)
+    local s = get_state()
+    local k = key(pos)
+    if s.allowed[k] then return end            -- judged safe already
+    if block.occupancy[bx][by].dig_marked then
+        return                                 -- already suspended, ours or not
+    end
+    if priority_of(pos) <= EXEMPT_PRIORITY then return end
+    block.occupancy[bx][by].dig_marked = true
+    s.marks[k] = true
+end
+
 -- ---------------------------------------------------------------------------
 -- the pass
 -- ---------------------------------------------------------------------------
@@ -771,6 +816,7 @@ local function step_scan()
                                      z = block.map_pos.z}
                         scan.found[#scan.found + 1] = pos
                         if not scan.top or pos.z > scan.top then scan.top = pos.z end
+                        deny_on_sight(pos, block, bx, by)
                     end
                 end
             end
@@ -852,16 +898,19 @@ local function apply(found, top)
     for _, pos in ipairs(found) do
         local what = decide(pos)
         if what == 'support' then
+            s.allowed[key(pos)] = nil
             hold(pos)
             held = held + 1
             if pos.z == top then support_blocked = support_blocked + 1 end
         elseif what == 'hold' then
+            s.allowed[key(pos)] = nil
             hold(pos)
             held = held + 1
             -- only ACCESS holds are valve candidates
             if pos.z == top then all_held[#all_held + 1] = pos end
         else
             release(pos)
+            s.allowed[key(pos)] = true      -- judged safe; do not re-deny it
             freed = freed + 1
             if pos.z == top then released_here = released_here + 1 end
         end
@@ -928,6 +977,11 @@ local function apply(found, top)
             s.marks[k] = nil
         end
     end
+    for k in pairs(s.allowed) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+        if pos and not is_channel(pos) then s.allowed[k] = nil end
+    end
     if s.valve and not is_channel({
             x = tonumber(s.valve:match('^(-?%d+)')),
             y = tonumber(s.valve:match('^-?%d+,(-?%d+)')),
@@ -992,16 +1046,6 @@ end
 
 function tick()
     if not get_state().enabled then return end
-    -- cheap, and it has to be quick: a job posted on a held tile has to go
-    -- before somebody picks it up
-    pcall(veto_jobs)
-    local now = dfhack.getTickCount()
-    if scan then
-        pcall(pump)
-        return
-    end
-    if now < next_pass_at then return end
-    next_pass_at = now + PASS_INTERVAL_MS
     pcall(pump)
 end
 
