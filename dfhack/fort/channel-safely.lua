@@ -3,198 +3,76 @@
 --[[
 fort/channel-safely
 
-Channelling a large hole is miserable to manage by hand: dwarves happily start
-on a lower level while the level above is still open, drop into their own work,
-or cut the last support out from under a chunk of floor. This holds every
-channel designation in MARKER MODE except the ones on the highest z-level that
-still has channelling to do, and releases the next level down as each level
-finishes.
+Channelling a large hole by hand is miserable: dwarves cut the floor out from
+under each other, drop into their own work, and close a ring around a patch of
+floor that then falls on somebody. This takes the designation over and feeds it
+back to them one tile at a time, in an order it can prove is safe.
 
     fort/channel-safely            status
     fort/channel-safely enable     start managing channel designations
-    fort/channel-safely disable    stop, and release every designation it holds
-    fort/channel-safely once       run a single pass now, then stop
+    fort/channel-safely disable    stop, and hand every held designation back
+    fort/channel-safely once       run a single pass now
 
-DEFAULT DENY, WHICH IS THE POINT
-  A channel designation is suspended the instant it is SEEN, before anything is
-  known about it, and released again only once the checks below have cleared it.
+HOW IT WORKS
 
-  That inversion is the whole reason this works. DF turns a designation into a
-  job promptly, and the moment it does, the tile's dig field is CLEARED -- the
-  work stops living on the map and lives in the job, where marker mode cannot
-  reach it and where the two ways of intervening are both unacceptable
-  (removeJob destroys the plan outright; writing to a job a dwarf is working is
-  live-job mutation this repo has crashed on). Deciding at leisure and
-  suspending afterwards therefore loses every tile the scheduler gets to first,
-  which is what let a fort channel itself into a collapse three times over.
+  Suspend on sight. A channel designation is put into marker mode the instant it
+  is seen, before anything is known about it. That is not caution, it is the
+  only workable order of operations: DF turns a designation into a job promptly,
+  and the moment it does the tile's dig field is CLEARED -- the work stops living
+  on the map, and marker mode has nothing left to hold. Judging first and
+  suspending afterwards loses every tile the scheduler reached first, which is
+  what caved three forts in during development. The visible cost is a flicker as
+  a freshly drawn area shows planned before anything is let out.
 
-  Judging first and releasing second means DF can only ever build a job out of a
-  tile already cleared, and there is no window left to lose. The visible cost is
-  a flicker: a freshly drawn area shows as planned for a moment before the safe
-  parts are released.
+  A few at a time, never side by side. Up to eight tiles are out of the
+  blueprint at once and no two of them touch, so two miners can never take
+  neighbouring tiles and drop a floor that neither would alone. Each pick is
+  chosen with the ones before it imagined as ALREADY CHANNELLED OUT, and the
+  whole judgement is recomputed between picks -- that is what stops eight
+  individually reasonable choices from adding up to a collapse.
 
-  A job issued for a tile this has not yet cleared is TAKEN BACK: the job is
-  removed and the tile written straight back as a suspended designation, which
-  is the planned state you see on the map. That happens a frame later, from a
-  timeout, never inside the event callback -- removing a job while DFHack's
-  event manager still holds it is a SIGSEGV in Core::onUpdate, confirmed here
-  with a crash log. Everything is re-checked when the frame comes round, since
-  the job may have been taken or finished in between.
+  Everything already let out -- released but not yet dug, or in a dwarf's hands
+  as a job -- counts the same way: a HOLE THAT EXISTS, holding nothing up, with
+  nobody able to stand on it. Being pessimistic about work in flight is what
+  makes a release provable rather than merely plausible.
 
-  A job that already has a worker is left strictly alone, and that tile is
-  accepted as lost and planned around.
+  Two tests, both against that pretend map. A candidate is released only if
+  digging it leaves nothing hanging that was not hanging already, and if every
+  other designated tile still has somewhere to stand that connects out of the
+  excavation. The first is a connectivity search over the standing rock,
+  anchored at the walls; the second floods DF's own walkability groups inward
+  from the edge of the area, with the pretend holes knocked out.
 
-ONE AT A TIME
-  Nothing is released next to a channel job already under way. Two adjacent
-  tiles dug at the same moment can drop a floor that neither would alone, and
-  the analysis reasons about the map rather than about what two miners happen to
-  be doing at once. It costs digging speed and buys the guarantee.
+  Candidates are tried farthest-from-the-middle first, which is the order a
+  dwarf would choose anyway: start at the far end and retreat toward the way in.
 
-PRIORITY IS THE ESCAPE HATCH
-  A channel designation at priority 1 (DF's highest, `d1` in quickfort or the
-  priority selector in-game) is never held back. Set a tile to priority 1 when
-  you want it dug now regardless of what is above it -- that is the manual
-  override, and the only way to make this tool get out of the way for one tile.
+  When nothing can be proven safe, everything simply stays planned. A ring drawn
+  around floor that is not itself designated has no safe order and will sit
+  suspended: designate the floor inside it, or dig those tiles by hand.
 
-CAVE-IN PROTECTION IS CHEAP, NOT A GUARANTEE
-  A chunk of floor falls when nothing in it still touches a wall, so the honest
-  test is a connectivity search -- a property of the whole level, not of the tile
-  being dug. This does run that search, but over a bounded area and one level at
-  a time, which is what keeps it affordable and also what keeps it short of a
-  guarantee. Three rules:
-
-    1. Top level only. Nothing below the highest channelling level is active, so
-       a level is never opened while one above it is still coming down. This is
-       the rule that prevents most real collapses, because a staged excavation
-       keeps its floor attached at the edges.
-    2. Never channel a tile that has a building or construction standing on it,
-       or one directly below it. Digging those out drops the thing on top.
-    3. Never channel a tile that is the LAST place a dwarf can stand to dig
-       another channel tile that is still waiting. Channelling away a standing
-       spot leaves the tile it served undiggable forever, and the hole is
-       abandoned half finished with no error reported anywhere. Holding those
-       back produces the order you would use by hand: start at the far end and
-       retreat toward the way in. Reachability is DF's own walkability group
-       (`block.walkable`), compared against the group the citizens are standing
-       in, so it costs an integer comparison rather than a path search.
-    4. Never channel a tile whose removal would drop the floor it is holding
-       up. Against the map AS IT STANDS, find the tiles that hold a piece of
-       rock onto the rest of it -- articulation points, 8-connected as DF's own
-       support is, anchored at the walls -- and hold those back. A ring is then
-       dug from both ends and the tile that would close it waits until the floor
-       inside has gone.
-
-  Rule 4 asks TWO questions, because either one alone lets a fort collapse.
-
-    * "If everything I am about to release were dug, what would be left
-      hanging?" -- this is the one that catches a ring before a single tile is
-      cut. It runs to a fixpoint: tiles next to something that would be left
-      hanging are held, which shrinks the set that will be dug, which can make
-      other tiles safe, so it is asked again until it settles.
-    * "Which single removal would strand something, given the map as it is?" --
-      this is the one that still works once digging is under way and the
-      remaining designations no longer enclose anything.
-
-  In-flight dig jobs count as already gone in both. Marker mode does not cancel
-  a job a dwarf has already taken, and cancelling one outright risks the crash
-  that removeJob on a live job is known for, so whatever has a job is planned
-  around as a hole that already exists.
-
-  Support holds are absolute: the escape valve below may not override them. A
-  valve that can eventually release the tile which closes a ring is just a
-  slower way to cave the fort in. When every remaining designation is held for
-  support, the plan cannot be finished as drawn and it simply stays suspended --
-  quietly. The tiles sit visibly planned on the map, which says it better than
-  a message would, and the only thing to do about it is to designate the floor
-  they enclose. `status` counts them if you ask.
-
-JOBS, NOT JUST DESIGNATIONS
-  Marker mode stops DF posting NEW jobs for a designation; it does nothing about
-  a job already on the list, which gets taken and dug regardless. So a tile
-  decided against between two passes was dug anyway -- polling every couple of
-  seconds against dwarves who act continuously is a race, and the analysis
-  cannot win it on its own.
-
-  Every tick, channel jobs standing on held tiles are removed, provided nobody
-  has taken them yet. That is the narrow, safe version: removeJob on the job a
-  unit is actually working is the known way to crash DF, so a claimed job is
-  left alone and instead treated as a hole that already exists when the next
-  plan is computed.
-
-  An earlier version asked only the first question, and then only the second,
-  and a fort caved in each time.
-  Rule 4 is a real connectivity search, not a neighbour count, so it catches an
-  unanchored region of any shape -- but it is bounded, and those bounds are
-  where it stops being a guarantee:
-
-    * Only SINGLE removals are checked. Dwarves dig concurrently, so two
-      released tiles can go at the same moment and strand something neither
-      would have alone.
-
-    * It looks only at the bounding box of the active channel set plus a small
-      margin. Support running off the edge of that box is ASSUMED anchored,
-      because it usually is, and assuming otherwise would hold back half a fort.
-    * Above 10,000 tiles the check is skipped entirely and says so.
-      The staging and building rules still apply; the support test does not.
-    * It considers one z-level. A floor cut loose by digging on the level below
-      is not this rule's business.
-
-  Cost drove every one of those choices, and the numbers are measured, not
-  estimated. Asking the question once per level instead of once per candidate
-  tile is what makes it linear in the area rather than in area x designations.
-  Reading tiletypes out of cached map blocks instead of through
-  dfhack.maps.getTileType is worth 100x on its own -- 2500 tiles in 4ms rather
-  than 474ms -- and the flood uses integer grid indices because building
-  "x,y,z" keys for it cost more than the map reads. The answer is cached and
-  recomputed only when the designation set changes, so a pass that finds the
-  same set as the last one is nearly free.
-
-A TRAP WORTH KNOWING ABOUT, IF YOU EVER TOUCH THIS CODE
-  `block_flags.designated` means "this block has designation JOBS", and a
-  designation in marker mode has no job. So the flag goes FALSE on a block as
-  soon as the last of its designations is one this tool is holding -- and a scan
-  filtered on that flag loses sight of precisely the tiles it suspended. They
-  can never be re-examined, never released, and sit as "planned" forever, which
-  is what a stuck job looks like from the player's side. Confirmed on a live
-  fort: a block with three marker-mode channel designations reported
-  `designated = false`. The scan therefore always examines the blocks holding
-  its own marks as well, which persistence knows.
-
-WHEN IT GETS IN ITS OWN WAY
-  "Never strand a tile" and "always finish the job" can contradict each other: a
-  shaft designated from the inside has no safe first tile, and in a ring every
-  tile is the last way to the next. Held to the rule the whole level would sit
-  suspended forever, which is indistinguishable from the tool being broken. So
-  when nothing on the active level is workable, exactly one tile is let through
-  -- whichever is the last foothold for the fewest others -- and you get told.
-  That release is sticky: a pass runs every couple of seconds and a dwarf takes
-  far longer to walk over, so re-deciding the tile each pass would re-hold it
-  before anyone could dig it and it would flicker between planned and active
-  instead of getting done.
-
-ANNOUNCEMENTS
-  Three situations raise a fortress announcement, once each, cleared when the
-  situation goes away:
-
-    * designations that cannot be reached at all (nothing walkable and
-      fort-connected beside them), which no ordering can fix
-    * the escape valve above firing
-    * the channelled area being too large for the cave-in check
-
-  `fort/channel-safely` on its own prints the same state to the DFHack console
-  -- what it is holding, the last pass's numbers, and any of the above that is
-  currently true. That console readout is what "status" means here; there is no
-  separate status screen.
+PRIORITY 1 IS THE ESCAPE HATCH
+  A designation at priority 1 is never touched. That is the way to say "dig this
+  now, I know what I am doing".
 
 WHAT IT TOUCHES
-  `occupancy.dig_marked` -- DF's own marker-mode bit -- and nothing else. Marker
-  mode is saved with the map, so held designations survive a save/load whether
-  or not this is enabled. It only ever un-marks tiles IT marked: marks are
-  recorded in dfhack persistence (site data) so a designation you put into
-  marker mode yourself is never released by this tool.
+  `occupancy.dig_marked`, DF's marker-mode bit, and `block_flags.designated`,
+  which has to be re-raised whenever a marker is cleared or DF never schedules
+  the tile. While enabled it OWNS the marker bit for channel designations, so a
+  suspension set by hand does not stick; `disable` hands everything back.
 
-  `disable` releases everything it currently holds, so turning it off leaves the
-  map the way you would have designated it by hand.
+  Jobs are READ, never written, with one exception: a job issued for a tile that
+  has not been cleared is removed and the tile written straight back as a
+  suspended designation, so nothing is lost. That happens a frame later from a
+  timeout, never inside the event callback -- removing a job while DFHack's
+  event manager still holds it is a SIGSEGV in Core::onUpdate. A job somebody is
+  already working is left strictly alone and planned around.
+
+WHERE IT STOPS BEING A GUARANTEE
+  The searches cover the bounding box of the designation plus a small margin,
+  and skip entirely above 10,000 tiles. Support running off the edge of that box
+  is assumed anchored. Everything is reasoned one z-level at a time, so a floor
+  cut loose by digging below it is not this tool's business. And it only manages
+  channel designations: ordinary mining that undercuts something is not seen.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -238,6 +116,11 @@ local function save_state()
 end
 
 local function key(pos) return ('%d,%d,%d'):format(pos.x, pos.y, pos.z) end
+
+-- Declared up here because both the event hook and the pass queue into it, and
+-- the pass is defined long before the hook is.
+local pending_reclaim = {}
+local process_reclaims          -- forward declaration
 
 -- ---------------------------------------------------------------------------
 -- tile access
@@ -308,6 +191,12 @@ end
 --   * tiles on the box edge count as anchored -- support may well continue
 --     outside the box, and assuming it does not would hold half a fort
 --   * recomputed only when the channel set changes
+
+-- How many tiles may be out of the blueprint at once. Never two of them
+-- adjacent, and each one is chosen with the ones before it imagined as already
+-- channelled out, so the set as a whole is provable rather than eight
+-- individually plausible picks.
+local MAX_CONCURRENT = 8
 
 local MARGIN = 3
 local MAX_AREA = 10000         -- a 100x100 excavation; measured at ~16ms
@@ -879,179 +768,239 @@ end
 -- the channel set the last rule-3 answer was computed for
 local hanging_cache = {set = nil, hanging = nil, skipped = false}
 
+-- ---------------------------------------------------------------------------
+-- the pass: release ONE tile at a time, along an order it can prove
+-- ---------------------------------------------------------------------------
+--
+-- Everything before this judged the whole designation every couple of seconds
+-- and released whatever looked safe at that moment. Tile by tile each decision
+-- was defensible, and the fort still caved in, because "safe now" says nothing
+-- about the shape that is left after several of those releases have been dug.
+--
+-- So it commits to an order instead. At most ONE tile is out of the blueprint
+-- at a time, and the next is not chosen until that one is actually gone. When
+-- weighing a candidate, everything already let out -- released but not yet dug,
+-- or already in a dwarf's hands as a job -- counts as a HOLE THAT EXISTS: it
+-- holds nothing up and nobody can stand on it. That pessimism is what makes a
+-- release provable rather than merely plausible.
+--
+-- A candidate has to pass both tests, against that pretend map:
+--   * digging it leaves nothing hanging that was not hanging already, and
+--   * every other designated tile still has somewhere to stand that connects
+--     out of the excavation -- so no part of the job is stranded by getting to
+--     this one.
+--
+-- Candidates are tried farthest-out first, which is the order a dwarf would
+-- pick anyway: start at the far end, retreat toward the way in.
+
+local function count(t)
+    local n = 0
+    for _ in pairs(t or {}) do n = n + 1 end
+    return n
+end
+
+-- Tiles let out but not yet dug: still designated, or gone from the map into a
+-- job somebody is carrying. Until this is empty, nothing else is released.
+local function outstanding(s)
+    local jobs = inflight_channels()
+    local out = {}
+    for k in pairs(s.released or {}) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+        if pos and (is_channel(pos) or jobs[k]) then out[k] = true end
+    end
+    for k in pairs(jobs) do out[k] = true end
+    return out
+end
+
+-- Would digging `hyp` (a set of holes-to-be) leave any designated tile with
+-- nowhere to stand that reaches the outside? Walkability comes from DF's own
+-- groups, read straight out of the blocks, with the pretend holes knocked out.
+function strands_work(active, hyp, group)
+    if not group then return false end
+    local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+    for _, p in ipairs(active) do
+        x0, y0 = math.min(x0, p.x), math.min(y0, p.y)
+        x1, y1 = math.max(x1, p.x), math.max(y1, p.y)
+    end
+    x0, y0, x1, y1 = x0 - MARGIN, y0 - MARGIN, x1 + MARGIN, y1 + MARGIN
+    local w, h, z = x1 - x0 + 1, y1 - y0 + 1, active[1].z
+    if w * h > MAX_AREA then return false end
+
+    local walk, blocks = {}, {}
+    for ix = 0, w - 1 do
+        for iy = 0, h - 1 do
+            local x, y = x0 + ix, y0 + iy
+            local bk = (x // 16) * 4096 + (y // 16)
+            local b = blocks[bk]
+            if b == nil then
+                b = dfhack.maps.getTileBlock({x = x, y = y, z = z}) or false
+                blocks[bk] = b
+            end
+            local ok = b and b.walkable[x % 16][y % 16] == group
+            if ok and hyp[key({x = x, y = y, z = z})] then ok = false end
+            walk[ix * h + iy] = ok and true or false
+        end
+    end
+
+    -- flood in from the border: those are the tiles that reach the rest of the
+    -- fort, so a standing spot only counts if the flood got to it
+    local seen, stack, sp = {}, {}, 0
+    for ix = 0, w - 1 do
+        for iy = 0, h - 1 do
+            if (ix == 0 or iy == 0 or ix == w - 1 or iy == h - 1)
+                    and walk[ix * h + iy] then
+                local i = ix * h + iy
+                seen[i] = true; sp = sp + 1; stack[sp] = i
+            end
+        end
+    end
+    while sp > 0 do
+        local i = stack[sp]; sp = sp - 1
+        local ix, iy = i // h, i % h
+        for _, d in ipairs(NEIGHBOURS) do
+            local nx, ny = ix + d.x, iy + d.y
+            if nx >= 0 and ny >= 0 and nx < w and ny < h then
+                local ni = nx * h + ny
+                if walk[ni] and not seen[ni] then
+                    seen[ni] = true; sp = sp + 1; stack[sp] = ni
+                end
+            end
+        end
+    end
+
+    for _, p in ipairs(active) do
+        if not hyp[key(p)] then
+            local reachable = false
+            for _, d in ipairs(NEIGHBOURS) do
+                local ix, iy = p.x + d.x - x0, p.y + d.y - y0
+                if ix >= 0 and iy >= 0 and ix < w and iy < h and seen[ix * h + iy] then
+                    reachable = true
+                    break
+                end
+            end
+            if not reachable then return true end
+        end
+    end
+    return false
+end
+
+-- the one tile to let out next, or nil if nothing can be proven safe
+function choose_release(active, phantom, group)
+    local _, base = analyse(active, phantom)
+    if not base then return nil end
+    local base_n = count(base)
+
+    -- farthest from the middle of the shape first
+    local cx, cy = 0, 0
+    for _, p in ipairs(active) do cx, cy = cx + p.x, cy + p.y end
+    cx, cy = cx / #active, cy / #active
+    local order = {}
+    for _, p in ipairs(active) do
+        if not phantom[key(p)] then order[#order + 1] = p end
+    end
+    table.sort(order, function(a, b)
+        local da = (a.x - cx) ^ 2 + (a.y - cy) ^ 2
+        local db = (b.x - cx) ^ 2 + (b.y - cy) ^ 2
+        if da ~= db then return da > db end
+        return key(a) < key(b)
+    end)
+
+    for _, cand in ipairs(order) do
+        -- never beside work already out: two adjacent tiles dug at the same
+        -- moment can drop a floor that neither would alone, and no amount of
+        -- per-tile reasoning sees that coming
+        local beside_work = false
+        for _, d in ipairs(NEIGHBOURS) do
+            if phantom[('%d,%d,%d'):format(cand.x + d.x, cand.y + d.y, cand.z)] then
+                beside_work = true
+                break
+            end
+        end
+        local hyp = {}
+        for k in pairs(phantom) do hyp[k] = true end
+        hyp[key(cand)] = true
+        if beside_work then goto continue end
+        local _, hanging = analyse(active, hyp)
+        if hanging and count(hanging) <= base_n
+                and not strands_work(active, hyp, group) then
+            return cand
+        end
+        ::continue::
+    end
+    return nil
+end
+
+-- Jobs that got out while nothing was watching -- created before this was
+-- enabled, or while the hook was missing. Same treatment as a fresh one: taken
+-- back and written down as a suspended designation, but only while unclaimed,
+-- and always through the deferred queue rather than from here.
+local function reclaim_stray_jobs()
+    local s = get_state()
+    each_job(function(job)
+        if job.job_type ~= df.job_type.DigChannel then return end
+        local pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}
+        local k = key(pos)
+        if s.released[k] or s.allowed[k] then return end
+        if priority_of(pos) <= EXEMPT_PRIORITY then return end
+        if dfhack.job.getWorker(job) then return end
+        pending_reclaim[#pending_reclaim + 1] = {id = job.id, pos = pos}
+    end)
+end
+
 local function apply(found, top)
     local s = get_state()
-    local doomed = {}
-    for _, pos in ipairs(found) do doomed[key(pos)] = true end
+    s.released = s.released or {}
+    s.allowed = s.allowed or {}
+    reclaim_stray_jobs()
 
-    -- The rule-3 flood only cares about the ACTIVE level: everything below is
-    -- held by rule 1 whatever the answer, so there is no reason to pay for it.
-    local active, active_all, sig = {}, {}, {}
+    local active = {}
     for _, pos in ipairs(found) do
-        if pos.z == top then
-            active_all[#active_all + 1] = pos
-            if priority_of(pos) > EXEMPT_PRIORITY then
-                active[#active + 1] = pos
-                sig[#sig + 1] = key(pos)
-            end
+        if pos.z == top and priority_of(pos) > EXEMPT_PRIORITY then
+            active[#active + 1] = pos
         end
     end
-    table.sort(sig)
-    sig = table.concat(sig, ';')
 
-    -- Recompute only when the designation set actually changed. Dwarves finish
-    -- one tile at a time, so most passes look at the same set as the last one
-    -- and the flood would return the same answer for the same cost.
-    if hanging_cache.set ~= sig then
-        local holds, cut_set, hanging = plan_support_holds(active)
-        hanging_cache.holds, hanging_cache.cut, hanging_cache.hanging = holds, cut_set, hanging
-        hanging_cache.skipped = holds == nil
-        hanging_cache.set = sig
-    end
-    local support_holds = hanging_cache.holds or {}
-    local cut_set, hanging = hanging_cache.cut, hanging_cache.hanging
-
-    -- rule 4 looks at the whole active level, priority 1 tiles included: those
-    -- are never held, but they still have to be reachable, so they count when
-    -- deciding whether some other tile is about to remove their last foothold
-    local critical, stranded = access_holds(active_all)
-
-    local n_stranded = 0
-    for _ in pairs(stranded) do n_stranded = n_stranded + 1 end
-    if n_stranded > 0 then
-        announce('stranded', ('%d channel designation%s cannot be reached -- no tile '
-            .. 'beside %s is both walkable and connected to the fort')
-            :format(n_stranded, n_stranded == 1 and '' or 's',
-                    n_stranded == 1 and 'it' or 'them'))
-    else
-        clear_warning('stranded')
+    -- forget released tiles that are done with
+    local out = outstanding(s)
+    for k in pairs(s.released) do
+        if not out[k] then s.released[k] = nil end
     end
 
-    -- Counted as TOTALS, not as changes made this pass: a pass that alters
-    -- nothing was reporting "0 held" while two designations sat suspended.
-    local held, freed, released_here = 0, 0, 0
-    -- Nothing is released beside a channel job already under way. Two adjacent
-    -- tiles dug at the same moment can drop a floor that neither would alone,
-    -- and the analysis reasons about the map, not about what two miners happen
-    -- to be doing at once. Waiting for the neighbour to finish costs digging
-    -- speed and buys the one guarantee this tool exists for.
-    local busy = inflight_channels()
-    local function next_to_work(pos)
-        for _, d in ipairs(NEIGHBOURS) do
-            if busy[('%d,%d,%d'):format(pos.x + d.x, pos.y + d.y, pos.z)] then return true end
+    -- Top the working set up to MAX_CONCURRENT, one pick at a time, each chosen
+    -- with the previous picks imagined as already channelled out. Recomputing
+    -- between picks is the whole point: it is what stops eight separately
+    -- reasonable choices from adding up to a collapse.
+    local picks, phantom = {}, {}
+    for k in pairs(out) do phantom[k] = true end
+    if #active > 0 then
+        local group = fort_group()
+        while count(phantom) < MAX_CONCURRENT do
+            local cand = choose_release(active, phantom, group)
+            if not cand then break end
+            picks[key(cand)] = true
+            phantom[key(cand)] = true
         end
-        return false
     end
 
-    local function decide(pos)
+    local held, freed = 0, 0
+    for _, pos in ipairs(found) do
         local k = key(pos)
-        if priority_of(pos) <= EXEMPT_PRIORITY then return 'release' end
-        if pos.z < top then return 'hold' end          -- rule 1
-
-        -- Order matters, and getting it wrong is how a tile beside a running
-        -- job came to be released: the valve was consulted before the rules it
-        -- has no business overriding. It exists for ONE situation -- tiles that
-        -- block each other's access with no safe first move -- so it is checked
-        -- last, inside that case alone. It may not override support, and it may
-        -- not override waiting for a neighbour's job to finish.
-        if support_holds[k] then return 'support' end
-        if select(1, is_unsafe(pos, cut_set, hanging)) then return 'support' end
-        -- 'wait' rather than 'hold': waiting on a neighbour's job resolves
-        -- itself in seconds, so it must not count as the kind of deadlock the
-        -- escape valve exists to break. Treating it as one had the valve fire
-        -- on a single tile beside a running job and release the very thing it
-        -- was told to wait for.
-        if next_to_work(pos) then return 'wait' end
-        if critical[k] then
-            if s.valve == k then return 'release' end
-            return 'hold'
-        end
-        return 'release'
-    end
-
-    -- Rebuilt from scratch every pass. Left to accumulate, a tile cleared once
-    -- stayed cleared for good: the fort owner watched a 2x1 where the safe tile
-    -- was taken and its neighbour -- judged safe in an earlier pass, when the
-    -- neighbour was still solid -- was never reconsidered.
-    s.allowed = {}
-
-    local all_held, support_blocked = {}, 0
-    for _, pos in ipairs(found) do
-        local what = decide(pos)
-        if what == 'support' or what == 'wait' then
-            s.allowed[key(pos)] = nil
-            hold(pos)
-            held = held + 1
-            if pos.z == top and what == 'support' then
-                support_blocked = support_blocked + 1
-            end
-        elseif what == 'hold' then
-            s.allowed[key(pos)] = nil
-            hold(pos)
-            held = held + 1
-            -- only ACCESS holds are valve candidates
-            if pos.z == top then all_held[#all_held + 1] = pos end
-        else
+        if priority_of(pos) <= EXEMPT_PRIORITY then
+            release(pos); freed = freed + 1
+        elseif picks[k] then
             release(pos)
-            s.allowed[key(pos)] = true      -- judged safe; do not re-deny it
+            s.released[k] = true
             freed = freed + 1
-            if pos.z == top then released_here = released_here + 1 end
+        elseif out[k] then
+            freed = freed + 1            -- already out; leave it alone
+        else
+            hold(pos); held = held + 1
         end
     end
 
-    -- The escape valve. "Never strand anything" and "always finish the job" can
-    -- contradict each other -- a shaft designated from inside it has no safe
-    -- first tile, and every tile in a ring is the last way to the next. Left
-    -- alone the whole level would sit held forever, which looks exactly like
-    -- the tool being broken. So when nothing on the active level is workable,
-    -- one tile is let through: the one that is the last foothold for the fewest
-    -- others, breaking ties by priority.
-    -- A plan with no safe order -- a ring around floor that is not itself
-    -- designated -- simply stays suspended. It is not announced: the tiles are
-    -- visibly planned on the map, which says it better than a message would,
-    -- and there is nothing to do about it beyond designating the floor inside.
-    last_pass_blocked = support_blocked
-
-    if released_here == 0 and #all_held > 0 then
-        local best, best_cost
-        for _, pos in ipairs(all_held) do
-            if critical[key(pos)] then
-                local cost = 0
-                for _, other in ipairs(active_all) do
-                    local spots = standing_spots(other, fort_group() or -1)
-                    if #spots == 1 and key(spots[1]) == key(pos) then cost = cost + 1 end
-                end
-                cost = cost * 10 + priority_of(pos)
-                if not best_cost or cost < best_cost then best, best_cost = pos, cost end
-            end
-        end
-        best = best or all_held[1]
-        release(best)
-        released_here = released_here + 1
-        -- Sticky. A pass runs every couple of seconds and a dwarf takes far
-        -- longer than that to walk over, so re-deciding this tile on the next
-        -- pass would re-hold it before anyone could dig it, and it would
-        -- flicker between planned and active forever instead of getting done.
-        s.valve = key(best)
-        freed = freed + 1
-        held = math.max(0, held - 1)
-        announce('deadlock', ('every channel designation on this level would strand '
-            .. 'another; released the one at %d,%d,%d so the work can proceed -- '
-            .. 'check that stretch by eye'):format(best.x, best.y, best.z))
-    else
-        clear_warning('deadlock')
-    end
-
-    if hanging_cache.skipped then
-        announce('too_big', ('the channelled area is larger than %d tiles, so the '
-            .. 'cave-in check is skipped -- staging and the building rules still apply')
-            :format(MAX_AREA))
-    else
-        clear_warning('too_big')
-    end
-
-    -- a tile we were holding that is no longer designated at all (dug, or the
-    -- player erased it) must not keep an entry, or the marker bit is stranded
+    -- a tile we were holding that is no longer designated must not keep an
+    -- entry, or the marker bit is stranded
     for k in pairs(s.marks) do
         local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
         local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
@@ -1060,17 +1009,10 @@ local function apply(found, top)
             s.marks[k] = nil
         end
     end
-    for k in pairs(s.allowed) do
-        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
-        local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
-        if pos and not is_channel(pos) then s.allowed[k] = nil end
-    end
-    if s.valve and not is_channel({
-            x = tonumber(s.valve:match('^(-?%d+)')),
-            y = tonumber(s.valve:match('^-?%d+,(-?%d+)')),
-            z = tonumber(s.valve:match('(-?%d+)$'))}) then
-        s.valve = nil          -- the tile it let through has been dug
-    end
+
+    s.allowed = {}
+    for k in pairs(s.released) do s.allowed[k] = true end
+    last_pass_blocked = (next(picks) == nil and next(out) == nil) and #active or 0
 
     save_state()
     return held, freed
@@ -1079,6 +1021,7 @@ end
 last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
 last_pass_blocked = last_pass_blocked or 0
 reclaimed = reclaimed or 0
+reclaim_error = reclaim_error or nil
 
 -- one pump step; returns true when a full pass completed
 function pump()
@@ -1131,9 +1074,6 @@ end
 -- Core::onUpdate -- confirmed the hard way, with a crash log to match. The hook
 -- only writes down an id; the work happens a frame later, from a timeout, at a
 -- clean point in the update cycle.
-local pending_reclaim = {}
-local process_reclaims          -- forward declaration
-
 local function reclaim_job(job)
     local s = get_state()
     if not s.enabled then return end
@@ -1142,15 +1082,22 @@ local function reclaim_job(job)
     if s.allowed[key(pos)] then return end            -- already judged safe
     if priority_of(pos) <= EXEMPT_PRIORITY then return end
     pending_reclaim[#pending_reclaim + 1] = {id = job.id, pos = pos}
-    dfhack.timeout(1, 'frames', function() pcall(process_reclaims) end)
 end
 
 function process_reclaims()
     local s = get_state()
     local queue = pending_reclaim
     pending_reclaim = {}
+    -- Re-found by walking the list, because df.job.find DOES NOT EXIST: jobs
+    -- live in a linked list rather than an indexed vector, so there is no
+    -- find() for them. Calling it threw, the pcall around this swallowed the
+    -- error, and the whole reclaim path silently did nothing at all -- a fort
+    -- ran up 21 dig jobs with not one designation suspended before this showed
+    -- up. Never wrap a path like this in pcall without a way to see the throw.
+    local by_id = {}
+    each_job(function(j) by_id[j.id] = j end)
     for _, item in ipairs(queue) do
-        local job = df.job.find(item.id)
+        local job = by_id[item.id]
         -- everything is re-checked: a frame has passed, and the job may have
         -- been taken, finished or cancelled in the meantime
         if job and job.job_type == df.job_type.DigChannel
@@ -1172,9 +1119,19 @@ function process_reclaims()
     save_state()
 end
 
+-- Re-checked every tick, not just on enable.
+--
+-- The hook is a function value held by the eventful plugin. Reloading this
+-- script builds a NEW module environment with a new reclaim_job, while eventful
+-- keeps calling the old one -- whose state, config and helpers all belong to a
+-- dead copy of the script. Worse, after enough reloads it can end up holding
+-- nothing at all. Registering once on enable therefore quietly stops working
+-- exactly when the script is being worked on, which is how a fort ended up with
+-- 21 dig jobs and not one suspended designation.
 local function register_hooks()
     local ok, ev = pcall(require, 'plugins.eventful')
     if not ok then return end
+    if ev.onJobInitiated.channel_safely == reclaim_job then return end
     ev.onJobInitiated.channel_safely = reclaim_job
     ev.onUnload.channel_safely = function()
         ev.onJobInitiated.channel_safely = nil
@@ -1219,6 +1176,19 @@ end
 
 function tick()
     if not get_state().enabled then return end
+    register_hooks()
+    -- The queue is drained HERE rather than from a frame timeout. Frame
+    -- timeouts do not fire while the game is paused, so a job taken back while
+    -- the player was looking at something sat in the queue indefinitely. This
+    -- runs from the overlay pump, which ticks even when paused, and is outside
+    -- the event callback either way -- which is the part that matters.
+    if #pending_reclaim > 0 then
+        local ok, err = pcall(process_reclaims)
+        if not ok then
+            reclaim_error = tostring(err)      -- shown by `status`
+            pending_reclaim = {}
+        end
+    end
     pcall(pump)
 end
 
@@ -1248,6 +1218,9 @@ function status()
             :format(last_pass.channels, last_pass.top, last_pass.held, last_pass.freed))
     end
     print(('  priority %d designations are never held'):format(EXEMPT_PRIORITY))
+    if reclaim_error then
+        print('  LAST RECLAIM FAILED: ' .. reclaim_error)
+    end
     if (reclaimed or 0) > 0 then
         print(('  %d job%s taken back and re-planned since load')
             :format(reclaimed, reclaimed == 1 and '' or 's'))
