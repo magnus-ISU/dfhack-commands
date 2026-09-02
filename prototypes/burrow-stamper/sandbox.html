@@ -519,7 +519,7 @@ function pack(o){
       n=i+1;}
     if(head.join&&n===want)joined=true;
     if(joined){if(n<head.minLen)return null;}else{if(n<head.minLen+half)return null;}
-    const seg={x,y,dir,w,n,tiles:[],joined,level:head.level,children:0,rooms:0,connector:!!head.connector,parent:head.parent||null};
+    const seg={x,y,dir,w,n,tiles:[],joined,level:head.level,children:0,rooms:0,connector:!!head.connector,parent:head.parent||null,stamps:[]};
     for(let i=0;i<n;i++){for(const[a,b]of footprint(x+dx*i,y+dy*i,dir,w)){claim[b][a]=1;seg.tiles.push([a,b]);}}
     for(const k of own){const[a,b]=k.split(",").map(Number);if(claim[b][a]===5)claim[b][a]=0;}
     if(joined)joins++;
@@ -536,7 +536,7 @@ function pack(o){
     for(const c of v.cells){const x=ax+c.x,y=ay+c.y;if(!free(x,y))return false;const k=claim[y][x];if(k!==1&&(onRoadOnly||(k!==0&&k!==4&&k!==7)))return false;cells.push({x,y,ch:c.ch});}
     for(const s of v.shell){const x=ax+s.x,y=ay+s.y;if(at(x,y)===2||at(x,y)===3)return false;}
     for(const c of cells)claim[c.y][c.x]=(c.ch==="s"||c.ch==="x")?6:1;
-    stamps.push({stamp:name,cells,plaza:true});return true;};
+    const st={stamp:name,cells,plaza:true};stamps.push(st);return st;};
   // reserve a straight continuation from (hx,hy) heading nd at width w; returns a head or null
   let lastBlock="";
   const reserve=(hx,hy,nd,w,level,budget,parent,minLen,keep)=>{lastBlock="";
@@ -561,22 +561,32 @@ function pack(o){
   // ---- growth ----
   const heads=[];
   if(!prior){heads.push({x:entry[0],y:entry[1],dir:entryDir,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;}
-  else{ // existing geometry is the starting point: continue its roads from their end squares and branch from gaps along them
-    for(const seg of prior.segments){if(seg.dir<0)continue;const[dx,dy]=DIRS[seg.dir];
-      const[ecx,ecy]=sqCentre(seg);
-      // an existing end square may carry a plaza: step outward until the footprint is off the road
-      const pastRoad=(hx,hy,nd,w)=>{const[px,py]=DIRS[nd];for(let t=0;t<8;t++){const f=footprint(hx+px*t,hy+py*t,nd,w);if(!f.some(([a,b])=>at(a,b)===1||at(a,b)===6))return[hx+px*t,hy+py*t];}return null;};
-      if(!seg.joined)for(const nd of[seg.dir,(seg.dir+1)%4,(seg.dir+3)%4]){const[px,py]=DIRS[nd];const w=nd===seg.dir?seg.w:mainW;const ed=eo(seg.w,px+py);
-        const start=pastRoad(ecx+px*(ed+1),ecy+py*(ed+1),nd,w);if(!start)continue;
-        const h2=reserve(start[0],start[1],nd,w,0,40,null,w>1?6:4);if(h2)heads.push(h2);}
+  // seed heads from an existing, connected network: every segment's end square and every gap along it, with
+  // the throat connectors allowed. Used for existing geometry and again when a network has exhausted.
+  const seedFrom=(segList)=>{let added=0;
+    // which segment owns a road tile: when a start steps past road, the new road's parent is the segment it
+    // actually touches (a connector laid earlier from the same gap), not the segment the gap belongs to
+    const ownerOf=new Map();for(const sg of segments)if(!sg.dead)for(const[a,b]of sg.tiles)ownerOf.set(key(a,b),sg);
+    let touched=null;
+    const pastRoad=(hx,hy,nd,w)=>{const[px,py]=DIRS[nd];touched=null;for(let t=0;t<8;t++){const f=footprint(hx+px*t,hy+py*t,nd,w);const hit=f.find(([a,b])=>at(a,b)===1||at(a,b)===6);if(!hit)return[hx+px*t,hy+py*t];touched=ownerOf.get(key(hit[0],hit[1]))||touched;}return null;};
+    // the start is recomputed for every width tried: stepping past the end square's road with a wide
+    // footprint can land further out than a narrow one, and a narrow road laid from there would not touch its parent
+    const tryW=(hx,hy,nd,w,minLen,parent)=>{let h2=null;
+      const at0=pastRoad(hx,hy,nd,w);if(at0)h2=reserve(at0[0],at0[1],nd,w,0,40,touched||parent,minLen,false);
+      if(!h2&&(!at0||lastBlock==="rock"))for(let cw=w-1;cw>=1&&!h2;cw--){const st=pastRoad(hx,hy,nd,cw);if(!st)continue;h2=reserve(st[0],st[1],nd,cw,0,40,touched||parent,cw>1?4:3,false);if(h2){h2.connector=true;h2.connDepth=1;}}
+      if(h2){heads.push(h2);added++;}};
+    for(const seg of segList){if(seg.dir<0||seg.dead)continue;const[dx,dy]=DIRS[seg.dir];const[ecx,ecy]=sqCentre(seg);
+      if(!seg.joined)for(const nd of[seg.dir,(seg.dir+1)%4,(seg.dir+3)%4]){const[px,py]=DIRS[nd];const w=nd===seg.dir?Math.max(seg.w,seg.connector?mainW:0):mainW;const ed=eo(seg.w,px+py);
+        tryW(ecx+px*(ed+1),ecy+py*(ed+1),nd,w,w>1?6:4,seg);}
       for(const sd of[1,-1]){const pd=sd>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
-        for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;const h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,mainW,0,40,null,mainW>1?6:4);if(h2){heads.push(h2);last=i;}}}}}
+        for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;const before=heads.length;tryW(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,sideW,sideW>1?6:4,seg);if(heads.length>before)last=i;}}}
+    return added;};
+  if(prior)seedFrom(prior.segments); // existing geometry is the starting point
   let guard=0,phase=0;
   while((heads.length||phase===0)&&guard++<3000){
-    if(!heads.length){ // the network from the entry or the existing geometry has exhausted: start again from every valid outer tile
-      phase=1;let lastPos=[];for(const c of boundaryHeads()){if(lastPos.some(([px,py])=>Math.abs(px-c.x)+Math.abs(py-c.y)<10))continue;
-        const h2=reserve(c.x,c.y,c.dir,mainW,0,40,null,minMain,false);if(h2){heads.push(h2);lastPos.push([c.x,c.y]);}}
-      if(!heads.length)break;}
+    if(!heads.length){ // the network has exhausted: re-seed from every segment of the network itself, so every new road
+      // still starts on a connected road; throats may be crossed with connectors from any end or gap
+      if(phase>=2)break;phase++;seedFrom(segments);if(!heads.length)break;}
     const head=heads.shift();
     if(head.diag!==undefined){const seg=layDiagonal(head);if(seg)segments.push(seg);continue;}
     const sn=snapshot();
@@ -592,10 +602,10 @@ function pack(o){
     if(!seg.joined&&head.budget>0){ends=head.level<=1?["S","L","R"]:["S",rng.next()<0.5?"L":"R"];}
     let plazaR=0;
     if(!seg.connector&&ends.length>=2&&plazaStamps.length&&rng.next()<0.6){const ps=rng.pick(plazaStamps,s=>s.weight);const v=ps.p.plain;const r=v.w>>1;
-      if(layRoadStamp(v,ecx-r,ecy-r,ps.name,false))plazaR=r;}
+      const st=layRoadStamp(v,ecx-r,ecy-r,ps.name,false);if(st){plazaR=r;seg.stamps.push(st);}}
     if(!seg.connector&&segStamps.length&&seg.n>=15&&rng.next()<0.5){const ss=rng.pick(segStamps,s=>s.weight);const v=(seg.dir===1||seg.dir===3)?(ss.p.plain.w>=ss.p.plain.h?ss.p.plain:ss.p.turned):(ss.p.plain.h>=ss.p.plain.w?ss.p.plain:ss.p.turned);
       if(v){const len=Math.max(v.w,v.h);const start=Math.floor((seg.n-half-len)/2);if(start>=1){const cx=seg.x+dx*start,cy=seg.y+dy*start;
-        const ax=Math.min(cx,cx+dx*(len-1))+(dx===0?lo(seg.w):0),ay=Math.min(cy,cy+dy*(len-1))+(dy===0?lo(seg.w):0);layRoadStamp(v,ax,ay,ss.name,true);}}}
+        const ax=Math.min(cx,cx+dx*(len-1))+(dx===0?lo(seg.w):0),ay=Math.min(cy,cy+dy*(len-1))+(dy===0?lo(seg.w):0);const st=layRoadStamp(v,ax,ay,ss.name,true);if(st)seg.stamps.push(st);}}}
     // continuation heads from the end square (or the plaza), reserved for their whole length before rooms go down
     const newHeads=[];
     const tryEnd=(e)=>{let nd,hx,hy,w;
@@ -639,7 +649,9 @@ function pack(o){
   // ---- connectors that led nowhere are removed (a connector is kept only if roads with rooms grew beyond it) ----
   let connectorsCut=0;
   for(let changed=true;changed;){changed=false;for(const seg of segments){if(seg.dead||!seg.connector)continue;
-    if(!segments.some(k=>!k.dead&&k.parent===seg)){seg.dead=true;for(const[a,b]of seg.tiles)if(claim[b][a]===1)claim[b][a]=0;changed=true;connectorsCut++;}}}
+    if(!segments.some(k=>!k.dead&&k.parent===seg)){seg.dead=true;for(const[a,b]of seg.tiles)if(claim[b][a]===1||claim[b][a]===6)claim[b][a]=0;
+      for(const st of seg.stamps){for(const c of st.cells)if(claim[c.y][c.x]===1||claim[c.y][c.x]===6)claim[c.y][c.x]=0;const i=stamps.indexOf(st);if(i>=0)stamps.splice(i,1);}
+      changed=true;connectorsCut++;}}}
   for(let i=segments.length-1;i>=0;i--)if(segments[i].dead)segments.splice(i,1);
   // ---- second pass: with the road network settled, walk every road edge again with the fill list ----
   const firstPassRooms=rooms.length;

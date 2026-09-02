@@ -247,16 +247,17 @@ shorter than the preset's wanted length is still tried, since the no-rooms rule 
 any that turn out useless. The entry on an empty slab is the boundary tile whose
 main-road-wide open run is longest, in any of the four directions.
 
-**4.6d Every outer tile is a head.** When the network from the entry or from the existing
-geometry has exhausted, every valid boundary tile (an edge tile with a main-road-wide open
-run into the burrow, scored by the free rock around that run and spaced at least ten tiles
-apart) becomes a new head, and growth runs again. Networks started this way may be
-disconnected from the first; each is pruned by the same rules. The entry on an empty slab
-is simply the best of those candidates. A roomless road is refused unless its flanks are a
-cave passage (too shallow for any room before the burrow ends) and it leads somewhere, in
-which case it stays as a connector. Before a road is refused for holding nothing from the
-first list, the fill list is tried on it, so a cave too tight for a full noble suite still
-gets minor nobles.
+**4.6d Re-seeding.** When the network from the entry or from the existing geometry has
+exhausted, every segment of the network itself re-seeds heads from its end square and its
+gaps, with throat connectors allowed from any of them, and growth runs again (twice at
+most). Every road therefore starts on a road that is already connected; the packer never
+creates a second network and never needs a connectivity check. On a fresh slab the entry
+is the boundary tile with the best main-road-wide open run, scored by the free rock
+around it. A roomless road is refused unless its flanks are a cave passage (too shallow
+for any room before the burrow ends) and it leads somewhere, in which case it stays as a
+connector; a connector pruned at the end takes its road stamps with it. Before a road is
+refused for holding nothing from the first list, the fill list is tried on it, so a cave
+too tight for a full noble suite still gets minor nobles.
 
 **4.6a Fill pass.** With the road network settled, every road edge is walked again with
 the preset's `second` district list (defaults to the first list), placing whatever still
