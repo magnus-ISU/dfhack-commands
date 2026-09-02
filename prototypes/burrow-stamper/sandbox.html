@@ -1,0 +1,762 @@
+<title>Burrow Stamper Sandbox</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+:root{
+  --bg:#f3f1ec; --panel:#e9e6df; --ink:#23241f; --muted:#6b6a62; --line:#cfcbc0;
+  --accent:#8a6d2f; --focus:#c9a96e;
+  --rock:#2b2d33; --void:#15161a; --road:#c9a96e; --plaza:#e3cf9a; --wallE:#5a5145; --wallS:#464a55; --entry:#6fbf73;
+  --r0:#7aa2c9; --r1:#c98f7a; --r2:#9fb87c; --r3:#b58fc9; --r4:#c9b47a; --r5:#7ac1b8; --r6:#d07f9a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1c1d21; --panel:#25262c; --ink:#e6e3da; --muted:#9a978d; --line:#3a3b42; --accent:#d3b06a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1c1d21; --panel:#25262c; --ink:#e6e3da; --muted:#9a978d; --line:#3a3b42; --accent:#d3b06a;
+}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif;margin:0}
+.app{display:grid;grid-template-columns:290px 1fr;gap:16px;padding:16px;max-width:1440px;margin:0 auto}
+@media (max-width:900px){.app{grid-template-columns:1fr}}
+h1{font:600 18px/1.2 "IBM Plex Mono",monospace;margin:0 0 4px;letter-spacing:.02em}
+.sub{color:var(--muted);margin:0 0 16px;font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);padding:14px;display:flex;flex-direction:column;gap:10px}
+label{display:grid;grid-template-columns:1fr 120px;align-items:center;gap:8px;font-size:13px}
+label span.k{color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:11px}
+select,input,button,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);padding:4px 6px}
+input[type=number]{width:100%;box-sizing:border-box;font-family:"IBM Plex Mono",monospace}
+button{cursor:pointer;background:var(--accent);color:#fff;border:0;padding:8px;font-weight:600}
+button.quiet{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.row{display:flex;gap:8px}
+.row button{flex:1}
+canvas{display:block;width:100%;height:auto;background:var(--void);image-rendering:pixelated;border:1px solid var(--line)}
+.stats{font:13px/1.5 "IBM Plex Mono",monospace;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px 16px;margin-top:10px;font-variant-numeric:tabular-nums}
+.stats b{display:block;font-size:20px;font-weight:600}
+.stats span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font:12px "IBM Plex Mono",monospace;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:12px;height:12px;vertical-align:-2px;margin-right:5px;border:1px solid var(--line)}
+textarea{width:100%;box-sizing:border-box;min-height:260px;font:12px/1.4 "IBM Plex Mono",monospace;white-space:pre;overflow:auto}
+details{margin-top:14px}
+summary{cursor:pointer;color:var(--muted);font-size:13px}
+.err{color:#c0392b;font:12px "IBM Plex Mono",monospace;min-height:1.2em}
+.note{color:var(--muted);font-size:12px;margin:0}
+.picker{display:flex;flex-direction:column;gap:8px;border:1px solid var(--accent);padding:10px;background:var(--bg)}
+.picker h2{font:600 13px "IBM Plex Mono",monospace;margin:0;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.status{font:12px "IBM Plex Mono",monospace;color:var(--muted);min-height:1.2em}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:10}
+.editor{background:var(--panel);color:var(--ink);border:1px solid var(--line);width:min(1240px,96vw);height:min(760px,92vh);display:grid;grid-template-columns:230px 1fr 260px;gap:10px;padding:12px;box-sizing:border-box}
+.col{display:flex;flex-direction:column;gap:6px;min-height:0}
+.col h3{font:600 12px "IBM Plex Mono",monospace;margin:0;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.col button{padding:6px;font-size:13px}
+.sect{flex:1;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);background:var(--bg)}
+.sect h4{font:600 11px "IBM Plex Mono",monospace;margin:0;padding:4px 6px;border-bottom:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sect .body{overflow:auto;padding:6px;display:flex;flex-direction:column;gap:6px}
+.dbox{border:1px solid var(--line);padding:4px 6px;cursor:pointer}
+.dbox.sel{outline:2px solid var(--accent)}
+.dbox .hd{font:600 12px "IBM Plex Sans",sans-serif;display:flex;justify-content:space-between}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.chip{font:11px "IBM Plex Mono",monospace;border:1px solid var(--line);padding:2px 6px;cursor:pointer;background:var(--panel)}
+.chip.sel{outline:2px solid var(--accent)}
+.chip.opt{border-style:dashed}
+.chip.alt{margin-left:10px}
+.lib{overflow:auto;flex:1;display:flex;flex-direction:column;gap:3px}
+.lib .chip{display:flex;justify-content:space-between}
+.settings{border:1px solid var(--line);padding:6px;display:flex;flex-direction:column;gap:4px;font-size:12px}
+.settings label{grid-template-columns:1fr 70px}
+.small{font-size:11px;color:var(--muted)}
+</style>
+
+<div class="app">
+  <div class="panel">
+    <div>
+      <h1>Burrow Stamper Sandbox</h1>
+      <p class="sub">Throwaway packer prototype. Roads grow from the entry one segment at a time; each segment is dressed and lined with districts as it is laid.</p>
+    </div>
+    <div class="picker">
+      <h2>fort/burrow-stamper</h2>
+      <label><span class="k">Burrow</span><select id="burrow"></select></label>
+      <label><span class="k">Preset</span><select id="preset"></select></label>
+      <label><span class="k">Build when</span><select id="gate">
+        <option value="now">apply now</option><option value="noble">a noble needs rooms</option><option value="house">a house is needed</option>
+        <option value="guild">a guildhall is needed</option><option value="temple">a temple is needed</option><option value="tomb">a tomb is needed</option></select></label>
+      <div class="row"><button id="apply">Plan and apply</button><button class="quiet" id="newpreset">New preset…</button></div>
+      <div class="row"><button class="quiet" id="editpreset">Edit preset…</button><button class="quiet" id="copyjson">Copy preset JSON</button></div>
+      <div class="status" id="status"></div>
+    </div>
+    <details><summary>Sandbox controls (not part of the in-game UI)</summary>
+    <label><span class="k">Shape</span><select id="shape">
+      <option value="rect" selected>rectangle</option><option value="blob">cave blob</option>
+      <option value="L">L-shape</option><option value="ring">ring</option><option value="strip">long strip</option></select></label>
+    <label><span class="k">Width × height</span><div class="row"><input type="number" id="W" value="80" min="16" max="200"><input type="number" id="H" value="100" min="12" max="200"></div></label>
+    <label><span class="k">Main / side road</span><div class="row"><input type="number" id="main" value="3" min="1" max="5"><input type="number" id="side" value="1" min="1" max="5"></div></label>
+    <label><span class="k">Existing geometry</span><select id="existing"><option value="none">none</option></select></label>
+    <label><span class="k">Seed</span><input type="number" id="seed" value="1"></label>
+    <div class="row"><button id="reroll">Reroll</button><button class="quiet" id="run">Re-run</button></div>
+    <p class="note">Changing the preset resets road widths to the preset's values. Margin, caps, shared walls and setback are per-district fields in the JSON. "Existing geometry" generates a smaller preset on a central patch first; the main preset then grows around it and may join its roads.</p>
+    <details><summary>Preset JSON (editable, Re-run applies)</summary>
+      <textarea id="json" spellcheck="false"></textarea>
+      <div class="err" id="err"></div>
+    </details>
+    </details>
+  </div>
+  <div>
+    <canvas id="c" width="864" height="576"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--rock)"></i>burrow rock</span>
+      <span><i style="background:var(--wallE)"></i>engraved wall (room-owned)</span>
+      <span><i style="background:var(--wallS)"></i>smoothed wall (hallway)</span>
+      <span><i style="background:var(--road)"></i>road (smoothed)</span>
+      <span><i style="background:var(--plaza)"></i>road stamp</span>
+      <span><i style="background:var(--entry)"></i>entry (when there is no existing geometry)</span>
+      <span><i style="background:var(--r0)"></i><i style="background:var(--r1)"></i><i style="background:var(--r2)"></i>rooms by district</span>
+      <span>▮ door &nbsp;▬ bed &nbsp;▪ furniture &nbsp;² ³ upper floors</span>
+    </div>
+    <div class="stats" id="stats"></div>
+    <details><summary>The algorithm</summary>
+      <p class="note">1. A road head is a tile, a direction and a width; the first one sits on the entry pointing inward, main-road width. Heads are processed breadth-first. 2. A segment advances tile by tile: its full-width footprint must be unclaimed free rock, and the tiles just beyond both edges may not be road, so roads never lie side by side or touch at a corner. It ends at its wanted length, at rock, or one tile short of an existing road it meets across its full width, which makes a T junction and a loop. Every segment ends in a full square cap, so a turn is two rectangles meeting at a square: corners are valid by construction. 3. The segment is dressed at once: a statue row rolled into its middle if long enough, a plaza rolled onto the junction square before anything else claims it. Statues are blocked road, so no door ever faces one. 4. Each side of the segment is a sequence of districts chosen by quota: a repeat district lines the road with its stamps, doors on the road, until its capped stamps are used or its length allowance is spent; a set district is a suite, hub door on the road, other rooms attached wall to wall growing square. Stubs for side streets are reserved first so rooms leave the gap. 5. At the cap the segment spawns straight, turn, T or cross heads by width and depth, and side streets also branch mid-segment. Segments left with no rooms and no children are removed. 6. Room floors smooth, room walls engrave, road floors smooth, rock beside a road that no room owns smooth.</p>
+    </details>
+  </div>
+</div>
+
+<div id="modal" hidden>
+  <div class="editor">
+    <div class="col">
+      <h3>Preset</h3>
+      <label><span class="k">Name</span><input id="ed-name" type="text"></label>
+      <label><span class="k">Main / side</span><div class="row"><input id="ed-main" type="number" min="1" max="5"><input id="ed-side" type="number" min="1" max="5"></div></label>
+      <label><span class="k">Surface</span><input id="ed-surface" type="checkbox"></label>
+      <button class="quiet" id="ed-paste">Paste JSON from clipboard</button>
+      <h3>Edit</h3>
+      <button class="quiet" id="ed-adddistrict">Create district</button>
+      <button class="quiet" id="ed-addbp">Add blueprint</button>
+      <button class="quiet" id="ed-remove">Remove selected</button>
+      <div class="settings" id="ed-settings"><span class="small">Select a district or blueprint to see its settings.</span></div>
+      <h3>Layout</h3>
+      <button class="quiet" id="ed-second">Different second pass</button>
+      <button class="quiet" id="ed-road">Add hallway blueprints</button>
+      <div style="flex:1"></div>
+      <button id="ed-save">Save preset</button>
+      <button class="quiet" id="ed-cancel">Cancel</button>
+    </div>
+    <div class="col" id="ed-passes"></div>
+    <div class="col">
+      <h3>Blueprint library</h3>
+      <div class="small">Click one, then "Add blueprint". Rooms need a door; hallway pieces have none.</div>
+      <div class="lib" id="ed-lib"></div>
+    </div>
+  </div>
+</div>
+<script>
+// ---------- stamps ----------
+// quickfort codes: b bed d door t table c chair f cabinet h chest r weapon rack a armor stand s statue x coffin
+// A altar, B bookcase, P pedestal (placeholder codes), i up/down stair, F farm plot, '.' floor, ' ' blank, '#' constructed wall (surface)
+// Names give the INTERIOR size. A stamp is a grid, or {floors:[ground, first, ...]} for a multi-z blueprint
+// (the ground floor decides fit, door and frontage; upper floors go at z+1.. over the same anchor).
+const G = {
+  hovel:     ["d", "b", "f", "h"],
+  house2:    ["d ", ".f", "bh"],
+  house3:    [" d ", "...", "fbh", "..."],
+  luxury3:   [" d ", "f.h", "rbs", "a.A"],
+  nbed:      [" d ", "f.h", ".b.", "..."],
+  nbed4:     ["  d ", "f..h", "..b.", "....", "...."],
+  nbed35:    [" d ", "f.h", "...", ".b.", "...", "..."],
+  noffice:   [" d ", "...", "tc.", "f.h"],
+  noffice4:  ["  d ", "....", "tc..", "c...", "f..h"],
+  ndining:   ["  d  ", ".....", ".ttt.", ".ccc.", "f...h"],
+  ndining7:  ["   d   ", ".......", "..ttt..", "..ccc..", ".......", "f.....h"],
+  ntomb:     [" d ", "...", ".x.", "f.h"],
+  ndining3:  [" d ", "...", "tc.", "f.h"],
+  dhall73:   ["   d   ", "f.....h", ".ttttt.", ".ccccc."],
+  ntomb5:    ["  d  ", "s...s", "..x..", "f...h"],
+  ngarden3:  [" d ", "s.s", "...", "s.s"],
+  ngarden5:  ["  d  ", "s...s", ".....", "..s..", "s...s"],
+  nthrone:   ["  d  ", ".....", ".....", "..c..", "f.s.h"],
+  nlibrary:  ["  d  ", "B...B", ".tc..", "B...B", "f...h"],
+  plaza7:    [".......", ".s...s.", ".......", "...s...", ".......", ".s...s.", "......."],
+  seg13:     ["s.....s.....s", ".............", "s.....s.....s"],
+  catacomb:  ["   d   ", "x.....x", "x.....x", "x..s..x", "x.....x", "x.....x", "x..s..x", "x.....x", "x.....x"],
+  memorial:  ["  d  ", ".....", ".s.s.", "..x..", "....."],
+  family:    [" d ", "x.x", "...", "x.x", "..."],
+  coffinrow: ["x.....x.....x", ".............", "x.....x.....x"],
+  shrine5:   [".....", ".x.x.", "..s..", ".x.x.", "....."],
+  // town (surface): walls are part of the footprint
+  bungalow:  ["#####", "#f.h#", "#.b.#", "#...#", "##d##"],
+  thin:      {floors:[["####", "#..#", "#..#", "#..#", "#.i#", "#..#", "#d##"], ["####", "#b.#", "#..#", "#f.#", "#.i#", "#h.#", "####"], ["####", "#b.#", "#..#", "#f.#", "#.i#", "#h.#", "####"], ["####", "#b.#", "#..#", "#f.#", "#.i#", "#h.#", "####"]]},
+  big:       {floors:[["######", "#tc..#", "#....#", "#..i.#", "##d###"], ["######", "#b..b#", "#f..h#", "#..i.#", "######"]]},
+  farm:      ["FFFFFFFFF", "FFFFFFFFF", "FFFFFFFFF", "FFFFFFFFF", "FFFFFFFFF", "FFFFFFFFF"],
+  courtyard: ["#########", "#.......#", "#..s.s..#", "#.......#", "#...s...#", "#.......#", "#..s.s..#", "#.......#", "####d####"],
+  greathall: {floors:[["#########", "#f.....h#", "#.ttttt.#", "#.ccccc.#", "#......i#", "####d####"], ["#########", "#B.....B#", "#.tc....#", "#B.....B#", "#......i#", "#########"]]},
+  tower:     {floors:[["#####", "#..i#", "#...#", "#...#", "##d##"], ["#####", "#..i#", "#...#", "#...#", "#####"], ["#####", "#..i#", "#...#", "#...#", "#####"], ["#####", "#..i#", "#...#", "#...#", "#####"], ["#####", "#..i#", "#.s.#", "#...#", "#####"]]},
+  master:    ["#######", "#f...h#", "#..b..#", "#.....#", "#.....#", "###d###"],
+  servants:  ["#######", "#b.b.b#", "#.....#", "#h.f.h#", "###d###"],
+  kitchen:   ["######", "#tt..#", "#....#", "##d###"],
+  // temples: every hall has at least one pedestal P
+  forge:     ["  d  ", "a...a", "r.P.r", "..A..", "s...s"],
+  sea:       ["  d  ", "s...s", ".....", "..P..", ".....", "..A..", "s...s"],
+  dead:      ["  d  ", "x...x", "..P..", "x.A.x", "x...x"],
+  grove:     ["   d   ", "s.....s", ".......", "..s.s..", "...P...", "..s.s..", "...A...", "s.....s"],
+  sanctum:   ["   d   ", ".......", ".P...P.", "...A...", ".P...P.", ".......", "s.....s"],
+  vestry:    [" d ", "f.h", "..P", "..."],
+  cloister:  ["  d  ", "s...s", ".....", "..P..", "s...s"],
+  crypt:     [" d ", "x.x", "...", "x.x", ".P."],
+  nave:      ["    d    ", ".........", ".cc...cc.", ".cc...cc.", ".cc...cc.", "....P....", "..s.A.s..", "........."],
+  chapel:    [" d ", "...", ".A.", "P.."],
+  // guildhalls
+  masons:    ["   d   ", "s.....s", ".tt.tt.", ".cc.cc.", "...P...", "f.....h"],
+  smiths:    ["   d   ", "r.....r", ".tt.tt.", ".cc.cc.", "a..P..a", "f.....h"],
+  scholars:  ["   d   ", "B.....B", ".tt.tt.", ".cc.cc.", "B..P..B", "f.....h"],
+  brewers:   ["  d  ", "h...h", ".t.t.", ".c.c.", "..P..", "h...h"],
+  merchants: ["   d   ", ".......", ".ttttt.", ".ccccc.", "...P...", "f.s.s.h"],
+  counting:  [" d ", "tc.", "...", "f.h"],
+  vault:     [" d ", "hhh", "...", "hPh"],
+  warriors:  ["   d   ", "r.....r", ".ttttt.", ".ccccc.", "a..P..a", "s.....s"],
+  armory:    ["  d  ", "r.r.r", ".....", "a.a.a"],
+  barracks:  ["  d  ", "b.b.b", ".....", "h.f.h"],
+};
+const DISTRICTS = {
+  "hovels":       {margin:0, maxLen:16, stamps:[{name:"hovel 1x4", grid:G.hovel}]},
+  "houses 2x2":   {margin:0, maxLen:16, stamps:[{name:"house 2x2", grid:G.house2}]},
+  "houses 3x3":   {margin:0, maxLen:16, stamps:[{name:"house 3x3", grid:G.house3}]},
+  "luxury 3x3":   {margin:1, maxLen:16, stamps:[{name:"luxury house 3x3", grid:G.luxury3}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "noble":        {margin:1, set:true, depth:16,
+                   stamps:[{name:"dining (hub)", alts:[{grid:G.ndining, weight:2, name:"dining 5x4"}, {grid:G.ndining7, name:"dining 7x5"}]},
+                           {name:"bedroom", alts:[{grid:G.nbed, weight:2, name:"bedroom 3x3"}, {grid:G.nbed4, name:"bedroom 4x4"}, {grid:G.nbed35, name:"bedroom 3x5"}]},
+                           {name:"office", alts:[{grid:G.noffice, weight:2, name:"office 3x3"}, {grid:G.noffice4, name:"office 4x4"}]},
+                           {name:"tomb", alts:[{grid:G.ntomb, weight:2, name:"tomb 3x3"}, {grid:G.ntomb5, name:"tomb 5x3"}]}],
+                   optional:[{name:"sculpture garden", max:2, alts:[{grid:G.ngarden3, name:"garden 3x3"}, {grid:G.ngarden5, name:"garden 5x5"}]},
+                             {name:"throne room / library", max:1, alts:[{grid:G.nthrone, name:"throne room 5x5"}, {grid:G.nlibrary, name:"library 5x5"}]}],
+                   road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
+  "dining halls": {margin:1, maxLen:10, stamps:[{name:"dining hall 7x3", grid:G.dhall73, max:1}]},
+  // a minor noble: 3x3 rooms only, bedroom guaranteed, the other core rooms if they fit
+  "minor noble":  {margin:1, set:true, depth:12,
+                   stamps:[{name:"bedroom 3x3 (hub)", alts:[{grid:G.nbed}]}],
+                   optional:[{name:"dining 3x3", max:1, alts:[{grid:G.ndining3}]}, {name:"office 3x3", max:1, alts:[{grid:G.noffice}]}, {name:"tomb 3x3", max:1, alts:[{grid:G.ntomb}]}]},
+  "catacombs":    {margin:0, maxLen:12, stamps:[{name:"catacomb 7x9", grid:G.catacomb, max:1}], road:[{name:"coffin row 13x3", grid:G.coffinrow}, {name:"shrine 5x5", grid:G.shrine5}]},
+  "memorials":    {margin:1, maxLen:8,  stamps:[{name:"memorial 5x5", grid:G.memorial, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "family tombs": {margin:0, maxLen:12, stamps:[{name:"family tomb 3x5", grid:G.family}], road:[{name:"coffin row 13x3", grid:G.coffinrow}]},
+  "bungalows":    {margin:1, maxLen:20, stamps:[{name:"bungalow 3x3", grid:G.bungalow}]},
+  "thin townhouses": {margin:0, maxLen:24, shared:true, stamps:[{name:"thin townhouse 2x5, 4 floors", grid:G.thin, weight:2}, {name:"thin townhouse 2x5, 4 floors, set back", grid:G.thin, setback:1}]},
+  "big townhouses":  {margin:0, maxLen:24, shared:true, stamps:[{name:"big townhouse 4x3, 2 floors", grid:G.big}]},
+  "farms":        {margin:1, maxLen:12, stamps:[{name:"farm 9x6", grid:G.farm, max:1}]},
+  // manor: a walled courtyard is the hub with the road door; everything else shares a wall with it
+  "manor":        {margin:2, set:true, depth:24,
+                   stamps:[{name:"courtyard 7x7 (hub)", alts:[{grid:G.courtyard}]}, {name:"great hall 7x4, 2 floors", alts:[{grid:G.greathall}]},
+                           {name:"tower 3x3, 5 floors", alts:[{grid:G.tower}]}, {name:"master bedroom 5x4", alts:[{grid:G.master}]}, {name:"servants quarters 5x3", alts:[{grid:G.servants}]}],
+                   optional:[{name:"second tower 3x3, 5 floors", max:1, alts:[{grid:G.tower}]}, {name:"kitchen 4x2", max:1, alts:[{grid:G.kitchen}]}]},
+};
+Object.assign(DISTRICTS,{
+  "forge shrines":  {margin:1, maxLen:10, stamps:[{name:"shrine of the forge 5x5", grid:G.forge, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "sea shrines":    {margin:1, maxLen:10, stamps:[{name:"shrine of the sea 5x7", grid:G.sea, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "chapels of the dead": {margin:1, maxLen:10, stamps:[{name:"chapel of the dead 5x5", grid:G.dead, max:1}], road:[{name:"coffin row 13x3", grid:G.coffinrow}]},
+  "groves":         {margin:1, maxLen:12, stamps:[{name:"grove of nature 7x8", grid:G.grove, max:1}], road:[{name:"statue garden 7x7", grid:G.plaza7}]},
+  "temple complex": {margin:1, set:true, depth:20,
+                     stamps:[{name:"sanctum 7x7 (hub)", alts:[{grid:G.sanctum}]}, {name:"vestry 3x4", alts:[{grid:G.vestry}]}, {name:"cloister 5x5", alts:[{grid:G.cloister}]}],
+                     optional:[{name:"crypt 3x5", max:1, alts:[{grid:G.crypt}]}, {name:"library 5x5", max:1, alts:[{grid:G.nlibrary}]}],
+                     road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
+  "great temple":   {margin:1, set:true, depth:20,
+                     stamps:[{name:"nave 9x8 (hub)", alts:[{grid:G.nave}]}, {name:"side chapel 3x4", alts:[{grid:G.chapel}]}, {name:"second chapel 3x4", alts:[{grid:G.chapel}]}, {name:"vestry 3x4", alts:[{grid:G.vestry}]}],
+                     optional:[{name:"crypt 3x5", max:2, alts:[{grid:G.crypt}]}],
+                     road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
+  "masons' guild":  {margin:1, maxLen:10, stamps:[{name:"masons' hall 7x6", grid:G.masons, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "smiths' guild":  {margin:1, maxLen:10, stamps:[{name:"smiths' hall 7x6", grid:G.smiths, max:1}]},
+  "scholars' guild":{margin:1, maxLen:10, stamps:[{name:"scholars' hall 7x6", grid:G.scholars, max:1}]},
+  "brewers' guild": {margin:1, maxLen:8,  stamps:[{name:"brewers' hall 5x6", grid:G.brewers, max:1}]},
+  "merchants' guild": {margin:1, set:true, depth:18,
+                     stamps:[{name:"merchants' hall 7x6 (hub)", alts:[{grid:G.merchants}]}, {name:"counting room 3x3", alts:[{grid:G.counting}]}, {name:"vault 3x3", alts:[{grid:G.vault}]}],
+                     optional:[{name:"second vault 3x3", max:1, alts:[{grid:G.vault}]}]},
+  "warriors' guild": {margin:1, set:true, depth:18,
+                     stamps:[{name:"warriors' hall 7x6 (hub)", alts:[{grid:G.warriors}]}, {name:"armory 5x3", alts:[{grid:G.armory}]}, {name:"barracks 5x3", alts:[{grid:G.barracks}]}],
+                     optional:[{name:"second barracks 5x3", max:1, alts:[{grid:G.barracks}]}],
+                     road:[{name:"statue row 13x3", grid:G.seg13}]},
+});
+const PRESETS = {
+  "hovels":         {main:1, side:1, districts:[{name:"hovels"}]},
+  "housing 2x2":    {main:2, side:2, districts:[{name:"houses 2x2"}]},
+  "housing 3x3":    {main:1, side:1, districts:[{name:"houses 3x3"}]},
+  "luxury housing": {main:3, side:3, districts:[{name:"luxury 3x3"}], second:[{name:"luxury 3x3", weight:3}, {name:"dining halls", weight:1}]},
+  "varied housing": {main:3, side:1, road:[{name:"statue row 13x3", grid:G.seg13}],
+                     districts:[{name:"hovels", weight:1}, {name:"houses 2x2", weight:2}, {name:"houses 3x3", weight:2}, {name:"luxury 3x3", weight:1}]},
+  "noble quarters": {main:3, side:3, districts:[{name:"noble"}], second:[{name:"noble", weight:1}, {name:"minor noble", weight:2}]},
+  "tombs":          {main:3, side:3, districts:[{name:"catacombs", weight:2}, {name:"memorials", weight:1}, {name:"family tombs", weight:2}]},
+  "temples":        {main:3, side:3, districts:[{name:"forge shrines", weight:2}, {name:"sea shrines", weight:2}, {name:"chapels of the dead", weight:2}, {name:"groves", weight:1}, {name:"temple complex", weight:2}, {name:"great temple", weight:1}]},
+  "guildhalls":     {main:3, side:3, districts:[{name:"masons' guild", weight:2}, {name:"smiths' guild", weight:2}, {name:"scholars' guild", weight:1}, {name:"brewers' guild", weight:2}, {name:"merchants' guild", weight:1}, {name:"warriors' guild", weight:1}]},
+  "town":           {main:3, side:1, surface:true, angled:true, districts:[{name:"bungalows", weight:2}, {name:"thin townhouses", weight:2}, {name:"big townhouses", weight:1}, {name:"farms", weight:1}, {name:"manor", weight:1}]},
+};
+
+// ---------- rng ----------
+function RNG(seed){let s=(seed>>>0)||1;return{
+  next(){s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296;},
+  int(n){return Math.floor(this.next()*n);},
+  shuffle(a){for(let i=a.length-1;i>0;i--){const j=this.int(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;},
+  pick(arr,wf){const t=arr.reduce((a,x)=>a+wf(x),0);let r=this.next()*t;for(const x of arr){r-=wf(x);if(r<=0)return x;}return arr[arr.length-1];}
+};}
+
+// ---------- burrow shapes ----------
+function makeBurrow(shape,W,H,rng,rect){
+  const g=Array.from({length:H},()=>new Uint8Array(W));
+  const set=(x,y,v)=>{if(x>=0&&y>=0&&x<W&&y<H)g[y][x]=v;};
+  if(rect){for(let y=rect.y0;y<=rect.y1;y++)for(let x=rect.x0;x<=rect.x1;x++)set(x,y,1);return g;}
+  if(shape==="rect"){for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++)set(x,y,1);}
+  else if(shape==="L"){for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++)if(x<W*0.55||y>H*0.5)set(x,y,1);}
+  else if(shape==="ring"){for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const ix=x>W*0.3&&x<W*0.7&&y>H*0.3&&y<H*0.7;if(!ix)set(x,y,1);}}
+  else if(shape==="strip"){for(let y=Math.floor(H*0.35);y<H*0.65;y++)for(let x=1;x<W-1;x++)set(x,y,1);}
+  else {
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++)g[y][x]=(x>0&&y>0&&x<W-1&&y<H-1&&rng.next()<0.58)?1:0;
+    for(let it=0;it<5;it++){const n=g.map(r=>r.slice());
+      for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){let c=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)c+=g[y+dy][x+dx];n[y][x]=c>=5?1:0;}
+      for(let y=0;y<H;y++)g[y]=n[y];}
+    const seen=Array.from({length:H},()=>new Uint8Array(W));let best=[];
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(g[y][x]&&!seen[y][x]){const comp=[],st=[[x,y]];seen[y][x]=1;
+      while(st.length){const[cx,cy]=st.pop();comp.push([cx,cy]);for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=cx+dx,ny=cy+dy;if(nx>=0&&ny>=0&&nx<W&&ny<H&&g[ny][nx]&&!seen[ny][nx]){seen[ny][nx]=1;st.push([nx,ny]);}}}
+      if(comp.length>best.length)best=comp;}
+    for(let y=0;y<H;y++)g[y].fill(0);for(const[x,y]of best)g[y][x]=1;
+  }
+  return g;
+}
+
+// ---------- stamp analysis ----------
+const DIRS=[[0,-1],[1,0],[0,1],[-1,0]]; // 0 up, 1 right, 2 down, 3 left
+const DIAG=[[1,-1],[1,1],[-1,1],[-1,-1]];
+const key=(x,y)=>x+","+y;
+function transforms(grid){
+  const out=[];let rows=grid.map(r=>r.split(""));
+  for(let f=0;f<2;f++){let cur=rows;for(let r=0;r<4;r++){out.push(cur.map(x=>x.join("")));
+      const h=cur.length,w=cur[0].length;const n=Array.from({length:w},()=>Array(h).fill(" "));
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++)n[x][h-1-y]=cur[y][x];cur=n;}
+    rows=rows.map(r=>r.slice().reverse());}
+  const seen=new Set();return out.filter(g=>{const k=g.join("\n");if(seen.has(k))return false;seen.add(k);return true;});
+}
+function analyse(grid){
+  const h=grid.length,w=Math.max(...grid.map(r=>r.length));
+  const at=(x,y)=>(y>=0&&y<h&&x>=0&&x<w)?(grid[y][x]||" "):" ";
+  const cells=[];for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(at(x,y)!==" ")cells.push({x,y,ch:at(x,y)});
+  const entrances=[];
+  for(const c of cells)if(c.ch==="d")for(let d=0;d<4;d++){const[dx,dy]=DIRS[d];
+    if(at(c.x+dx,c.y+dy)===" "&&at(c.x-dx,c.y-dy)!==" "&&at(c.x-dx,c.y-dy)!=="#")entrances.push({x:c.x,y:c.y,dir:d});}
+  if(!entrances.length)for(const c of cells)for(let d=0;d<4;d++){const[dx,dy]=DIRS[d];if(at(c.x+dx,c.y+dy)===" ")entrances.push({x:c.x,y:c.y,dir:d,open:true});}
+  const fp=new Set(cells.map(c=>key(c.x,c.y)));const shell=[];const sset=new Set();
+  for(const c of cells)for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const k=key(c.x+dx,c.y+dy);if(!fp.has(k)&&!sset.has(k)){sset.add(k);shell.push({x:c.x+dx,y:c.y+dy});}}
+  for(const e of entrances){const zone=new Set();
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const sx=e.x+dx,sy=e.y+dy;if(fp.has(key(sx,sy)))continue;
+      let nearOther=false;for(const c of cells){if(c.x===e.x&&c.y===e.y)continue;if(Math.abs(c.x-sx)<=1&&Math.abs(c.y-sy)<=1)nearOther=true;}
+      if(!nearOther)zone.add(key(sx,sy));}
+    e.zone=zone;}
+  return{cells,entrances,shell,w,h};
+}
+function prepStamp(s){
+  const ground=s.grid.floors?s.grid.floors[0]:s.grid;const floors=s.grid.floors?s.grid.floors.length:1;
+  const vs=transforms(ground).map(analyse);const byDir=[];
+  for(let d=0;d<4;d++){let best=null;for(const v of vs)for(const e of v.entrances)if(e.dir===d){
+      const depth=(d===0||d===2)?v.h:v.w;if(!best||depth<best.depth)best={v,e,depth};}
+    byDir[d]=best;}
+  const turned=vs.find(v=>v.w===vs[0].h&&v.h===vs[0].w&&v!==vs[0])||null;
+  return{name:s.name,weight:s.weight||1,max:s.max||Infinity,byDir,plain:vs[0],turned,floors};
+}
+
+// ---------- packer ----------
+// claim: 0 free, 1 road, 2 room, 3 wall (room-owned rock), 4 margin (keeps rooms apart; roads may cross),
+// 5 road stub (reserved for a head), 6 statue on road
+function pack(o){
+  const{W,H,burrow,preset,seed,prior}=o;const rng=RNG(seed*7919+13);
+  const mainW=preset.main||1, sideW=preset.side||1;const surface=!!preset.surface;
+  // the burrow's border ring is always rock: only tiles whose whole neighbourhood is in the burrow may be dug
+  const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H&&burrow[y][x]===1;
+  const free=(x,y)=>{if(!inB(x,y))return false;for(let ey=-1;ey<=1;ey++)for(let ex=-1;ex<=1;ex++)if(!inB(x+ex,y+ey))return false;return true;};
+  const claim=prior?prior.claim.map(r=>r.slice()):Array.from({length:H},()=>new Uint8Array(W));
+  const owner=prior?prior.owner.map(r=>r.slice()):Array.from({length:H},()=>new Int16Array(W));
+  const at=(x,y)=>(x>=0&&y>=0&&x<W&&y<H)?claim[y][x]:9;
+  const freeList=[];for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(free(x,y))freeList.push([x,y]);
+  if(!freeList.length)return null;
+  const slot=(s)=>({name:s.name,max:s.max||1,weight:s.weight||1,alts:(s.alts||[{grid:s.grid,weight:s.weight,max:s.max}]).map(a=>({name:a.name||s.name,weight:a.weight||1,p:prepStamp({name:a.name||s.name,grid:a.grid,weight:a.weight,max:a.max})}))});
+  const slotSb=(s)=>{const sl=slot(s);sl.alts.forEach((a,i)=>{a.setback=(s.alts?s.alts[i].setback:s.setback)||0;});return sl;};
+  const buildTypes=(list)=>list.map(d=>{const base=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});
+    return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(base.margin||0),maxLen:base.maxLen||14,depth:base.depth||12,set:!!base.set,shared:!!base.shared,
+      stamps:(base.stamps||[]).map(slotSb),optional:(base.optional||[]).map(slot),
+      road:(base.road||[]).map(s=>({name:s.name,weight:s.weight||1,p:prepStamp(s)}))};});
+  const dtypes=buildTypes(preset.districts);
+  const dtypes2=buildTypes(preset.second||preset.districts); // the fill pass may use a different list
+  const roadPool=(preset.road||[]).map(s=>({name:s.name,weight:s.weight||1,p:prepStamp(s)}));
+  for(const D of dtypes)for(const r of D.road)if(!roadPool.some(q=>q.name===r.name))roadPool.push(r);
+  // segments must be long enough for the widest hub to find clear frontage between the end-square turns
+  let frontNeed=0;for(const D of dtypes)for(const sl of D.stamps.slice(0,1))for(const a of sl.alts)frontNeed=Math.max(frontNeed,Math.max(a.p.plain.w,a.p.plain.h)+2+D.margin+2*(mainW>>1)+1);
+  const minMain=Math.max(6,frontNeed),maxMain=Math.max(22,2*frontNeed);
+  const segStamps=roadPool.filter(r=>Math.min(r.p.plain.w,r.p.plain.h)===mainW&&Math.max(r.p.plain.w,r.p.plain.h)>mainW);
+  const plazaStamps=roadPool.filter(r=>r.p.plain.w===r.p.plain.h&&r.p.plain.w>mainW);
+  // entry: on the left edge, a main-road footprint free for ten tiles, pointing right
+  const mh=mainW>>1;let entry=null,bd=1e9;
+  if(!prior){for(const[x,y]of freeList){let ok=true;for(let i=0;i<10&&ok;i++)for(let t=-((mainW-1)>>1);t<=(mainW>>1);t++)if(!free(x+i,y+t)||claim[y+t][x+i]!==0)ok=false;if(!ok)continue;const d=Math.abs(y-H/2)+x*2;if(d<bd){bd=d;entry=[x,y];}}
+    if(!entry)return null;}else entry=prior.entry;
+  const rooms=prior?prior.rooms.slice():[],districts=prior?prior.districts.slice():[],segments=prior?prior.segments.slice():[],stamps=prior?prior.stamps.slice():[];
+  let joins=0,undone=0,diagonals=0;
+  const count={};for(const D of dtypes.concat(dtypes2))count[D.name]=0;let placedN=0;
+  const nextDistrict=(list,exclude)=>{const wsum=list.reduce((a,d)=>a+d.weight,0);const order=list.filter(d=>!exclude.has(d.name)).sort((a,b)=>((b.weight*(placedN+1)/wsum-count[b.name])-(a.weight*(placedN+1)/wsum-count[a.name]))+(rng.next()-0.5)*0.6);return order[0]||null;};
+  const snapshot=()=>({c:claim.map(r=>r.slice()),o:owner.map(r=>r.slice()),nR:rooms.length,nD:districts.length,nS:stamps.length,nSeg:segments.length,joins,cnt:{...count},pn:placedN});
+  const restore=(sn)=>{for(let y=0;y<H;y++){claim[y].set(sn.c[y]);owner[y].set(sn.o[y]);}rooms.length=sn.nR;districts.length=sn.nD;stamps.length=sn.nS;segments.length=sn.nSeg;joins=sn.joins;Object.assign(count,sn.cnt);placedN=sn.pn;};
+
+  // ---- room placement primitives ----
+  const commitRoom=(v,e,ax,ay,R,room,dIdx)=>{const idx=rooms.length+1;
+    for(const c of v.cells){const x=ax+c.x,y=ay+c.y;claim[y][x]=2;owner[y][x]=idx;room.cells.push({x,y,ch:c.ch});if(e&&c.x===e.x&&c.y===e.y)room.door={x,y};}
+    for(const s of v.shell){if(e&&e.zone.has(key(s.x,s.y)))continue;const x=ax+s.x,y=ay+s.y;if(x<0||y<0||x>=W||y>=H)continue;
+      if(claim[y][x]===0||claim[y][x]===4){claim[y][x]=surface?4:3;}}
+    for(const c of v.cells)for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const x=ax+c.x+dx,y=ay+c.y+dy;if(x>=0&&y>=0&&x<W&&y<H&&claim[y][x]===0)claim[y][x]=4;}
+    room.district=dIdx;rooms.push(room);return room;};
+  // can a variant sit at (ax,ay)? `shareWith`: owner id whose '#' walls this stamp's '#' walls may overlap (0 = none, -1 = any)
+  const fits=(v,e,ax,ay,inside,shareWith)=>{
+    for(const c of v.cells){const x=ax+c.x,y=ay+c.y;if(!free(x,y)||!inside(x,y))return false;
+      const k=claim[y][x];
+      if(k===2&&c.ch==="#"&&shareWith&&(shareWith===-1||owner[y][x]===shareWith)){const rm=rooms[owner[y][x]-1];const pc=rm&&rm.cells.find(q=>q.x===x&&q.y===y);if(pc&&pc.ch==="#")continue;}
+      if(k!==0&&!(surface&&k===4))return false;}
+    for(const s of v.shell){const x=ax+s.x,y=ay+s.y;if(x<0||y<0||x>=W||y>=H)continue;const k=claim[y][x];
+      if(k===2){const zoneOK=e&&e.zone.has(key(s.x,s.y));const shareOK=shareWith&&(shareWith===-1||owner[y][x]===shareWith);if(!zoneOK&&!shareOK)return false;}
+      if(k===6)return false;if(k===5&&!(e&&e.zone.has(key(s.x,s.y))))return false;
+      if(k===1&&!surface&&!(e&&e.zone.has(key(s.x,s.y))))return false;}
+    return true;};
+
+  // ---- districts along one side of a segment ----
+  const packSide=(seg,side,list,gaps)=>{
+    const[dx,dy]=DIRS[seg.dir];const pd=side>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const half=eo(seg.w,px+py);
+    const doorDir=(pd+2)%4;
+    let i=0;let D=null,used=0,capsLeft=null,dIdx=-1;const tried=new Set();
+    const iEnd=seg.joined?seg.n:seg.n-seg.w;
+    const doorAt=(i,setback)=>{const cx=seg.x+dx*i,cy=seg.y+dy*i;const fx=cx+px*half,fy=cy+py*half;const doorX=cx+px*(half+1+setback),doorY=cy+py*(half+1+setback);
+      for(let t=1;t<=setback;t++){const x=cx+px*(half+t),y=cy+py*(half+t);if(!free(x,y)||!(claim[y][x]===0||claim[y][x]===4))return null;}
+      if(at(fx,fy)!==1||!free(doorX,doorY)||!(claim[doorY][doorX]===0||(surface&&claim[doorY][doorX]===4)))return null;
+      return{cx,cy,fx,fy,doorX,doorY};};
+    while(i<iEnd){
+      if(!D){D=nextDistrict(list,tried);if(!D)break;tried.add(D.name);used=0;capsLeft=new Map();for(const sl of D.stamps)for(const a of sl.alts)capsLeft.set(a.name,a.p.max);dIdx=-1;}
+      let advanced=0;
+      if(D.set){
+        const pos=doorAt(i,0);if(!pos){i++;continue;}
+        const r=clusterAt(D,pos.doorX,pos.doorY,doorDir,seg,dIdx);
+        if(r){if(dIdx<0){dIdx=districts.length;districts.push({type:D,rooms:[]});count[D.name]++;placedN++;}for(const rm of r.rooms){rm.district=dIdx;districts[dIdx].rooms.push(rm);}advanced=r.extent+1+D.margin;}
+        else{D=null;if(tried.size>=list.length){tried.clear();i++;}continue;}
+      }else{
+        const cand=D.stamps.flatMap(sl=>sl.alts).filter(a=>(capsLeft.get(a.name)||0)>0);
+        if(!cand.length){D=null;continue;}
+        const s=rng.pick(cand,x=>x.weight);const setback=surface?(s.setback||0):0;const b=s.p.byDir[doorDir];
+        const pos=doorAt(i,setback);
+        if(b&&pos){const{v,e}=b;const{cx,cy,fx,fy,doorX,doorY}=pos;const ax=doorX-e.x,ay=doorY-e.y;
+          const inside=(x,y)=>Math.abs((x-cx)*px+(y-cy)*py)<=D.depth+half+setback;
+          if(fits(v,e,ax,ay,inside,D.shared?-1:0)){const room={stamp:s.name,cells:[],door:null,front:{x:fx,y:fy},floors:s.p.floors};
+            if(dIdx<0){dIdx=districts.length;districts.push({type:D,rooms:[]});count[D.name]++;placedN++;}
+            for(let t=1;t<=setback;t++){const x=cx+px*(half+t),y=cy+py*(half+t);claim[y][x]=1;} // the path from road to a set-back door
+            commitRoom(v,e,ax,ay,D.shared?0:1+D.margin,room,dIdx);districts[dIdx].rooms.push(room);
+            capsLeft.set(s.name,capsLeft.get(s.name)-1);
+            const extent=(pd===1||pd===3)?v.h:v.w;advanced=extent+(D.shared?-1:1)+D.margin;}}
+      }
+      if(advanced){i+=advanced;used+=advanced;
+        const capped=D.stamps.every(sl=>sl.alts.every(a=>a.p.max!==Infinity))&&D.stamps.every(sl=>sl.alts.every(a=>(capsLeft.get(a.name)||0)<=0));
+        if(used>=D.maxLen||capped||D.set){D=null;tried.clear();if(gaps&&seg.level<3)i+=sideW+1;}} // leave room for a side street between districts
+      else i++;
+    }
+  };
+  // a suite: hub door at (doorX,doorY) facing doorDir; every other room shares a wall with a placed room.
+  // Underground the child's door replaces a tile of the parent's rock wall and opens onto its floor;
+  // on the surface the child's built wall row coincides with the parent's built wall, door in it.
+  const clusterAt=(D,doorX,doorY,doorDir,seg,dIdx)=>{
+    const pd=(doorDir+2)%4;const[px,py]=DIRS[pd];const[dx,dy]=DIRS[seg.dir];
+    const inside=(x,y)=>{const dep=(x-doorX)*px+(y-doorY)*py;const al=(x-doorX)*dx+(y-doorY)*dy;return dep>=0&&dep<=D.depth&&al>=-8&&al<=D.depth+8;};
+    const pickAlt=(sl)=>rng.pick(sl.alts,a=>a.weight);
+    const sn=snapshot();const placed=[];
+    const hub=pickAlt(D.stamps[0]);const b=hub.p.byDir[doorDir];if(!b)return null;
+    const ax=doorX-b.e.x,ay=doorY-b.e.y;if(!fits(b.v,b.e,ax,ay,inside,0))return null;
+    const hubRoom={stamp:hub.name,cells:[],door:null,front:{x:doorX-px,y:doorY-py},hub:true,floors:hub.p.floors};
+    commitRoom(b.v,b.e,ax,ay,1,hubRoom,dIdx);placed.push(hubRoom);
+    const bbox=()=>{let x0=1e9,y0=1e9,x1=-1,y1=-1;for(const r of placed)for(const c of r.cells){x0=Math.min(x0,c.x);y0=Math.min(y0,c.y);x1=Math.max(x1,c.x);y1=Math.max(y1,c.y);}return{x0,y0,x1,y1};};
+    const attach=(stamp)=>{const cands=[];const bb=bbox();
+      for(const parent of placed){const pidx=rooms.indexOf(parent)+1;
+        for(const pc of parent.cells){if(pc.ch==="d")continue;
+          for(let d=0;d<4;d++){let tx,ty;
+            if(surface){ // door goes INTO the parent's wall cell, which must have parent floor behind it
+              if(pc.ch!=="#")continue;const bx=pc.x-DIRS[d][0],by=pc.y-DIRS[d][1];const back=parent.cells.find(q=>q.x===bx&&q.y===by);if(!back||back.ch==="#")continue;tx=pc.x;ty=pc.y;}
+            else{if(pc.ch==="#")continue;tx=pc.x+DIRS[d][0];ty=pc.y+DIRS[d][1];if(!free(tx,ty)||!inside(tx,ty)||claim[ty][tx]!==3)continue;}
+            let clean=true;for(let ey=-1;ey<=1&&clean;ey++)for(let ex=-1;ex<=1;ex++){const x=tx+ex,y=ty+ey;if(at(x,y)===2&&owner[y][x]!==pidx){clean=false;break;}}
+            if(!clean)continue;
+            const bb2=stamp.p.byDir[(d+2)%4];if(!bb2)continue;const{v,e}=bb2;const ax2=tx-e.x,ay2=ty-e.y;
+            const saved=claim[ty][tx],savedO=owner[ty][tx];claim[ty][tx]=0;
+            const ok=fits(v,e,ax2,ay2,inside,surface?pidx:0);
+            claim[ty][tx]=saved;owner[ty][tx]=savedO;if(!ok)continue;
+            let nx0=bb.x0,ny0=bb.y0,nx1=bb.x1,ny1=bb.y1;for(const c of v.cells){nx0=Math.min(nx0,ax2+c.x);ny0=Math.min(ny0,ay2+c.y);nx1=Math.max(nx1,ax2+c.x);ny1=Math.max(ny1,ay2+c.y);}
+            const w=nx1-nx0+1,hh=ny1-ny0+1;cands.push({score:Math.max(w,hh)*1000+w*hh+rng.next()*0.5,v,e,ax:ax2,ay:ay2,tx,ty,parent});}}}
+      if(!cands.length)return false;cands.sort((p,q)=>p.score-q.score);const c=cands[0];
+      claim[c.ty][c.tx]=0;const room={stamp:stamp.name,cells:[],door:null,front:null,parent:c.parent.stamp,floors:stamp.p.floors};
+      commitRoom(c.v,c.e,c.ax,c.ay,1,room,dIdx);placed.push(room);return true;};
+    for(const sl of D.stamps.slice(1))if(!attach(pickAlt(sl))){restore(sn);return null;}
+    for(const sl of(D.optional||[])){const n=rng.int(sl.max+1);for(let i=0;i<n;i++)attach(pickAlt(sl));}
+    const bb=bbox();const R=D.margin;for(let y=bb.y0-1-R;y<=bb.y1+1+R;y++)for(let x=bb.x0-1-R;x<=bb.x1+1+R;x++)if(x>=0&&y>=0&&x<W&&y<H&&claim[y][x]===0)claim[y][x]=4;
+    const extent=Math.max(0,...placed.flatMap(r=>r.cells.map(c=>(c.x-doorX)*dx+(c.y-doorY)*dy)));
+    return{rooms:placed,extent};};
+
+  // ---- road laying ----
+  // width geometry, valid for even widths too: a road of width w around centre tile c covers absolute
+  // offsets lo(w)..hi(w) across its axis (the extra tile of an even width always sits on the +x/+y side)
+  const lo=(w)=>-((w-1)>>1),hi=(w)=>w>>1;
+  const eo=(w,sign)=>sign>0?hi(w):-lo(w);            // distance from centre to the edge in a signed direction
+  const footprint=(x,y,dir,w)=>{const[px,py]=DIRS[(dir+1)%4];const qx=Math.abs(px),qy=Math.abs(py);const out=[];for(let t=lo(w);t<=hi(w);t++)out.push([x+qx*t,y+qy*t]);return out;};
+  const haloOf=(x,y,dir,w)=>{const[px,py]=DIRS[(dir+1)%4];const qx=Math.abs(px),qy=Math.abs(py);return[[x+qx*(hi(w)+1),y+qy*(hi(w)+1)],[x+qx*(lo(w)-1),y+qy*(lo(w)-1)]];};
+  // centre of a segment's end square (its last w centreline tiles), consistent with the absolute offsets
+  const sqCentre=(seg)=>{const[dx,dy]=DIRS[seg.dir];const back=(sg)=>sg>0?hi(seg.w):-lo(seg.w);return[seg.x+dx*(seg.n-1)-(dx?dx*back(dx):0),seg.y+dy*(seg.n-1)-(dy?dy*back(dy):0)];};
+  // an angled road: each step is a 2-tile-thick diagonal band so successive steps touch by edges
+  const diagFoot=(x,y,d,w)=>{const[sx,sy]=DIAG[d];const out=[];for(let t=lo(w);t<=hi(w);t++){out.push([x+t*sx,y-t*sy]);out.push([x+t*sx+sx,y-t*sy]);}return out;};
+  const laySegment=(head,want)=>{
+    const{x,y,dir,w}=head;const half=w>>1;const[dx,dy]=DIRS[dir];const[px,py]=DIRS[(dir+1)%4];
+    const own=head.stub||new Set();
+    let n=0,joined=false;
+    for(let i=0;i<(head.join?want:want+half);i++){const cx=x+dx*i,cy=y+dy*i;const f=footprint(cx,cy,dir,w);
+      let bad=false,road=0;
+      for(const[a,b]of f){if(!free(a,b)){bad=true;break;}const k=claim[b][a];if(k===2||k===3||k===6||(k===5&&!own.has(key(a,b)))){bad=true;break;}if(k===1)road++;}
+      if(bad)break;
+      if(road){if(road===f.length&&i>=head.minLen&&!head.noJoin)joined=true;break;}
+      const[[h1x,h1y],[h2x,h2y]]=haloOf(cx,cy,dir,w);const hl=at(h1x,h1y),hr=at(h2x,h2y);
+      if(hl===1||hr===1||hl===6||hr===6)break;
+      n=i+1;}
+    if(head.join&&n===want)joined=true;
+    if(joined){if(n<head.minLen)return null;}else{if(n<head.minLen+half)return null;}
+    const seg={x,y,dir,w,n,tiles:[],joined,level:head.level,children:0,rooms:0};
+    for(let i=0;i<n;i++){for(const[a,b]of footprint(x+dx*i,y+dy*i,dir,w)){claim[b][a]=1;seg.tiles.push([a,b]);}}
+    for(const k of own){const[a,b]=k.split(",").map(Number);if(claim[b][a]===5)claim[b][a]=0;}
+    if(joined)joins++;
+    return seg;};
+  const layDiagonal=(head)=>{const{x,y,w}=head;const d=head.diag;const[sx,sy]=DIAG[d];let n=0,joined=false;
+    for(let i=0;i<head.want;i++){const f=diagFoot(x+sx*i,y+sy*i,d,w);let bad=false,road=0;
+      for(const[a,b]of f){if(!free(a,b)){bad=true;break;}const k=at(a,b);if(k===2||k===3||k===6||k===5){bad=true;break;}if(k===1)road++;}
+      if(bad)break;if(road){if(i>=4&&road>=Math.ceil(f.length/2))joined=true;break;}n=i+1;}
+    if(!joined||n<4)return null;
+    const seg={x,y,dir:-1,diag:d,w,n,tiles:[],joined:true,level:head.level,children:0,rooms:0};
+    for(let i=0;i<n;i++)for(const[a,b]of diagFoot(x+sx*i,y+sy*i,d,w)){claim[b][a]=1;seg.tiles.push([a,b]);}
+    joins++;diagonals++;return seg;};
+  const layRoadStamp=(v,ax,ay,name,onRoadOnly)=>{const cells=[];
+    for(const c of v.cells){const x=ax+c.x,y=ay+c.y;if(!free(x,y))return false;const k=claim[y][x];if(k!==1&&(onRoadOnly||(k!==0&&k!==4)))return false;cells.push({x,y,ch:c.ch});}
+    for(const s of v.shell){const x=ax+s.x,y=ay+s.y;if(at(x,y)===2||at(x,y)===3)return false;}
+    for(const c of cells)claim[c.y][c.x]=(c.ch==="s"||c.ch==="x")?6:1;
+    stamps.push({stamp:name,cells,plaza:true});return true;};
+  // reserve a straight continuation from (hx,hy) heading nd at width w; returns a head or null
+  const reserve=(hx,hy,nd,w,level,budget,parent,minLen)=>{
+    if(w===mainW)minLen=Math.max(minLen,minMain);
+    const[ndx,ndy]=DIRS[nd];const nh=w>>1;const want=minLen+rng.int(Math.max(1,(w===mainW?maxMain:(w>1?22:16))-minLen));
+    const stub=new Set();let got=0,join=false;
+    for(let t=0;t<want+nh;t++){let ok=true,road=0;const f=footprint(hx+ndx*t,hy+ndy*t,nd,w);
+      for(const[a,b]of f){const k=at(a,b);if(!free(a,b)||(k!==0&&k!==4&&k!==1))ok=false;if(k===1)road++;}
+      if(ok&&road){if(road===f.length&&t>=minLen)join=true;break;}
+      const[[h1x,h1y],[h2x,h2y]]=haloOf(hx+ndx*t,hy+ndy*t,nd,w);const hl=at(h1x,h1y),hr=at(h2x,h2y);
+      if(!ok||hl===1||hr===1||hl===6||hr===6)break;for(const[a,b]of f)stub.add(key(a,b));got=t+1;}
+    if(join?got<minLen:got<minLen+nh)return null;for(const k of stub){const[a,b]=k.split(",").map(Number);claim[b][a]=5;}
+    return{x:hx,y:hy,dir:nd,w,level,minLen,want:join?got:Math.min(want,got-nh),join,budget,parent,stub};};
+  const release=(head)=>{if(head&&head.stub)for(const k of head.stub){const[a,b]=k.split(",").map(Number);if(claim[b][a]===5)claim[b][a]=0;}};
+
+  // ---- growth ----
+  const heads=[];
+  if(!prior){heads.push({x:entry[0],y:entry[1],dir:1,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;}
+  else{ // existing geometry is the starting point: continue its roads from their end squares and branch from gaps along them
+    for(const seg of prior.segments){if(seg.dir<0)continue;const[dx,dy]=DIRS[seg.dir];
+      const[ecx,ecy]=sqCentre(seg);
+      if(!seg.joined)for(const nd of[seg.dir,(seg.dir+1)%4,(seg.dir+3)%4]){const[px,py]=DIRS[nd];const w=nd===seg.dir?seg.w:mainW;const ed=eo(seg.w,px+py);
+        const h2=reserve(ecx+px*(ed+1),ecy+py*(ed+1),nd,w,0,40,null,w>1?6:4);if(h2)heads.push(h2);}
+      for(const sd of[1,-1]){const pd=sd>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
+        for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;const h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,mainW,0,40,null,mainW>1?6:4);if(h2){heads.push(h2);last=i;}}}}}
+  let guard=0;
+  while(heads.length&&guard++<3000){
+    const head=heads.shift();
+    if(head.diag!==undefined){const seg=layDiagonal(head);if(seg)segments.push(seg);continue;}
+    const sn=snapshot();
+    const want=head.want||(head.minLen+rng.int(Math.max(1,(head.w===mainW?maxMain:(head.w>1?22:16))-head.minLen)));
+    const seg=laySegment(head,want);
+    if(!seg){release(head);continue;}
+    segments.push(seg);
+    const[dx,dy]=DIRS[seg.dir];const half=seg.w>>1;
+    const[ecx,ecy]=sqCentre(seg); // centre of the end square
+    // every continuation that can be reserved becomes a head; the "no rooms, no road" rule prunes the rest,
+    // so the network is as dense as the districts can fill. Deep side streets try fewer directions.
+    let ends=[];
+    if(!seg.joined&&head.budget>0){ends=head.level<=1?["S","L","R"]:["S",rng.next()<0.5?"L":"R"];}
+    let plazaR=0;
+    if(ends.length>=2&&plazaStamps.length&&rng.next()<0.6){const ps=rng.pick(plazaStamps,s=>s.weight);const v=ps.p.plain;const r=v.w>>1;
+      if(layRoadStamp(v,ecx-r,ecy-r,ps.name,false))plazaR=r;}
+    if(segStamps.length&&seg.n>=15&&rng.next()<0.5){const ss=rng.pick(segStamps,s=>s.weight);const v=(seg.dir===1||seg.dir===3)?(ss.p.plain.w>=ss.p.plain.h?ss.p.plain:ss.p.turned):(ss.p.plain.h>=ss.p.plain.w?ss.p.plain:ss.p.turned);
+      if(v){const len=Math.max(v.w,v.h);const start=Math.floor((seg.n-half-len)/2);if(start>=1){const cx=seg.x+dx*start,cy=seg.y+dy*start;
+        const ax=Math.min(cx,cx+dx*(len-1))+(dx===0?lo(seg.w):0),ay=Math.min(cy,cy+dy*(len-1))+(dy===0?lo(seg.w):0);layRoadStamp(v,ax,ay,ss.name,true);}}}
+    // continuation heads from the end square (or the plaza), reserved for their whole length before rooms go down
+    const newHeads=[];
+    const tryEnd=(e)=>{let nd,hx,hy,w;
+      if(e==="S"){nd=seg.dir;w=seg.w;const R=plazaR||eo(seg.w,dx+dy);hx=ecx+dx*(R+1);hy=ecy+dy*(R+1);}
+      else{nd=e==="L"?(seg.dir+3)%4:(seg.dir+1)%4;w=(head.level===0&&ends.length===1)?mainW:(rng.next()<0.5?mainW:sideW);if(seg.w===sideW)w=sideW;
+        const[px,py]=DIRS[nd];const R=plazaR||eo(seg.w,px+py);hx=ecx+px*(R+1);hy=ecy+py*(R+1);}
+      const h2=reserve(hx,hy,nd,w,head.level+(w<seg.w?1:0),head.budget-1,seg,w>1?6:4);if(h2)newHeads.push(h2);return !!h2;};
+    for(const e of rng.shuffle(ends.slice()))tryEnd(e);
+    // angled connector from the end square (towns): kept only if it reaches another road
+    if(preset.angled&&ends.length>=2&&rng.next()<0.5){newHeads.push({diag:rng.int(4),x:ecx,y:ecy,w:seg.w,want:6+rng.int(14),level:head.level});}
+    // districts along both sides
+    for(const s of[1,-1])packSide(seg,s,dtypes,true);
+    // side streets: found in the gaps the districts left, never reserved through rooms
+    if(head.level<3&&seg.n>=8){
+      for(const s of[1,-1]){const pd=s>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
+        for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;
+          const h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,sideW,head.level+1,head.budget-1,seg,4);if(h2){newHeads.push(h2);last=i;}}}}
+    seg.rooms=rooms.filter(r=>r.front&&seg.tiles.some(([a,b])=>a===r.front.x&&b===r.front.y)).length;
+    // a road with nothing along it is not dug
+    if(seg.rooms===0){restore(sn);for(const h2 of newHeads)release(h2);release(head);undone++;continue;}
+    if(head.parent)head.parent.children++;
+    for(const h2 of newHeads)heads.push(h2);
+  }
+  // ---- second pass: with the road network settled, walk every road edge again with the fill list ----
+  const firstPassRooms=rooms.length;
+  for(const seg of segments){if(seg.dir<0||seg.dead)continue;for(const s of[1,-1])packSide(seg,s,dtypes2,false);}
+  const filled=rooms.length-firstPassRooms;
+  // ---- designations ----
+  const desig={smoothFloor:0,engrave:0,smoothWall:0};const wallKind=Array.from({length:H},()=>new Uint8Array(W));
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const k=claim[y][x];
+    if(k===1||k===6||k===2)desig.smoothFloor++;
+    else if(k===3){wallKind[y][x]=1;desig.engrave++;}
+    else if(inB(x,y)){let nearRoad=false;for(let ey=-1;ey<=1;ey++)for(let ex=-1;ex<=1;ex++){const kk=at(x+ex,y+ey);if(kk===1||kk===6)nearRoad=true;}if(nearRoad){wallKind[y][x]=2;desig.smoothWall++;}}}
+  // ---- stats ----
+  let roadTiles=0,roomTiles=0;for(let y=0;y<H;y++)for(let x=0;x<W;x++){const k=claim[y][x];if(k===1||k===6)roadTiles++;else if(k===2)roomTiles++;}
+  const per={};for(const D of districts)per[D.type.name]=(per[D.type.name]||0)+1;
+  let floors=0;for(const r of rooms)if(r.floors>1)floors+=r.floors-1;
+  const allTypes=(prior?prior.dtypes:[]).concat(dtypes.filter(d=>!(prior&&prior.dtypes.some(q=>q.name===d.name))));
+  return{rooms,stamps,segments,districts,claim,owner,wallKind,entry,dtypes:allTypes,
+    stats:{burrow:freeList.length,roadTiles,roomTiles,per,joins,undone,diagonals,filled,stampsN:stamps.length,segN:segments.length,desig,floors}};
+}
+
+// ---------- ui ----------
+const $=id=>document.getElementById(id);
+const sel=$("preset");
+function fillPresets(keep){sel.innerHTML="";for(const k in PRESETS){const o=document.createElement("option");o.value=k;o.textContent=k;sel.appendChild(o);}if(keep)sel.value=keep;}
+fillPresets();
+// mock burrows: what the in-game picker lists (name, shape, size)
+const BURROWS=[{name:"Housing burrow (80x100)",shape:"rect",W:80,H:100},{name:"Cavern burrow (blob)",shape:"blob",W:80,H:100},{name:"Long gallery (strip)",shape:"strip",W:120,H:40},{name:"L-shaped burrow",shape:"L",W:80,H:80},{name:"Ring burrow",shape:"ring",W:80,H:80}];
+const bsel=$("burrow");BURROWS.forEach((b,i)=>{const o=document.createElement("option");o.value=i;o.textContent=b.name;bsel.appendChild(o);});
+bsel.addEventListener("change",()=>{const b=BURROWS[+bsel.value];$("shape").value=b.shape;$("W").value=b.W;$("H").value=b.H;run();});
+function expand(p){const ex=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{});return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:b.margin,maxLen:b.maxLen,depth:b.depth,set:b.set||undefined,shared:b.shared||undefined,stamps:b.stamps,optional:b.optional,road:b.road};};
+  return{...p,districts:p.districts.map(ex),second:(p.second||p.districts).map(ex)};}
+function loadPreset(){const p=PRESETS[sel.value];$("main").value=p.main;$("side").value=p.side;$("json").value=JSON.stringify(expand(p),null,1);}
+function currentPreset(){try{const p=JSON.parse($("json").value);$("err").textContent="";p.main=+$("main").value;p.side=+$("side").value;return p;}catch(e){$("err").textContent="JSON: "+e.message;return null;}}
+function run(){const p=currentPreset();if(!p)return;
+  const W=+$("W").value,H=+$("H").value,seed=+$("seed").value;const rng=RNG(seed*31+7);
+  const burrow=makeBurrow($("shape").value,W,H,rng);
+  // existing geometry: a smaller preset generated first on a central patch, then the main preset around it
+  let prior=null;const ex=$("existing").value;
+  if(ex!=="none"){const pe={...PRESETS[ex]};const rect={x0:Math.floor(W*0.3),y0:Math.floor(H*0.35),x1:Math.floor(W*0.72),y1:Math.floor(H*0.65)};
+    const sub=makeBurrow(null,W,H,rng,rect);for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!burrow[y][x])sub[y][x]=0;
+    prior=pack({W,H,burrow:sub,preset:pe,seed:seed+101});}
+  const res=pack({W,H,burrow,preset:p,seed,prior});
+  if(res&&prior)res.priorRooms=prior.rooms.length;
+  draw(W,H,burrow,res);
+  if(!res){$("stats").innerHTML="";return;}
+  const s=res.stats;const used=((s.roomTiles+s.roadTiles)/s.burrow*100).toFixed(0);
+  const per=Object.entries(s.per).map(([k,v])=>`${v} ${k}`).join(", ")||"none";
+  $("stats").innerHTML=`<div><span>rooms</span><b>${res.rooms.length}</b>${s.filled} from the fill pass${s.floors?", +"+s.floors+" upper floors":""}</div>
+    <div><span>districts</span><b>${res.districts.length}</b>${per}</div>
+    <div><span>roads</span><b>${s.segN}</b>segments, ${s.joins} loops closed (${s.diagonals} angled), ${s.stampsN} road stamps, ${s.undone} roomless roads refused</div>
+    <div><span>burrow used</span><b>${used}%</b>${s.roomTiles} room + ${s.roadTiles} road of ${s.burrow}</div>
+    <div><span>road share</span><b>${(s.roadTiles/Math.max(1,s.roomTiles+s.roadTiles)*100).toFixed(0)}%</b>of dug tiles</div>
+    <div><span>designations</span><b>${s.desig.smoothFloor}</b>smooth floor, ${s.desig.engrave} engrave, ${s.desig.smoothWall} smooth wall</div>`;}
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function draw(W,H,burrow,res){const c=$("c");const T=Math.max(4,Math.floor(Math.min(1100/W,1000/H)));c.width=W*T;c.height=H*T;const g=c.getContext("2d");
+  g.fillStyle=css("--void");g.fillRect(0,0,c.width,c.height);g.fillStyle=css("--rock");
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(burrow[y][x])g.fillRect(x*T,y*T,T,T);
+  if(!res)return;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const k=res.claim[y][x];const wk=res.wallKind[y][x];
+    if(wk===1){g.fillStyle=css("--wallE");g.fillRect(x*T,y*T,T,T);}else if(wk===2){g.fillStyle=css("--wallS");g.fillRect(x*T,y*T,T,T);}
+    if(k===1||k===6){g.fillStyle=css("--road");g.fillRect(x*T,y*T,T,T);}}
+  const cols=["--r0","--r1","--r2","--r3","--r4","--r5","--r6"].map(css);
+  const colourOf=name=>cols[Math.max(0,res.dtypes.findIndex(d=>d.name===name))%cols.length];
+  const glyph=(cell)=>{if(cell.ch==="b"){g.fillStyle="rgba(0,0,0,.45)";g.fillRect(cell.x*T+T*0.2,cell.y*T+T*0.35,T*0.6,T*0.3);}
+      if("tcxsfhraABiF".includes(cell.ch)){g.fillStyle=cell.ch==="F"?"rgba(60,90,20,.45)":"rgba(0,0,0,.35)";g.fillRect(cell.x*T+T*0.25,cell.y*T+T*0.25,T*0.5,T*0.5);
+        if(T>=10&&cell.ch!=="F"){g.fillStyle="rgba(255,255,255,.85)";g.font=`${Math.floor(T*0.6)}px "IBM Plex Mono",monospace`;g.textAlign="center";g.textBaseline="middle";g.fillText(cell.ch,cell.x*T+T/2,cell.y*T+T/2+1);}}
+      if(cell.ch==="d"){g.fillStyle="rgba(0,0,0,.6)";g.fillRect(cell.x*T+T*0.35,cell.y*T+T*0.1,T*0.3,T*0.8);}};
+  for(const st of res.stamps){for(const cell of st.cells){g.fillStyle=css("--plaza");g.fillRect(cell.x*T,cell.y*T,T,T);glyph(cell);}}
+  for(const r of res.rooms){const col=colourOf(res.districts[r.district].type.name);
+    for(const cell of r.cells){g.fillStyle=cell.ch==="#"?css("--wallE"):col;g.fillRect(cell.x*T,cell.y*T,T,T);if(cell.ch!=="#")glyph(cell);}
+    if(r.floors>1&&T>=8){const c0=r.cells.find(c=>c.ch===".")||r.cells[0];g.fillStyle="rgba(0,0,0,.7)";g.font=`bold ${Math.floor(T*0.8)}px "IBM Plex Mono",monospace`;g.textAlign="center";g.textBaseline="middle";g.fillText(String(r.floors),c0.x*T+T/2,c0.y*T+T/2+1);}}
+  if(!res.priorRooms){g.fillStyle=css("--entry");g.fillRect(res.entry[0]*T,res.entry[1]*T,T,T);}
+  if(T>=6){g.strokeStyle="rgba(0,0,0,.15)";g.lineWidth=1;g.beginPath();for(let x=0;x<=W;x++){g.moveTo(x*T+.5,0);g.lineTo(x*T+.5,H*T);}for(let y=0;y<=H;y++){g.moveTo(0,y*T+.5);g.lineTo(W*T,y*T+.5);}g.stroke();}}
+sel.addEventListener("change",()=>{loadPreset();run();});
+for(const id of["shape","main","side","W","H","seed","existing"])$(id).addEventListener("change",run);
+const exs=$("existing");for(const k in PRESETS){const o=document.createElement("option");o.value=k;o.textContent=k;exs.appendChild(o);}exs.value="noble quarters";
+$("reroll").addEventListener("click",()=>{$("seed").value=+$("seed").value+1;run();});
+$("run").addEventListener("click",run);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",run);
+loadPreset();run();
+
+// ---------- in-game picker ----------
+const GATES={now:"applied now",noble:"gated: a noble needs rooms",house:"gated: a house is needed",guild:"gated: a guildhall is needed",temple:"gated: a temple is needed",tomb:"gated: a tomb is needed"};
+$("apply").addEventListener("click",()=>{run();const g=$("gate").value;
+  $("status").textContent=`Plan stored for "${BURROWS[+bsel.value].name}" with preset "${sel.value}"; blueprints ${g==="now"?"applied now through fort/quickfort":"held, "+GATES[g]}.`;});
+$("copyjson").addEventListener("click",()=>{const t=JSON.stringify(expand(PRESETS[sel.value]),null,1);navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>{$("status").textContent="Preset JSON copied.";},()=>{$("status").textContent="Clipboard unavailable; JSON is in the sandbox textarea.";});$("json").value=t;});
+
+// ---------- preset editor ----------
+// library: every stamp the districts know, plus hallway pieces, deduplicated by name
+const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);LIB.push({name,grid,kind});};
+  for(const dn in DISTRICTS){const d=DISTRICTS[dn];for(const sl of(d.stamps||[]).concat(d.optional||[])){if(sl.alts)for(const a of sl.alts)add(a.name||sl.name,a.grid,"room");else add(sl.name,sl.grid,"room");}
+    for(const r of(d.road||[]))add(r.name,r.grid,"road");}
+  add("statue row 13x3",G.seg13,"road");add("statue garden 7x7",G.plaza7,"road");add("coffin row 13x3",G.coffinrow,"road");add("shrine 5x5",G.shrine5,"road");}
+let ED=null,EDSEL=null,LIBSEL=null;
+const clone=(o)=>JSON.parse(JSON.stringify(o));
+// editor state: districts always inline, every stamp a slot with alts
+function toEditable(p){const norm=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});const sl=(s)=>({name:s.name,weight:s.weight||1,max:s.max||(s.alts?1:undefined),alts:(s.alts||[{grid:s.grid,name:s.name,weight:s.weight,setback:s.setback,max:s.max}]).map(a=>({name:a.name||s.name,grid:a.grid,weight:a.weight||1,setback:a.setback||0}))});
+    return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(b.margin||0),set:!!b.set,shared:!!b.shared,maxLen:b.maxLen||14,depth:b.depth||12,stamps:(b.stamps||[]).map(sl),optional:(b.optional||[]).map(sl),road:(b.road||[]).map(r=>({name:r.name,grid:r.grid,weight:r.weight||1}))};};
+  return{name:p.name||"",main:p.main||3,side:p.side||1,surface:!!p.surface,angled:!!p.angled,districts:(p.districts||[]).map(norm),second:p.second?p.second.map(norm):null,road:p.road?p.road.map(r=>({name:r.name,grid:r.grid,weight:r.weight||1})):null};}
+// back to what pack() eats: inline districts (stamps as slots with alts), optional second list, preset road stamps
+function fromEditable(e){const out=(d)=>({name:d.name,weight:d.weight,margin:d.margin,set:d.set||undefined,shared:d.shared||undefined,maxLen:d.maxLen,depth:d.depth,
+    stamps:d.stamps.map(s=>({name:s.name,weight:s.weight,max:d.set?undefined:s.max,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback,max:d.set?undefined:s.max}))})),
+    optional:d.optional.map(s=>({name:s.name,max:s.max||1,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback}))})),road:d.road});
+  const p={main:e.main,side:e.side,surface:e.surface||undefined,angled:e.angled||undefined,districts:e.districts.map(out)};
+  if(e.second)p.second=e.second.map(out);if(e.road)p.road=e.road;return p;}
+function openEditor(base){ED=toEditable(base);if(!base.name)ED.name="my preset";EDSEL=null;LIBSEL=null;$("ed-name").value=ED.name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;
+  renderLib();renderPasses();renderSettings();$("modal").hidden=false;}
+function renderLib(){const box=$("ed-lib");box.innerHTML="";for(const it of LIB){const c=document.createElement("div");c.className="chip"+(LIBSEL===it?" sel":"");const g=it.grid.floors?it.grid.floors[0]:it.grid;
+    c.innerHTML=`<span>${it.name}</span><span class="small">${it.kind}${it.grid.floors?" ×"+it.grid.floors.length+"z":""} ${g[0].length}×${g.length}</span>`;c.addEventListener("click",()=>{LIBSEL=it;renderLib();renderSettings();});box.appendChild(c);}}
+function renderPasses(){const col=$("ed-passes");col.innerHTML="";
+  const section=(title,key)=>{const sec=document.createElement("div");sec.className="sect";sec.innerHTML=`<h4>${title}</h4>`;const body=document.createElement("div");body.className="body";sec.appendChild(body);
+    if(key==="road"){const chips=document.createElement("div");chips.className="chips";(ED.road||[]).forEach((r,i)=>{const c=document.createElement("span");c.className="chip"+(EDSEL&&EDSEL.kind==="road"&&EDSEL.i===i?" sel":"");c.textContent=`${r.name} ×${r.weight}`;c.addEventListener("click",()=>{EDSEL={kind:"road",i};renderPasses();renderSettings();});chips.appendChild(c);});body.appendChild(chips);if(!(ED.road||[]).length)body.innerHTML='<span class="small">No hallway blueprints yet: select one in the library and "Add blueprint".</span>';}
+    else{const list=ED[key];if(!list.length)body.innerHTML='<span class="small">No districts: "Create district", then add blueprints to it.</span>';
+      list.forEach((d,di)=>{const box=document.createElement("div");const dsel=EDSEL&&EDSEL.kind==="district"&&EDSEL.pass===key&&EDSEL.di===di;box.className="dbox"+(dsel?" sel":"");
+        box.innerHTML=`<div class="hd"><span>${d.name}${d.set?" (suite)":""}${d.shared?" · shared walls":""}</span><span class="small">weight ${d.weight} · margin ${d.margin}</span></div>`;
+        box.addEventListener("click",(ev)=>{if(ev.target.classList.contains("chip"))return;EDSEL={kind:"district",pass:key,di};renderPasses();renderSettings();});
+        const chips=document.createElement("div");chips.className="chips";
+        const chip=(s,si,optional,ai)=>{const c=document.createElement("span");const isSel=EDSEL&&EDSEL.kind==="slot"&&EDSEL.pass===key&&EDSEL.di===di&&EDSEL.si===si&&EDSEL.optional===optional&&(EDSEL.ai===ai);
+          c.className="chip"+(optional?" opt":"")+(isSel?" sel":"")+(ai>0?" alt":"");const a=s.alts[ai];c.textContent=(ai===0?"":"alt: ")+a.name+(ai===0&&optional?` (0–${s.max})`:"")+(ai===0&&!optional&&!d.set&&s.max?` (max ${s.max})`:"")+(a.setback?" ↓"+a.setback:"")+` ×${a.weight}`;
+          c.addEventListener("click",()=>{EDSEL={kind:"slot",pass:key,di,si,optional,ai};renderPasses();renderSettings();});chips.appendChild(c);};
+        d.stamps.forEach((s,si)=>s.alts.forEach((a,ai)=>chip(s,si,false,ai)));d.optional.forEach((s,si)=>s.alts.forEach((a,ai)=>chip(s,si,true,ai)));
+        box.appendChild(chips);body.appendChild(box);});}
+    col.appendChild(sec);};
+  section("First pass","districts");if(ED.second)section("Second pass (fill)","second");if(ED.road)section("Hallway blueprints (road stamps)","road");
+  $("ed-second").textContent=ED.second?"Same second pass":"Different second pass";$("ed-road").textContent=ED.road?"Remove hallway blueprints":"Add hallway blueprints";
+  $("ed-addbp").textContent=!EDSEL?"Add blueprint (select a district first)":EDSEL.kind==="slot"?"Add blueprint as alt of selected":EDSEL.kind==="road"?"Add hallway blueprint":"Add blueprint to district";}
+function renderSettings(){const box=$("ed-settings");box.innerHTML="";
+  const field=(label,val,onch,type="number")=>{const l=document.createElement("label");l.innerHTML=`<span class="k">${label}</span>`;const i=document.createElement("input");i.type=type;if(type==="checkbox")i.checked=!!val;else i.value=val;i.addEventListener("change",()=>{onch(type==="checkbox"?i.checked:+i.value);renderPasses();});l.appendChild(i);box.appendChild(l);};
+  if(!EDSEL){box.innerHTML='<span class="small">Select a district or blueprint to see its settings.</span>';return;}
+  if(EDSEL.kind==="road"){const r=ED.road[EDSEL.i];box.innerHTML=`<b>${r.name}</b>`;field("weight",r.weight,v=>r.weight=v);return;}
+  const d=ED[EDSEL.pass][EDSEL.di];
+  if(EDSEL.kind==="district"){box.innerHTML=`<b>${d.name}</b>`;
+    const n=document.createElement("input");n.type="text";n.value=d.name;n.addEventListener("change",()=>{d.name=n.value;renderPasses();});box.appendChild(n);
+    field("weight",d.weight,v=>d.weight=v);field("margin",d.margin,v=>d.margin=v);field("max length",d.maxLen,v=>d.maxLen=v);field("depth",d.depth,v=>d.depth=v);
+    field("suite (set)",d.set,v=>d.set=v,"checkbox");field("shared walls",d.shared,v=>d.shared=v,"checkbox");return;}
+  const s=(EDSEL.optional?d.optional:d.stamps)[EDSEL.si];const a=s.alts[EDSEL.ai];box.innerHTML=`<b>${a.name}</b><span class="small">${EDSEL.optional?"optional slot":(d.set?(EDSEL.si===0?"hub":"required"):"repeat")}</span>`;
+  field("weight",a.weight,v=>a.weight=v);field("setback",a.setback,v=>a.setback=v);
+  if(EDSEL.optional)field("optional max",s.max||1,v=>s.max=v);else if(!d.set)field("max per district",s.max||0,v=>s.max=v||undefined);
+  if(d.set)field("optional",EDSEL.optional,v=>{const from=EDSEL.optional?d.optional:d.stamps,to=EDSEL.optional?d.stamps:d.optional;const[sl]=from.splice(EDSEL.si,1);if(!sl.max)sl.max=1;to.push(sl);EDSEL={kind:"slot",pass:EDSEL.pass,di:EDSEL.di,si:to.length-1,optional:!EDSEL.optional,ai:0};renderSettings();},"checkbox");}
+$("ed-adddistrict").addEventListener("click",()=>{const pass=EDSEL&&EDSEL.pass==="second"?"second":"districts";ED[pass].push({name:"district "+(ED[pass].length+1),weight:1,margin:0,set:false,shared:false,maxLen:14,depth:12,stamps:[],optional:[],road:[]});EDSEL={kind:"district",pass,di:ED[pass].length-1};renderPasses();renderSettings();});
+$("ed-addbp").addEventListener("click",()=>{if(!LIBSEL){$("ed-settings").innerHTML='<span class="small">Pick a blueprint in the library first.</span>';return;}
+  const entry={name:LIBSEL.name,grid:LIBSEL.grid,weight:1,setback:0};
+  if(!EDSEL)return;
+  if(EDSEL.kind==="road"||(EDSEL.kind==="district"&&LIBSEL.kind==="road"&&ED.road)){ED.road=ED.road||[];ED.road.push({name:LIBSEL.name,grid:LIBSEL.grid,weight:1});EDSEL={kind:"road",i:ED.road.length-1};}
+  else if(EDSEL.kind==="district"){const d=ED[EDSEL.pass][EDSEL.di];d.stamps.push({name:LIBSEL.name,weight:1,max:undefined,alts:[entry]});EDSEL={kind:"slot",pass:EDSEL.pass,di:EDSEL.di,si:d.stamps.length-1,optional:false,ai:0};}
+  else if(EDSEL.kind==="slot"){const d=ED[EDSEL.pass][EDSEL.di];const s=(EDSEL.optional?d.optional:d.stamps)[EDSEL.si];s.alts.push(entry);EDSEL={...EDSEL,ai:s.alts.length-1};}
+  renderPasses();renderSettings();});
+$("ed-remove").addEventListener("click",()=>{if(!EDSEL)return;
+  if(EDSEL.kind==="road")ED.road.splice(EDSEL.i,1);
+  else if(EDSEL.kind==="district")ED[EDSEL.pass].splice(EDSEL.di,1);
+  else{const d=ED[EDSEL.pass][EDSEL.di];const list=EDSEL.optional?d.optional:d.stamps;const s=list[EDSEL.si];if(s.alts.length>1)s.alts.splice(EDSEL.ai,1);else list.splice(EDSEL.si,1);}
+  EDSEL=null;renderPasses();renderSettings();});
+$("ed-second").addEventListener("click",()=>{ED.second=ED.second?null:clone(ED.districts);EDSEL=null;renderPasses();renderSettings();});
+$("ed-road").addEventListener("click",()=>{ED.road=ED.road?null:[];EDSEL=null;renderPasses();renderSettings();});
+$("ed-paste").addEventListener("click",()=>{const apply=(t)=>{try{const p=JSON.parse(t);const name=ED.name;ED=toEditable(p);ED.name=p.name||name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;EDSEL=null;renderPasses();renderSettings();}catch(e){$("ed-settings").innerHTML='<span class="small">Clipboard did not hold preset JSON: '+e.message+'</span>';}};
+  if(navigator.clipboard&&navigator.clipboard.readText)navigator.clipboard.readText().then(apply,()=>apply($("json").value));else apply($("json").value);});
+$("ed-save").addEventListener("click",()=>{ED.name=$("ed-name").value.trim()||"my preset";ED.main=+$("ed-main").value;ED.side=+$("ed-side").value;ED.surface=$("ed-surface").checked;
+  PRESETS[ED.name]=fromEditable(ED);fillPresets(ED.name);$("modal").hidden=true;loadPreset();run();$("status").textContent=`Preset "${ED.name}" saved.`;});
+$("ed-cancel").addEventListener("click",()=>{$("modal").hidden=true;});
+$("newpreset").addEventListener("click",()=>openEditor({name:"",main:3,side:1,districts:[]}));
+$("editpreset").addEventListener("click",()=>openEditor({...PRESETS[sel.value],name:sel.value}));
+</script>
