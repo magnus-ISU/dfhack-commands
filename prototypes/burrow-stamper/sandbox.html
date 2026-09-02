@@ -688,11 +688,15 @@ function typeOf(grid){const floors=grid.floors||[grid];const g=floors[0];const t
   if(n("A"))types.push("temple");                       // an altar makes a temple whatever else is there
   else if(n("P")||(types.length===0&&n("s")))types.push("meeting area"); // pedestals mark a meeting area; statues only when nothing else defines the room
   const corners=[g[0][0],g[0][g[0].length-1],g[g.length-1][0],g[g.length-1][g[g.length-1].length-1]];
-  const constructed=corners.some(c=>c==="#");
-  const surface=constructed||n("F")>0; // built walls or a farm plot: only valid on the surface
-  return{type:types.length===0?"other":types.length===1?types[0]:"multi",constructed,surface};}
+  const constructed=n("#")>0;
+  // where it works: a stamp that brings built walls is a surface building (underground its walls collide
+  // with the rock a suite parent owns); a walled-by-rock stamp with a door is underground (on the surface
+  // a suite cannot attach it, there is no built wall to put its door in, and a repeat district leaves it
+  // without walls); an open stamp with neither (farm plot, garden) works either way
+  const where=constructed?"surface":(n("d")>0?"underground":"either");
+  return{type:types.length===0?"other":types.length===1?types[0]:"multi",constructed,where};}
 const TYPE_ORDER={"bedroom":0,"office":1,"dining room":2,"tomb":3,"temple":4,"meeting area":5,"multi":6,"other":7};
-const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);const t=kind==="road"?{type:"hallway",constructed:false,surface:null}:typeOf(grid);LIB.push({name,grid,kind,type:t.type,constructed:t.constructed,surface:t.surface});};
+const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);const t=kind==="road"?{type:"hallway",constructed:false,where:"either"}:typeOf(grid);LIB.push({name,grid,kind,type:t.type,constructed:t.constructed,where:t.where});};
   for(const dn in DISTRICTS){const d=DISTRICTS[dn];for(const sl of(d.stamps||[]).concat(d.optional||[])){if(sl.alts)for(const a of sl.alts)add(a.name||sl.name,a.grid,"room");else add(sl.name,sl.grid,"room");}}
   for(const pn in PRESETS)for(const r of(PRESETS[pn].road||[]))add(r.name,r.grid,"road");
   LIB.sort((p,q)=>(p.constructed-q.constructed)||((TYPE_ORDER[p.type]??9)-(TYPE_ORDER[q.type]??9))||p.name.localeCompare(q.name));}
@@ -717,9 +721,13 @@ function renderAll(){renderLib();renderPasses();renderSettings();}
 const inRoadContext=()=>EDSEL&&(EDSEL.kind==="road"||(EDSEL.kind==="pass"&&EDSEL.pass==="road"));
 function renderLib(){const box=$("ed-lib");box.innerHTML="";const road=inRoadContext();
   const hint=document.createElement("div");hint.className="small";hint.textContent=road?"Hallway pieces (no door): rows as wide as the road dress straight stretches, squares are plazas at junctions. Click a selected one to add it.":"Rooms by type, then surface (built-wall) rooms by type. Click a selected one to add it.";box.appendChild(hint);
-  let lastGroup=null;
-  for(const it of LIB){if((it.kind==="road")!==road)continue;
-    if(!road&&it.surface!==ED.surface)continue; // surface presets get built-wall and farm blueprints, underground presets the rock-cut ones
+  let lastGroup=null;const here=ED.surface?"surface":"underground";
+  const items=LIB.filter(it=>(it.kind==="road")===road);
+  const fitsHere=(it)=>road||it.where==="either"||it.where===here;
+  const ordered=items.filter(fitsHere).concat(items.filter(it=>!fitsHere(it)));let dividerDone=false;
+  for(const it of ordered){
+    if(!road&&!fitsHere(it)&&!dividerDone){dividerDone=true;const d=document.createElement("div");d.className="small";d.style.cssText="margin-top:10px;border-top:1px solid var(--line);padding-top:6px";
+      d.textContent=ED.surface?"Built for underground: no built walls, so a surface suite cannot attach them and a repeat district leaves them without walls.":"Built for the surface: their built walls collide with the rock an underground suite parent owns; a repeat district would dig a room and build walls inside it.";box.appendChild(d);}
     const group=(it.constructed?"surface ":"")+it.type;if(group!==lastGroup){const h=document.createElement("div");h.className="small";h.style.marginTop="6px";h.textContent=group;box.appendChild(h);lastGroup=group;}
     const c=document.createElement("div");c.className="chip"+(LIBSEL===it?" sel":"");const g=it.grid.floors?it.grid.floors[0]:it.grid;
     c.innerHTML=`<span>${it.name}</span><span class="small">${it.grid.floors?"×"+it.grid.floors.length+"z ":""}${g[0].length}×${g.length}</span>`;
