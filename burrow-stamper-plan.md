@@ -124,10 +124,11 @@ trade's furniture, plus merchants' guild (hall, counting room, vault) and warrio
 (hall, armory, barracks) as sets. Every temple and guildhall hall carries at least one
 pedestal.
 
-Every district also lists **road stamps**: blueprints the road generator may use on the
-roads it lays while serving that district. A road stamp as wide as the road (13x3 statue
-row, 13x3 coffin row) dresses the middle of a straight segment; a square one (7x7 statue
-garden, 5x5 shrine) is a plaza on a junction square. Presets may carry road stamps too.
+A **preset** also lists its **hallway blueprints** (road stamps): pieces the road
+generator may use on the roads it lays. They belong to the preset, not to a district,
+because they dress the roads every district shares. A piece as wide as the road (13x3
+statue row, 13x3 coffin row) dresses the middle of a straight segment; a square one (7x7
+statue garden, 5x5 shrine) is a plaza on a junction square.
 
 Stamp names give the **interior** size. Every bedroom stamp includes a cabinet and a
 chest. Hovels are a 4x1 strip: door, bed, cabinet, chest. The luxury house is 3x3 with bed,
@@ -147,19 +148,16 @@ in the footprint; underground stamps leave walls blank and the packer owns the r
 ```
 districts.json (excerpt)
   "hovels":       {"kind": "repeat", "margin": 0, "max_len": 16, "stamps": ["hovel-1x4"]}
-  "luxury 3x3":   {"kind": "repeat", "margin": 1, "max_len": 16, "stamps": ["luxury-3x3"],
-                   "road": ["statue-row-13x3"]}
+  "luxury 3x3":   {"kind": "repeat", "margin": 1, "max_len": 16, "stamps": ["luxury-3x3"]}
   "catacombs":    {"kind": "repeat", "margin": 0, "max_len": 12,
-                   "stamps": [{"name": "catacomb-7x9", "max": 1}],
-                   "road": ["coffin-row-13x3", "shrine-5x5"]}
+                   "stamps": [{"name": "catacomb-7x9", "max": 1}]}
   "noble":        {"kind": "set", "margin": 1, "depth": 16,
                    "stamps":   [{"name": "dining", "alts": ["noble-dining-5x4", "noble-dining-7x5"]},
                                 {"name": "bedroom", "alts": ["noble-bedroom-3x3", "noble-bedroom-4x4", "noble-bedroom-3x5"]},
                                 {"name": "office", "alts": ["noble-office-3x3", "noble-office-4x4"]},
                                 {"name": "tomb", "alts": ["noble-tomb-3x3", "noble-tomb-5x3"]}],
                    "optional": [{"name": "sculpture garden", "max": 2, "alts": ["garden-3x3", "garden-5x5"]},
-                                {"name": "hall", "max": 1, "alts": ["throne-room-5x5", "library-5x5"]}],
-                   "road": ["statue-row-13x3", "statue-garden-7x7"]}
+                                {"name": "hall", "max": 1, "alts": ["throne-room-5x5", "library-5x5"]}]}
   "manor":        {"kind": "set", "margin": 2, "depth": 18,
                    "stamps": ["manor-house-9x6-2f", "stable-7x4", "garden-7x5"], "optional": [{"name": "well", "max": 1, "alts": ["well-3x3"]}]}
 presets.json
@@ -169,8 +167,8 @@ presets.json
   "varied housing": {"main": 3, "side": 1, "road": ["statue-row-13x3"], "districts": [
                        {"name": "hovels", "weight": 1}, {"name": "houses 2x2", "weight": 2},
                        {"name": "houses 3x3", "weight": 2}, {"name": "luxury 3x3", "weight": 1}]}
-  "noble quarters": {"main": 3, "side": 3, "districts": [{"name": "noble"}]}
-  "tombs":          {"main": 3, "side": 3, "districts": [
+  "noble quarters": {"main": 3, "side": 3, "road": ["statue-row-13x3", "statue-garden-7x7"], "districts": [{"name": "noble"}]}
+  "tombs":          {"main": 3, "side": 3, "road": ["coffin-row-13x3", "shrine-5x5", "statue-row-13x3"], "districts": [
                        {"name": "catacombs", "weight": 2}, {"name": "memorials", "weight": 1}, {"name": "family tombs", "weight": 2}]}
   "town":           {"main": 3, "side": 1, "surface": true, "districts": [
                        {"name": "bungalows", "weight": 2}, {"name": "thin townhouses", "weight": 2},
@@ -285,8 +283,15 @@ room never moves once the fort has started on it.
   2. the passes: first pass districts with their blueprints as chips (dashed = optional,
      indented = alternative), then the second pass and the hallway blueprints when
      enabled, each section scrollable and of equal height.
-  3. the blueprint library: every blueprint shipped or found in the blueprints folder,
-     marked room (has a door) or hallway (no door), with its size and floors.
+  3. the blueprint library, filtered by what is being edited: rooms when a pass, district
+     or room is selected, hallway pieces when the hallway section is. Rooms are typed from
+     the furniture they place (bedroom, office, dining room, tomb, temple, meeting area,
+     multi, other; an altar makes a temple, pedestals mark a meeting area, statues count
+     only when nothing else defines the room, all floors count) and listed in that order,
+     then surface blueprints (a built wall in a corner) in the same order as "surface
+     bedroom", "surface office" and so on; by name within a type. Clicking a selected
+     entry adds it: to the selected district, as an alternative of the selected blueprint,
+     or, with only a pass selected, in a new district named after it.
 - **Copy preset JSON** puts the current preset on the clipboard, so presets travel as text.
 
 Roads of any width from 1 to 5 are valid, even widths included.

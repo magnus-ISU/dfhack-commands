@@ -218,23 +218,22 @@ const DISTRICTS = {
   "hovels":       {margin:0, maxLen:16, stamps:[{name:"hovel 1x4", grid:G.hovel}]},
   "houses 2x2":   {margin:0, maxLen:16, stamps:[{name:"house 2x2", grid:G.house2}]},
   "houses 3x3":   {margin:0, maxLen:16, stamps:[{name:"house 3x3", grid:G.house3}]},
-  "luxury 3x3":   {margin:1, maxLen:16, stamps:[{name:"luxury house 3x3", grid:G.luxury3}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+  "luxury 3x3":   {margin:1, maxLen:16, stamps:[{name:"luxury house 3x3", grid:G.luxury3}]},
   "noble":        {margin:1, set:true, depth:16,
                    stamps:[{name:"dining (hub)", alts:[{grid:G.ndining, weight:2, name:"dining 5x4"}, {grid:G.ndining7, name:"dining 7x5"}]},
                            {name:"bedroom", alts:[{grid:G.nbed, weight:2, name:"bedroom 3x3"}, {grid:G.nbed4, name:"bedroom 4x4"}, {grid:G.nbed35, name:"bedroom 3x5"}]},
                            {name:"office", alts:[{grid:G.noffice, weight:2, name:"office 3x3"}, {grid:G.noffice4, name:"office 4x4"}]},
                            {name:"tomb", alts:[{grid:G.ntomb, weight:2, name:"tomb 3x3"}, {grid:G.ntomb5, name:"tomb 5x3"}]}],
                    optional:[{name:"sculpture garden", max:2, alts:[{grid:G.ngarden3, name:"garden 3x3"}, {grid:G.ngarden5, name:"garden 5x5"}]},
-                             {name:"throne room / library", max:1, alts:[{grid:G.nthrone, name:"throne room 5x5"}, {grid:G.nlibrary, name:"library 5x5"}]}],
-                   road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
+                             {name:"throne room / library", max:1, alts:[{grid:G.nthrone, name:"throne room 5x5"}, {grid:G.nlibrary, name:"library 5x5"}]}]},
   "dining halls": {margin:1, maxLen:10, stamps:[{name:"dining hall 7x3", grid:G.dhall73, max:1}]},
   // a minor noble: 3x3 rooms only, bedroom guaranteed, the other core rooms if they fit
   "minor noble":  {margin:1, set:true, depth:12,
                    stamps:[{name:"bedroom 3x3 (hub)", alts:[{grid:G.nbed}]}],
                    optional:[{name:"dining 3x3", max:1, alts:[{grid:G.ndining3}]}, {name:"office 3x3", max:1, alts:[{grid:G.noffice}]}, {name:"tomb 3x3", max:1, alts:[{grid:G.ntomb}]}]},
-  "catacombs":    {margin:0, maxLen:12, stamps:[{name:"catacomb 7x9", grid:G.catacomb, max:1}], road:[{name:"coffin row 13x3", grid:G.coffinrow}, {name:"shrine 5x5", grid:G.shrine5}]},
-  "memorials":    {margin:1, maxLen:8,  stamps:[{name:"memorial 5x5", grid:G.memorial, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
-  "family tombs": {margin:0, maxLen:12, stamps:[{name:"family tomb 3x5", grid:G.family}], road:[{name:"coffin row 13x3", grid:G.coffinrow}]},
+  "catacombs":    {margin:0, maxLen:12, stamps:[{name:"catacomb 7x9", grid:G.catacomb, max:1}]},
+  "memorials":    {margin:1, maxLen:8,  stamps:[{name:"memorial 5x5", grid:G.memorial, max:1}]},
+  "family tombs": {margin:0, maxLen:12, stamps:[{name:"family tomb 3x5", grid:G.family}]},
   "bungalows":    {margin:1, maxLen:20, stamps:[{name:"bungalow 3x3", grid:G.bungalow}]},
   "thin townhouses": {margin:0, maxLen:24, shared:true, stamps:[{name:"thin townhouse 2x5, 4 floors", grid:G.thin, weight:2}, {name:"thin townhouse 2x5, 4 floors, set back", grid:G.thin, setback:1}]},
   "big townhouses":  {margin:0, maxLen:24, shared:true, stamps:[{name:"big townhouse 4x3, 2 floors", grid:G.big}]},
@@ -246,19 +245,17 @@ const DISTRICTS = {
                    optional:[{name:"second tower 3x3, 5 floors", max:1, alts:[{grid:G.tower}]}, {name:"kitchen 4x2", max:1, alts:[{grid:G.kitchen}]}]},
 };
 Object.assign(DISTRICTS,{
-  "forge shrines":  {margin:1, maxLen:10, stamps:[{name:"shrine of the forge 5x5", grid:G.forge, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
-  "sea shrines":    {margin:1, maxLen:10, stamps:[{name:"shrine of the sea 5x7", grid:G.sea, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
-  "chapels of the dead": {margin:1, maxLen:10, stamps:[{name:"chapel of the dead 5x5", grid:G.dead, max:1}], road:[{name:"coffin row 13x3", grid:G.coffinrow}]},
-  "groves":         {margin:1, maxLen:12, stamps:[{name:"grove of nature 7x8", grid:G.grove, max:1}], road:[{name:"statue garden 7x7", grid:G.plaza7}]},
+  "forge shrines":  {margin:1, maxLen:10, stamps:[{name:"shrine of the forge 5x5", grid:G.forge, max:1}]},
+  "sea shrines":    {margin:1, maxLen:10, stamps:[{name:"shrine of the sea 5x7", grid:G.sea, max:1}]},
+  "chapels of the dead": {margin:1, maxLen:10, stamps:[{name:"chapel of the dead 5x5", grid:G.dead, max:1}]},
+  "groves":         {margin:1, maxLen:12, stamps:[{name:"grove of nature 7x8", grid:G.grove, max:1}]},
   "temple complex": {margin:1, set:true, depth:20,
                      stamps:[{name:"sanctum 7x7 (hub)", alts:[{grid:G.sanctum}]}, {name:"vestry 3x4", alts:[{grid:G.vestry}]}, {name:"cloister 5x5", alts:[{grid:G.cloister}]}],
-                     optional:[{name:"crypt 3x5", max:1, alts:[{grid:G.crypt}]}, {name:"library 5x5", max:1, alts:[{grid:G.nlibrary}]}],
-                     road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
+                     optional:[{name:"crypt 3x5", max:1, alts:[{grid:G.crypt}]}, {name:"library 5x5", max:1, alts:[{grid:G.nlibrary}]}]},
   "great temple":   {margin:1, set:true, depth:20,
                      stamps:[{name:"nave 9x8 (hub)", alts:[{grid:G.nave}]}, {name:"side chapel 3x4", alts:[{grid:G.chapel}]}, {name:"second chapel 3x4", alts:[{grid:G.chapel}]}, {name:"vestry 3x4", alts:[{grid:G.vestry}]}],
-                     optional:[{name:"crypt 3x5", max:2, alts:[{grid:G.crypt}]}],
-                     road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}]},
-  "masons' guild":  {margin:1, maxLen:10, stamps:[{name:"masons' hall 7x6", grid:G.masons, max:1}], road:[{name:"statue row 13x3", grid:G.seg13}]},
+                     optional:[{name:"crypt 3x5", max:2, alts:[{grid:G.crypt}]}]},
+  "masons' guild":  {margin:1, maxLen:10, stamps:[{name:"masons' hall 7x6", grid:G.masons, max:1}]},
   "smiths' guild":  {margin:1, maxLen:10, stamps:[{name:"smiths' hall 7x6", grid:G.smiths, max:1}]},
   "scholars' guild":{margin:1, maxLen:10, stamps:[{name:"scholars' hall 7x6", grid:G.scholars, max:1}]},
   "brewers' guild": {margin:1, maxLen:8,  stamps:[{name:"brewers' hall 5x6", grid:G.brewers, max:1}]},
@@ -267,20 +264,19 @@ Object.assign(DISTRICTS,{
                      optional:[{name:"second vault 3x3", max:1, alts:[{grid:G.vault}]}]},
   "warriors' guild": {margin:1, set:true, depth:18,
                      stamps:[{name:"warriors' hall 7x6 (hub)", alts:[{grid:G.warriors}]}, {name:"armory 5x3", alts:[{grid:G.armory}]}, {name:"barracks 5x3", alts:[{grid:G.barracks}]}],
-                     optional:[{name:"second barracks 5x3", max:1, alts:[{grid:G.barracks}]}],
-                     road:[{name:"statue row 13x3", grid:G.seg13}]},
+                     optional:[{name:"second barracks 5x3", max:1, alts:[{grid:G.barracks}]}]},
 });
 const PRESETS = {
   "hovels":         {main:1, side:1, districts:[{name:"hovels"}]},
   "housing 2x2":    {main:2, side:2, districts:[{name:"houses 2x2"}]},
   "housing 3x3":    {main:1, side:1, districts:[{name:"houses 3x3"}]},
-  "luxury housing": {main:3, side:3, districts:[{name:"luxury 3x3"}], second:[{name:"luxury 3x3", weight:3}, {name:"dining halls", weight:1}]},
+  "luxury housing": {main:3, side:3, road:[{name:"statue row 13x3", grid:G.seg13}], districts:[{name:"luxury 3x3"}], second:[{name:"luxury 3x3", weight:3}, {name:"dining halls", weight:1}]},
   "varied housing": {main:3, side:1, road:[{name:"statue row 13x3", grid:G.seg13}],
                      districts:[{name:"hovels", weight:1}, {name:"houses 2x2", weight:2}, {name:"houses 3x3", weight:2}, {name:"luxury 3x3", weight:1}]},
-  "noble quarters": {main:3, side:3, districts:[{name:"noble"}], second:[{name:"noble", weight:1}, {name:"minor noble", weight:2}]},
-  "tombs":          {main:3, side:3, districts:[{name:"catacombs", weight:2}, {name:"memorials", weight:1}, {name:"family tombs", weight:2}]},
-  "temples":        {main:3, side:3, districts:[{name:"forge shrines", weight:2}, {name:"sea shrines", weight:2}, {name:"chapels of the dead", weight:2}, {name:"groves", weight:1}, {name:"temple complex", weight:2}, {name:"great temple", weight:1}]},
-  "guildhalls":     {main:3, side:3, districts:[{name:"masons' guild", weight:2}, {name:"smiths' guild", weight:2}, {name:"scholars' guild", weight:1}, {name:"brewers' guild", weight:2}, {name:"merchants' guild", weight:1}, {name:"warriors' guild", weight:1}]},
+  "noble quarters": {main:3, side:3, road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}], districts:[{name:"noble"}], second:[{name:"noble", weight:1}, {name:"minor noble", weight:2}]},
+  "tombs":          {main:3, side:3, road:[{name:"coffin row 13x3", grid:G.coffinrow}, {name:"shrine 5x5", grid:G.shrine5}, {name:"statue row 13x3", grid:G.seg13}], districts:[{name:"catacombs", weight:2}, {name:"memorials", weight:1}, {name:"family tombs", weight:2}]},
+  "temples":        {main:3, side:3, road:[{name:"statue row 13x3", grid:G.seg13}, {name:"statue garden 7x7", grid:G.plaza7}, {name:"coffin row 13x3", grid:G.coffinrow}], districts:[{name:"forge shrines", weight:2}, {name:"sea shrines", weight:2}, {name:"chapels of the dead", weight:2}, {name:"groves", weight:1}, {name:"temple complex", weight:2}, {name:"great temple", weight:1}]},
+  "guildhalls":     {main:3, side:3, road:[{name:"statue row 13x3", grid:G.seg13}], districts:[{name:"masons' guild", weight:2}, {name:"smiths' guild", weight:2}, {name:"scholars' guild", weight:1}, {name:"brewers' guild", weight:2}, {name:"merchants' guild", weight:1}, {name:"warriors' guild", weight:1}]},
   "town":           {main:3, side:1, surface:true, angled:true, districts:[{name:"bungalows", weight:2}, {name:"thin townhouses", weight:2}, {name:"big townhouses", weight:1}, {name:"farms", weight:1}, {name:"manor", weight:1}]},
 };
 
@@ -372,12 +368,10 @@ function pack(o){
   const slotSb=(s)=>{const sl=slot(s);sl.alts.forEach((a,i)=>{a.setback=(s.alts?s.alts[i].setback:s.setback)||0;});return sl;};
   const buildTypes=(list)=>list.map(d=>{const base=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});
     return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(base.margin||0),maxLen:base.maxLen||14,depth:base.depth||12,set:!!base.set,shared:!!base.shared,
-      stamps:(base.stamps||[]).map(slotSb),optional:(base.optional||[]).map(slot),
-      road:(base.road||[]).map(s=>({name:s.name,weight:s.weight||1,p:prepStamp(s)}))};});
+      stamps:(base.stamps||[]).map(slotSb),optional:(base.optional||[]).map(slot)};});
   const dtypes=buildTypes(preset.districts);
   const dtypes2=buildTypes(preset.second||preset.districts); // the fill pass may use a different list
   const roadPool=(preset.road||[]).map(s=>({name:s.name,weight:s.weight||1,p:prepStamp(s)}));
-  for(const D of dtypes)for(const r of D.road)if(!roadPool.some(q=>q.name===r.name))roadPool.push(r);
   // segments must be long enough for the widest hub to find clear frontage between the end-square turns
   let frontNeed=0;for(const D of dtypes)for(const sl of D.stamps.slice(0,1))for(const a of sl.alts)frontNeed=Math.max(frontNeed,Math.max(a.p.plain.w,a.p.plain.h)+2+D.margin+2*(mainW>>1)+1);
   const minMain=Math.max(6,frontNeed),maxMain=Math.max(22,2*frontNeed);
@@ -627,7 +621,7 @@ fillPresets();
 const BURROWS=[{name:"Housing burrow (80x100)",shape:"rect",W:80,H:100},{name:"Cavern burrow (blob)",shape:"blob",W:80,H:100},{name:"Long gallery (strip)",shape:"strip",W:120,H:40},{name:"L-shaped burrow",shape:"L",W:80,H:80},{name:"Ring burrow",shape:"ring",W:80,H:80}];
 const bsel=$("burrow");BURROWS.forEach((b,i)=>{const o=document.createElement("option");o.value=i;o.textContent=b.name;bsel.appendChild(o);});
 bsel.addEventListener("change",()=>{const b=BURROWS[+bsel.value];$("shape").value=b.shape;$("W").value=b.W;$("H").value=b.H;run();});
-function expand(p){const ex=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{});return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:b.margin,maxLen:b.maxLen,depth:b.depth,set:b.set||undefined,shared:b.shared||undefined,stamps:b.stamps,optional:b.optional,road:b.road};};
+function expand(p){const ex=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{});return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:b.margin,maxLen:b.maxLen,depth:b.depth,set:b.set||undefined,shared:b.shared||undefined,stamps:b.stamps,optional:b.optional};};
   return{...p,districts:p.districts.map(ex),second:(p.second||p.districts).map(ex)};}
 function loadPreset(){const p=PRESETS[sel.value];$("main").value=p.main;$("side").value=p.side;$("json").value=JSON.stringify(expand(p),null,1);}
 function currentPreset(){try{const p=JSON.parse($("json").value);$("err").textContent="";p.main=+$("main").value;p.side=+$("side").value;return p;}catch(e){$("err").textContent="JSON: "+e.message;return null;}}
@@ -697,19 +691,19 @@ function typeOf(grid){const floors=grid.floors||[grid];const g=floors[0];const t
   return{type:types.length===0?"other":types.length===1?types[0]:"multi",constructed};}
 const TYPE_ORDER={"bedroom":0,"office":1,"dining room":2,"tomb":3,"temple":4,"meeting area":5,"multi":6,"other":7};
 const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);const t=kind==="road"?{type:"hallway",constructed:false}:typeOf(grid);LIB.push({name,grid,kind,type:t.type,constructed:t.constructed});};
-  for(const dn in DISTRICTS){const d=DISTRICTS[dn];for(const sl of(d.stamps||[]).concat(d.optional||[])){if(sl.alts)for(const a of sl.alts)add(a.name||sl.name,a.grid,"room");else add(sl.name,sl.grid,"room");}
-    for(const r of(d.road||[]))add(r.name,r.grid,"road");}
-  add("statue row 13x3",G.seg13,"road");add("statue garden 7x7",G.plaza7,"road");add("coffin row 13x3",G.coffinrow,"road");add("shrine 5x5",G.shrine5,"road");
+  for(const dn in DISTRICTS){const d=DISTRICTS[dn];for(const sl of(d.stamps||[]).concat(d.optional||[])){if(sl.alts)for(const a of sl.alts)add(a.name||sl.name,a.grid,"room");else add(sl.name,sl.grid,"room");}}
+  for(const pn in PRESETS)for(const r of(PRESETS[pn].road||[]))add(r.name,r.grid,"road");
   LIB.sort((p,q)=>(p.constructed-q.constructed)||((TYPE_ORDER[p.type]??9)-(TYPE_ORDER[q.type]??9))||p.name.localeCompare(q.name));}
 let ED=null,EDSEL=null,LIBSEL=null;
 const clone=(o)=>JSON.parse(JSON.stringify(o));
 // editor state: districts inline, every stamp a slot with alts; hallway pieces live on the preset only
-function toEditable(p){const roads=[];const addRoad=(r)=>{if(!roads.some(q=>q.name===r.name))roads.push({name:r.name,grid:r.grid,weight:r.weight||1});};
-  const norm=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});for(const r of(b.road||[]))addRoad(r);
+function toEditable(p){
+  const norm=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});
     const sl=(s)=>({name:s.name,weight:s.weight||1,max:s.max||(s.alts?1:undefined),alts:(s.alts||[{grid:s.grid,name:s.name,weight:s.weight,setback:s.setback,max:s.max}]).map(a=>({name:a.name||s.name,grid:a.grid,weight:a.weight||1,setback:a.setback||0}))});
     return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(b.margin||0),set:!!b.set,shared:!!b.shared,maxLen:b.maxLen||14,depth:b.depth||12,stamps:(b.stamps||[]).map(sl),optional:(b.optional||[]).map(sl)};};
-  const districts=(p.districts||[]).map(norm);const second=p.second?p.second.map(norm):null;for(const r of(p.road||[]))addRoad(r);
-  return{name:p.name||"",main:p.main||3,side:p.side||1,surface:!!p.surface,angled:!!p.angled,districts,second,road:roads.length?roads:null};}
+  const districts=(p.districts||[]).map(norm);const second=p.second?p.second.map(norm):null;
+  const road=p.road?p.road.map(r=>({name:r.name,grid:r.grid,weight:r.weight||1})):null;
+  return{name:p.name||"",main:p.main||3,side:p.side||1,surface:!!p.surface,angled:!!p.angled,districts,second,road};}
 function fromEditable(e){const out=(d)=>({name:d.name,weight:d.weight,margin:d.margin,set:d.set||undefined,shared:d.shared||undefined,maxLen:d.maxLen,depth:d.depth,
     stamps:d.stamps.map(s=>({name:s.name,weight:s.weight,max:d.set?undefined:s.max,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback,max:d.set?undefined:s.max}))})),
     optional:d.optional.map(s=>({name:s.name,max:s.max||1,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback}))}))});
@@ -720,10 +714,10 @@ function openEditor(base){ED=toEditable(base);if(!base.name)ED.name="my preset";
 function renderAll(){renderLib();renderPasses();renderSettings();}
 const inRoadContext=()=>EDSEL&&(EDSEL.kind==="road"||(EDSEL.kind==="pass"&&EDSEL.pass==="road"));
 function renderLib(){const box=$("ed-lib");box.innerHTML="";const road=inRoadContext();
-  const hint=document.createElement("div");hint.className="small";hint.textContent=road?"Hallway pieces (no door): rows as wide as the road dress straight stretches, squares are plazas at junctions. Click a selected one to add it.":"Rooms, sorted by type; built-wall (surface) blueprints below. Click a selected one to add it.";box.appendChild(hint);
+  const hint=document.createElement("div");hint.className="small";hint.textContent=road?"Hallway pieces (no door): rows as wide as the road dress straight stretches, squares are plazas at junctions. Click a selected one to add it.":"Rooms by type, then surface (built-wall) rooms by type. Click a selected one to add it.";box.appendChild(hint);
   let lastGroup=null;
   for(const it of LIB){if((it.kind==="road")!==road)continue;
-    const group=it.constructed?"built walls (surface)":it.type;if(group!==lastGroup){const h=document.createElement("div");h.className="small";h.style.marginTop="6px";h.textContent=group;box.appendChild(h);lastGroup=group;}
+    const group=(it.constructed?"surface ":"")+it.type;if(group!==lastGroup){const h=document.createElement("div");h.className="small";h.style.marginTop="6px";h.textContent=group;box.appendChild(h);lastGroup=group;}
     const c=document.createElement("div");c.className="chip"+(LIBSEL===it?" sel":"");const g=it.grid.floors?it.grid.floors[0]:it.grid;
     c.innerHTML=`<span>${it.name}</span><span class="small">${it.grid.floors?"×"+it.grid.floors.length+"z ":""}${g[0].length}×${g.length}</span>`;
     c.addEventListener("click",()=>{if(LIBSEL===it){addBlueprint();}else{LIBSEL=it;renderLib();}});box.appendChild(c);}}
