@@ -244,7 +244,11 @@ and whose dining room, office and tomb are placed only if they fit.
 
 **4.6b Existing geometry.** The packer starts from whatever claims are already on the
 slab: existing rooms, walls and roads. New roads may join existing roads, and districts
-avoid existing rooms. The GUI demonstrates it by generating a smaller preset on a central
+avoid existing rooms. Two rules keep an existing road usable as a start: a seed head steps
+outward past any plaza on the old end square before reserving, and whenever a road's
+straight continuation could not be reserved (the burrow ended) the first three tiles of
+that lane are kept clear of room bodies and walls, so a later plan on a bigger burrow can
+grow through the old dead end instead of finding it fenced by engraved walls. The GUI demonstrates it by generating a smaller preset on a central
 patch first, then growing the main preset around it (a noble district around a tomb).
 
 **4.7 Designations.** Room floors smoothed, room walls (the rock ring the packer owns)
