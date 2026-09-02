@@ -250,7 +250,11 @@ main-road-wide open run is longest, in any of the four directions.
 **4.6d Re-seeding.** When the network from the entry or from the existing geometry has
 exhausted, every segment of the network itself re-seeds heads from its end square and its
 gaps, with throat connectors allowed from any of them, and growth runs again (twice at
-most). Every road therefore starts on a road that is already connected; the packer never
+most). A root segment (one with nothing behind it, such as an existing road whose entry
+was the edge of an older, smaller burrow) also re-seeds from its start square, backward
+and to both sides; a root long enough to afford it keeps its start square clear of rooms
+for that purpose, the way every segment keeps its end square. Existing geometry that holds
+no road at all is treated as an empty slab and growth starts from the edge. Every road therefore starts on a road that is already connected; the packer never
 creates a second network and never needs a connectivity check. On a fresh slab the entry
 is the boundary tile with the best main-road-wide open run, scored by the free rock
 around it. A roomless road is refused unless its flanks are a cave passage (too shallow

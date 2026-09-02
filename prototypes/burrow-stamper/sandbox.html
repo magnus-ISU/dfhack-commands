@@ -392,7 +392,8 @@ function pack(o){
       let area=0;for(let i=0;i<run;i++)for(let t=-10;t<=10;t++){const a=x+dx*i+qx*t,b=y+dy*i+qy*t;if(free(a,b)&&claim[b][a]===0)area++;}
       out.push({x,y,dir:d,run,score:area-Math.abs(y-H/2)*0.05-x*0.02});}}
     out.sort((p,q)=>q.score-p.score);return out;};
-  if(!prior){const c=boundaryHeads()[0];if(!c)return null;entry=[c.x,c.y];entryDir=c.dir;}else entry=prior.entry;
+  const priorRoads=prior&&prior.segments.some(sg=>sg.dir>=0&&!sg.dead);
+  if(!priorRoads){const c=boundaryHeads()[0];if(!c)return null;entry=[c.x,c.y];entryDir=c.dir;}else entry=prior.entry;
   const rooms=prior?prior.rooms.slice():[],districts=prior?prior.districts.slice():[],segments=prior?prior.segments.slice():[],stamps=prior?prior.stamps.slice():[];
   let joins=0,undone=0,diagonals=0;
   const count={};for(const D of dtypes.concat(dtypes2))count[D.name]=0;let placedN=0;
@@ -423,7 +424,8 @@ function pack(o){
   const packSide=(seg,side,list,gaps,deadEnd)=>{
     const[dx,dy]=DIRS[seg.dir];const pd=side>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const half=eo(seg.w,px+py);
     const doorDir=(pd+2)%4;
-    let i=0;let D=null,used=0,capsLeft=null,dIdx=-1;const tried=new Set();
+    // a root's start square stays clear like an end square (so a later plan can turn from it), when the road can afford it
+    let i=(!seg.parent&&seg.n>=minMain+2*seg.w)?seg.w:0;let D=null,used=0,capsLeft=null,dIdx=-1;const tried=new Set();
     const iEnd=(seg.joined||deadEnd)?seg.n:seg.n-seg.w; // a dead end has no junction to keep clear
     const doorAt=(i,setback)=>{const cx=seg.x+dx*i,cy=seg.y+dy*i;const fx=cx+px*half,fy=cy+py*half;const doorX=cx+px*(half+1+setback),doorY=cy+py*(half+1+setback);
       for(let t=1;t<=setback;t++){const x=cx+px*(half+t),y=cy+py*(half+t);if(!free(x,y)||!(claim[y][x]===0||claim[y][x]===4))return null;}
@@ -560,7 +562,7 @@ function pack(o){
 
   // ---- growth ----
   const heads=[];
-  if(!prior){heads.push({x:entry[0],y:entry[1],dir:entryDir,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;}
+  if(!priorRoads){heads.push({x:entry[0],y:entry[1],dir:entryDir,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;} // existing geometry without a road: start from the edge
   // seed heads from an existing, connected network: every segment's end square and every gap along it, with
   // the throat connectors allowed. Used for existing geometry and again when a network has exhausted.
   const seedFrom=(segList)=>{let added=0;
@@ -578,10 +580,14 @@ function pack(o){
     for(const seg of segList){if(seg.dir<0||seg.dead)continue;const[dx,dy]=DIRS[seg.dir];const[ecx,ecy]=sqCentre(seg);
       if(!seg.joined)for(const nd of[seg.dir,(seg.dir+1)%4,(seg.dir+3)%4]){const[px,py]=DIRS[nd];const w=nd===seg.dir?Math.max(seg.w,seg.connector?mainW:0):mainW;const ed=eo(seg.w,px+py);
         tryW(ecx+px*(ed+1),ecy+py*(ed+1),nd,w,w>1?6:4,seg);}
+      // a root segment (nothing behind it) has a second open end: its start square. Continue backward and turn from there too.
+      if(!seg.parent){const back=(seg.dir+2)%4;const scx=seg.x-(dx>0?lo(seg.w):dx<0?hi(seg.w):0),scy=seg.y-(dy>0?lo(seg.w):dy<0?hi(seg.w):0);
+        for(const nd of[back,(seg.dir+1)%4,(seg.dir+3)%4]){const[px,py]=DIRS[nd];const w=nd===back?Math.max(seg.w,seg.connector?mainW:0):mainW;const ed=eo(seg.w,px+py);
+          tryW(scx+px*(ed+1),scy+py*(ed+1),nd,w,w>1?6:4,seg);}}
       for(const sd of[1,-1]){const pd=sd>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
         for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;const before=heads.length;tryW(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,sideW,sideW>1?6:4,seg);if(heads.length>before)last=i;}}}
     return added;};
-  if(prior)seedFrom(prior.segments); // existing geometry is the starting point
+  if(priorRoads)seedFrom(prior.segments); // existing geometry is the starting point
   let guard=0,phase=0;
   while((heads.length||phase===0)&&guard++<3000){
     if(!heads.length){ // the network has exhausted: re-seed from every segment of the network itself, so every new road
