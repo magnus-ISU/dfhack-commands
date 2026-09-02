@@ -381,14 +381,18 @@ function pack(o){
   // entry: on the left edge, a main-road footprint free for ten tiles, pointing right
   const mh=mainW>>1;let entry=null,bd=1e9;
   let entryDir=1;
-  if(!prior){ // the entry sits on the burrow's boundary and points into the longest open run of main-road width
-    let best=-1;
+  // boundary candidates: a tile on the burrow's edge with an open run of main-road width ahead, scored by
+  // the free rock around the run (a long run in a shallow band scores less than a shorter run into open space)
+  const boundaryHeads=()=>{const out=[];
     for(const[x,y]of freeList){for(let d=0;d<4;d++){const[dx,dy]=DIRS[d];
-      if(free(x-dx*2,y-dy*2))continue;                       // must come in from the edge
+      if(free(x-dx*2,y-dy*2))continue;
       const qx=Math.abs(DIRS[(d+1)%4][0]),qy=Math.abs(DIRS[(d+1)%4][1]);
       let run=0;for(let i=0;i<40;i++){let ok=true;for(let t=-((mainW-1)>>1);t<=(mainW>>1);t++){const a=x+dx*i+qx*t,b=y+dy*i+qy*t;if(!free(a,b)||claim[b][a]!==0)ok=false;}if(!ok)break;run++;}
-      if(run<6)continue;const score=run*10-Math.abs(y-H/2)*0.05-x*0.02;if(score>best){best=score;entry=[x,y];entryDir=d;}}}
-    if(!entry)return null;}else entry=prior.entry;
+      if(run<6)continue;
+      let area=0;for(let i=0;i<run;i++)for(let t=-10;t<=10;t++){const a=x+dx*i+qx*t,b=y+dy*i+qy*t;if(free(a,b)&&claim[b][a]===0)area++;}
+      out.push({x,y,dir:d,run,score:area-Math.abs(y-H/2)*0.05-x*0.02});}}
+    out.sort((p,q)=>q.score-p.score);return out;};
+  if(!prior){const c=boundaryHeads()[0];if(!c)return null;entry=[c.x,c.y];entryDir=c.dir;}else entry=prior.entry;
   const rooms=prior?prior.rooms.slice():[],districts=prior?prior.districts.slice():[],segments=prior?prior.segments.slice():[],stamps=prior?prior.stamps.slice():[];
   let joins=0,undone=0,diagonals=0;
   const count={};for(const D of dtypes.concat(dtypes2))count[D.name]=0;let placedN=0;
@@ -567,8 +571,12 @@ function pack(o){
         const h2=reserve(start[0],start[1],nd,w,0,40,null,w>1?6:4);if(h2)heads.push(h2);}
       for(const sd of[1,-1]){const pd=sd>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
         for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;const h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,mainW,0,40,null,mainW>1?6:4);if(h2){heads.push(h2);last=i;}}}}}
-  let guard=0;
-  while(heads.length&&guard++<3000){
+  let guard=0,phase=0;
+  while((heads.length||phase===0)&&guard++<3000){
+    if(!heads.length){ // the network from the entry or the existing geometry has exhausted: start again from every valid outer tile
+      phase=1;let lastPos=[];for(const c of boundaryHeads()){if(lastPos.some(([px,py])=>Math.abs(px-c.x)+Math.abs(py-c.y)<10))continue;
+        const h2=reserve(c.x,c.y,c.dir,mainW,0,40,null,minMain,false);if(h2){heads.push(h2);lastPos.push([c.x,c.y]);}}
+      if(!heads.length)break;}
     const head=heads.shift();
     if(head.diag!==undefined){const seg=layDiagonal(head);if(seg)segments.push(seg);continue;}
     const sn=snapshot();
@@ -612,9 +620,19 @@ function pack(o){
           // a gap that opens onto a throat: a narrower connector may lead to another pocket of the burrow
           if(!h2&&lastBlock==="rock"&&(head.connDepth||0)<3)for(let cw=sideW-1;cw>=1&&!h2;cw--){h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,cw,head.level+1,head.budget-1,seg,cw>1?4:3,false);if(h2){h2.connector=true;h2.connDepth=(head.connDepth||0)+1;}}
           if(h2){newHeads.push(h2);last=i;}}}}
-    seg.rooms=rooms.filter(r=>r.front&&seg.tiles.some(([a,b])=>a===r.front.x&&b===r.front.y)).length;
+    const roomsOn=()=>rooms.filter(r=>r.front&&seg.tiles.some(([a,b])=>a===r.front.x&&b===r.front.y)).length;
+    seg.rooms=roomsOn();
+    // nothing from the first list fits here: the fill list may hold smaller districts that do, before the road is refused
+    if(seg.rooms===0&&!seg.connector&&preset.second){for(const s of[1,-1])packSide(seg,s,dtypes2,true,newHeads.length===0);seg.rooms=roomsOn();}
     // a road with nothing along it is not dug
-    if(seg.rooms===0&&!seg.connector){restore(sn);for(const h2 of newHeads)release(h2);release(head);undone++;continue;}
+    if(seg.rooms===0&&!seg.connector){
+      // is this a cave passage (flanks too shallow for any room before the burrow ends) or space that rooms declined?
+      // only a passage may stay, as a connector, and only if it leads somewhere
+      let depthSum=0,flank=0,rock=0;for(let i=0;i<seg.n;i++)for(const sd of[1,-1]){const pd=sd>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const e=eo(seg.w,px+py);
+        let dpt=0;for(let t=1;t<=10;t++){const x=seg.x+dx*i+px*(e+t),y=seg.y+dy*i+py*(e+t);if(!free(x,y))break;dpt++;}if(dpt===0)rock++;depthSum+=dpt;flank++;}
+      const passage=depthSum/flank<5||rock>=flank*0.5;
+      if(!passage||!newHeads.length){restore(sn);for(const h2 of newHeads)release(h2);release(head);undone++;continue;}
+      seg.connector=true;}
     if(head.parent)head.parent.children++;
     for(const h2 of newHeads)heads.push(h2);
   }
