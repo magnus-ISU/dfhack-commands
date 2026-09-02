@@ -126,7 +126,7 @@ summary{cursor:pointer;color:var(--muted);font-size:13px}
       <label><span class="k">Name</span><input id="ed-name" type="text"></label>
       <label><span class="k">Main / side</span><div class="row"><input id="ed-main" type="number" min="1" max="5"><input id="ed-side" type="number" min="1" max="5"></div></label>
       <label><span class="k">Surface</span><input id="ed-surface" type="checkbox"></label>
-      <button class="quiet" id="ed-paste">Paste JSON from clipboard</button>
+      <div class="row"><button class="quiet" id="ed-paste">Paste JSON</button><button class="quiet" id="ed-copy">Copy JSON</button></div>
       <h3>Edit</h3>
       <button class="quiet" id="ed-adddistrict">Create district</button>
       <button class="quiet" id="ed-addbp">Add blueprint</button>
@@ -681,82 +681,117 @@ loadPreset();run();
 
 // ---------- in-game picker ----------
 const GATES={now:"applied now",noble:"gated: a noble needs rooms",house:"gated: a house is needed",guild:"gated: a guildhall is needed",temple:"gated: a temple is needed",tomb:"gated: a tomb is needed"};
-$("apply").addEventListener("click",()=>{run();const g=$("gate").value;
+$("apply").addEventListener("click",()=>{$("seed").value=+$("seed").value+1;run();const g=$("gate").value;
   $("status").textContent=`Plan stored for "${BURROWS[+bsel.value].name}" with preset "${sel.value}"; blueprints ${g==="now"?"applied now through fort/quickfort":"held, "+GATES[g]}.`;});
 $("copyjson").addEventListener("click",()=>{const t=JSON.stringify(expand(PRESETS[sel.value]),null,1);navigator.clipboard&&navigator.clipboard.writeText(t).then(()=>{$("status").textContent="Preset JSON copied.";},()=>{$("status").textContent="Clipboard unavailable; JSON is in the sandbox textarea.";});$("json").value=t;});
 
 // ---------- preset editor ----------
-// library: every stamp the districts know, plus hallway pieces, deduplicated by name
-const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);LIB.push({name,grid,kind});};
+// room type inferred from the furniture a stamp would place (the zones DF would accept)
+function typeOf(grid){const floors=grid.floors||[grid];const g=floors[0];const txt=floors.map(f=>f.join("")).join("");const n=(ch)=>(txt.split(ch).length-1);
+  const types=[];if(n("b"))types.push("bedroom");if(n("x"))types.push("tomb");
+  const tables=n("t"),chairs=n("c");if(chairs&&tables<=2)types.push("office");if(tables>=3)types.push("dining room");
+  if(n("A"))types.push("temple");                       // an altar makes a temple whatever else is there
+  else if(n("P")||(types.length===0&&n("s")))types.push("meeting area"); // pedestals mark a meeting area; statues only when nothing else defines the room
+  const corners=[g[0][0],g[0][g[0].length-1],g[g.length-1][0],g[g.length-1][g[g.length-1].length-1]];
+  const constructed=corners.some(c=>c==="#");
+  return{type:types.length===0?"other":types.length===1?types[0]:"multi",constructed};}
+const TYPE_ORDER={"bedroom":0,"office":1,"dining room":2,"tomb":3,"temple":4,"meeting area":5,"multi":6,"other":7};
+const LIB=[];{const seen=new Set();const add=(name,grid,kind)=>{if(seen.has(name))return;seen.add(name);const t=kind==="road"?{type:"hallway",constructed:false}:typeOf(grid);LIB.push({name,grid,kind,type:t.type,constructed:t.constructed});};
   for(const dn in DISTRICTS){const d=DISTRICTS[dn];for(const sl of(d.stamps||[]).concat(d.optional||[])){if(sl.alts)for(const a of sl.alts)add(a.name||sl.name,a.grid,"room");else add(sl.name,sl.grid,"room");}
     for(const r of(d.road||[]))add(r.name,r.grid,"road");}
-  add("statue row 13x3",G.seg13,"road");add("statue garden 7x7",G.plaza7,"road");add("coffin row 13x3",G.coffinrow,"road");add("shrine 5x5",G.shrine5,"road");}
+  add("statue row 13x3",G.seg13,"road");add("statue garden 7x7",G.plaza7,"road");add("coffin row 13x3",G.coffinrow,"road");add("shrine 5x5",G.shrine5,"road");
+  LIB.sort((p,q)=>(p.constructed-q.constructed)||((TYPE_ORDER[p.type]??9)-(TYPE_ORDER[q.type]??9))||p.name.localeCompare(q.name));}
 let ED=null,EDSEL=null,LIBSEL=null;
 const clone=(o)=>JSON.parse(JSON.stringify(o));
-// editor state: districts always inline, every stamp a slot with alts
-function toEditable(p){const norm=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});const sl=(s)=>({name:s.name,weight:s.weight||1,max:s.max||(s.alts?1:undefined),alts:(s.alts||[{grid:s.grid,name:s.name,weight:s.weight,setback:s.setback,max:s.max}]).map(a=>({name:a.name||s.name,grid:a.grid,weight:a.weight||1,setback:a.setback||0}))});
-    return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(b.margin||0),set:!!b.set,shared:!!b.shared,maxLen:b.maxLen||14,depth:b.depth||12,stamps:(b.stamps||[]).map(sl),optional:(b.optional||[]).map(sl),road:(b.road||[]).map(r=>({name:r.name,grid:r.grid,weight:r.weight||1}))};};
-  return{name:p.name||"",main:p.main||3,side:p.side||1,surface:!!p.surface,angled:!!p.angled,districts:(p.districts||[]).map(norm),second:p.second?p.second.map(norm):null,road:p.road?p.road.map(r=>({name:r.name,grid:r.grid,weight:r.weight||1})):null};}
-// back to what pack() eats: inline districts (stamps as slots with alts), optional second list, preset road stamps
+// editor state: districts inline, every stamp a slot with alts; hallway pieces live on the preset only
+function toEditable(p){const roads=[];const addRoad=(r)=>{if(!roads.some(q=>q.name===r.name))roads.push({name:r.name,grid:r.grid,weight:r.weight||1});};
+  const norm=(d)=>{const b=d.stamps?d:(DISTRICTS[d.name]||{stamps:[]});for(const r of(b.road||[]))addRoad(r);
+    const sl=(s)=>({name:s.name,weight:s.weight||1,max:s.max||(s.alts?1:undefined),alts:(s.alts||[{grid:s.grid,name:s.name,weight:s.weight,setback:s.setback,max:s.max}]).map(a=>({name:a.name||s.name,grid:a.grid,weight:a.weight||1,setback:a.setback||0}))});
+    return{name:d.name,weight:d.weight||1,margin:d.margin!==undefined?d.margin:(b.margin||0),set:!!b.set,shared:!!b.shared,maxLen:b.maxLen||14,depth:b.depth||12,stamps:(b.stamps||[]).map(sl),optional:(b.optional||[]).map(sl)};};
+  const districts=(p.districts||[]).map(norm);const second=p.second?p.second.map(norm):null;for(const r of(p.road||[]))addRoad(r);
+  return{name:p.name||"",main:p.main||3,side:p.side||1,surface:!!p.surface,angled:!!p.angled,districts,second,road:roads.length?roads:null};}
 function fromEditable(e){const out=(d)=>({name:d.name,weight:d.weight,margin:d.margin,set:d.set||undefined,shared:d.shared||undefined,maxLen:d.maxLen,depth:d.depth,
     stamps:d.stamps.map(s=>({name:s.name,weight:s.weight,max:d.set?undefined:s.max,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback,max:d.set?undefined:s.max}))})),
-    optional:d.optional.map(s=>({name:s.name,max:s.max||1,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback}))})),road:d.road});
+    optional:d.optional.map(s=>({name:s.name,max:s.max||1,alts:s.alts.map(a=>({name:a.name,grid:a.grid,weight:a.weight,setback:a.setback}))}))});
   const p={main:e.main,side:e.side,surface:e.surface||undefined,angled:e.angled||undefined,districts:e.districts.map(out)};
-  if(e.second)p.second=e.second.map(out);if(e.road)p.road=e.road;return p;}
-function openEditor(base){ED=toEditable(base);if(!base.name)ED.name="my preset";EDSEL=null;LIBSEL=null;$("ed-name").value=ED.name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;
-  renderLib();renderPasses();renderSettings();$("modal").hidden=false;}
-function renderLib(){const box=$("ed-lib");box.innerHTML="";for(const it of LIB){const c=document.createElement("div");c.className="chip"+(LIBSEL===it?" sel":"");const g=it.grid.floors?it.grid.floors[0]:it.grid;
-    c.innerHTML=`<span>${it.name}</span><span class="small">${it.kind}${it.grid.floors?" ×"+it.grid.floors.length+"z":""} ${g[0].length}×${g.length}</span>`;c.addEventListener("click",()=>{LIBSEL=it;renderLib();renderSettings();});box.appendChild(c);}}
+  if(e.second)p.second=e.second.map(out);if(e.road&&e.road.length)p.road=e.road;return p;}
+function openEditor(base){ED=toEditable(base);if(!base.name)ED.name="my preset";EDSEL={kind:"pass",pass:"districts"};LIBSEL=null;$("ed-name").value=ED.name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;
+  renderAll();$("modal").hidden=false;}
+function renderAll(){renderLib();renderPasses();renderSettings();}
+const inRoadContext=()=>EDSEL&&(EDSEL.kind==="road"||(EDSEL.kind==="pass"&&EDSEL.pass==="road"));
+function renderLib(){const box=$("ed-lib");box.innerHTML="";const road=inRoadContext();
+  const hint=document.createElement("div");hint.className="small";hint.textContent=road?"Hallway pieces (no door): rows as wide as the road dress straight stretches, squares are plazas at junctions. Click a selected one to add it.":"Rooms, sorted by type; built-wall (surface) blueprints below. Click a selected one to add it.";box.appendChild(hint);
+  let lastGroup=null;
+  for(const it of LIB){if((it.kind==="road")!==road)continue;
+    const group=it.constructed?"built walls (surface)":it.type;if(group!==lastGroup){const h=document.createElement("div");h.className="small";h.style.marginTop="6px";h.textContent=group;box.appendChild(h);lastGroup=group;}
+    const c=document.createElement("div");c.className="chip"+(LIBSEL===it?" sel":"");const g=it.grid.floors?it.grid.floors[0]:it.grid;
+    c.innerHTML=`<span>${it.name}</span><span class="small">${it.grid.floors?"×"+it.grid.floors.length+"z ":""}${g[0].length}×${g.length}</span>`;
+    c.addEventListener("click",()=>{if(LIBSEL===it){addBlueprint();}else{LIBSEL=it;renderLib();}});box.appendChild(c);}}
 function renderPasses(){const col=$("ed-passes");col.innerHTML="";
-  const section=(title,key)=>{const sec=document.createElement("div");sec.className="sect";sec.innerHTML=`<h4>${title}</h4>`;const body=document.createElement("div");body.className="body";sec.appendChild(body);
-    if(key==="road"){const chips=document.createElement("div");chips.className="chips";(ED.road||[]).forEach((r,i)=>{const c=document.createElement("span");c.className="chip"+(EDSEL&&EDSEL.kind==="road"&&EDSEL.i===i?" sel":"");c.textContent=`${r.name} ×${r.weight}`;c.addEventListener("click",()=>{EDSEL={kind:"road",i};renderPasses();renderSettings();});chips.appendChild(c);});body.appendChild(chips);if(!(ED.road||[]).length)body.innerHTML='<span class="small">No hallway blueprints yet: select one in the library and "Add blueprint".</span>';}
-    else{const list=ED[key];if(!list.length)body.innerHTML='<span class="small">No districts: "Create district", then add blueprints to it.</span>';
+  const section=(title,key)=>{const sec=document.createElement("div");sec.className="sect";const selPass=EDSEL&&EDSEL.kind==="pass"&&EDSEL.pass===key;if(selPass)sec.style.outline="2px solid var(--accent)";
+    const h=document.createElement("h4");h.textContent=title+(selPass?"  (selected)":"");h.style.cursor="pointer";h.addEventListener("click",()=>{EDSEL={kind:"pass",pass:key};LIBSEL=null;renderAll();});sec.appendChild(h);
+    const body=document.createElement("div");body.className="body";sec.appendChild(body);
+    if(key==="road"){const chips=document.createElement("div");chips.className="chips";(ED.road||[]).forEach((r,i)=>{const c=document.createElement("span");c.className="chip"+(EDSEL&&EDSEL.kind==="road"&&EDSEL.i===i?" sel":"");c.textContent=`${r.name} ×${r.weight}`;c.addEventListener("click",()=>{EDSEL={kind:"road",i};renderAll();});chips.appendChild(c);});body.appendChild(chips);if(!(ED.road||[]).length)body.innerHTML='<span class="small">No hallway pieces yet: with this section selected, pick one in the library.</span>';}
+    else{const list=ED[key];if(!list.length)body.innerHTML='<span class="small">Empty pass: pick a blueprint in the library and it gets its own district.</span>';
       list.forEach((d,di)=>{const box=document.createElement("div");const dsel=EDSEL&&EDSEL.kind==="district"&&EDSEL.pass===key&&EDSEL.di===di;box.className="dbox"+(dsel?" sel":"");
         box.innerHTML=`<div class="hd"><span>${d.name}${d.set?" (suite)":""}${d.shared?" · shared walls":""}</span><span class="small">weight ${d.weight} · margin ${d.margin}</span></div>`;
-        box.addEventListener("click",(ev)=>{if(ev.target.classList.contains("chip"))return;EDSEL={kind:"district",pass:key,di};renderPasses();renderSettings();});
+        box.addEventListener("click",(ev)=>{if(ev.target.classList.contains("chip"))return;EDSEL={kind:"district",pass:key,di};renderAll();});
         const chips=document.createElement("div");chips.className="chips";
         const chip=(s,si,optional,ai)=>{const c=document.createElement("span");const isSel=EDSEL&&EDSEL.kind==="slot"&&EDSEL.pass===key&&EDSEL.di===di&&EDSEL.si===si&&EDSEL.optional===optional&&(EDSEL.ai===ai);
           c.className="chip"+(optional?" opt":"")+(isSel?" sel":"")+(ai>0?" alt":"");const a=s.alts[ai];c.textContent=(ai===0?"":"alt: ")+a.name+(ai===0&&optional?` (0–${s.max})`:"")+(ai===0&&!optional&&!d.set&&s.max?` (max ${s.max})`:"")+(a.setback?" ↓"+a.setback:"")+` ×${a.weight}`;
-          c.addEventListener("click",()=>{EDSEL={kind:"slot",pass:key,di,si,optional,ai};renderPasses();renderSettings();});chips.appendChild(c);};
+          c.addEventListener("click",()=>{EDSEL={kind:"slot",pass:key,di,si,optional,ai};renderAll();});chips.appendChild(c);};
         d.stamps.forEach((s,si)=>s.alts.forEach((a,ai)=>chip(s,si,false,ai)));d.optional.forEach((s,si)=>s.alts.forEach((a,ai)=>chip(s,si,true,ai)));
         box.appendChild(chips);body.appendChild(box);});}
     col.appendChild(sec);};
   section("First pass","districts");if(ED.second)section("Second pass (fill)","second");if(ED.road)section("Hallway blueprints (road stamps)","road");
   $("ed-second").textContent=ED.second?"Same second pass":"Different second pass";$("ed-road").textContent=ED.road?"Remove hallway blueprints":"Add hallway blueprints";
-  $("ed-addbp").textContent=!EDSEL?"Add blueprint (select a district first)":EDSEL.kind==="slot"?"Add blueprint as alt of selected":EDSEL.kind==="road"?"Add hallway blueprint":"Add blueprint to district";}
+  $("ed-addbp").textContent=inRoadContext()?"Add hallway piece":!EDSEL||EDSEL.kind==="pass"?"Add blueprint (new district)":EDSEL.kind==="slot"?"Add blueprint as alt of selected":"Add blueprint to district";}
 function renderSettings(){const box=$("ed-settings");box.innerHTML="";
-  const field=(label,val,onch,type="number")=>{const l=document.createElement("label");l.innerHTML=`<span class="k">${label}</span>`;const i=document.createElement("input");i.type=type;if(type==="checkbox")i.checked=!!val;else i.value=val;i.addEventListener("change",()=>{onch(type==="checkbox"?i.checked:+i.value);renderPasses();});l.appendChild(i);box.appendChild(l);};
-  if(!EDSEL){box.innerHTML='<span class="small">Select a district or blueprint to see its settings.</span>';return;}
-  if(EDSEL.kind==="road"){const r=ED.road[EDSEL.i];box.innerHTML=`<b>${r.name}</b>`;field("weight",r.weight,v=>r.weight=v);return;}
+  const field=(label,val,onch,type="number",hint)=>{const l=document.createElement("label");l.innerHTML=`<span class="k">${label}</span>`;const i=document.createElement("input");i.type=type;if(type==="checkbox")i.checked=!!val;else i.value=val;i.addEventListener("change",()=>{onch(type==="checkbox"?i.checked:+i.value);});l.appendChild(i);box.appendChild(l);if(hint){const h=document.createElement("div");h.className="small";h.textContent=hint;box.appendChild(h);}return i;};
+  if(!EDSEL||EDSEL.kind==="pass"){box.innerHTML='<span class="small">'+(EDSEL?`Pass selected: ${EDSEL.pass==="road"?"hallway blueprints":EDSEL.pass==="second"?"second pass":"first pass"}. "Create district" adds here; picking a blueprint adds it in a new district.`:"Select a pass, district or blueprint.")+'</span>';return;}
+  if(EDSEL.kind==="road"){const r=ED.road[EDSEL.i];box.innerHTML=`<b>${r.name}</b>`;field("weight",r.weight,v=>{r.weight=v;renderPasses();});const del=document.createElement("button");del.className="quiet";del.textContent="Remove this piece";del.addEventListener("click",()=>{ED.road.splice(EDSEL.i,1);EDSEL={kind:"pass",pass:"road"};renderAll();});box.appendChild(del);return;}
   const d=ED[EDSEL.pass][EDSEL.di];
-  if(EDSEL.kind==="district"){box.innerHTML=`<b>${d.name}</b>`;
+  if(EDSEL.kind==="district"){box.innerHTML=`<b>district</b>`;
     const n=document.createElement("input");n.type="text";n.value=d.name;n.addEventListener("change",()=>{d.name=n.value;renderPasses();});box.appendChild(n);
-    field("weight",d.weight,v=>d.weight=v);field("margin",d.margin,v=>d.margin=v);field("max length",d.maxLen,v=>d.maxLen=v);field("depth",d.depth,v=>d.depth=v);
-    field("suite (set)",d.set,v=>d.set=v,"checkbox");field("shared walls",d.shared,v=>d.shared=v,"checkbox");return;}
-  const s=(EDSEL.optional?d.optional:d.stamps)[EDSEL.si];const a=s.alts[EDSEL.ai];box.innerHTML=`<b>${a.name}</b><span class="small">${EDSEL.optional?"optional slot":(d.set?(EDSEL.si===0?"hub":"required"):"repeat")}</span>`;
-  field("weight",a.weight,v=>a.weight=v);field("setback",a.setback,v=>a.setback=v);
-  if(EDSEL.optional)field("optional max",s.max||1,v=>s.max=v);else if(!d.set)field("max per district",s.max||0,v=>s.max=v||undefined);
-  if(d.set)field("optional",EDSEL.optional,v=>{const from=EDSEL.optional?d.optional:d.stamps,to=EDSEL.optional?d.stamps:d.optional;const[sl]=from.splice(EDSEL.si,1);if(!sl.max)sl.max=1;to.push(sl);EDSEL={kind:"slot",pass:EDSEL.pass,di:EDSEL.di,si:to.length-1,optional:!EDSEL.optional,ai:0};renderSettings();},"checkbox");}
-$("ed-adddistrict").addEventListener("click",()=>{const pass=EDSEL&&EDSEL.pass==="second"?"second":"districts";ED[pass].push({name:"district "+(ED[pass].length+1),weight:1,margin:0,set:false,shared:false,maxLen:14,depth:12,stamps:[],optional:[],road:[]});EDSEL={kind:"district",pass,di:ED[pass].length-1};renderPasses();renderSettings();});
-$("ed-addbp").addEventListener("click",()=>{if(!LIBSEL){$("ed-settings").innerHTML='<span class="small">Pick a blueprint in the library first.</span>';return;}
+    field("weight",d.weight,v=>{d.weight=v;renderPasses();});field("margin",d.margin,v=>{d.margin=v;renderPasses();},"number","Extra rock between neighbouring rooms. 0 = one shared wall.");field("max length",d.maxLen,v=>d.maxLen=v);field("depth",d.depth,v=>d.depth=v);
+    field("suite (set)",d.set,v=>{d.set=v;renderPasses();},"checkbox","A suite: first blueprint is the hub with the road door, the rest attach wall to wall.");
+    if(ED.surface)field("shared walls",d.shared,v=>{d.shared=v;renderPasses();},"checkbox","Built-wall blueprints overlap their walls with the neighbour's, so a terrace is one wall thick.");
+    const del=document.createElement("button");del.className="quiet";del.textContent="Remove this district";del.addEventListener("click",()=>{ED[EDSEL.pass].splice(EDSEL.di,1);EDSEL={kind:"pass",pass:EDSEL.pass};renderAll();});box.appendChild(del);return;}
+  const list=EDSEL.optional?d.optional:d.stamps;const s=list[EDSEL.si];const a=s.alts[EDSEL.ai];
+  box.innerHTML=`<b>${a.name}</b><span class="small">${EDSEL.optional?"optional":(d.set?(EDSEL.si===0?"hub":"required"):"repeat")}${EDSEL.ai>0?" · alternative":""}</span>`;
+  field("weight",a.weight,v=>{a.weight=v;renderPasses();});field("setback",a.setback,v=>{a.setback=v;renderPasses();});
+  if(!d.set)field("max per district",s.max||0,v=>{s.max=v||undefined;renderPasses();},"number","0 = unlimited");
+  if(d.set&&EDSEL.si>0||d.set&&EDSEL.optional){ // one row: a checkbox while required, the max input while optional; 0 makes it required again
+    const move=(toOptional)=>{const from=toOptional?d.stamps:d.optional,to=toOptional?d.optional:d.stamps;const idx=EDSEL.si;const[sl]=from.splice(idx,1);if(toOptional&&!sl.max)sl.max=1;to.push(sl);EDSEL={...EDSEL,si:to.length-1,optional:toOptional};};
+    if(!EDSEL.optional)field("optional",false,v=>{if(v){move(true);renderAll();}},"checkbox");
+    else field("optional max",s.max||1,v=>{if(v<=0){move(false);renderAll();}else{s.max=v;renderPasses();}},"number","0 makes it required again");}
+  const del=document.createElement("button");del.className="quiet";del.textContent=s.alts.length>1?"Remove this alternative":"Remove this blueprint";del.addEventListener("click",()=>{if(s.alts.length>1)s.alts.splice(EDSEL.ai,1);else list.splice(EDSEL.si,1);EDSEL={kind:"district",pass:EDSEL.pass,di:EDSEL.di};renderAll();});box.appendChild(del);}
+function newDistrict(pass){const d={name:"district "+(ED[pass].length+1),weight:1,margin:0,set:false,shared:false,maxLen:14,depth:12,stamps:[],optional:[]};ED[pass].push(d);return ED[pass].length-1;}
+function addBlueprint(){if(!LIBSEL){renderSettings();$("ed-settings").insertAdjacentHTML("afterbegin",'<span class="small">Pick a blueprint in the library first.</span>');return;}
   const entry={name:LIBSEL.name,grid:LIBSEL.grid,weight:1,setback:0};
-  if(!EDSEL)return;
-  if(EDSEL.kind==="road"||(EDSEL.kind==="district"&&LIBSEL.kind==="road"&&ED.road)){ED.road=ED.road||[];ED.road.push({name:LIBSEL.name,grid:LIBSEL.grid,weight:1});EDSEL={kind:"road",i:ED.road.length-1};}
-  else if(EDSEL.kind==="district"){const d=ED[EDSEL.pass][EDSEL.di];d.stamps.push({name:LIBSEL.name,weight:1,max:undefined,alts:[entry]});EDSEL={kind:"slot",pass:EDSEL.pass,di:EDSEL.di,si:d.stamps.length-1,optional:false,ai:0};}
-  else if(EDSEL.kind==="slot"){const d=ED[EDSEL.pass][EDSEL.di];const s=(EDSEL.optional?d.optional:d.stamps)[EDSEL.si];s.alts.push(entry);EDSEL={...EDSEL,ai:s.alts.length-1};}
-  renderPasses();renderSettings();});
-$("ed-remove").addEventListener("click",()=>{if(!EDSEL)return;
-  if(EDSEL.kind==="road")ED.road.splice(EDSEL.i,1);
-  else if(EDSEL.kind==="district")ED[EDSEL.pass].splice(EDSEL.di,1);
-  else{const d=ED[EDSEL.pass][EDSEL.di];const list=EDSEL.optional?d.optional:d.stamps;const s=list[EDSEL.si];if(s.alts.length>1)s.alts.splice(EDSEL.ai,1);else list.splice(EDSEL.si,1);}
-  EDSEL=null;renderPasses();renderSettings();});
-$("ed-second").addEventListener("click",()=>{ED.second=ED.second?null:clone(ED.districts);EDSEL=null;renderPasses();renderSettings();});
-$("ed-road").addEventListener("click",()=>{ED.road=ED.road?null:[];EDSEL=null;renderPasses();renderSettings();});
-$("ed-paste").addEventListener("click",()=>{const apply=(t)=>{try{const p=JSON.parse(t);const name=ED.name;ED=toEditable(p);ED.name=p.name||name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;EDSEL=null;renderPasses();renderSettings();}catch(e){$("ed-settings").innerHTML='<span class="small">Clipboard did not hold preset JSON: '+e.message+'</span>';}};
+  if(inRoadContext()){ED.road=ED.road||[];if(!ED.road.some(r=>r.name===LIBSEL.name))ED.road.push({name:LIBSEL.name,grid:LIBSEL.grid,weight:1});EDSEL={kind:"pass",pass:"road"};}
+  else if(!EDSEL||EDSEL.kind==="pass"){const pass=EDSEL&&EDSEL.pass==="second"?"second":"districts";const di=newDistrict(pass);ED[pass][di].name=LIBSEL.name;ED[pass][di].stamps.push({name:LIBSEL.name,weight:1,max:undefined,alts:[entry]});EDSEL={kind:"district",pass,di};}
+  else if(EDSEL.kind==="district"){const d=ED[EDSEL.pass][EDSEL.di];d.stamps.push({name:LIBSEL.name,weight:1,max:undefined,alts:[entry]});}
+  else if(EDSEL.kind==="slot"){const d=ED[EDSEL.pass][EDSEL.di];const s=(EDSEL.optional?d.optional:d.stamps)[EDSEL.si];s.alts.push(entry);}
+  renderPasses();renderSettings();}
+$("ed-adddistrict").addEventListener("click",()=>{const pass=EDSEL&&EDSEL.pass==="second"?"second":"districts";const di=newDistrict(pass);EDSEL={kind:"district",pass,di};renderAll();});
+$("ed-addbp").addEventListener("click",addBlueprint);
+$("ed-remove").addEventListener("click",()=>{if(!EDSEL||EDSEL.kind==="pass")return;
+  if(EDSEL.kind==="road"){ED.road.splice(EDSEL.i,1);EDSEL={kind:"pass",pass:"road"};}
+  else if(EDSEL.kind==="district"){ED[EDSEL.pass].splice(EDSEL.di,1);EDSEL={kind:"pass",pass:EDSEL.pass};}
+  else{const d=ED[EDSEL.pass][EDSEL.di];const list=EDSEL.optional?d.optional:d.stamps;const s=list[EDSEL.si];if(s.alts.length>1)s.alts.splice(EDSEL.ai,1);else list.splice(EDSEL.si,1);EDSEL={kind:"district",pass:EDSEL.pass,di:EDSEL.di};}
+  renderAll();});
+$("ed-second").addEventListener("click",()=>{ED.second=ED.second?null:clone(ED.districts);EDSEL={kind:"pass",pass:ED.second?"second":"districts"};renderAll();});
+$("ed-road").addEventListener("click",()=>{ED.road=ED.road?null:[];EDSEL={kind:"pass",pass:ED.road?"road":"districts"};LIBSEL=null;renderAll();});
+$("ed-paste").addEventListener("click",()=>{const apply=(t)=>{try{const p=JSON.parse(t);const name=ED.name;ED=toEditable(p);ED.name=p.name||name;$("ed-main").value=ED.main;$("ed-side").value=ED.side;$("ed-surface").checked=ED.surface;EDSEL={kind:"pass",pass:"districts"};renderAll();}catch(e){$("ed-settings").innerHTML='<span class="small">Clipboard did not hold preset JSON: '+e.message+'</span>';}};
   if(navigator.clipboard&&navigator.clipboard.readText)navigator.clipboard.readText().then(apply,()=>apply($("json").value));else apply($("json").value);});
+$("ed-copy").addEventListener("click",()=>{ED.name=$("ed-name").value.trim()||ED.name;const t=JSON.stringify({name:ED.name,...fromEditable(ED)},null,1);$("json").value=t;
+  const done=()=>{$("ed-settings").innerHTML='<span class="small">Preset JSON copied to the clipboard (and to the sandbox textarea).</span>';};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,done);else done();});
 $("ed-save").addEventListener("click",()=>{ED.name=$("ed-name").value.trim()||"my preset";ED.main=+$("ed-main").value;ED.side=+$("ed-side").value;ED.surface=$("ed-surface").checked;
   PRESETS[ED.name]=fromEditable(ED);fillPresets(ED.name);$("modal").hidden=true;loadPreset();run();$("status").textContent=`Preset "${ED.name}" saved.`;});
 $("ed-cancel").addEventListener("click",()=>{$("modal").hidden=true;});
 $("newpreset").addEventListener("click",()=>openEditor({name:"",main:3,side:1,districts:[]}));
 $("editpreset").addEventListener("click",()=>openEditor({...PRESETS[sel.value],name:sel.value}));
+$("ed-surface").addEventListener("change",()=>{ED.surface=$("ed-surface").checked;renderSettings();});
 </script>
