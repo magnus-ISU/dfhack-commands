@@ -270,6 +270,62 @@ local function key(pos) return ('%d,%d,%d'):format(pos.x, pos.y, pos.z) end
 -- persisted state a single line rather than a map of every tile.
 function build_plan(job)
     local plan = {tiles = {}, regions = {}, total = 0}
+    -- one parsed section (a grid of cells with a mode) into the plan
+    local function add_section_data(sd, section_name)
+        local mode = sd.modeline.mode
+        local region = {mode = mode, cells = {}, section = section_name,
+                        stage = STAGE.region}
+        local build_cells = {}
+        for y, row in pairs(sd.grid) do
+            for x, cell in pairs(row) do
+                local pos = {x = x, y = y, z = sd.zlevel}
+                local stage = stage_of(mode, cell.text)
+                if stage == STAGE.region then
+                    region.cells[#region.cells + 1] = {pos = pos, text = cell.text}
+                elseif stage == STAGE.build then
+                    build_cells[#build_cells + 1] = {pos = pos, text = cell.text}
+                else
+                    local t = plan.tiles[key(pos)]
+                    if not t then
+                        t = {pos = pos, steps = {}, at = 1}
+                        plan.tiles[key(pos)] = t
+                    end
+                    t.steps[#t.steps + 1] = {stage = stage, mode = mode,
+                                             text = cell.text}
+                    plan.total = plan.total + 1
+                end
+            end
+        end
+        for _, group in ipairs(group_build_cells(build_cells)) do
+            plan.regions[#plan.regions + 1] = {mode = mode, cells = group,
+                                              section = section_name,
+                                              stage = STAGE.build}
+            plan.total = plan.total + 1
+        end
+        if #region.cells > 0 then
+            plan.regions[#plan.regions + 1] = region
+            plan.total = plan.total + 1
+        end
+    end
+    if job.data then
+        -- an in-memory blueprint (fort/builder-burrow makes these): sections
+        -- of {mode, name, cells = {{dx, dy, text}, ...}} relative to job.pos
+        for _, sec in ipairs(job.data) do
+            local grid = {}
+            for _, c in ipairs(sec.cells) do
+                local x, y = job.pos.x + c[1], job.pos.y + c[2]
+                grid[y] = grid[y] or {}
+                grid[y][x] = {text = c[3]}
+            end
+            add_section_data({grid = grid, zlevel = job.pos.z, modeline = {mode = sec.mode}},
+                             sec.name or sec.mode)
+        end
+        for _, t in pairs(plan.tiles) do
+            table.sort(t.steps, function(a, b) return a.stage < b.stage end)
+        end
+        table.sort(plan.regions, function(a, b) return a.stage < b.stage end)
+        return plan
+    end
     local filepath = quickfort_list.get_blueprint_filepath(job.name)
     for _, section in ipairs(job.sections) do
         -- `#meta` sections just run other sections of the same file, and every
@@ -280,42 +336,7 @@ function build_plan(job)
         local ok, section_data_list = pcall(quickfort_parse.process_section,
             filepath, sheet_name, label, copyall(job.pos), nil)
         if ok then
-            for _, sd in ipairs(section_data_list) do
-                local mode = sd.modeline.mode
-                local region = {mode = mode, cells = {}, section = section.name,
-                                stage = STAGE.region}
-                local build_cells = {}
-                for y, row in pairs(sd.grid) do
-                    for x, cell in pairs(row) do
-                        local pos = {x = x, y = y, z = sd.zlevel}
-                        local stage = stage_of(mode, cell.text)
-                        if stage == STAGE.region then
-                            region.cells[#region.cells + 1] = {pos = pos, text = cell.text}
-                        elseif stage == STAGE.build then
-                            build_cells[#build_cells + 1] = {pos = pos, text = cell.text}
-                        else
-                            local t = plan.tiles[key(pos)]
-                            if not t then
-                                t = {pos = pos, steps = {}, at = 1}
-                                plan.tiles[key(pos)] = t
-                            end
-                            t.steps[#t.steps + 1] = {stage = stage, mode = mode,
-                                                     text = cell.text}
-                            plan.total = plan.total + 1
-                        end
-                    end
-                end
-                for _, group in ipairs(group_build_cells(build_cells)) do
-                    plan.regions[#plan.regions + 1] = {mode = mode, cells = group,
-                                                      section = section.name,
-                                                      stage = STAGE.build}
-                    plan.total = plan.total + 1
-                end
-                if #region.cells > 0 then
-                    plan.regions[#plan.regions + 1] = region
-                    plan.total = plan.total + 1
-                end
-            end
+            for _, sd in ipairs(section_data_list) do add_section_data(sd, section.name) end
         end
         end
     end
@@ -342,7 +363,7 @@ end
 local function persist()
     local out = {}
     for _, job in ipairs(jobs_table()) do
-        out[#out + 1] = {name = job.name, pos = job.pos, sections = job.sections}
+        out[#out + 1] = {name = job.name, pos = job.pos, sections = job.sections, data = job.data}
     end
     pcall(dfhack.persistent.saveSiteData, GLOBAL_KEY, {jobs = out})
 end
@@ -360,8 +381,16 @@ function start_job(entry, pos)
         last_progress = dfhack.getTickCount(),
         done_count = 0,
     }
-    for _, s in ipairs(entry.sections) do
-        job.sections[#job.sections + 1] = {name = s.name, mode = s.mode}
+    if entry.data then
+        -- an in-memory blueprint: the sections are its data blocks
+        job.data = entry.data
+        for _, sec in ipairs(entry.data) do
+            job.sections[#job.sections + 1] = {name = sec.name or sec.mode, mode = sec.mode}
+        end
+    else
+        for _, s in ipairs(entry.sections) do
+            job.sections[#job.sections + 1] = {name = s.name, mode = s.mode}
+        end
     end
     job.plan = build_plan(job)
     table.insert(jobs_table(), job)
@@ -389,7 +418,7 @@ local function restore_jobs()
     local jobs = {}
     for _, saved in ipairs(data.jobs or {}) do
         local job = {name = saved.name, pos = saved.pos, sections = saved.sections,
-                     last_progress = dfhack.getTickCount(), done_count = 0}
+                     data = saved.data, last_progress = dfhack.getTickCount(), done_count = 0}
         local ok = pcall(function() job.plan = build_plan(job) end)
         if ok and job.plan then jobs[#jobs + 1] = job end
     end

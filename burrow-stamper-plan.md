@@ -373,7 +373,9 @@ cannot disagree with the world. A plan whose burrow no longer exists is dropped 
   `transform`; if it does not, rotate the parsed grid in `build_plan` instead.
 - Footprint/entrance inference as an exported helper, so the stamper and the picker share it.
 
-**Phase 1 — scan, pack, preview. No digging.**
+**Phase 1 — shipped as `fort/builder-burrow` (packer port, picker, apply now).**
+
+**Phase 1 (original) — scan, pack, preview. No digging.**
 - `fort/burrow-stamper` opens a window: burrow list → preset → params (spine, width,
   margin, seed) → *Plan*. Frame-paced scan and pack, preview overlay on the map (roads one
   colour, each stamp its own, entrances marked, shells dotted), the §4.6 report, *Reroll*.

@@ -59,6 +59,19 @@ any tile's verdict. Enabled by `magnus-scripts`.
 
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
 
+### **`fort/builder-burrow`**
+Turn a burrow into a district. Pick a burrow, a preset (hovels, 2x2 or 3x3 housing, luxury
+housing, varied housing, noble quarters, tombs, temples, guildhalls) and when to build, and the
+burrow is planned on the level you are looking at: roads grow from wherever the burrow touches
+your dug floor, one segment at a time, each segment dressed with statue rows and plazas and lined
+with districts as it is laid; a road with nothing along it is refused; a second pass fills the
+leftover frontage; noble suites and guild complexes are placed as suites with one door on the
+road. Then every room, road and hallway piece is started as a `fort/quickfort` job, so digging,
+smoothing, engraving and furniture sequence themselves per tile. The burrow's outer ring is never
+dug and nothing outside it is touched. Only "apply now" exists so far; the presets and stamps
+live in `internal/builder-burrow/presets.lua`. `fort/builder-burrow status` lists the plans made
+for this fort.
+
 ### **`fort/dig-shapes`**
 Right-click to dig; drag shapes that automatically become staircases, constructions, mining,
 chopping or removal.
@@ -97,9 +110,14 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 
 ### **`fort/planeswalkers`**
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
-terrain (with veins, sand/soil, adamantine, and the grass cover — surface grasses and the
-cavern mosses, fungi and lichens alike — but not the magma sea or the underworld, which
-each world keeps as its own), constructions, buildings, stockpiles with their
+terrain (with veins, sand/soil, the grass cover — surface grasses and the
+cavern mosses, fungi and lichens alike — and, on a same-size embark, the whole column down
+through the magma sea and hell; the destination keeps its own demons), adamantine spires
+carried as real spires with their contents — the demon wave waiting in each hollow, the
+divine treasures, the encased horrors and magma/water pockets, each with its trigger tiles
+and whether it already went off — while the destination's own spire contents under the fort
+are removed before the terrain lands, so the load itself can never set them off —
+constructions, buildings, stockpiles with their
 settings, zones, items (with containment, quality, decorations, and maker), artifacts (named,
 with their descriptions and full artifact status — value, quality and the Objects screen —
 even on pedestals), retired adventurers (unretirable on arrival), and
@@ -114,8 +132,10 @@ materials, procedurally generated races, necromantic secrets) is substituted wit
 equivalent or skipped with a report. Make a manual DF save before loading — there is no
 rollback. An in-game announcement tells you when the save is written and when the fort has
 been restored. Run it with no arguments for a walkthrough, or `help fort/planeswalkers` for
-the full description. `list`, `delete <name> --yes` (deletes only the snapshot folder),
-`status`, and `cancel` round out the set.
+the full description. A fort restored into a larger embark than it came from is saved again
+at its original size and area, so it keeps travelling to embarks of its own size. `list`,
+`delete <name> --yes` (deletes only the snapshot folder), `spires` (re-arm the carried spires
+on a fort restored before that pass existed), `status`, and `cancel` round out the set.
 
 ### **`fort/workshop-tools`**
 Puts a `+` on every queued workshop task that queues another one just like it, and sorts
