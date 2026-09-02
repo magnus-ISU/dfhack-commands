@@ -235,6 +235,18 @@ their full width are laid as joins and close loops. In towns, an angled connecto
 two-tile-thick diagonal band so every step touches by edges) may leave a junction square
 and is kept only if it reaches another road.
 
+**4.6c Caverns and throats.** Roads never leave the burrow, so a burrow painted over a
+cavern is a set of pockets joined by throats narrower than the road. When a continuation
+or a gap side street is blocked by rock outside the burrow (never by rooms), the packer
+pushes a narrower **connector** through the throat, down to one tile wide, up to three
+connectors in a chain. No district is packed along a connector, so the preset's road
+widths still hold everywhere rooms are, and a connector survives only if roads with rooms
+grew beyond it; otherwise it is removed at the end. A segment that reserved no
+continuation is a dead end and may use its end square for rooms, and a continuation
+shorter than the preset's wanted length is still tried, since the no-rooms rule undoes
+any that turn out useless. The entry on an empty slab is the boundary tile whose
+main-road-wide open run is longest, in any of the four directions.
+
 **4.6a Fill pass.** With the road network settled, every road edge is walked again with
 the preset's `second` district list (defaults to the first list), placing whatever still
 fits in the leftover frontage: the gaps left for side streets that never came, margins,

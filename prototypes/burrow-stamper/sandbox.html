@@ -380,7 +380,14 @@ function pack(o){
   const plazaStamps=roadPool.filter(r=>r.p.plain.w===r.p.plain.h&&r.p.plain.w>mainW);
   // entry: on the left edge, a main-road footprint free for ten tiles, pointing right
   const mh=mainW>>1;let entry=null,bd=1e9;
-  if(!prior){for(const[x,y]of freeList){let ok=true;for(let i=0;i<10&&ok;i++)for(let t=-((mainW-1)>>1);t<=(mainW>>1);t++)if(!free(x+i,y+t)||claim[y+t][x+i]!==0)ok=false;if(!ok)continue;const d=Math.abs(y-H/2)+x*2;if(d<bd){bd=d;entry=[x,y];}}
+  let entryDir=1;
+  if(!prior){ // the entry sits on the burrow's boundary and points into the longest open run of main-road width
+    let best=-1;
+    for(const[x,y]of freeList){for(let d=0;d<4;d++){const[dx,dy]=DIRS[d];
+      if(free(x-dx*2,y-dy*2))continue;                       // must come in from the edge
+      const qx=Math.abs(DIRS[(d+1)%4][0]),qy=Math.abs(DIRS[(d+1)%4][1]);
+      let run=0;for(let i=0;i<40;i++){let ok=true;for(let t=-((mainW-1)>>1);t<=(mainW>>1);t++){const a=x+dx*i+qx*t,b=y+dy*i+qy*t;if(!free(a,b)||claim[b][a]!==0)ok=false;}if(!ok)break;run++;}
+      if(run<6)continue;const score=run*10-Math.abs(y-H/2)*0.05-x*0.02;if(score>best){best=score;entry=[x,y];entryDir=d;}}}
     if(!entry)return null;}else entry=prior.entry;
   const rooms=prior?prior.rooms.slice():[],districts=prior?prior.districts.slice():[],segments=prior?prior.segments.slice():[],stamps=prior?prior.stamps.slice():[];
   let joins=0,undone=0,diagonals=0;
@@ -409,11 +416,11 @@ function pack(o){
     return true;};
 
   // ---- districts along one side of a segment ----
-  const packSide=(seg,side,list,gaps)=>{
+  const packSide=(seg,side,list,gaps,deadEnd)=>{
     const[dx,dy]=DIRS[seg.dir];const pd=side>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const half=eo(seg.w,px+py);
     const doorDir=(pd+2)%4;
     let i=0;let D=null,used=0,capsLeft=null,dIdx=-1;const tried=new Set();
-    const iEnd=seg.joined?seg.n:seg.n-seg.w;
+    const iEnd=(seg.joined||deadEnd)?seg.n:seg.n-seg.w; // a dead end has no junction to keep clear
     const doorAt=(i,setback)=>{const cx=seg.x+dx*i,cy=seg.y+dy*i;const fx=cx+px*half,fy=cy+py*half;const doorX=cx+px*(half+1+setback),doorY=cy+py*(half+1+setback);
       for(let t=1;t<=setback;t++){const x=cx+px*(half+t),y=cy+py*(half+t);if(!free(x,y)||!(claim[y][x]===0||claim[y][x]===4))return null;}
       if(at(fx,fy)!==1||!free(doorX,doorY)||!(claim[doorY][doorX]===0||(surface&&claim[doorY][doorX]===4)))return null;
@@ -508,7 +515,7 @@ function pack(o){
       n=i+1;}
     if(head.join&&n===want)joined=true;
     if(joined){if(n<head.minLen)return null;}else{if(n<head.minLen+half)return null;}
-    const seg={x,y,dir,w,n,tiles:[],joined,level:head.level,children:0,rooms:0};
+    const seg={x,y,dir,w,n,tiles:[],joined,level:head.level,children:0,rooms:0,connector:!!head.connector,parent:head.parent||null};
     for(let i=0;i<n;i++){for(const[a,b]of footprint(x+dx*i,y+dy*i,dir,w)){claim[b][a]=1;seg.tiles.push([a,b]);}}
     for(const k of own){const[a,b]=k.split(",").map(Number);if(claim[b][a]===5)claim[b][a]=0;}
     if(joined)joins++;
@@ -527,24 +534,29 @@ function pack(o){
     for(const c of cells)claim[c.y][c.x]=(c.ch==="s"||c.ch==="x")?6:1;
     stamps.push({stamp:name,cells,plaza:true});return true;};
   // reserve a straight continuation from (hx,hy) heading nd at width w; returns a head or null
-  const reserve=(hx,hy,nd,w,level,budget,parent,minLen,keep)=>{
+  let lastBlock="";
+  const reserve=(hx,hy,nd,w,level,budget,parent,minLen,keep)=>{lastBlock="";
     if(w===mainW)minLen=Math.max(minLen,minMain);
     const[ndx,ndy]=DIRS[nd];const nh=w>>1;const want=minLen+rng.int(Math.max(1,(w===mainW?maxMain:(w>1?22:16))-minLen));
     const stub=new Set();let got=0,join=false;
-    for(let t=0;t<want+nh;t++){let ok=true,road=0;const f=footprint(hx+ndx*t,hy+ndy*t,nd,w);
-      for(const[a,b]of f){const k=at(a,b);if(!free(a,b)||(k!==0&&k!==4&&k!==7&&k!==1))ok=false;if(k===1)road++;}
+    for(let t=0;t<want+nh;t++){let ok=true,road=0,rock=false;const f=footprint(hx+ndx*t,hy+ndy*t,nd,w);
+      for(const[a,b]of f){const k=at(a,b);if(!free(a,b)){ok=false;rock=true;}else if(k!==0&&k!==4&&k!==7&&k!==1)ok=false;if(k===1)road++;}
       if(ok&&road){if(road===f.length&&t>=minLen)join=true;break;}
       const[[h1x,h1y],[h2x,h2y]]=haloOf(hx+ndx*t,hy+ndy*t,nd,w);const hl=at(h1x,h1y),hr=at(h2x,h2y);
-      if(!ok||hl===1||hr===1||hl===6||hr===6)break;for(const[a,b]of f)stub.add(key(a,b));got=t+1;}
-    if(join?got<minLen:got<minLen+nh){ // too short for a road now; at a road end keep the first tiles of the lane clear of rooms so a later plan can grow through it
+      if(!ok||hl===1||hr===1||hl===6||hr===6){lastBlock=rock?"rock":"claim";break;}for(const[a,b]of f)stub.add(key(a,b));got=t+1;}
+    // a continuation shorter than wanted is still worth trying: in a cavern most runs are short, and the
+    // "no rooms, no road" rule undoes any that turn out useless. The floor is one room's worth of frontage.
+    const floor=Math.max(3,w+2);
+    if(join?got<2:got<floor+nh){ // truly no room; at a road end keep the first tiles of the lane clear so a later plan can grow through it
       if(keep){let t=0;for(const k of stub){if(t++>=3*w)break;const[a,b]=k.split(",").map(Number);if(claim[b][a]===0||claim[b][a]===4)claim[b][a]=7;}}return null;}
     for(const k of stub){const[a,b]=k.split(",").map(Number);claim[b][a]=5;}
-    return{x:hx,y:hy,dir:nd,w,level,minLen,want:join?got:Math.min(want,got-nh),join,budget,parent,stub};};
+    const laid=join?got:Math.min(want,got-nh);
+    return{x:hx,y:hy,dir:nd,w,level,minLen:Math.min(minLen,laid),want:laid,join,budget,parent,stub};};
   const release=(head)=>{if(head&&head.stub)for(const k of head.stub){const[a,b]=k.split(",").map(Number);if(claim[b][a]===5)claim[b][a]=0;}};
 
   // ---- growth ----
   const heads=[];
-  if(!prior){heads.push({x:entry[0],y:entry[1],dir:1,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;}
+  if(!prior){heads.push({x:entry[0],y:entry[1],dir:entryDir,w:mainW,level:0,minLen:minMain,budget:40});claim[entry[1]][entry[0]]=0;}
   else{ // existing geometry is the starting point: continue its roads from their end squares and branch from gaps along them
     for(const seg of prior.segments){if(seg.dir<0)continue;const[dx,dy]=DIRS[seg.dir];
       const[ecx,ecy]=sqCentre(seg);
@@ -571,37 +583,51 @@ function pack(o){
     let ends=[];
     if(!seg.joined&&head.budget>0){ends=head.level<=1?["S","L","R"]:["S",rng.next()<0.5?"L":"R"];}
     let plazaR=0;
-    if(ends.length>=2&&plazaStamps.length&&rng.next()<0.6){const ps=rng.pick(plazaStamps,s=>s.weight);const v=ps.p.plain;const r=v.w>>1;
+    if(!seg.connector&&ends.length>=2&&plazaStamps.length&&rng.next()<0.6){const ps=rng.pick(plazaStamps,s=>s.weight);const v=ps.p.plain;const r=v.w>>1;
       if(layRoadStamp(v,ecx-r,ecy-r,ps.name,false))plazaR=r;}
-    if(segStamps.length&&seg.n>=15&&rng.next()<0.5){const ss=rng.pick(segStamps,s=>s.weight);const v=(seg.dir===1||seg.dir===3)?(ss.p.plain.w>=ss.p.plain.h?ss.p.plain:ss.p.turned):(ss.p.plain.h>=ss.p.plain.w?ss.p.plain:ss.p.turned);
+    if(!seg.connector&&segStamps.length&&seg.n>=15&&rng.next()<0.5){const ss=rng.pick(segStamps,s=>s.weight);const v=(seg.dir===1||seg.dir===3)?(ss.p.plain.w>=ss.p.plain.h?ss.p.plain:ss.p.turned):(ss.p.plain.h>=ss.p.plain.w?ss.p.plain:ss.p.turned);
       if(v){const len=Math.max(v.w,v.h);const start=Math.floor((seg.n-half-len)/2);if(start>=1){const cx=seg.x+dx*start,cy=seg.y+dy*start;
         const ax=Math.min(cx,cx+dx*(len-1))+(dx===0?lo(seg.w):0),ay=Math.min(cy,cy+dy*(len-1))+(dy===0?lo(seg.w):0);layRoadStamp(v,ax,ay,ss.name,true);}}}
     // continuation heads from the end square (or the plaza), reserved for their whole length before rooms go down
     const newHeads=[];
     const tryEnd=(e)=>{let nd,hx,hy,w;
-      if(e==="S"){nd=seg.dir;w=seg.w;const R=plazaR||eo(seg.w,dx+dy);hx=ecx+dx*(R+1);hy=ecy+dy*(R+1);}
+      if(e==="S"){nd=seg.dir;w=seg.connector?mainW:seg.w;const R=plazaR||eo(seg.w,dx+dy);hx=ecx+dx*(R+1);hy=ecy+dy*(R+1);}
       else{nd=e==="L"?(seg.dir+3)%4:(seg.dir+1)%4;w=(head.level===0&&ends.length===1)?mainW:(rng.next()<0.5?mainW:sideW);if(seg.w===sideW)w=sideW;
         const[px,py]=DIRS[nd];const R=plazaR||eo(seg.w,px+py);hx=ecx+px*(R+1);hy=ecy+py*(R+1);}
-      const h2=reserve(hx,hy,nd,w,head.level+(w<seg.w?1:0),head.budget-1,seg,w>1?6:4,e==="S");if(h2)newHeads.push(h2);return !!h2;};
+      let h2=reserve(hx,hy,nd,w,head.level+(w<seg.w?1:0),head.budget-1,seg,w>1?6:4,e==="S");
+      // a throat too narrow for the road: push a narrower connector through it; it is kept only if
+      // roads with districts grow beyond it, and no district is packed along the connector itself
+      if(!h2&&lastBlock==="rock"&&(head.connDepth||0)<3)for(let cw=w-1;cw>=1&&!h2;cw--){h2=reserve(hx,hy,nd,cw,head.level,head.budget-1,seg,cw>1?4:3,false);if(h2){h2.connector=true;h2.connDepth=(head.connDepth||0)+1;}}
+      if(h2)newHeads.push(h2);return !!h2;};
     for(const e of rng.shuffle(ends.slice()))tryEnd(e);
     // angled connector from the end square (towns): kept only if it reaches another road
     if(preset.angled&&ends.length>=2&&rng.next()<0.5){newHeads.push({diag:rng.int(4),x:ecx,y:ecy,w:seg.w,want:6+rng.int(14),level:head.level});}
     // districts along both sides
-    for(const s of[1,-1])packSide(seg,s,dtypes,true);
+    if(!seg.connector)for(const s of[1,-1])packSide(seg,s,dtypes,true,newHeads.length===0);
     // side streets: found in the gaps the districts left, never reserved through rooms
     if(head.level<3&&seg.n>=8){
       for(const s of[1,-1]){const pd=s>0?(seg.dir+1)%4:(seg.dir+3)%4;const[px,py]=DIRS[pd];const ed=eo(seg.w,px+py);let last=-99;
         for(let i=2;i<seg.n-seg.w-2;i++){if(i-last<6)continue;
-          const h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,sideW,head.level+1,head.budget-1,seg,4);if(h2){newHeads.push(h2);last=i;}}}}
+          let h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,sideW,head.level+1,head.budget-1,seg,4);
+          // a gap that opens onto a throat: a narrower connector may lead to another pocket of the burrow
+          if(!h2&&lastBlock==="rock"&&(head.connDepth||0)<3)for(let cw=sideW-1;cw>=1&&!h2;cw--){h2=reserve(seg.x+dx*i+px*(ed+1),seg.y+dy*i+py*(ed+1),pd,cw,head.level+1,head.budget-1,seg,cw>1?4:3,false);if(h2){h2.connector=true;h2.connDepth=(head.connDepth||0)+1;}}
+          if(h2){newHeads.push(h2);last=i;}}}}
     seg.rooms=rooms.filter(r=>r.front&&seg.tiles.some(([a,b])=>a===r.front.x&&b===r.front.y)).length;
     // a road with nothing along it is not dug
-    if(seg.rooms===0){restore(sn);for(const h2 of newHeads)release(h2);release(head);undone++;continue;}
+    if(seg.rooms===0&&!seg.connector){restore(sn);for(const h2 of newHeads)release(h2);release(head);undone++;continue;}
     if(head.parent)head.parent.children++;
     for(const h2 of newHeads)heads.push(h2);
   }
+  // ---- connectors that led nowhere are removed (a connector is kept only if roads with rooms grew beyond it) ----
+  let connectorsCut=0;
+  for(let changed=true;changed;){changed=false;for(const seg of segments){if(seg.dead||!seg.connector)continue;
+    if(!segments.some(k=>!k.dead&&k.parent===seg)){seg.dead=true;for(const[a,b]of seg.tiles)if(claim[b][a]===1)claim[b][a]=0;changed=true;connectorsCut++;}}}
+  for(let i=segments.length-1;i>=0;i--)if(segments[i].dead)segments.splice(i,1);
   // ---- second pass: with the road network settled, walk every road edge again with the fill list ----
   const firstPassRooms=rooms.length;
-  for(const seg of segments){if(seg.dir<0||seg.dead)continue;for(const s of[1,-1])packSide(seg,s,dtypes2,false);}
+  for(const seg of segments){if(seg.dir<0||seg.dead)continue;const[ecx,ecy]=sqCentre(seg);const[dx,dy]=DIRS[seg.dir];
+    const dead=!seg.joined&&!DIRS.some(([px,py])=>{const e=eo(seg.w,px+py);return at(ecx+px*(e+1),ecy+py*(e+1))===1;});
+    for(const s of[1,-1])packSide(seg,s,dtypes2,false,dead);}
   const filled=rooms.length-firstPassRooms;
   // ---- designations ----
   const desig={smoothFloor:0,engrave:0,smoothWall:0};const wallKind=Array.from({length:H},()=>new Uint8Array(W));
@@ -615,7 +641,7 @@ function pack(o){
   let floors=0;for(const r of rooms)if(r.floors>1)floors+=r.floors-1;
   const allTypes=(prior?prior.dtypes:[]).concat(dtypes.filter(d=>!(prior&&prior.dtypes.some(q=>q.name===d.name))));
   return{rooms,stamps,segments,districts,claim,owner,wallKind,entry,dtypes:allTypes,
-    stats:{burrow:freeList.length,roadTiles,roomTiles,per,joins,undone,diagonals,filled,stampsN:stamps.length,segN:segments.length,desig,floors}};
+    stats:{burrow:freeList.length,roadTiles,roomTiles,per,joins,undone,diagonals,filled,connectors:segments.filter(s=>s.connector).length,connectorsCut,stampsN:stamps.length,segN:segments.length,desig,floors}};
 }
 
 // ---------- ui ----------
@@ -647,7 +673,7 @@ function run(){const p=currentPreset();if(!p)return;
   const per=Object.entries(s.per).map(([k,v])=>`${v} ${k}`).join(", ")||"none";
   $("stats").innerHTML=`<div><span>rooms</span><b>${res.rooms.length}</b>${s.filled} from the fill pass${s.floors?", +"+s.floors+" upper floors":""}</div>
     <div><span>districts</span><b>${res.districts.length}</b>${per}</div>
-    <div><span>roads</span><b>${s.segN}</b>segments, ${s.joins} loops closed (${s.diagonals} angled), ${s.stampsN} road stamps, ${s.undone} roomless roads refused</div>
+    <div><span>roads</span><b>${s.segN}</b>segments, ${s.connectors} narrow connectors, ${s.joins} loops closed, ${s.stampsN} road stamps, ${s.undone} roomless roads refused</div>
     <div><span>burrow used</span><b>${used}%</b>${s.roomTiles} room + ${s.roadTiles} road of ${s.burrow}</div>
     <div><span>road share</span><b>${(s.roadTiles/Math.max(1,s.roomTiles+s.roadTiles)*100).toFixed(0)}%</b>of dug tiles</div>
     <div><span>designations</span><b>${s.desig.smoothFloor}</b>smooth floor, ${s.desig.engrave} engrave, ${s.desig.smoothWall} smooth wall</div>`;}
