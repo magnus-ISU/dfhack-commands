@@ -75,7 +75,8 @@ ZONES AND STOCKPILES ARE ALL-OR-NOTHING
   reported once as a fortress announcement naming the blueprint.
 
 WHEN IT CANNOT FINISH
-  It waits, and shows you that it is waiting. A job that stops advancing usually
+  It waits, and shows you that it is waiting -- unless a designation it placed was
+  cancelled and stayed cancelled, which drops that blueprint (see below). A job that stops advancing usually
   has an ordinary reason -- the beds are not built yet, the miners are busy on
   something else, the stone for a door has not arrived -- and none of those mean
   the plan is wrong. There is no give-up timer, because on a real fort a timer
@@ -105,16 +106,23 @@ HOW PROGRESS IS TRACKED
   a tile that is not ready (you cannot smooth un-dug rock), so a premature step
   is a no-op that gets retried, never a corruption.
 
-  One DF mechanic matters here: a smoothing designation is CONSUMED when DF turns it
-  into work. `designation.smooth` goes back to 0 and a DetailWall / DetailFloor job
-  appears on that square, waiting for a mason. So an empty designation does not mean
-  "not designated yet" -- usually it means "already taken" -- and a step counts as
-  placed while either the designation or the job is there.
+  One DF mechanic matters here: a designation is CONSUMED when DF turns it into work.
+  The tile's `dig` or `smooth` field goes back to 0 and a Dig / DetailWall / DetailFloor
+  job appears on that square, waiting for a worker. So an empty designation does not mean
+  "not designated yet" -- usually it means "already taken" -- and a step counts as placed
+  while either the designation or a job for it is there. Reading it the other way is not
+  a small mistake: it cancelled 26 blueprints in a live fort, half of them on mining.
 
-  A step that has been placed is then LEFT ALONE. If both the designation and the job
-  are gone it waits a minute before putting it back, because re-designating a square a
-  mason is already walking to makes DF drop that job and take a new one -- do it every
-  pump and the work is picked up and cancelled forever, and never done.
+  A step that has been placed is then LEFT ALONE for a minute. If both the designation
+  and any job for it are gone by then, DF cancelled that work and did not hand the
+  designation back -- which is ordinary: a mason is interrupted, a miner is called away.
+  It is placed again, once. Re-placing it any sooner is what turns work into an endless
+  pick-up-and-cancel, because a designation put back on a square a worker is already
+  walking to makes DF drop that job and take a new one.
+
+  A square that loses its designation more than a few times is not bad luck: something
+  about it will not be worked. Only then is the blueprint cancelled, and the
+  announcement recentres the map on the square and says which stage it was.
 
   MINING AND SMOOTHING NEVER SHARE A TILE. DF is happy to smooth the face of a natural
   wall, so a square that is one blueprint's flanking wall and another's doorway can end
@@ -140,14 +148,20 @@ local GLOBAL_KEY = 'quickfort-seq'
 local PUMP_INTERVAL_MS = 1500     -- how often a job is looked at
 local MAX_STEP_TRIES = 6          -- a designation DF will not take (smoothing soil, say)
                                   -- is skipped after this many tries, not retried forever
-local RETRY_MS = 60000            -- how long a placed designation is left alone before it is
-                                  -- considered lost and put back
+local RETRY_MS = 60000            -- how long a placed designation is left alone before it
+                                  -- counts as lost
+local MAX_STEP_LOSSES = 3         -- how many times a square may lose its designation before
+                                  -- the blueprint is given up on
 
 -- ---------------------------------------------------------------------------
 -- stages
 -- ---------------------------------------------------------------------------
 
 STAGE = {dig = 1, smooth = 2, engrave = 3, carve = 4, build = 5, region = 6}
+
+-- how a stage is named in an announcement
+STAGE_NAME = {[1] = 'mining', [2] = 'smoothing', [3] = 'engraving', [4] = 'carving',
+              [5] = 'construction', [6] = 'placement'}
 
 
 -- Which stage a `#dig` cell belongs to, by its code. Marker prefixes and the
@@ -238,36 +252,39 @@ local function has_dig_designation(pos)
     return d and d.dig ~= df.tile_dig_designation.No
 end
 
--- DF CONSUMES a smoothing designation when it turns it into a job: designation.smooth goes
--- back to 0 and a DetailWall / DetailFloor job appears at that square, waiting for a mason.
--- So an empty designation does not mean "not designated" -- it usually means "already
--- taken" -- and re-reading it that way had this tool re-designating squares that were
--- already queued, then writing them off when the designation "kept vanishing".
-local DETAILING_JOBS = {
-    [df.job_type.DetailWall] = true,
-    [df.job_type.DetailFloor] = true,
-    [df.job_type.CarveTrack] = true,
-    [df.job_type.CarveFortification] = true,
-    [df.job_type.CarveUpwardStaircase] = true,
-    [df.job_type.CarveDownwardStaircase] = true,
-    [df.job_type.CarveUpDownStaircase] = true,
-    [df.job_type.CarveRamp] = true,
+-- DF CONSUMES a designation when it turns it into a job. The tile's `dig` or `smooth`
+-- field goes back to 0 and a Dig / DetailWall / DetailFloor job appears on that square,
+-- waiting for a worker -- measured in a live fort: every one of 17 active Dig jobs sat on
+-- a tile with no dig designation left on it. So an empty designation does not mean "not
+-- designated": most often it means "already taken", and reading it the other way had this
+-- tool re-designating squares that were already queued and then declaring the work lost.
+local DESIGNATION_JOBS = {
+    [df.job_type.Dig] = 'dig',
+    [df.job_type.DigChannel] = 'dig',
+    [df.job_type.CarveUpwardStaircase] = 'dig',
+    [df.job_type.CarveDownwardStaircase] = 'dig',
+    [df.job_type.CarveUpDownStaircase] = 'dig',
+    [df.job_type.CarveRamp] = 'dig',
+    [df.job_type.RemoveStairs] = 'dig',
+    [df.job_type.DetailWall] = 'detail',
+    [df.job_type.DetailFloor] = 'detail',
+    [df.job_type.CarveTrack] = 'detail',
+    [df.job_type.CarveFortification] = 'detail',
 }
-local function detailing_job_tiles()
+local function designation_job_tiles()
     local set = {}
     local link = df.global.world.jobs.list.next
     while link do
         local job = link.item
-        if job and DETAILING_JOBS[job.job_type] then
-            set[('%d,%d,%d'):format(job.pos.x, job.pos.y, job.pos.z)] = true
-        end
+        local kind = job and DESIGNATION_JOBS[job.job_type]
+        if kind then set[('%d,%d,%d'):format(job.pos.x, job.pos.y, job.pos.z)] = kind end
         link = link.next
     end
     return set
 end
-local detail_jobs = {}
-local function has_detailing_job(pos)
-    return detail_jobs[('%d,%d,%d'):format(pos.x, pos.y, pos.z)] or false
+local job_tiles = {}
+local function has_job_for(pos, kind)
+    return job_tiles[('%d,%d,%d'):format(pos.x, pos.y, pos.z)] == kind
 end
 
 local function has_smooth_designation(pos)
@@ -349,13 +366,15 @@ end
 
 -- Has the designation this step asks for been placed on the tile?
 local function step_pending_on_map(step, pos)
-    if step.stage == STAGE.dig then return has_dig_designation(pos) end
+    if step.stage == STAGE.dig then
+        return has_dig_designation(pos) or has_job_for(pos, 'dig')
+    end
     if step.stage == STAGE.smooth or step.stage == STAGE.engrave then
-        return has_smooth_designation(pos) or has_detailing_job(pos)
+        return has_smooth_designation(pos) or has_job_for(pos, 'detail')
     end
     if step.stage == STAGE.carve then
         return has_smooth_designation(pos) or has_track_designation(pos)
-            or has_detailing_job(pos)
+            or has_job_for(pos, 'detail')
     end
     if step.stage == STAGE.build then return building_at(pos) ~= nil end
     return false
@@ -535,9 +554,18 @@ local function persist()
     pcall(dfhack.persistent.saveSiteData, GLOBAL_KEY, {jobs = out})
 end
 
-local function warn(msg)
-    pcall(dfhack.gui.showAnnouncement, 'fort/quickfort: ' .. msg, COLOR_YELLOW, true)
-    print('fort/quickfort: ' .. msg)
+local function warn(msg, pos)
+    -- With a position it goes out as a ZOOM announcement, so the notification recentres
+    -- the map on the square it is about when you click it (or press the recentre key).
+    -- The text then says WHY, not where -- the coordinates are what the zoom is for.
+    local text = 'fort/quickfort: ' .. msg
+    local ok = false
+    if pos then
+        ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.CANCEL_JOB, pos,
+                   text, COLOR_YELLOW, true)
+    end
+    if not ok then pcall(dfhack.gui.showAnnouncement, text, COLOR_YELLOW, true) end
+    print(text)
 end
 
 function start_job(entry, pos)
@@ -609,8 +637,15 @@ local function restore_jobs()
     for _, saved in ipairs(data.jobs or {}) do
         local job = {name = saved.name, pos = saved.pos, sections = saved.sections,
                      data = saved.data, last_progress = dfhack.getTickCount(), done_count = 0}
-        local ok = pcall(function() job.plan = build_plan(job) end)
-        if ok and job.plan then jobs[#jobs + 1] = job end
+        local ok, err = pcall(function() job.plan = build_plan(job) end)
+        if ok and job.plan then
+            jobs[#jobs + 1] = job
+        else
+            -- never disappear quietly: a blueprint that cannot be rebuilt is one the fort
+            -- will simply stop working on, and that is worth saying out loud
+            warn(('%s: dropped on load -- its blueprint could not be rebuilt (%s)')
+                :format(job.name, tostring(err)))
+        end
     end
     dfhack.internal.quickfort_seq_jobs = jobs
 end
@@ -644,14 +679,29 @@ end
 
 local function region_tiles_ready(job, region, stages)
     local needs_building = region.mode == 'query' or region.mode == 'config'
+    -- A ZONE is the loose case. It takes in the room's WALLS as well as its floor, so it
+    -- must tolerate squares that are wall and squares still queued for smoothing and
+    -- engraving -- a bedroom should be usable as soon as the room is dug, not months later
+    -- when the last carving is finished. Everything else (a building, a stockpile) needs
+    -- its squares finished and floored.
+    local zone = region.mode == 'zone'
     for _, c in ipairs(region.cells) do
         local k = key(c.pos)
         local t = job.plan.tiles[k]
-        if t and t.at <= #t.steps then return false end
+        if t then
+            if not zone then
+                if t.at <= #t.steps then return false end
+            else
+                for i = t.at, #t.steps do
+                    if t.steps[i].stage == STAGE.dig then return false end
+                end
+            end
+        end
         -- and nothing else may still owe this square earlier work
         local earliest = stages and stages[k]
-        if earliest and earliest < region.stage then return false end
-        if has_dig_designation(c.pos) or is_wall(c.pos) then return false end
+        if earliest and earliest < (zone and STAGE.smooth or region.stage) then return false end
+        if has_dig_designation(c.pos) then return false end
+        if not zone and is_wall(c.pos) then return false end
         -- query/config drive a building's own screen, so the building has to be
         -- standing before the keys mean anything
         if needs_building and not building_at(c.pos) then return false end
@@ -782,18 +832,31 @@ local function pump_job(job, stages)
                 if step_done_on_map(step, t.pos) then
                     finish()
                 elseif not step_pending_on_map(step, t.pos) then
-                    -- Neither the designation nor a job for it is on the square any more.
-                    -- Do NOT rush to put it back: a designation re-placed on a square a
-                    -- mason is already walking to makes DF drop the job it had and take a
-                    -- new one, so re-applying every pump means the work is picked up and
-                    -- cancelled forever and never actually done. Leave it alone for a
-                    -- minute; if it is still missing then, it really was lost.
+                    -- Neither the designation nor a job for it is on the square any more:
+                    -- DF cancelled the work and did not hand the designation back. That is
+                    -- ORDINARY -- a mason gets interrupted, a miner is called away -- so it
+                    -- is placed again. What must not happen is placing it again straight
+                    -- away: a designation put back on a square a worker is already walking
+                    -- to makes DF drop that job and take a new one, and the work is picked
+                    -- up and cancelled forever. So it waits a minute (DF is often just
+                    -- between consuming a designation and creating the job) and then tries
+                    -- once more. A square that loses its designation MAX_STEP_LOSSES times
+                    -- is not bad luck any more -- something about it will not be worked --
+                    -- and only then is the blueprint given up on.
                     local now = dfhack.getTickCount()
                     if not step.retry_at then
                         step.retry_at = now + RETRY_MS
                     elseif now >= step.retry_at then
+                        step.losses = (step.losses or 0) + 1
                         step.applied, step.retry_at = false, nil
                         advanced = true
+                        if step.losses > MAX_STEP_LOSSES then
+                            job.lost = {
+                                what = STAGE_NAME[step.stage] or step.text,
+                                losses = step.losses,
+                                pos = copyall(t.pos),
+                            }
+                        end
                     end
                 end
             else
@@ -824,7 +887,7 @@ local function pump_job(job, stages)
                     if not job.warned_overlap then
                         job.warned_overlap = true
                         warn(('%s: a zone overlaps one that already exists -- skipped')
-                            :format(job.name))
+                            :format(job.name), region.cells[1] and region.cells[1].pos)
                     end
                 elseif region.stage == STAGE.build
                         and building_at(region.cells[1].pos) then
@@ -847,12 +910,18 @@ end
 
 function pump()
     local jobs = jobs_table()
-    detail_jobs = detailing_job_tiles()
+    job_tiles = designation_job_tiles()
     local stages = earliest_pending_stage()
     for i = #jobs, 1, -1 do
         local job = jobs[i]
         local _, pending = pump_job(job, stages)
-        if pending == 0 then
+        if job.lost then
+            table.remove(jobs, i)
+            persist()
+            warn(('%s: cancelled -- its %s was called off %d times over, so that square is'
+                  .. ' not going to be worked (out of reach, or something is standing on it)')
+                :format(job.name, job.lost.what, job.lost.losses), job.lost.pos)
+        elseif pending == 0 then
             table.remove(jobs, i)
             persist()
             warn(('%s: finished'):format(job.name))

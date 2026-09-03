@@ -18,7 +18,8 @@ any tile's verdict. Enabled by `magnus-scripts`.
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
 
 ### **`fort/builder-burrow`**
-Turn a burrow into a district. Pick a burrow, a preset (hovels, 2x2 or 3x3 housing, luxury
+Turn a burrow into a district. Pick a burrow (only those on a single z-level are listed, under
+the name DF shows them by; the burrow is deleted once its blueprints start), a preset (hovels, 2x2 or 3x3 housing, luxury
 housing, varied housing, noble quarters, tombs, temples, guildhalls) and when to build, and the
 burrow is planned on the level you are looking at: roads grow from wherever the burrow touches
 your dug floor, one segment at a time, each segment dressed with statue rows and plazas and lined
@@ -28,7 +29,8 @@ road. Then every room, road and hallway piece is started as a `fort/quickfort` j
 digging,
 smoothing, engraving and furniture sequence themselves per tile, and the three blueprints that
 want a given square wait for each other on it — a mine designation and a smooth designation never
-share a tile, because DF works the smoothing, the mining never happens, and the wall just stays. Each stamp declares the activity zone its
+share a tile, because DF works the smoothing, the mining never happens, and the wall just stays. Every wall around the plan is smoothed, and a room's walls are engraved as well — hallway
+walls are left plain, so the carvings belong to the rooms. Each stamp declares the activity zone its
 room carries (`zone = 'b'`/`'o'`/`'h'`/`'T'` in the preset), and the blueprint gets a `#zone`
 section next to its dig, smooth, engrave and build sections — bedrooms, offices, dining rooms and
 single-coffin tombs. A catacomb or family tomb declares none and is left to `fort/auto-tomb`,

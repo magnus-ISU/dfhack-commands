@@ -46,6 +46,15 @@ BUILD WHEN
   reason (all floor already, no dug floor to start from, or no room for a road of
   this preset's width).
 
+THE BURROW
+  Only burrows that sit on ONE z-level are offered: a plan is laid on a single level, so
+  picking a burrow that spans several would silently plan one floor of it and leave the
+  rest. Burrows are listed under the name DF shows them by ("Burrow 7" when unnamed).
+
+  A burrow is CONSUMED by planning: once the blueprints are started it is deleted, since
+  it was the instruction rather than anything the fort needs afterwards, and a list of
+  spent outlines is worth nothing.
+
 WHAT IT NEEDS FROM THE BURROW
   The burrow marks rock the tool may dig. Its outermost ring is never dug, so it
   becomes wall, and the tool only starts where the burrow touches dug floor: a
@@ -58,13 +67,16 @@ WHAT IT NEEDS FROM THE BURROW
 
 CODES
   Every tile a plan touches is dug and then smoothed before anything is built on it.
-  ENGRAVING is for walls only, so the pictures are at eye level and the floors stay
-  plain -- and EVERY wall around what the plan digs is dressed, not just the walls a
-  room formally owns, or the margin rock between two rooms would be left bare. Each
-  wall belongs to exactly one blueprint (two jobs would fight over the square, and two
-  room zones covering it would overlap, which DF refuses). Rock that the plan is going
-  to dig out is never smoothed as though it were a wall: a road's flank is often the
-  square a room's door gets cut through.
+  EVERY wall around what the plan digs is smoothed, not just the walls a room formally
+  owns, or the margin rock between two rooms would be left bare.
+
+  ENGRAVING is narrower still: walls, and only a ROOM's walls. Floors stay plain so the
+  pictures are at eye level, and hallways stay plain so the carvings belong to the rooms
+  people live in. Each wall belongs to exactly one blueprint (two jobs would fight over
+  the square, and two room zones covering it would overlap, which DF refuses), and rooms
+  are emitted before roads, so a wall shared between the two is the room's and is
+  engraved. Rock that the plan is going to dig out is never smoothed as though it were a
+  wall: a road's flank is often the square a room's door gets cut through.
 
   fort/quickfort sequences a tile's own steps (dig, smooth, engrave, build), so each
   square is dressed as soon as IT is ready rather than waiting for the rest.
@@ -336,9 +348,10 @@ local function emit_jobs(result, slab, preset_name, yield, on_status, in_burrow)
                 smooth[#smooth + 1] = {x, y, 's'}
             end
         end
+        -- a hallway's walls are smoothed but NOT engraved: the carvings belong in the
+        -- rooms. (A wall shared with a room went to the room, which is emitted first.)
         for _, w in ipairs(claim_walls(dig)) do
             smooth[#smooth + 1] = {w[1], w[2], 's'}
-            engrave[#engrave + 1] = {w[1], w[2], 'e'}
         end
         if start_data_job(job_name(preset_name, ('road %dx%d'):format(seg.w, seg.n), i), origin, dig, smooth, engrave, {}) then
             started = started + 1
@@ -355,8 +368,7 @@ local function emit_jobs(result, slab, preset_name, yield, on_status, in_burrow)
             if b and c.ch ~= 'd' then build[#build + 1] = {c.x, c.y, b} end
         end
         for _, w in ipairs(claim_walls(dig)) do
-            smooth[#smooth + 1] = {w[1], w[2], 's'}
-            engrave[#engrave + 1] = {w[1], w[2], 'e'}
+            smooth[#smooth + 1] = {w[1], w[2], 's'}   -- hallway walls: smoothed, not engraved
         end
         if start_data_job(job_name(preset_name, st.stamp, i), origin, dig, smooth, engrave, build) then
             started = started + 1
@@ -369,6 +381,30 @@ end
 -- ---------------------------------------------------------------------------
 -- the pipeline: scan, pack, emit -- pumped a step per frame
 -- ---------------------------------------------------------------------------
+
+-- What DF calls this burrow. An unnamed one is "Burrow <id+1>" on DF's own screens, so
+-- that is what the picker shows -- not an internal id the game never mentions.
+function burrow_name(burrow)
+    return #burrow.name > 0 and burrow.name or ('Burrow %d'):format(burrow.id + 1)
+end
+
+-- The burrow was the instruction, and the plan has now taken it, so it is deleted --
+-- otherwise the burrow list fills with spent outlines that mean nothing. Same steps the
+-- stock quickfort burrow code uses: drop its units and tiles, take it out of the list,
+-- free it.
+local function delete_burrow(burrow)
+    pcall(dfhack.burrows.clearUnits, burrow)
+    pcall(dfhack.burrows.clearTiles, burrow)
+    local list = df.global.plotinfo.burrows.list
+    for i, b in ipairs(list) do
+        if b.id == burrow.id then
+            list:erase(i)
+            b:delete()
+            return true
+        end
+    end
+    return false
+end
 
 local function persist_plan(record)
     local data = dfhack.persistent.getSiteData(GLOBAL_KEY, {plans = {}})
@@ -463,7 +499,9 @@ function plan_and_apply(burrow, preset_name, on_status, on_done)
         local per = {}
         for name, n in pairs(result.stats.per) do per[#per + 1] = ('%d %s'):format(n, name) end
         table.sort(per)
-        persist_plan({burrow = burrow.id, burrow_name = burrow.name, preset = preset_name, z = z,
+        local burrow_id, burrow_label = burrow.id, burrow_name(burrow)
+        if started > 0 then delete_burrow(burrow) end
+        persist_plan({burrow = burrow_id, burrow_name = burrow_label, preset = preset_name, z = z,
                       seed = seed, rooms = #result.rooms, roads = result.stats.segN, jobs = started,
                       when = 'now', year = df.global.cur_year, tick = df.global.cur_year_tick})
         return {rooms = #result.rooms, roads = result.stats.segN, stamps = result.stats.stampsN,
@@ -499,9 +537,20 @@ BuilderWindow.ATTRS{
 
 function BuilderWindow:init()
     local burrows = {}
+    local multi_z = 0
     for _, b in ipairs(df.global.plotinfo.burrows.list) do
-        local name = b.name ~= '' and b.name or ('burrow #' .. b.id)
-        burrows[#burrows + 1] = {text = name, burrow = b}
+        local levels = {}
+        local n = 0
+        for _, block in ipairs(dfhack.burrows.listBlocks(b)) do
+            if not levels[block.map_pos.z] then levels[block.map_pos.z] = true; n = n + 1 end
+        end
+        -- a plan is laid on ONE z-level, so a burrow spanning several is not offered:
+        -- picking one would silently plan a single floor of it and leave the rest alone
+        if n == 1 then
+            burrows[#burrows + 1] = {text = burrow_name(b), burrow = b}
+        elseif n > 1 then
+            multi_z = multi_z + 1
+        end
     end
     self:addviews{
         widgets.Label{frame = {t = 0, l = 0}, text = 'Burrow'},
@@ -519,7 +568,17 @@ function BuilderWindow:init()
         widgets.Label{view_id = 'status', frame = {t = 18, l = 0}, text = ''},
     }
     self:refresh_presets()
-    if #burrows == 0 then self:status('this fort has no burrows: paint one over the rock to build in') end
+    if #burrows == 0 then
+        if multi_z > 0 then
+            self:status(('no burrow on a single level: %d span several, and a plan covers one')
+                :format(multi_z))
+        else
+            self:status('this fort has no burrows: paint one over the rock to build in')
+        end
+    elseif multi_z > 0 then
+        self:status(('%d burrow%s not listed: they span several z-levels')
+            :format(multi_z, multi_z == 1 and ' is' or 's are'))
+    end
 end
 
 function BuilderWindow:status(text)
@@ -596,7 +655,7 @@ local function status()
     if not data.plans or #data.plans == 0 then print('fort/builder-burrow: no plans stored for this fort') return end
     for _, p in ipairs(data.plans) do
         print(('  %s in %s (z %d): %d rooms, %d roads, %d jobs, seed %d, %s')
-            :format(p.preset, p.burrow_name ~= '' and p.burrow_name or ('burrow #' .. p.burrow), p.z,
+            :format(p.preset, p.burrow_name ~= '' and p.burrow_name or ('Burrow %d'):format(p.burrow + 1), p.z,
                     p.rooms, p.roads, p.jobs, p.seed, p.when))
     end
 end
