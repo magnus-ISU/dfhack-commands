@@ -20,6 +20,40 @@ Each tile advances on its own. The mason smooths the first stretch of corridor
 while miners are still cutting the far end; a bed goes down the moment its own
 square is floor, not when the last tile of the blueprint is done.
 
+TWO DESIGNATIONS NEVER SHARE A SQUARE
+  DF is happy to smooth the face of a natural wall. So a tile that carries a mine
+  designation AND a smooth designation gets SMOOTHED -- and the mining never happens.
+  Worse, finishing the smoothing clears the square's designations, so the wall is
+  left standing in the middle of a room with nothing on it at all, and every step
+  queued behind that square waits forever. Four rules keep that state unreachable:
+
+  1. WITHIN a blueprint, a tile's steps run in stage order -- its dig finishes before
+     its smooth is designated, its smooth before its engraving.
+  2. BETWEEN blueprints, a step may only act when its stage is the earliest anything
+     still has waiting at that square (`earliest_pending_stage`). Several plans can
+     want one tile -- a road whose flank is the next room's doorway, a second apply
+     over the same burrow -- and this is the queue between them. Stockpiles, zones
+     and buildings hold their squares the same way until they are placed.
+  3. A smoothing or engraving step also waits while the square carries a live dig
+     designation that belongs to no job at all -- one you placed by hand.
+  4. Mining wins any tie: a tile sitting at its dig step has any smoothing
+     designation stripped straight off it.
+
+  A HIDDEN square cannot be smoothed or engraved -- DF does not keep those
+  designations on undiscovered rock -- so those steps WAIT until the rock beside them is
+  dug and the wall is revealed. They are never retried-and-given-up in the meantime,
+  which would leave a room's walls silently unsmoothed.
+
+  A step is never written off while DF might still take it. Rock is always diggable, so
+  a dig designation that went missing was taken away by something else, and mining is
+  never given up on at all. For the rest, only an OUTRIGHT refusal counts against a
+  square -- DF declining the designation the moment it is placed, which is the permanent
+  kind of no (smoothing a soil floor). A designation that was accepted and later vanished
+  is a cancelled job -- the wall went out of reach while the room was being dug, the
+  dwarf was interrupted -- and it is simply placed again. Anything that did not happen --
+  still rock past its dig step, still rough past its smoothing -- is rewound to that step
+  and designated again.
+
     fort/quickfort           open the picker
     fort/quickfort status    running jobs, in the console
     fort/quickfort cancel    cancel every running job
@@ -55,15 +89,41 @@ WHEN IT CANNOT FINISH
 HOW PROGRESS IS TRACKED
   Nothing about the plan is stored beyond the blueprint name, the section list
   and the cursor it started at: the tile plan is rebuilt from the blueprint on
-  every load, and progress is read back off the MAP -- a dig step is done when
-  its designation is gone, a smooth step when `designation.smooth` clears, a
-  build step when the building exists. That means a save/load, a script reload
-  or a mid-job cancel-and-restart all pick up exactly where the fort actually
-  is, and it is impossible for the stored state to disagree with the world.
+  every load, and progress is read back off the MAP. Every "done" test is
+  POSITIVE evidence -- the tile is no longer wall, the tile is smooth, an
+  engraving exists there, the track is carved, the building stands -- never the
+  absence of a designation, which cannot tell a finished tile from one that was
+  never asked. That means a save/load, a script reload or a mid-job
+  cancel-and-restart all pick up exactly where the fort actually is, and it is
+  impossible for the stored state to disagree with the world.
+
+  A designation DF will not accept -- smoothing a soil floor, say -- is retried a
+  few times and then given up on, so the steps queued behind it (the furniture
+  waiting for that tile) are not blocked forever.
 
   Applying a step early is harmless: quickfort's own designation actions refuse
   a tile that is not ready (you cannot smooth un-dug rock), so a premature step
   is a no-op that gets retried, never a corruption.
+
+  One DF mechanic matters here: a smoothing designation is CONSUMED when DF turns it
+  into work. `designation.smooth` goes back to 0 and a DetailWall / DetailFloor job
+  appears on that square, waiting for a mason. So an empty designation does not mean
+  "not designated yet" -- usually it means "already taken" -- and a step counts as
+  placed while either the designation or the job is there.
+
+  A step that has been placed is then LEFT ALONE. If both the designation and the job
+  are gone it waits a minute before putting it back, because re-designating a square a
+  mason is already walking to makes DF drop that job and take a new one -- do it every
+  pump and the work is picked up and cancelled forever, and never done.
+
+  MINING AND SMOOTHING NEVER SHARE A TILE. DF is happy to smooth the face of a natural
+  wall, so a square that is one blueprint's flanking wall and another's doorway can end
+  up carrying a mine designation and a smooth designation at once -- and then the
+  smoothing is what gets worked, the mining never happens, and everything queued behind
+  that square waits forever. Mining wins, both ways round: a smoothing or engraving step
+  waits while its tile still carries a dig designation (from any blueprint, or from you)
+  or while another running job has yet to dig it, and a tile at its dig step has any
+  smoothing designation stripped off it.
 ]]
 
 local gui = require('gui')
@@ -78,12 +138,17 @@ local quickfort_parse = reqscript('internal/quickfort/parse')
 local GLOBAL_KEY = 'quickfort-seq'
 
 local PUMP_INTERVAL_MS = 1500     -- how often a job is looked at
+local MAX_STEP_TRIES = 6          -- a designation DF will not take (smoothing soil, say)
+                                  -- is skipped after this many tries, not retried forever
+local RETRY_MS = 60000            -- how long a placed designation is left alone before it is
+                                  -- considered lost and put back
 
 -- ---------------------------------------------------------------------------
 -- stages
 -- ---------------------------------------------------------------------------
 
 STAGE = {dig = 1, smooth = 2, engrave = 3, carve = 4, build = 5, region = 6}
+
 
 -- Which stage a `#dig` cell belongs to, by its code. Marker prefixes and the
 -- priority suffix are stripped first: "ms3" is a smooth.
@@ -158,9 +223,51 @@ local function occupancy(pos)
     return block and block.occupancy[bx][by] or nil
 end
 
+-- Undiscovered rock. DF will happily take a MINE designation on a hidden tile (that is how
+-- you dig into unexplored stone), but it refuses smoothing, engraving and track carving
+-- there -- quickfort's own actions return nothing for them. A hidden square is therefore
+-- not "impossible", it is "not yet": it becomes designatable the moment the rock beside it
+-- is dug out and the wall is revealed.
+local function is_hidden(pos)
+    local d = designation(pos)
+    return d and d.hidden or false
+end
+
 local function has_dig_designation(pos)
     local d = designation(pos)
     return d and d.dig ~= df.tile_dig_designation.No
+end
+
+-- DF CONSUMES a smoothing designation when it turns it into a job: designation.smooth goes
+-- back to 0 and a DetailWall / DetailFloor job appears at that square, waiting for a mason.
+-- So an empty designation does not mean "not designated" -- it usually means "already
+-- taken" -- and re-reading it that way had this tool re-designating squares that were
+-- already queued, then writing them off when the designation "kept vanishing".
+local DETAILING_JOBS = {
+    [df.job_type.DetailWall] = true,
+    [df.job_type.DetailFloor] = true,
+    [df.job_type.CarveTrack] = true,
+    [df.job_type.CarveFortification] = true,
+    [df.job_type.CarveUpwardStaircase] = true,
+    [df.job_type.CarveDownwardStaircase] = true,
+    [df.job_type.CarveUpDownStaircase] = true,
+    [df.job_type.CarveRamp] = true,
+}
+local function detailing_job_tiles()
+    local set = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        if job and DETAILING_JOBS[job.job_type] then
+            set[('%d,%d,%d'):format(job.pos.x, job.pos.y, job.pos.z)] = true
+        end
+        link = link.next
+    end
+    return set
+end
+local detail_jobs = {}
+local function has_detailing_job(pos)
+    return detail_jobs[('%d,%d,%d'):format(pos.x, pos.y, pos.z)] or false
 end
 
 local function has_smooth_designation(pos)
@@ -173,6 +280,59 @@ local function has_track_designation(pos)
     if not o then return false end
     return o.carve_track_north or o.carve_track_south
         or o.carve_track_east or o.carve_track_west
+end
+
+-- Positively smoothed, as opposed to "no smoothing designation on the tile": a
+-- freshly dug floor has no designation either.
+local function is_smoothed(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    if not tt then return false end
+    return df.tiletype.attrs[tt].special == df.tiletype_special.SMOOTH
+end
+
+local function is_track(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    if not tt then return false end
+    return df.tiletype.attrs[tt].special == df.tiletype_special.TRACK
+end
+
+local function is_fortification(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    if not tt then return false end
+    return df.tiletype.attrs[tt].shape == df.tiletype_shape.FORTIFICATION
+end
+
+-- Engravings are a world-level list, not a tile field, so keep a position set and
+-- extend it as the list grows (it only shrinks when an engraving is destroyed, which
+-- is when the whole set is rebuilt).
+local engraved = {n = -1, set = {}}
+local function engraving_key(pos) return ('%d,%d,%d'):format(pos.x, pos.y, pos.z) end
+local function has_engraving(pos)
+    local list = df.global.world.event.engravings
+    local n = #list
+    if n < engraved.n then
+        engraved = {n = 0, set = {}}
+    end
+    if n > engraved.n then
+        for i = math.max(engraved.n, 0), n - 1 do
+            local e = list[i]
+            if e then engraved.set[engraving_key(e.pos)] = true end
+        end
+        engraved.n = n
+    end
+    return engraved.set[engraving_key(pos)] or false
+end
+
+-- Take a smoothing designation off a tile. A tile carrying BOTH a mine and a smooth
+-- designation is the one state that must never exist: DF works the smoothing and the
+-- mining never happens, so the square stays wall forever and everything queued behind
+-- it stalls. Mining always wins -- a wall that is going to be removed has no business
+-- being polished first.
+local function clear_smooth_designation(pos)
+    local block, bx, by = tile_parts(pos)
+    if not block then return end
+    block.designation[bx][by].smooth = 0
+    block.flags.designated = true
 end
 
 local function is_wall(pos)
@@ -191,25 +351,32 @@ end
 local function step_pending_on_map(step, pos)
     if step.stage == STAGE.dig then return has_dig_designation(pos) end
     if step.stage == STAGE.smooth or step.stage == STAGE.engrave then
-        return has_smooth_designation(pos)
+        return has_smooth_designation(pos) or has_detailing_job(pos)
     end
     if step.stage == STAGE.carve then
         return has_smooth_designation(pos) or has_track_designation(pos)
+            or has_detailing_job(pos)
     end
     if step.stage == STAGE.build then return building_at(pos) ~= nil end
     return false
 end
 
--- Is the work this step asks for finished?
+-- Is the work this step asks for finished? Every answer here is POSITIVE evidence off
+-- the map -- the tile is smooth, the engraving exists, the track is carved -- and not
+-- "the designation is gone". The absence of a designation cannot tell a finished tile
+-- from one that was never asked: reading it that way marked every smoothing and
+-- engraving step done the instant its dig finished, so the furniture went straight onto
+-- rough floor and nothing was ever smoothed.
 local function step_done_on_map(step, pos)
     if step.stage == STAGE.dig then
         return not has_dig_designation(pos) and not is_wall(pos)
     end
-    if step.stage == STAGE.smooth or step.stage == STAGE.engrave then
-        return not has_smooth_designation(pos)
-    end
+    if step.stage == STAGE.smooth then return is_smoothed(pos) end
+    if step.stage == STAGE.engrave then return has_engraving(pos) end
     if step.stage == STAGE.carve then
-        return not has_smooth_designation(pos) and not has_track_designation(pos)
+        local code = (step.text or ''):gsub('^m?b?', ''):gsub('%d+$', '')
+        if code == 'F' then return is_fortification(pos) end
+        return is_track(pos)
     end
     if step.stage == STAGE.build then return building_at(pos) ~= nil end
     return true
@@ -398,6 +565,29 @@ function start_job(entry, pos)
     return job
 end
 
+-- Is a running job about to put a zone on this tile? Tools that place activity zones of
+-- their own (fort/auto-tomb drops a 1x1 Tomb on every coffin) ask this before acting: a
+-- coffin whose room zone has not landed yet would otherwise get a 1x1 zone first, and DF
+-- would then be holding two overlapping zones -- or, since an overlap is refused, the room
+-- would never get the zone the blueprint asked for. A cancelled job stops answering, so
+-- nothing is blocked forever.
+function pending_zone_at(pos)
+    for _, job in ipairs(jobs_table()) do
+        if job.plan then
+            for _, region in ipairs(job.plan.regions) do
+                if region.mode == 'zone' and not region.applied then
+                    for _, c in ipairs(region.cells) do
+                        if c.pos.x == pos.x and c.pos.y == pos.y and c.pos.z == pos.z then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
 function cancel_job(job)
     local jobs = jobs_table()
     for i, j in ipairs(jobs) do
@@ -452,11 +642,15 @@ local function apply_region(region)
         {mode = region.mode, data = data, pos = {x = minx, y = miny, z = z}})
 end
 
-local function region_tiles_ready(job, region)
+local function region_tiles_ready(job, region, stages)
     local needs_building = region.mode == 'query' or region.mode == 'config'
     for _, c in ipairs(region.cells) do
-        local t = job.plan.tiles[key(c.pos)]
+        local k = key(c.pos)
+        local t = job.plan.tiles[k]
         if t and t.at <= #t.steps then return false end
+        -- and nothing else may still owe this square earlier work
+        local earliest = stages and stages[k]
+        if earliest and earliest < region.stage then return false end
         if has_dig_designation(c.pos) or is_wall(c.pos) then return false end
         -- query/config drive a building's own screen, so the building has to be
         -- standing before the keys mean anything
@@ -474,35 +668,148 @@ local function zone_would_overlap(region)
     return false
 end
 
+-- The EARLIEST stage any running job still has waiting at each tile.
+--
+-- Within one blueprint a tile's steps are already ordered, but several blueprints can want
+-- the same square -- two plans over the same ground, a second apply on the same burrow, a
+-- road whose flank is the next room's doorway. This is the queue between them: a step may
+-- only act when its stage is the earliest anything still has pending there, so smoothing
+-- waits behind another job's digging, engraving waits behind its smoothing, and furniture
+-- waits behind both. A job's own step is in this table too, so the earliest stage a tile
+-- is waiting on is its own whenever nothing else is ahead of it.
+local function earliest_pending_stage()
+    local out = {}
+    local function want(k, stage)
+        local cur = out[k]
+        if not cur or stage < cur then out[k] = stage end
+    end
+    for _, job in ipairs(jobs_table()) do
+        if job.plan then
+            for k, t in pairs(job.plan.tiles) do
+                local step = t.steps[t.at]
+                if step then want(k, step.stage) end
+            end
+            -- a stockpile, zone or building covers its tiles as one object; until it is
+            -- placed it is still waiting on them
+            for _, region in ipairs(job.plan.regions) do
+                if not region.applied then
+                    for _, c in ipairs(region.cells) do want(key(c.pos), region.stage) end
+                end
+            end
+        end
+    end
+    return out
+end
+
 -- one pass over a job; returns true if anything advanced
-local function pump_job(job)
+local function pump_job(job, stages)
     local advanced = false
     local pending = 0
 
     for _, t in pairs(job.plan.tiles) do
+        -- REPAIR: an earlier step that plainly never happened -- the square is still rock
+        -- past its dig, or still rough past its smoothing -- is rewound and done again. A
+        -- step that was deliberately given up on (gave_up) is left alone, so a square DF
+        -- really will not take is not retried in a loop.
+        local function rewind_to(stage, ok)
+            if ok then return end
+            for i = 1, t.at - 1 do
+                if t.steps[i].stage == stage and not t.steps[i].gave_up then
+                    job.done_count = math.max(0, job.done_count - (t.at - i))
+                    t.at = i
+                    t.steps[i].applied, t.steps[i].tries = false, 0
+                    if stage == STAGE.dig then clear_smooth_designation(t.pos) end
+                    advanced = true
+                    return
+                end
+            end
+        end
+        if t.at > 1 then
+            -- a dig is only ever finished by the square ceasing to be wall; if it is still
+            -- wall, something took the mine designation away (a smoothing job on the same
+            -- square used to do exactly that) and it was wrongly written off
+            rewind_to(STAGE.dig, not is_wall(t.pos))
+            -- likewise a smoothing is only finished by the square becoming smooth. A
+            -- hidden square counts as not done and is rewound too -- it then WAITS at its
+            -- smooth step until the rock beside it is dug and it can be designated.
+            rewind_to(STAGE.smooth, is_smoothed(t.pos))
+        end
         local step = t.steps[t.at]
-        if step then
+        -- Wait for whatever else still owes this square earlier work: another blueprint's
+        -- dig, or its smoothing. A live dig designation counts even when no job owns it,
+        -- which is how a square you designated by hand also holds the queue.
+        local earliest = step and stages and stages[key(t.pos)]
+        local dressing = step and (step.stage == STAGE.smooth or step.stage == STAGE.engrave
+            or step.stage == STAGE.carve)
+        local held = step and ((earliest and step.stage > earliest)
+            or (dressing and is_hidden(t.pos))
+            or ((step.stage == STAGE.smooth or step.stage == STAGE.engrave)
+                and has_dig_designation(t.pos)))
+        if held then
             pending = pending + 1
+        elseif step then
+            pending = pending + 1
+            local function finish()
+                t.at = t.at + 1
+                job.done_count = job.done_count + 1
+                advanced = true
+            end
+            -- a step DF keeps refusing (you cannot smooth soil, and a room dug through
+            -- a soil layer has floors like that) is given up on, so the tiles behind it
+            -- -- the furniture waiting on this one -- are not blocked forever.
+            -- MINING is never given up on: rock is always diggable, so a dig designation
+            -- that went missing was taken away by something else, and abandoning it leaves
+            -- a wall standing in the middle of a room with nothing designated on it.
+            -- Counted ONLY when DF refuses the designation outright, the moment we place
+            -- it: that is the permanent kind of no (smoothing a soil floor, say). A
+            -- designation that WAS accepted and later vanished is a cancelled job -- the
+            -- wall went out of reach while the room around it was being dug, the dwarf was
+            -- interrupted -- and it is simply placed again. Counting those cost 45 walls
+            -- their engraving in a live fort: six cancellations inside nine seconds and the
+            -- square was written off, though it was perfectly engravable.
+            local function refuse()
+                if step.stage == STAGE.dig then return end
+                step.tries = (step.tries or 0) + 1
+                if step.tries >= MAX_STEP_TRIES then
+                    step.gave_up = true
+                    finish()
+                end
+            end
+            if step.stage == STAGE.dig and has_smooth_designation(t.pos) then
+                clear_smooth_designation(t.pos)
+            end
             if step.applied then
                 if step_done_on_map(step, t.pos) then
-                    t.at = t.at + 1
-                    job.done_count = job.done_count + 1
-                    advanced = true
+                    finish()
+                elseif not step_pending_on_map(step, t.pos) then
+                    -- Neither the designation nor a job for it is on the square any more.
+                    -- Do NOT rush to put it back: a designation re-placed on a square a
+                    -- mason is already walking to makes DF drop the job it had and take a
+                    -- new one, so re-applying every pump means the work is picked up and
+                    -- cancelled forever and never actually done. Leave it alone for a
+                    -- minute; if it is still missing then, it really was lost.
+                    local now = dfhack.getTickCount()
+                    if not step.retry_at then
+                        step.retry_at = now + RETRY_MS
+                    elseif now >= step.retry_at then
+                        step.applied, step.retry_at = false, nil
+                        advanced = true
+                    end
                 end
             else
                 -- a step whose designation is already on the tile (the player
                 -- did it, or we did before a reload) counts as applied
                 if step_pending_on_map(step, t.pos) then
-                    step.applied = true
+                    step.applied, step.retry_at = true, nil
                     advanced = true
                 elseif step_done_on_map(step, t.pos) then
-                    t.at = t.at + 1
-                    job.done_count = job.done_count + 1
-                    advanced = true
+                    finish()
                 elseif apply_cell(step.mode, step.text, t.pos)
                         and step_pending_on_map(step, t.pos) then
-                    step.applied = true
+                    step.applied, step.retry_at = true, nil
                     advanced = true
+                else
+                    refuse()
                 end
             end
         end
@@ -511,7 +818,7 @@ local function pump_job(job)
     for _, region in ipairs(job.plan.regions) do
         if not region.applied then
             pending = pending + 1
-            if region_tiles_ready(job, region) then
+            if region_tiles_ready(job, region, stages) then
                 if zone_would_overlap(region) then
                     region.applied = true      -- refused, not retried
                     if not job.warned_overlap then
@@ -540,9 +847,11 @@ end
 
 function pump()
     local jobs = jobs_table()
+    detail_jobs = detailing_job_tiles()
+    local stages = earliest_pending_stage()
     for i = #jobs, 1, -1 do
         local job = jobs[i]
-        local _, pending = pump_job(job)
+        local _, pending = pump_job(job, stages)
         if pending == 0 then
             table.remove(jobs, i)
             persist()
@@ -648,50 +957,55 @@ local function same_pos(a, b)
     return a and b and a.x == b.x and a.y == b.y and a.z == b.z
 end
 
+-- Docked down the LEFT edge, the full height of the screen: the blueprint list and
+-- the running-job list are both long, and the map you are about to place on is to the
+-- right of them. `t` and `b` with no `h` stretch the window to whatever the screen is.
+local LIST_FRAME = {l = 0, t = 0, b = 0, w = 80}
+
 QuickfortWindow = defclass(QuickfortWindow, widgets.Window)
 QuickfortWindow.ATTRS{
     frame_title = 'Quickfort (sequenced)',
-    frame = {w = 80, h = 32},
+    frame = copyall(LIST_FRAME),
     resizable = true,
 }
 
 function QuickfortWindow:init()
     self.blueprints = list_blueprints()
-    self.list_frame = {w = 80, h = 32}
+    self.list_frame = copyall(LIST_FRAME)
     self:addviews{
         widgets.FilteredList{
             view_id = 'list',
-            frame = {l = 0, t = 0, w = 44, b = 8},
+            frame = {l = 0, t = 0, w = 44, b = 16},
             edit_key = 'CUSTOM_ALT_S',
             on_select = function() self:show_detail() end,
             on_submit = function() self:enter_placement() end,
         },
         widgets.Label{
             view_id = 'detail',
-            frame = {l = 46, t = 0, b = 8},
+            frame = {l = 46, t = 0, b = 16},
             text = '',
         },
         widgets.Label{
             view_id = 'place_help',
-            frame = {l = 0, t = 0, b = 8},
+            frame = {l = 0, t = 0, b = 16},
             visible = false,
             text = '',
         },
         widgets.HotkeyLabel{
             view_id = 'cancel_btn',
-            frame = {l = 30, b = 6},
+            frame = {l = 30, b = 14},
             key = 'CUSTOM_CTRL_X',
             label = 'Cancel selected job',
             on_activate = function() self:cancel_selected() end,
         },
         widgets.Label{
             view_id = 'jobs_label',
-            frame = {l = 0, b = 5},
+            frame = {l = 0, b = 13},
             text = 'Running jobs:',
         },
         widgets.List{
             view_id = 'jobs',
-            frame = {l = 0, b = 1, h = 4},
+            frame = {l = 0, b = 1, h = 12},
             choices = {},
         },
         widgets.Label{
