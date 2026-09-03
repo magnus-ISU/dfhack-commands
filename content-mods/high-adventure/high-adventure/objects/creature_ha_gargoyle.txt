@@ -1,0 +1,111 @@
+creature_ha_gargoyle
+
+[OBJECT:CREATURE]
+
+Gargoyles: statues cut at the Gargoyle Forge out of fifteen boulders and given a bound soul.
+Built on vanilla's elemental-man construct idiom (HUMANOID_SIMPLE + a single stone TISSUE_LAYER
++ ITEMCORPSE:STATUE), because that shape is known to work.
+
+[IMMOBILE] is the whole point and also the problem: an immobile creature can never walk to the
+pasture you assign it. warlocks.lua teleports each gargoyle into its assigned pasture after a
+delay, while nobody is looking at it.
+
+Three castes:
+	MELEE  fifteen boulders, nothing else. Punches. The free early defence.
+	FIRE   + fifteen souls. Spits a jet of fire, five tiles.
+	ICE    + fifteen souls and a gem. Spits a freezing shard, five tiles.
+
+[CREATURE:HA_GARGOYLE]
+	[DESCRIPTION:A crouching stone guardian on a plinth. It does not move, ever, and it is looking at you.]
+	[NAME:gargoyle:gargoyles:gargoyle]
+	[CASTE_NAME:gargoyle:gargoyles:gargoyle]
+	[CREATURE_TILE:236][COLOR:7:0:0]
+	[CREATURE_CLASS:HA_WARLOCK_GARGOYLE]
+	[PET][PETVALUE:400]
+	[IMMOBILE]
+	[NOPAIN][EXTRAVISION][NOBREATHE][NOSTUN][NONAUSEA][NOEMOTION][NOTHOUGHT][NOEXERT]
+	[NO_DIZZINESS][NO_FEVERS][NOFEAR]
+	[NO_DRINK][NO_EAT][NO_SLEEP]
+	[NOT_LIVING]
+	[NOT_BUTCHERABLE]
+	[NOBONES]
+	[NO_THOUGHT_CENTER_FOR_MOVEMENT]
+	[ODOR_LEVEL:0]
+	[SMELL_TRIGGER:10000]
+	[PREFSTRING:patience]
+	[NATURAL_SKILL:RANGED_COMBAT:5]
+	[NATURAL_SKILL:MELEE_COMBAT:3]
+
+	[CASTE:MELEE]
+		[CASTE_NAME:stone gargoyle:stone gargoyles:stone gargoyle]
+		[CASTE_COLOR:7:0:0]
+		[POP_RATIO:1]
+		[NATURAL_SKILL:GRASP_STRIKE:5]
+
+	[CASTE:FIRE]
+		[CASTE_NAME:fire gargoyle:fire gargoyles:fire gargoyle]
+		[CASTE_COLOR:4:0:1]
+		[POP_RATIO:1]
+		[FIREIMMUNE]
+		[CAN_DO_INTERACTION:MATERIAL_EMISSION]
+			[CDI:ADV_NAME:Spray jet of fire]
+			[CDI:USAGE_HINT:ATTACK]
+			[CDI:BP_REQUIRED:BY_CATEGORY:MOUTH]
+			[CDI:FLOW:FIREJET]
+			[CDI:VERB:spray a jet of fire:sprays a jet of fire:NA]
+			[CDI:TARGET:C:LINE_OF_SIGHT]
+			[CDI:TARGET_RANGE:C:5]
+			[CDI:MAX_TARGET_NUMBER:C:1]
+			[CDI:WAIT_PERIOD:100]
+
+	[CASTE:ICE]
+		[CASTE_NAME:ice gargoyle:ice gargoyles:ice gargoyle]
+		[CASTE_COLOR:1:0:1]
+		[POP_RATIO:1]
+		[USE_MATERIAL_TEMPLATE:SHARD:CREATURE_EXTRACT_TEMPLATE]
+			[STATE_NAME_ADJ:ALL:ice shard]
+			[STATE_COLOR:ALL:CYAN]
+			[PREFIX:NONE]
+			[MAT_FIXED_TEMP:9700]
+			[MELTING_POINT:NONE]
+			[BOILING_POINT:NONE]
+		[CAN_DO_INTERACTION:MATERIAL_EMISSION]
+			[CDI:ADV_NAME:Spit a freezing shard]
+			[CDI:USAGE_HINT:ATTACK]
+			[CDI:BP_REQUIRED:BY_CATEGORY:MOUTH]
+			[CDI:MATERIAL:LOCAL_CREATURE_MAT:SHARD:SOLID_GLOB]
+			[CDI:VERB:spit a freezing shard:spits a freezing shard:NA]
+			[CDI:TARGET:C:LINE_OF_SIGHT]
+			[CDI:TARGET_RANGE:C:5]
+			[CDI:MAX_TARGET_NUMBER:C:1]
+			[CDI:WAIT_PERIOD:100]
+
+	[SELECT_CASTE:ALL]
+	[BODY:HUMANOID_SIMPLE]
+	[TISSUE:STONE]
+		[TISSUE_NAME:stone:NP]
+		[TISSUE_MATERIAL:INORGANIC:GRANITE]
+		[MUSCULAR]
+		[FUNCTIONAL]
+		[STRUCTURAL]
+		[RELATIVE_THICKNESS:1]
+		[CONNECTS]
+		[TISSUE_SHAPE:LAYER]
+	[TISSUE_LAYER:BY_CATEGORY:ALL:STONE]
+	[BODY_SIZE:0:0:90000]
+	[BODY_APPEARANCE_MODIFIER:HEIGHT:90:95:98:100:102:105:110]
+	[BODY_APPEARANCE_MODIFIER:BROADNESS:90:95:98:100:102:105:110]
+	[ATTACK:PUNCH:BODYPART:BY_TYPE:GRASP]
+		[ATTACK_SKILL:GRASP_STRIKE]
+		[ATTACK_VERB:strike:strikes]
+		[ATTACK_CONTACT_PERC:100]
+		[ATTACK_PREPARE_AND_RECOVER:3:3]
+		[ATTACK_FLAG_WITH]
+		[ATTACK_PRIORITY:MAIN]
+	Gaits are declared even though the thing is IMMOBILE: DF still wants a movement profile, and
+	a creature with none behaves unpredictably rather than simply standing still.
+	[APPLY_CREATURE_VARIATION:STANDARD_BIPED_GAITS:2900:2189:1479:709:4170:5900]
+	[APPLY_CREATURE_VARIATION:STANDARD_CRAWLING_GAITS:2900:2189:1479:709:4170:5900]
+	[ITEMCORPSE:STATUE:NO_SUBTYPE:INORGANIC:GRANITE]
+	[ITEMCORPSE_QUALITY:3]
+	[ALL_ACTIVE]

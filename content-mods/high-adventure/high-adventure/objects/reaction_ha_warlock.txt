@@ -1,0 +1,266 @@
+reaction_ha_warlock
+
+[OBJECT:REACTION]
+
+Reactions that make a unit produce NOTHING here. warlocks.lua watches JOB_COMPLETED and
+creates the creature; that is also where the caps live, since a reaction cannot count what
+already exists. Jobs are cancelled at ASSIGNMENT time when a cap or condition fails, so the
+souls are never spent on a refusal.
+
+Every gem line ships twice -- once for a real gemstone, once for cut clear glass -- because
+glass is not IS_GEM and an ANY_GEM_MATERIAL reagent silently rejects it.
+
+WORTHLESS_STONE_ONLY on the gargoyle reagents is deliberate: the original mod's forge happily
+ate fifteen hematite boulders and platinum nuggets. Ours will not touch ore or economic stone.
+
+======================================== GARGOYLE FORGE ========================================
+
+[REACTION:HA_GARGOYLE_MELEE]
+	[NAME:a. Carve a stone gargoyle (15 boulders)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_A]
+	[REAGENT:stone:15:BOULDER:NONE:INORGANIC:NONE][ANY_STONE_MATERIAL][WORTHLESS_STONE_ONLY]
+	[SKILL:STONECRAFT]
+
+[REACTION:HA_GARGOYLE_FIRE]
+	[NAME:b. Carve a fire gargoyle (15 boulders, 15 souls)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_B]
+	[REAGENT:stone:15:BOULDER:NONE:INORGANIC:NONE][ANY_STONE_MATERIAL][WORTHLESS_STONE_ONLY]
+	[REAGENT:soul:15:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:STONECRAFT]
+
+[REACTION:HA_GARGOYLE_ICE_GEM]
+	[NAME:c. Carve an ice gargoyle (15 boulders, 15 souls, a gem)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_C]
+	[REAGENT:stone:15:BOULDER:NONE:INORGANIC:NONE][ANY_STONE_MATERIAL][WORTHLESS_STONE_ONLY]
+	[REAGENT:soul:15:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gem:1:SMALLGEM:NONE:INORGANIC:NONE][ANY_GEM_MATERIAL]
+	[SKILL:STONECRAFT]
+
+[REACTION:HA_GARGOYLE_ICE_GLASS]
+	[NAME:d. Carve an ice gargoyle (15 boulders, 15 souls, clear glass)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_D]
+	[REAGENT:stone:15:BOULDER:NONE:INORGANIC:NONE][ANY_STONE_MATERIAL][WORTHLESS_STONE_ONLY]
+	[REAGENT:soul:15:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gem:1:SMALLGEM:NONE:GLASS_CLEAR:NONE]
+	[SKILL:STONECRAFT]
+
+[REACTION:HA_BIND_MEPHIT_GEM]
+	[NAME:e. Bind a mephit into a gem (random element)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_E]
+	[REAGENT:gem:1:SMALLGEM:NONE:INORGANIC:NONE][ANY_GEM_MATERIAL]
+	[REAGENT:soul:1:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_BIND_MEPHIT_GLASS]
+	[NAME:f. Bind a mephit into clear glass (random element)]
+	[BUILDING:HA_GARGOYLE_FORGE:CUSTOM_F]
+	[REAGENT:gem:1:SMALLGEM:NONE:GLASS_CLEAR:NONE]
+	[REAGENT:soul:1:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+======================================= NECROMANTIC SHRINE =====================================
+
+[REACTION:HA_RAISE_SKELETON]
+	[NAME:a. Raise a skeleton (5 souls)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_POWER_WARLOCK_GEM]
+	[NAME:b. Empower a warlock (10 souls, a gem)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gem:1:SMALLGEM:NONE:INORGANIC:NONE][ANY_GEM_MATERIAL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_POWER_WARLOCK_GLASS]
+	[NAME:c. Empower a warlock (10 souls, clear glass)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_C]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gem:1:SMALLGEM:NONE:GLASS_CLEAR:NONE]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_BONE_GOLEM_GEM]
+	[NAME:d. Raise a bone golem (20 souls, 10 gold bars, a gem)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_D]
+	[REAGENT:soul:20:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:gem:1:SMALLGEM:NONE:INORGANIC:NONE][ANY_GEM_MATERIAL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_BONE_GOLEM_GLASS]
+	[NAME:e. Raise a bone golem (20 souls, 10 gold bars, clear glass)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_E]
+	[REAGENT:soul:20:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:gem:1:SMALLGEM:NONE:GLASS_CLEAR:NONE]
+	[SKILL:ALCHEMY]
+
+A diamond is a diamond, but DF has eight of them and no shared reaction class, so
+resurrection ships once per stone. Cost is identical in every case.
+
+[REACTION:HA_RESURRECT_DIAMOND_CLEAR]
+	[NAME:z. Call back a dead warlock (10 gold bars, a clear diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_A]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_CLEAR]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_RED]
+	[NAME:z. Call back a dead warlock (10 gold bars, a red diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_B]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_RED]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_GREEN]
+	[NAME:z. Call back a dead warlock (10 gold bars, a green diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_C]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_GREEN]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_BLUE]
+	[NAME:z. Call back a dead warlock (10 gold bars, a blue diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_D]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_BLUE]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_YELLOW]
+	[NAME:z. Call back a dead warlock (10 gold bars, a yellow diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_E]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_YELLOW]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_BLACK]
+	[NAME:z. Call back a dead warlock (10 gold bars, a black diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_F]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_BLACK]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_FY]
+	[NAME:z. Call back a dead warlock (10 gold bars, a fine yellow diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_G]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_FY]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_RESURRECT_DIAMOND_LY]
+	[NAME:z. Call back a dead warlock (10 gold bars, a light yellow diamond)]
+	[BUILDING:HA_NECRO_SHRINE:CUSTOM_SHIFT_H]
+	[REAGENT:gold:10:BAR:NO_SUBTYPE:METAL:GOLD]
+	[REAGENT:diamond:1:SMALLGEM:NONE:INORGANIC:DIAMOND_LY]
+	[SKILL:ALCHEMY]
+
+======================================== ELEMENTAL SHRINES =====================================
+
+Each shrine summons its own vanilla elemental man -- no new creature -- and can provoke a mood.
+The 5-per-shrine and 5-x-shrines caps are enforced in lua at assignment time.
+
+[REACTION:HA_SUMMON_AMETHYST]
+	[NAME:a. Summon a amethyst man (5 souls)]
+	[BUILDING:HA_SHRINE_AMETHYST:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_AMETHYST]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_AMETHYST:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_SUMMON_FIRE]
+	[NAME:a. Summon a fire man (5 souls)]
+	[BUILDING:HA_SHRINE_FIRE:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_FIRE]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_FIRE:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_SUMMON_GABBRO]
+	[NAME:a. Summon a gabbro man (5 souls)]
+	[BUILDING:HA_SHRINE_GABBRO:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_GABBRO]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_GABBRO:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_SUMMON_IRON]
+	[NAME:a. Summon a iron man (5 souls)]
+	[BUILDING:HA_SHRINE_IRON:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_IRON]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_IRON:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_SUMMON_MAGMA]
+	[NAME:a. Summon a magma man (5 souls)]
+	[BUILDING:HA_SHRINE_MAGMA:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_MAGMA]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_MAGMA:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_SUMMON_MUD]
+	[NAME:a. Summon a mud man (5 souls)]
+	[BUILDING:HA_SHRINE_MUD:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+[REACTION:HA_MOOD_MUD]
+	[NAME:b. Provoke a mood (10 souls)]
+	[BUILDING:HA_SHRINE_MUD:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:ALCHEMY]
+
+======================================== OBSIDIAN FACTORY ======================================
+
+[REACTION:HA_OBSIDIAN]
+	[NAME:a. Summon obsidian (3 boulders, free)]
+	[BUILDING:HA_OBSIDIAN_FACTORY:CUSTOM_A]
+	[PRODUCT:100:3:BOULDER:NONE:INORGANIC:OBSIDIAN]
+	[SKILL:ALCHEMY]
+
+======================================== LIAISON'S OFFICE ======================================
+
+A summoned caravan is a timed_event written straight into df.global.timed_events. The script
+no-ops (and says so) when that civ already has a caravan outstanding, because DF then schedules
+none of its own -- see dfhack/fort/caravan-unstick.lua for what that failure looks like.
+
+[REACTION:HA_LURE_CARAVAN_OWN]
+	[NAME:a. Lure a warlock caravan (5 souls)]
+	[BUILDING:HA_LIAISONS_OFFICE:CUSTOM_A]
+	[REAGENT:soul:5:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:NEGOTIATION]
+
+[REACTION:HA_LURE_CARAVAN_GOBLIN]
+	[NAME:b. Lure a goblin caravan (10 souls)]
+	[BUILDING:HA_LIAISONS_OFFICE:CUSTOM_B]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:NEGOTIATION]
+
+[REACTION:HA_LURE_CARAVAN_ANY]
+	[NAME:c. Lure any neighbour's caravan (10 souls)]
+	[BUILDING:HA_LIAISONS_OFFICE:CUSTOM_C]
+	[REAGENT:soul:10:BOULDER:NONE:INORGANIC:HA_SOUL]
+	[SKILL:NEGOTIATION]
+

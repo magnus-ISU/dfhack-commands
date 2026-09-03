@@ -1,0 +1,8 @@
+[ID:HA_warlocks]
+[NUMERIC_VERSION:5]
+[DISPLAYED_VERSION:0.5]
+[EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
+[EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.1]
+[AUTHOR:High Adventure (design after Meph's Warlocks, bay12 thread 175304)]
+[NAME:HA - Warlocks]
+[DESCRIPTION:Part of the Dwarf Fortress: High Adventure suite. Play immortal warlocks who receive no migrants and manufacture their population instead. Corpses are the economy: killing, and butchering prisoners and large beasts, yields souls. Souls raise skeleton labourers and elemental warriors; gems bind mephits and fire imps and freeze ice gargoyles; gold and an original written work raise the shrines themselves; ten gold bars and a diamond bring a dead warlock back. Prisoners are livestock, bought at embark and dragged home from raids, and the dwarven, human and elven ones riot. Only a warlock may work magic. Nobles are the Sorcerer Supreme and the four Horsemen -- Death, Hunger, Pestilence and War -- with Crypt Lords and a Death Knight to lead the squads. See CHANGES.md.]

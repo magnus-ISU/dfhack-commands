@@ -1,0 +1,20 @@
+tile_page_ha_warlock
+
+[OBJECT:TILE_PAGE]
+
+One 8x2 page of 32x32 map sprites, cut from the ☼Warlocks☼ cheat sheet posted in bay12 thread
+175304 (the mod's own release is gone; see content-mods/warlocks/README.md). The sheet is 1:1
+pixel art on a 32 px grid for the civ, prisoner and mephit blocks, so those sprites are native
+and untouched; the gargoyle and golem blocks are drawn smaller on the sheet, so those three
+were trimmed to their own bounds and centred in a 32 px cell rather than upscaled.
+
+Attribution for this art is Meph, Vordak, Redshrike and Denzi -- see LICENSE.md section 3,
+where the CC-BY-SA question is recorded and still unresolved.
+
+PAGE_DIM_PIXELS must match the PNG exactly. It is 256x64. Getting this wrong makes the
+compositor read out of bounds and corrupt the heap, not just draw the wrong tile.
+
+[TILE_PAGE:HA_WARLOCK_CREATURES]
+	[FILE:images/ha_warlock_creatures.png]
+	[TILE_DIM:32:32]
+	[PAGE_DIM_PIXELS:256:64]

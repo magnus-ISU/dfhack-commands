@@ -71,10 +71,16 @@ Meph credits that art to **himself, Vordak, Redshrike and Denzi**:
   <https://opengameart.org>.
 - **Vordak** — used by Meph with permission granted to *him*, which does not transfer to us.
 
-**We cannot tell which sprite came from which artist.** If any Denzi sprite is used in
-`ha-warlocks`, CC-BY-SA's share-alike applies to our art. The decision on record is to credit
-all four and accept that; the alternative is redrawing. Note the Vordak permission problem is
-not solved by attribution.
+**We cannot tell which sprite came from which artist.** The decision on record is to credit all
+four and accept CC-BY-SA on this art; the alternative is redrawing. Note that the Vordak
+permission problem is not solved by attribution — his permission was granted to Meph, not to us.
+
+**As of ha-warlocks 0.2 this art is shipped**, not merely referenced:
+`content-mods/high-adventure/ha-warlocks/graphics/images/ha_warlock_creatures.png` is fifteen
+32x32 sprites cut from the thread's cheat sheet (`Kp8JNP7.png`) — warlock, witch, skeleton,
+bone golem, five prisoners, three mephits and three gargoyles. It is the only asset in this
+repository whose licence obliges share-alike, and it is the thing to redraw first if the
+project ever wants a clean permissive licence.
 
 ## 4. Dwarf Fortress's own assets
 

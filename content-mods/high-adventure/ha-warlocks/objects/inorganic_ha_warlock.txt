@@ -1,0 +1,27 @@
+inorganic_ha_warlock
+
+[OBJECT:INORGANIC]
+
+The soul: this mod's only new material, and its whole currency. Souls are minted by
+scripts_modactive/high-adventure/warlocks.lua -- on a kill, and on butchering a prisoner or a
+large animal -- and are spent in the shrine, forge and factory reactions.
+
+Note what is deliberately ABSENT: the IS_STONE token. Vanilla writes it explicitly on every
+stone (see data/vanilla .../inorganic_other.txt -- STONE_TEMPLATE does not imply it), so
+leaving it off gives a well-behaved material that no masonry job, construction, BUILDMAT or
+ANY_STONE_MATERIAL reagent will ever accept. Souls appear in no reaction but ours.
+
+The SPECIAL token additionally stops AI civilizations making goods out of it or hauling it
+in caravans.
+
+[INORGANIC:HA_SOUL]
+	[USE_MATERIAL_TEMPLATE:STONE_TEMPLATE]
+	[SPECIAL]
+	[STATE_NAME_ADJ:ALL:soul]
+	[DISPLAY_COLOR:7:0:1]
+	[TILE:'*']
+	[ITEM_SYMBOL:'*']
+	[SOLID_DENSITY:1]
+	[MATERIAL_VALUE:10]
+	[REACTION_CLASS:HA_SOUL]
+	[STATE_COLOR:ALL_SOLID:WHITE]

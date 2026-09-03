@@ -9,6 +9,43 @@ mod scripts live in `scripts_modactive/`, bundle rebuilt + version-bumped after 
 
 ---
 
+## 0. At a glance
+
+**New content**
+
+| | |
+|---|---|
+| Creatures | `HA_WARLOCK` (warlock / skeleton / bone-golem castes) · `HA_MEPHIT` (air, acid, ice) · `HA_PRISONER` (goblin, human, elf, dwarf, kobold) · `HA_GARGOYLE` (melee, fire, ice) · `HA_ELEMENTAL` (one per element) |
+| Reused from vanilla | fire imp · ravens, crows and their giant forms · giant bark scorpion · five snake lines |
+| Materials | **one**: `[INORGANIC:HA_SOUL]`. No bonemold/bloodsteel/soulforged, no ethereal, no plants, no potions |
+| Buildings | elemental shrine ×N · necromantic shrine · gargoyle mason · obsidian factory · liaison's office |
+| Entity | warlock civ · 5 nobles + 2 military positions · no migrants, children yes |
+| Scripts | soul minting · warlock-only job gating · artifact-book validation · elemental caps · gargoyle teleport · migrant suppression · caravan summoning · raid prisoners · unit creation |
+
+**Four currencies, four sources**
+
+| Currency | Comes from | Buys |
+|---|---|---|
+| **Souls** | kills; butchering prisoners and large animals | skeletons, elementals, fire gargoyles, familiars, caravans |
+| **Boulders** | mining; the obsidian factory | gargoyles (15 each) |
+| **Gems** | mining, or cut glass | familiars, ice gargoyles, bone golems, warlock power-ups, the necromantic shrine |
+| **Gold** | mining and trade | shrines, bone golems, resurrection |
+| *(Books)* | a library and warlock scholars | shrine construction — an original work, not a copy |
+
+**Progression**
+
+1. **Embark** with warlocks and prisoners. No migrants will ever come.
+2. **Butcher and kill** for souls; mine for boulders. A gargoyle mason and 15 boulders buy a
+   melee gargoyle — free static defence before any magic exists.
+3. **Build a library**; warlocks write. An original work plus 10 gold raises the first
+   elemental shrine.
+4. **Familiars and elementals**: 1 gem + 1 soul per mephit or fire imp; souls for elementals,
+   capped at 5 per shrine.
+5. **14 gems** raise the necromantic shrine — skeletons become the labour force, warlocks can
+   be powered up, and bone golems (souls + 10 gold + a gem) become the heavy end.
+6. **Late**: resurrect dead warlocks (10 gold + a diamond), raise more shrines to lift the
+   elemental caps, raid for prisoners, and summon caravans on demand.
+
 ## 1. Souls
 
 The single currency. **Entirely lua-produced — no vanilla creature is edited.**
@@ -38,8 +75,100 @@ directly — otherwise a siege would be worthless.
 | Bone golem | caste of the warlock creature | powerful, **large**, **citizen**, can do labour |
 | Elemental (per element) | **pet** creature | strong war animal, no labour, capped (§5) |
 | Gargoyle — melee / fire / ice | `[IMMOBILE]` pet creature | fire and ice get breath weapons via `[CAN_DO_INTERACTION]` + `CDI` |
-| Mephit | pet creature, 4 castes (Acid/Air/Ice/Fire) | dog-sized flier, `PET_EXOTIC` |
-| Prisoner | non-sapient pet creature | livestock; model on `ha-drow`'s `HA_GOBLIN_SLAVE` (`[PET]`, no `CAN_LEARN`/`CAN_SPEAK`, butcherable) |
+| Mephit | pet creature, 3 castes (Air/Acid/Ice) | dog-sized flier, `PET_EXOTIC`, breeds |
+| Fire imp | **vanilla `IMP_FIRE`** | the fire sibling — no new creature (§2b) |
+| Prisoner | non-sapient pet creature, castes per race | livestock (§2a) |
+
+### 2a. Prisoners
+
+**Livestock the warlock civ has access to.** One creature, `HA_PRISONER`, with a caste per
+race (goblin / human / elf / dwarf / kobold) for visual variety — not one creature per race as
+the original did, since our souls are generic.
+
+- `[ANIMAL_TOKEN:HA_PRISONER]` + always-present on the entity, so they are buyable at embark
+  and from caravans.
+- **Not sapient** — no `CAN_LEARN`/`CAN_SPEAK`, so they can be butchered. `ha-drow`'s
+  `HA_GOBLIN_SLAVE` is the working precedent in-repo; copy its shape, don't depend on it.
+- **No `[GRAZER]`** — in DF only grazers eat, so prisoners are zero-upkeep livestock. (The
+  original gave them `[GRAZER:1]` plus `BONECARN`/`NO_DRINK`; we don't need any of it.)
+- Long `[MAXAGE]`, `[PETVALUE]`, `[CANOPENDOORS]`.
+- Butchering one mints a soul (§1) plus ordinary meat/leather.
+- **Riots**: `[CAN_DO_INTERACTION:RIOT]`, self-only, long `WAIT_PERIOD` — on the **dwarf,
+  human and elf castes only**. Goblin and kobold prisoners are docile. Per-caste
+  `CAN_DO_INTERACTION` is how the original varied its mephits, so this is a supported shape.
+
+**Raids bring prisoners home.** Vanilla raids return loot, animals, artifacts and *rescued*
+captives — they never capture enemies — so this is ours to add in lua:
+
+- Hook: `df.global.world.status.mission_reports` (a `stl-vector` of `mission_report`, which
+  carries `title`, `flags`, `year`, `year_tick`, `campaigns` and `searched_site`). Watch it
+  grow; a new entry means a mission resolved.
+- Mint the prisoners when the squad is physically **back on the map**, not when the report
+  posts — the report fires while they are still walking home.
+- **Race follows the target**: `searched_site` → `world_site` → its civ → that entity's race,
+  so raiding elves yields elf prisoners. Fall back to a random caste if it cannot be resolved.
+- Count: scale with squad size and success; start with 0–3 per raid and tune.
+
+*How the original did it:* MDF had no embark prisoners at all — the Overlord's **raids**
+produced a "prisoner" tool item, which the Throne Room "unpacked" into a live prisoner of a
+random race (12% each of dwarf/human/orc/gnome/elf/drow…), and they could be sold back to
+caravans. The standalone simplified to "get them at embark or order some from the caravans",
+which is what we are doing.
+
+### 2b. Mephits and fire imps
+
+*How the original did it:* one `MEPHIT` creature, four castes — air, acid, ice, fire — dog-sized
+(15000), flying, `PET_EXOTIC`, each caste with a `MATERIAL_EMISSION` breath at 5-tile range on a
+300-tick cooldown (the fire caste using `[CDI:FLOW:FIREJET]`). Imps appear only in the
+standalone's Necromantic Shrine blurb and **no raws for them survive**.
+
+*What we do:* `HA_MEPHIT` gets **three** castes — air, acid, ice — and the fire sibling is the
+**vanilla fire imp**, which already has exactly the right kit and costs us nothing:
+
+```
+BODY_SIZE 6000, FIREIMMUNE, MAGMA_VISION, CANOPENDOORS, NO_EAT/NO_DRINK/NO_SLEEP
+CDI HURL_FIREBALL   FLOW:FIREBALL  range 15  wait 30
+CDI SPRAY_FIRE_JET  FLOW:FIREJET   range  5  wait 30
+```
+
+Make it available the way `ha-succubi` already does — `[SELECT_CREATURE:IMP_FIRE]` plus
+`[CREATURE_CLASS:HA_WARLOCK_PET]` and `[PETVALUE:...]` (additive only, no `CUT_`), then
+`[ANIMAL_TOKEN:IMP_FIRE]` on the entity.
+
+**Acquisition: built from gems, never bred.** *Lore:* mephits are minor elemental spirits —
+small winged imps of the elemental planes, mischievous, spiteful and cowardly, kept by
+summoners as familiars, messengers and spies, and always divided into elemental varieties. That
+reads as *constructed*, not born, so:
+
+| Reaction | Building | Cost | Product |
+|---|---|---|---|
+| Bind an air mephit | Air shrine | 1 gem + 1 soul | `HA_MEPHIT` air caste |
+| Bind an acid mephit | Acid shrine | 1 gem + 1 soul | `HA_MEPHIT` acid caste |
+| Bind an ice mephit | Ice shrine | 1 gem + 1 soul | `HA_MEPHIT` ice caste |
+| Bind a fire imp | Fire shrine | 1 gem + 1 soul | vanilla `IMP_FIRE` |
+
+The **shrine** determines the element, so the gem is just the body and no colour-matching is
+needed — otherwise this would be one reaction per gem material. All four familiars come from
+one symmetric reaction family, and the fire member needs no `ANIMAL_TOKEN` at all since it is
+minted rather than bought.
+
+Consequently: **no `[CHILD]`, no gendered castes.** Give mephits `[NO_EAT][NO_DRINK][NO_SLEEP]`
+like the vanilla fire imp so they read as constructs and cost nothing to keep.
+
+**Mephits and elementals stay distinct**, and there is no promotion path between them:
+
+| | Mephits / imps | Elementals |
+|---|---|---|
+| Cost | 1 gem + 1 soul | souls |
+| Cap | none | 5 per shrine, and 5 × shrines globally |
+| Role | mobile flying sentry, breath weapon | strong melee war pet |
+
+(An earlier draft had mephits promoting into elementals. With gem-built mephits and soul-only
+elementals that path is strictly worse than summoning directly — dropped.)
+
+Two warnings: fire imps are `LARGE_PREDATOR` and not naturally tame, and a pet that hurls
+fireballs 15 tiles on a 30-tick cooldown is a serious fire hazard in a fort with any wood in
+it. That is flavour, but it should be a deliberate choice.
 
 **Add nothing else.** Vanilla already supplies ravens, crows, giant ravens/crows, giant bark
 scorpions, and five snake lines (tame them the way `HA_HELMET_SNAKE_TAME` is tamed).
