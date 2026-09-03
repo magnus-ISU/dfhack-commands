@@ -12,7 +12,9 @@ immediately assignable with no manual zone-painting:
   * a nest box that isn't already under a Pen/Pasture zone -> a 1x1 Pen zone, so you can pasture
     a female egg-layer onto it to lay.
 Furniture that already has the matching zone is left alone (idempotent), and other zones on the
-tile are untouched.
+tile are untouched. A tile a running `fort/quickfort` job is about to cover with a zone of its own
+-- a tomb room planned by `fort/builder-burrow`, say -- is left to it: a 1x1 zone dropped on the
+coffin first would win the race and make DF refuse the room's zone as an overlap.
 
 It also cleans up after itself: zones it placed (tracked per fort; a pre-existing 1x1 zone found
 sitting on matching furniture is adopted into tracking) are REMOVED again when their coffin /
@@ -86,6 +88,25 @@ function isEnabled() return load_state().enabled end
 
 -- ---- the scan (needs the state above for zone tracking) ----------------------
 
+-- A running fort/quickfort job (fort/builder-burrow's tomb rooms, say) may be about to put
+-- a room-sized zone over this tile. Its coffin can be built before the rest of the room has
+-- finished being smoothed, so dropping a 1x1 zone on it the moment it appears would win the
+-- race and leave the room without the zone its blueprint asked for -- DF refuses a zone that
+-- overlaps one that already exists. Leave those tiles to it. quickfort not being loaded (or
+-- being mid-reload) is not an error here: with no answer we just carry on as before.
+-- resolved once per scan: reqscript re-checks the file on every call, and a scan asks
+-- about every coffin and nest box in the fort
+local function quickfort_module()
+    local ok, qf = pcall(reqscript, 'fort/quickfort')
+    if ok and qf and qf.pending_zone_at then return qf end
+end
+
+local function claimed_by_quickfort(qf, pos)
+    if not qf then return false end
+    local ok, claimed = pcall(qf.pending_zone_at, pos)
+    return ok and claimed or false
+end
+
 -- One pass over the fort's buildings: drop the matching zone on every coffin / nest box that
 -- lacks one, track the zones we place, and retire tracked zones whose furniture is gone.
 -- Returns (zones added, zones removed).
@@ -93,12 +114,13 @@ local function scan()
     load_state()
     state.zones = state.zones or {}     -- ids of zones we created/adopted (string keys for JSON)
     local made, removed, changed = 0, 0, false
+    local qf = quickfort_module()
     for _, b in ipairs(df.global.world.buildings.all) do
         local ztype = AUTO_ZONE[b:getType()]
         if ztype then
             local pos = {x = b.centerx, y = b.centery, z = b.z}
             local z = get_zone(pos, ztype)
-            if not z then
+            if not z and not claimed_by_quickfort(qf, pos) then
                 z = make_zone(pos, ztype)
                 if z then made = made + 1 end
             end

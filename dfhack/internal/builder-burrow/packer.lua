@@ -11,6 +11,12 @@
 
 local M = {}
 
+-- How many tiles a road may run directly alongside another road before it is refused.
+-- The rule exists to stop two roads running parallel with no frontage between them, but
+-- at zero it also refuses the tile where a road merely PASSES a junction or clips the
+-- corner of a plaza -- which is most of the places a road wants to start.
+local MAX_PARALLEL = 2
+
 -- ---------------------------------------------------------------------------
 -- rng (xorshift32, seeded, so a plan is reproducible)
 -- ---------------------------------------------------------------------------
@@ -230,7 +236,7 @@ local function prepStamp(s)
     end
     return {name = s.name, weight = s.weight or 1, max = s.max or math.huge,
             byDir = byDir, plain = plain, turned = turned, floors = floors,
-            grid = s.grid}
+            grid = s.grid, zone_code = s.zone}   -- `zone_code` here: `zone` alone is an entrance's approach area
 end
 M.prepStamp = prepStamp
 
@@ -293,10 +299,13 @@ function M.pack(opts)
 
     -- districts -----------------------------------------------------------
     local function slot(s)
-        local alts = s.alts or {{grid = s.grid, weight = s.weight, max = s.max, setback = s.setback, name = s.name}}
+        local alts = s.alts or {{grid = s.grid, weight = s.weight, max = s.max, setback = s.setback,
+                                 name = s.name, zone = s.zone}}
         local out = {name = s.name, max = s.max or 1, weight = s.weight or 1, alts = {}}
         for _, a in ipairs(alts) do
-            local p = prepStamp({name = a.name or s.name, grid = a.grid, weight = a.weight, max = a.max})
+            -- the zone is declared on the slot and may be overridden by one alternative
+            local p = prepStamp({name = a.name or s.name, grid = a.grid, weight = a.weight, max = a.max,
+                                 zone = a.zone or s.zone})
             out.alts[#out.alts + 1] = {name = a.name or s.name, weight = a.weight or 1,
                                        p = p, setback = a.setback or 0}
         end
@@ -393,7 +402,7 @@ function M.pack(opts)
                         if not ok then break end
                         run = run + 1
                     end
-                    if run >= 6 then
+                    if run >= minMain + (mainW >> 1) then
                         local area = 0
                         for i = 0, run - 1 do
                             for t = -10, 10 do
@@ -616,7 +625,8 @@ function M.pack(opts)
                         end
                         if fits(v, e, ax, ay, inside, D.shared and -1 or 0) then
                             local room = {stamp = s.name, cells = {}, door = nil,
-                                          front = {x = pos.fx, y = pos.fy}, floors = s.p.floors, grid = s.p.grid}
+                                          front = {x = pos.fx, y = pos.fy}, floors = s.p.floors,
+                                          grid = s.p.grid, zone_code = s.p.zone_code}
                             if dIdx < 0 then
                                 dIdx = #districts + 1
                                 districts[dIdx] = {type = D, rooms = {}}
@@ -679,7 +689,7 @@ function M.pack(opts)
         local ax, ay = doorX - b.e.x, doorY - b.e.y
         if not fits(b.v, b.e, ax, ay, inside, 0) then return nil end
         local hubRoom = {stamp = hub.name, cells = {}, door = nil, front = {x = doorX - px, y = doorY - py},
-                         hub = true, floors = hub.p.floors, grid = hub.p.grid}
+                         hub = true, floors = hub.p.floors, grid = hub.p.grid, zone_code = hub.p.zone_code}
         commitRoom(b.v, b.e, ax, ay, 1, hubRoom, dIdx)
         placed[#placed + 1] = hubRoom
         local function bbox()
@@ -757,7 +767,8 @@ function M.pack(opts)
             local c = cands[1]
             claim[c.ty][c.tx] = 0
             local room = {stamp = stamp.name, cells = {}, door = nil, front = nil,
-                          parent = c.parent.stamp, floors = stamp.p.floors, grid = stamp.p.grid}
+                          parent = c.parent.stamp, floors = stamp.p.floors, grid = stamp.p.grid,
+                          zone_code = stamp.p.zone_code}
             commitRoom(c.v, c.e, c.ax, c.ay, 1, room, dIdx)
             placed[#placed + 1] = room
             return true
@@ -787,12 +798,26 @@ function M.pack(opts)
 
     -- road laying ----------------------------------------------------------
     local lastBlock = ''
+    -- Does the tile beside a road forbid laying there? The rule is "no road runs alongside
+    -- another road or a statue square" -- but EXISTING fort floor carries claim 1 too, and a
+    -- road leaving the fort is meant to run out of it. Treating that as another road meant the
+    -- preferred entry -- the one that touches your dug floor -- could never lay its first tile,
+    -- and a burrow whose only opening was an irregular pocket planned nothing at all.
+    local function haloBlocked(h)
+        local k = at(h[1], h[2])
+        if k == 6 then return true end
+        if k ~= 1 then return false end
+        local row = existingRoad[h[2]]
+        return not (row and row[h[1]])
+    end
+
     local function laySegment(head, want)
         local x, y, dir, w = head.x, head.y, head.dir, head.w
         local half = w >> 1
         local dx, dy = DIRS[dir][1], DIRS[dir][2]
         local own = head.stub or {}
         local n, joined = 0, false
+        local parallel, parallelFrom = 0, 0
         local limit = head.join and want or want + half
         for i = 0, limit - 1 do
             local cx, cy = x + dx * i, y + dy * i
@@ -811,8 +836,15 @@ function M.pack(opts)
                 break
             end
             local h1, h2 = haloOf(cx, cy, dir, w)
-            local hl, hr = at(h1[1], h1[2]), at(h2[1], h2[2])
-            if hl == 1 or hr == 1 or hl == 6 or hr == 6 then break end
+            if haloBlocked(h1) or haloBlocked(h2) then
+                -- a short brush past another road is fine; a long parallel run is not, and
+                -- the segment is cut back to where that run began
+                if parallel == 0 then parallelFrom = n end
+                parallel = parallel + 1
+                if parallel > MAX_PARALLEL then n = parallelFrom break end
+            else
+                parallel = 0
+            end
             n = i + 1
         end
         if head.join and n == want then joined = true end

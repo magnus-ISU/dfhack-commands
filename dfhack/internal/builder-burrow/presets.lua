@@ -6,6 +6,12 @@
 --   P pedestal  A altar  B bookcase  i stair  F farm plot  # built wall (surface)
 -- A stamp may be {floors = {ground, first, ...}} for a multi-z blueprint.
 --
+-- A stamp may declare `zone`, the activity zone the finished room carries, written as
+-- the quickfort zone code the blueprint will use: 'b' bedroom, 'o' office, 'h' dining
+-- hall, 'T' tomb, 'm' meeting area, 'D' dormitory, 'B' barracks. A stamp with no `zone`
+-- gets none -- which is what a catacomb or a family tomb wants, since a DF tomb belongs
+-- to one dwarf and those rooms hold many coffins (fort/auto-tomb zones each coffin).
+--
 -- A district is a group of stamps with a packing rule: `set` = a suite whose
 -- first slot is the hub with the only road door and whose other slots attach
 -- wall to wall; otherwise stamps repeat along the road. `margin` is extra rock
@@ -70,31 +76,31 @@ local COFFIN = {name = 'coffin row 13x3', grid = G.coffinrow}
 local SHRINE = {name = 'shrine 5x5', grid = G.shrine5}
 
 DISTRICTS = {
-    ['hovels']       = {margin = 0, maxLen = 16, stamps = {{name = 'hovel 1x4', grid = G.hovel}}},
-    ['houses 2x2']   = {margin = 0, maxLen = 16, stamps = {{name = 'house 2x2', grid = G.house2}}},
-    ['houses 3x3']   = {margin = 0, maxLen = 16, stamps = {{name = 'house 3x3', grid = G.house3}}},
-    ['luxury 3x3']   = {margin = 1, maxLen = 16, stamps = {{name = 'luxury house 3x3', grid = G.luxury3}}},
-    ['dining halls'] = {margin = 1, maxLen = 10, stamps = {{name = 'dining hall 7x3', grid = G.dhall73, max = 1}}},
+    ['hovels']       = {margin = 0, maxLen = 16, stamps = {{name = 'hovel 1x4', grid = G.hovel, zone = 'b'}}},
+    ['houses 2x2']   = {margin = 0, maxLen = 16, stamps = {{name = 'house 2x2', grid = G.house2, zone = 'b'}}},
+    ['houses 3x3']   = {margin = 0, maxLen = 16, stamps = {{name = 'house 3x3', grid = G.house3, zone = 'b'}}},
+    ['luxury 3x3']   = {margin = 1, maxLen = 16, stamps = {{name = 'luxury house 3x3', grid = G.luxury3, zone = 'b'}}},
+    ['dining halls'] = {margin = 1, maxLen = 10, stamps = {{name = 'dining hall 7x3', grid = G.dhall73, max = 1, zone = 'h'}}},
     ['noble'] = {margin = 1, set = true, depth = 16,
         stamps = {
-            {name = 'dining (hub)', alts = {{grid = G.ndining, weight = 2, name = 'dining 5x4'}, {grid = G.ndining7, name = 'dining 7x5'}}},
-            {name = 'bedroom', alts = {{grid = G.nbed, weight = 2, name = 'bedroom 3x3'}, {grid = G.nbed4, name = 'bedroom 4x4'}, {grid = G.nbed35, name = 'bedroom 3x5'}}},
-            {name = 'office', alts = {{grid = G.noffice, weight = 2, name = 'office 3x3'}, {grid = G.noffice4, name = 'office 4x4'}}},
-            {name = 'tomb', alts = {{grid = G.ntomb, weight = 2, name = 'tomb 3x3'}, {grid = G.ntomb5, name = 'tomb 5x3'}}},
+            {name = 'dining (hub)', zone = 'h', alts = {{grid = G.ndining, weight = 2, name = 'dining 5x4'}, {grid = G.ndining7, name = 'dining 7x5'}}},
+            {name = 'bedroom', zone = 'b', alts = {{grid = G.nbed, weight = 2, name = 'bedroom 3x3'}, {grid = G.nbed4, name = 'bedroom 4x4'}, {grid = G.nbed35, name = 'bedroom 3x5'}}},
+            {name = 'office', zone = 'o', alts = {{grid = G.noffice, weight = 2, name = 'office 3x3'}, {grid = G.noffice4, name = 'office 4x4'}}},
+            {name = 'tomb', zone = 'T', alts = {{grid = G.ntomb, weight = 2, name = 'tomb 3x3'}, {grid = G.ntomb5, name = 'tomb 5x3'}}},
         },
         optional = {
             {name = 'sculpture garden', max = 2, alts = {{grid = G.ngarden3, name = 'garden 3x3'}, {grid = G.ngarden5, name = 'garden 5x5'}}},
-            {name = 'throne room / library', max = 1, alts = {{grid = G.nthrone, name = 'throne room 5x5'}, {grid = G.nlibrary, name = 'library 5x5'}}},
+            {name = 'throne room / library', max = 1, alts = {{grid = G.nthrone, name = 'throne room 5x5', zone = 'o'}, {grid = G.nlibrary, name = 'library 5x5'}}},
         }},
     ['minor noble'] = {margin = 1, set = true, depth = 12,
-        stamps = {{name = 'bedroom 3x3 (hub)', alts = {{grid = G.nbed}}}},
+        stamps = {{name = 'bedroom 3x3 (hub)', zone = 'b', alts = {{grid = G.nbed}}}},
         optional = {
-            {name = 'dining 3x3', max = 1, alts = {{grid = G.ndining3}}},
-            {name = 'office 3x3', max = 1, alts = {{grid = G.noffice}}},
-            {name = 'tomb 3x3', max = 1, alts = {{grid = G.ntomb}}},
+            {name = 'dining 3x3', max = 1, zone = 'h', alts = {{grid = G.ndining3}}},
+            {name = 'office 3x3', max = 1, zone = 'o', alts = {{grid = G.noffice}}},
+            {name = 'tomb 3x3', max = 1, zone = 'T', alts = {{grid = G.ntomb}}},
         }},
     ['catacombs']    = {margin = 0, maxLen = 12, stamps = {{name = 'catacomb 7x9', grid = G.catacomb, max = 1}}},
-    ['memorials']    = {margin = 1, maxLen = 8, stamps = {{name = 'memorial 5x5', grid = G.memorial, max = 1}}},
+    ['memorials']    = {margin = 1, maxLen = 8, stamps = {{name = 'memorial 5x5', grid = G.memorial, max = 1, zone = 'T'}}},
     ['family tombs'] = {margin = 0, maxLen = 12, stamps = {{name = 'family tomb 3x5', grid = G.family}}},
     ['forge shrines'] = {margin = 1, maxLen = 10, stamps = {{name = 'shrine of the forge 5x5', grid = G.forge, max = 1}}},
     ['sea shrines']   = {margin = 1, maxLen = 10, stamps = {{name = 'shrine of the sea 5x7', grid = G.sea, max = 1}}},
@@ -111,7 +117,7 @@ DISTRICTS = {
     ["scholars' guild"] = {margin = 1, maxLen = 10, stamps = {{name = "scholars' hall 7x6", grid = G.scholars, max = 1}}},
     ["brewers' guild"]  = {margin = 1, maxLen = 8, stamps = {{name = "brewers' hall 5x6", grid = G.brewers, max = 1}}},
     ["merchants' guild"] = {margin = 1, set = true, depth = 18,
-        stamps = {{name = "merchants' hall 7x6 (hub)", alts = {{grid = G.merchants}}}, {name = 'counting room 3x3', alts = {{grid = G.counting}}}, {name = 'vault 3x3', alts = {{grid = G.vault}}}},
+        stamps = {{name = "merchants' hall 7x6 (hub)", alts = {{grid = G.merchants}}}, {name = 'counting room 3x3', zone = 'o', alts = {{grid = G.counting}}}, {name = 'vault 3x3', alts = {{grid = G.vault}}}},
         optional = {{name = 'second vault 3x3', max = 1, alts = {{grid = G.vault}}}}},
     ["warriors' guild"] = {margin = 1, set = true, depth = 18,
         stamps = {{name = "warriors' hall 7x6 (hub)", alts = {{grid = G.warriors}}}, {name = 'armory 5x3', alts = {{grid = G.armory}}}, {name = 'barracks 5x3', alts = {{grid = G.barracks}}}},

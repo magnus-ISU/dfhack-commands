@@ -67,8 +67,19 @@ your dug floor, one segment at a time, each segment dressed with statue rows and
 with districts as it is laid; a road with nothing along it is refused; a second pass fills the
 leftover frontage; noble suites and guild complexes are placed as suites with one door on the
 road. Then every room, road and hallway piece is started as a `fort/quickfort` job, so digging,
-smoothing, engraving and furniture sequence themselves per tile. The burrow's outer ring is never
-dug and nothing outside it is touched. Only "apply now" exists so far. "New preset" and "Edit
+digging,
+smoothing, engraving and furniture sequence themselves per tile, and the three blueprints that
+want a given square wait for each other on it — a mine designation and a smooth designation never
+share a tile, because DF works the smoothing, the mining never happens, and the wall just stays. Each stamp declares the activity zone its
+room carries (`zone = 'b'`/`'o'`/`'h'`/`'T'` in the preset), and the blueprint gets a `#zone`
+section next to its dig, smooth, engrave and build sections — bedrooms, offices, dining rooms and
+single-coffin tombs. A catacomb or family tomb declares none and is left to `fort/auto-tomb`,
+which zones each coffin separately; auto-tomb stands off any tile a running plan is about to zone,
+so the two never race. New stamps added in the preset editor start with the zone their furniture
+implies. The burrow's outer ring is never
+dug and nothing outside it is touched. Confirming closes the picker immediately and plans in
+the background, a slice of a frame at a time, so the game keeps running while the rooms appear;
+progress goes to the console and the summary is announced in game. Only "apply now" exists so far. "New preset" and "Edit
 preset" open a three-column editor: actions and the settings of the selection, the passes with
 their districts and blueprints, and the blueprint library filtered by what is being edited; Enter
 on a library entry adds it. Presets save to `dfhack-config/scripts/data/builder-burrow/presets.json`

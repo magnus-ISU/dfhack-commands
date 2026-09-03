@@ -85,6 +85,15 @@ end
 local TYPE_ORDER = {['bedroom'] = 0, ['office'] = 1, ['dining room'] = 2, ['tomb'] = 3, ['temple'] = 4,
                     ['meeting area'] = 5, ['multi'] = 6, ['other'] = 7, ['hallway'] = 8}
 
+-- The activity zone a room of each type carries, as the quickfort zone code the
+-- blueprint writes. A stamp added from the library starts with this, and it is then
+-- part of the preset -- editable in its JSON, and what fort/builder-burrow applies.
+-- Only single-purpose types get one: 'multi' and 'other' are too ambiguous to guess,
+-- and a tomb here is one coffin's room (a many-coffin crypt classifies as 'tomb' too,
+-- so its zone is left for the preset author to remove or keep deliberately).
+local ZONE_FOR_TYPE = {['bedroom'] = 'b', ['office'] = 'o', ['dining room'] = 'h',
+                       ['tomb'] = 'T', ['meeting area'] = 'm'}
+
 -- every stamp the shipped districts and presets know, plus any in user presets
 function library()
     local seen, lib = {}, {}
@@ -93,7 +102,8 @@ function library()
         seen[name] = true
         local t, constructed, where = 'hallway', false, 'either'
         if kind == 'room' then t, constructed, where = typeOf(grid) end
-        lib[#lib + 1] = {name = name, grid = grid, kind = kind, type = t, constructed = constructed, where = where}
+        lib[#lib + 1] = {name = name, grid = grid, kind = kind, type = t, constructed = constructed,
+                         where = where, zone = ZONE_FOR_TYPE[t]}
     end
     local function addDistrict(d)
         for _, list in ipairs({d.stamps or {}, d.optional or {}}) do
@@ -131,10 +141,12 @@ function toEditable(p, name)
         local base = d.stamps and d or (presets.DISTRICTS[d.name] or {stamps = {}})
         local function sl(s)
             local alts = {}
-            for _, a in ipairs(s.alts or {{grid = s.grid, name = s.name, weight = s.weight, setback = s.setback}}) do
-                alts[#alts + 1] = {name = a.name or s.name, grid = a.grid, weight = a.weight or 1, setback = a.setback or 0}
+            for _, a in ipairs(s.alts or {{grid = s.grid, name = s.name, weight = s.weight,
+                                           setback = s.setback, zone = s.zone}}) do
+                alts[#alts + 1] = {name = a.name or s.name, grid = a.grid, weight = a.weight or 1,
+                                   setback = a.setback or 0, zone = a.zone or s.zone}
             end
-            return {name = s.name, weight = s.weight or 1, max = s.max, alts = alts}
+            return {name = s.name, weight = s.weight or 1, max = s.max, zone = s.zone, alts = alts}
         end
         local out = {name = d.name, weight = d.weight or 1,
                      margin = d.margin ~= nil and d.margin or (base.margin or 0),
@@ -166,14 +178,16 @@ function fromEditable(ed)
             local alts = {}
             for _, a in ipairs(s.alts) do
                 alts[#alts + 1] = {name = a.name, grid = a.grid, weight = a.weight, setback = a.setback,
-                                   max = (not d.set) and s.max or nil}
+                                   zone = a.zone, max = (not d.set) and s.max or nil}
             end
-            o.stamps[#o.stamps + 1] = {name = s.name, weight = s.weight, max = (not d.set) and s.max or nil, alts = alts}
+            o.stamps[#o.stamps + 1] = {name = s.name, weight = s.weight, max = (not d.set) and s.max or nil,
+                                       zone = s.zone, alts = alts}
         end
         for _, s in ipairs(d.optional) do
             local alts = {}
-            for _, a in ipairs(s.alts) do alts[#alts + 1] = {name = a.name, grid = a.grid, weight = a.weight, setback = a.setback} end
-            o.optional[#o.optional + 1] = {name = s.name, max = s.max or 1, alts = alts}
+            for _, a in ipairs(s.alts) do alts[#alts + 1] = {name = a.name, grid = a.grid, weight = a.weight,
+                                                             setback = a.setback, zone = a.zone} end
+            o.optional[#o.optional + 1] = {name = s.name, max = s.max or 1, zone = s.zone, alts = alts}
         end
         return o
     end
@@ -456,7 +470,7 @@ function EditorWindow:add_blueprint(item)
         item = choice and choice.item
     end
     if not item then self:say('pick a blueprint in the library first') return end
-    local entry = {name = item.name, grid = item.grid, weight = 1, setback = 0}
+    local entry = {name = item.name, grid = item.grid, weight = 1, setback = 0, zone = item.zone}
     local s = self.sel
     if self:in_road() then
         if item.kind ~= 'road' then self:say('that is a room; the hallway list takes hallway pieces') return end
