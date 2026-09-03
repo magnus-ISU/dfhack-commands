@@ -72,31 +72,41 @@ end
 -- that -- panel background repeats one tile id, and the row's TEXT carries no tile at all (the
 -- glyphs ride on the background tile as characters), so prose cannot fake a block.
 --
--- THE IDS RUN DOWNWARDS, n, n-1, n-2, n-3, which is the whole reason this was dead: the test
--- used to be `t == prev + 1`, no run ever matched, every row came back with no blocks and so
--- every click was handed straight back to DF.
+-- THE DIRECTION IS NOT FIXED, and testing for one is what kept killing this. It was written
+-- against ascending ids, found nothing and was "fixed" to descending; the rows now draw
+-- ASCENDING again (141909, 141910, 141911, 141912 on a name line), and it found nothing once
+-- more -- no blocks, so `classify` returned nil and every click went straight back to DF, which
+-- is what "clicking a noble does nothing" looks like. So a run is accepted in EITHER direction,
+-- with the direction fixed by its second tile and required to hold for the rest of it.
 --
 -- A run is also not always one block. Where two icons sit edge to edge and happen to be
--- neighbours in the atlas, their eight columns descend without a break and read as a single
--- run -- so a run is CUT INTO 4-wide blocks rather than accepted or rejected whole. Anything
--- left over past the last whole block is not a block and is dropped.
+-- neighbours in the atlas, their eight columns step without a break and read as a single run --
+-- so a run is CUT INTO 4-wide blocks. A run that is NOT a whole number of blocks is not made of
+-- icons at all (every icon is exactly four tiles, so any run of them is a multiple of four) and
+-- is dropped entire, rather than shaved into blocks that were never there: an 11-tile graphic
+-- sits on these rows, and cutting it yielded two phantom icons that swallowed clicks.
 local BLOCK_W = 4
 
 local function tile_blocks(y)
     local w = dfhack.screen.getWindowSize()
-    local blocks, run_start, prev = {}, nil, nil
+    local blocks, run_start, prev, step = {}, nil, nil, nil
     local function close(at)
         if not run_start then return end
-        for x1 = run_start, at - BLOCK_W, BLOCK_W do
-            local p = dfhack.screen.readTile(x1, y)
-            blocks[#blocks + 1] = {x1 = x1, x2 = x1 + BLOCK_W - 1, fg = p and p.fg}
+        local len = at - run_start
+        if len >= BLOCK_W and len % BLOCK_W == 0 then
+            for x1 = run_start, at - BLOCK_W, BLOCK_W do
+                local p = dfhack.screen.readTile(x1, y)
+                blocks[#blocks + 1] = {x1 = x1, x2 = x1 + BLOCK_W - 1, fg = p and p.fg}
+            end
         end
+        run_start, step = nil, nil
     end
     for x = 0, w - 1 do
         local p = dfhack.screen.readTile(x, y)
         local t = p and p.tile
-        if t and prev and t == prev - 1 then
-            -- still inside a run
+        local d = (t and prev) and (t - prev) or nil
+        if d and (d == 1 or d == -1) and (step == nil or step == d) then
+            step = d                             -- still inside a run, in its own direction
         else
             close(x)
             run_start = t and x or nil
@@ -293,7 +303,7 @@ NobleClickOverlay.ATTRS{
     -- /Default only: while the candidate or symbol list is up, every click is DF's
     viewscreens = 'dwarfmode/Info/ADMINISTRATORS/Default',
     frame = {w = 1, h = 1},          -- draws nothing; onInput sees the whole screen anyway
-    version = 2,
+    version = 3,
 }
 
 function NobleClickOverlay:onInput(keys)
