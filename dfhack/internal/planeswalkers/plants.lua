@@ -18,17 +18,20 @@ function save_phases(ctx)
             local trees = 0
             for _, p in ipairs(df.global.world.plants.all) do
                 if common.in_footprint(ctx, p.pos.x, p.pos.y) then
-                    local raw = df.plant_raw.find(p.material)
-                    if raw then
-                        local tree = p.tree_info ~= nil
-                        if tree then trees = trees + 1 end
-                        table.insert(out.list, {
-                            x = p.pos.x - o.x, y = p.pos.y - o.y, z = p.pos.z,
-                            id = raw.id, tree = tree or nil,
-                            grow = p.grow_counter, hp = p.hitpoints,
-                            dead = p.damage_flags.is_dead or nil,
-                        })
-                    end
+                    local ok, err = pcall(function()
+                        local raw = df.plant_raw.find(p.material)
+                        if raw then
+                            local tree = p.tree_info ~= nil
+                            if tree then trees = trees + 1 end
+                            table.insert(out.list, {
+                                x = p.pos.x - o.x, y = p.pos.y - o.y, z = p.pos.z,
+                                id = raw.id, tree = tree or nil,
+                                grow = p.grow_counter, hp = p.hitpoints,
+                                dead = p.damage_flags.dead or nil,
+                            })
+                        end
+                    end)
+                    if not ok then common.add_skip(ctx, 'plant-save-error', tostring(err)) end
                 end
             end
             common.write_json(ctx.dir .. FILE, out)
