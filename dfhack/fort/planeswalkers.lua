@@ -460,6 +460,11 @@ local function do_load(name, ...)
         local held = held_count()
         print(('planeswalkers: units hold %d item(s) at the end of the load (%d were attached)')
             :format(held, ctx.held_attached or 0))
+        dfhack.persistent.saveSiteData(GLOBAL_KEY,
+            {state = 'done', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S'),
+             anchor = marker_anchor,
+             items = {attached = ctx.held_attached or 0, held_at_end = held,
+                      grounded = ctx.skips['unit-held-item-grounded'] and ctx.skips['unit-held-item-grounded'].n or 0}})
         if ctx.components_reminted then
             print(('planeswalkers: %d building(s) needed their components put in a second time')
                 :format(ctx.components_reminted))
@@ -577,6 +582,10 @@ local function do_status()
             print(('  this fort: restore "%s" from world "%s" -- %s (%s)')
                 :format(marker.from or '?', marker.world or '?', marker.state,
                         marker.when or '?'))
+            if marker.items then
+                print(('  items: %d attached to units at load, %d held at the end of it, %d grounded')
+                    :format(marker.items.attached, marker.items.held_at_end, marker.items.grounded))
+            end
         end
     end
 end

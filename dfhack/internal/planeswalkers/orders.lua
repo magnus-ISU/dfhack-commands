@@ -160,9 +160,16 @@ function load_phases(ctx)
             local id_map, made = {}, {}
             for _, rec in ipairs(data.list or {}) do
                 local jt = df.job_type[rec.job]
-                if not jt then
+                -- an order for a reaction this world does not have would be
+                -- named by DF through a lookup that dereferences nothing (the
+                -- manager screen SEGFAULTed on exactly that)
+                if jt and rec.job == 'CustomReaction' and reaction_index(rec.reaction) < 0 then
+                    common.add_skip(ctx, 'order-reaction-missing-in-world', tostring(rec.reaction))
+                    jt = nil
+                elseif not jt then
                     common.add_skip(ctx, 'order-job-unknown', rec.job)
-                else
+                end
+                if jt then
                     local ok, err = pcall(function()
                         local o = df.manager_order:new()
                         o.id = handler.manager_order_next_id
@@ -170,7 +177,7 @@ function load_phases(ctx)
                         o.job_type = jt
                         o.item_type = rec.t and df.item_type[rec.t] or -1
                         o.item_subtype = rec.t and rec.st and match.resolve_subtype(ctx, rec.t, rec.st) or -1
-                        o.reaction_name = rec.reaction or ''
+                        o.reaction_name = rec.job == 'CustomReaction' and rec.reaction or ''
                         local mi = rec.mat and match.resolve_mat_token(ctx, rec.mat)
                         o.mat_type = mi and mi.type or -1
                         o.mat_index = mi and mi.index or -1
