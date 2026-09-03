@@ -84,7 +84,7 @@ settings, zones, items (with containment, quality, decorations, and maker), arti
 with their descriptions and full artifact status — value, quality and the Objects screen —
 even on pedestals, with their engraved images redrawn from what they depict), room and
 office assignments and the guildhalls/temples/libraries/taverns behind meeting areas,
-noble and administrator positions, locked doors and hatches, retired adventurers
+noble and administrator positions, the manager's work-order queue, locked doors and hatches, retired adventurers
 (unretirable on arrival), and every unit with skills, personality, appearance, family ties,
 kill tallies by species, clothing ownership, and the surrounding historical-figure web — into
 `dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world
@@ -92,8 +92,10 @@ kill tallies by species, clothing ownership, and the surrounding historical-figu
 (including the embark's own buildings — the wagon is dismantled, its supplies dropped)
 and rebuilds the fort there, dwarves and all. Everything is stored as raw tokens, so worlds
 with the same mod set restore near-losslessly; content the destination world lacks (modded
-materials, procedurally generated races, necromantic secrets) is substituted with the closest
-equivalent or skipped with a report. Make a manual DF save before loading — there is no
+materials, procedurally generated races and their materials, a deity's divine gear, necromantic
+secrets) is substituted with the closest equivalent or skipped with a report. Carried spires
+register on the destination's own tube features while it has spares; the rest are plain
+raw-adamantine veins, since a tube feature invented by a script does not survive retire/unretire. Make a manual DF save before loading — there is no
 rollback. An in-game announcement tells you when the save is written and when the fort has
 been restored. Run it with no arguments for a walkthrough, or `help fort/planeswalkers` for
 the full description. A fort restored into a larger embark than it came from is saved again

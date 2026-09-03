@@ -62,6 +62,10 @@ What is carried
   along (mayor, manager, bookkeeper, broker, baron...) is reassigned in the
   new site government or civilisation, where such a position exists.
 - **Doors and hatches** keep their locked/forbidden and closed state.
+- **Manager orders**: the whole work-order queue, with item, material,
+  conditions, repeat schedule and workshop restriction. Gear and materials the
+  destination world never generated (a deity's divine armour, a forgotten
+  beast's bone) are mapped to the closest local equivalent and reported.
 - **Decorations**: an artifact's engraved images are redrawn in the new world
   from what they depict (creatures, items, plants, shapes and their actions);
   only images of particular figures become images of the species.
@@ -268,6 +272,7 @@ local function do_save(name)
     local phases = terrain.save_phases(ctx)
     for _, p in ipairs(req('spires').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
+    for _, p in ipairs(req('orders').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
     common.start_job('save ' .. name, phases, ctx, function()
@@ -394,6 +399,7 @@ local function do_load(name, ...)
     end
     if dfhack.filesystem.exists(dir .. '/buildings.json') then
         for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('orders').load_phases(ctx)) do table.insert(phases, p) end
     end
     if dfhack.filesystem.exists(dir .. '/units.json') then
         -- units before items so unit-held items can be re-attached

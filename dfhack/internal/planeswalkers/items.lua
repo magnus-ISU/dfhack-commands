@@ -339,18 +339,18 @@ local function create_one(ctx, rec, is_retry)
         common.add_skip(ctx, 'item-type-unknown', rec.t)
         return nil
     end
+    local match = reqscript('internal/planeswalkers/match')
     local isub = -1
     if rec.st then
-        local ok, v = pcall(dfhack.items.findSubtype, rec.t .. ':' .. rec.st)
-        if ok and v and v ~= -1 then isub = v
-        else
+        isub = match.resolve_subtype(ctx, rec.t, rec.st)
+        if isub == -1 then
             common.add_skip(ctx, 'item-subtype-missing', rec.t .. ':' .. rec.st)
             return nil
         end
     end
     local mt, mx = 0, -1
     if rec.mat then
-        local minfo = dfhack.matinfo.find(rec.mat)
+        local minfo = match.resolve_mat_token(ctx, rec.mat)
         if minfo then mt, mx = minfo.type, minfo.index
         else
             common.add_skip(ctx, 'item-mat-missing', rec.mat)

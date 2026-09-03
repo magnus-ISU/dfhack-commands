@@ -12,11 +12,84 @@ local GEN_STEMS = {
     'ANGEL', 'WEREBEAST', 'EXPERIMENT', 'HF',
 }
 
+-- the letters before the first digit: FORGOTTEN_BEAST_, DEMON_, HFEXP, HF...
 local function stem_of(token)
+    local lead = token:match('^([%a_]-)%d')
+    if lead and #lead > 0 then return lead end
     for _, s in ipairs(GEN_STEMS) do
         if token:find(s, 1, true) == 1 then return s end
     end
     return token:match('^([%a_]+)_%d') or token
+end
+
+-- a material token the destination lacks, mapped to its nearest local one:
+-- a generated creature's material goes to the closest local creature of the
+-- same kind (same material name when it has one), a divine metal to any
+-- local divine metal. Returns a matinfo or nil.
+function resolve_mat_token(ctx, tok)
+    if not tok then return nil end
+    local mi = dfhack.matinfo.find(tok)
+    if mi then return mi end
+    ctx.mat_token_cache = ctx.mat_token_cache or {}
+    local hit = ctx.mat_token_cache[tok]
+    if hit ~= nil then return hit or nil end
+    local out
+    local race, mat = tok:match('^CREATURE:([^:]+):(.+)$')
+    if race then
+        local gi = match_generated(ctx, race, 0)
+        local craw = gi and df.global.world.raws.creatures.all[gi]
+        if craw then
+            out = dfhack.matinfo.find('CREATURE:' .. craw.creature_id .. ':' .. mat)
+            if not out then
+                -- no such material on the stand-in: its first material
+                for _, m in ipairs(craw.material) do
+                    out = dfhack.matinfo.find('CREATURE:' .. craw.creature_id .. ':' .. m.id)
+                    if out then break end
+                end
+            end
+        end
+    elseif tok:match('^INORGANIC:DIVINE_') then
+        for _, raw in ipairs(df.global.world.raws.inorganics.all) do
+            if raw.id:match('^DIVINE_') then out = dfhack.matinfo.find('INORGANIC:' .. raw.id) break end
+        end
+    end
+    if out then common.add_skip(ctx, 'material-substituted', tok .. ' -> ' .. out:getToken()) end
+    ctx.mat_token_cache[tok] = out or false
+    return out
+end
+
+local SUBTYPE_CATEGORY = {
+    WEAPON = 'weapons', ARMOR = 'armor', SHOES = 'shoes', SHIELD = 'shields',
+    HELM = 'helms', GLOVES = 'gloves', AMMO = 'ammo', TRAPCOMP = 'trapcomps',
+    PANTS = 'pants', TOOL = 'tools', INSTRUMENT = 'instruments', TOY = 'toys',
+    SIEGEAMMO = 'siege_ammo', FOOD = 'food',
+}
+
+-- an item subtype token, or the local equivalent of a world-generated one:
+-- divine gear is "HF<deity> EI1<set><kind><n>" in every world, only the deity
+-- number differs, so the same suffix on any local deity is the same piece
+function resolve_subtype(ctx, item_type_name, st)
+    if not st then return -1 end
+    local ok, v = pcall(dfhack.items.findSubtype, item_type_name .. ':' .. st)
+    if ok and v and v ~= -1 then return v end
+    ctx.subtype_cache = ctx.subtype_cache or {}
+    local key = item_type_name .. ':' .. st
+    local hit = ctx.subtype_cache[key]
+    if hit ~= nil then return hit end
+    local found = -1
+    local suffix = st:match('^HF%d+ (.+)$')
+    local cat = SUBTYPE_CATEGORY[item_type_name]
+    if suffix and cat then
+        for i, def in ipairs(df.global.world.raws.itemdefs[cat]) do
+            if def.id:match('^HF%d+ ' .. suffix:gsub('%p', '%%%0') .. '$') then
+                found = def.subtype
+                common.add_skip(ctx, 'subtype-substituted', key .. ' -> ' .. def.id)
+                break
+            end
+        end
+    end
+    ctx.subtype_cache[key] = found
+    return found
 end
 
 function adult_size(craw, caste)

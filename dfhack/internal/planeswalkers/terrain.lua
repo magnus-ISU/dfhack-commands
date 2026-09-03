@@ -1044,17 +1044,10 @@ function spires_phase(ctx)
                             break
                         end
                     end
-                    if not tube and block then
-                        local ok, t, err = pcall(create_tube, block.region_pos.x,
-                                                 block.region_pos.y, tubes[1] and tubes[1].init)
-                        if ok and t then
-                            tube = t
-                            created = created + 1
-                        else
-                            common.add_skip(ctx, 'spire-feature-create-failed',
-                                            tostring(ok and err or t))
-                        end
-                    end
+                    -- no free tube feature: this spire becomes plain raw-adamantine
+                    -- veins. A feature created here does NOT survive retire/unretire
+                    -- (DF rebuilds the world tile's feature list and the spire's
+                    -- tiles turn into "unknown material"), so none is created.
                 end
                 if tube then
                     -- carried spires keep their FEATURE tiletypes; the feature
@@ -1083,10 +1076,9 @@ function spires_phase(ctx)
                         string.pack('<I2I2I2I2B', x, y, z, mat_idx, 0)
                 end
             end
-            ctx.spire_report = ('%d spire(s) carried as live adamantine tubes (%d on this ' ..
-                'world\'s tube features, %d newly created, %d as plain veins); %d tile(s) of ' ..
-                'this world\'s own tubes disarmed'):format(reused + created, reused, created,
-                plain, ctx.tube_disarmed or 0)
+            ctx.spire_report = ('%d spire(s) carried: %d on this world\'s tube features, ' ..
+                '%d as plain raw-adamantine veins; %d tile(s) of this world\'s own tubes ' ..
+                'disarmed'):format(reused + plain, reused, plain, ctx.tube_disarmed or 0)
             print('planeswalkers: ' .. ctx.spire_report)
             return true
         end,
@@ -1117,7 +1109,17 @@ function spire_repair_phases(ctx)
                 local by = (i % (bw * bh)) // bw
                 local bx = i % bw
                 local block = dfhack.maps.getBlock(bx, by, z)
-                if block and block_is_tube(ctx, block) then
+                if block and block.local_feature >= 0
+                    and not dfhack.maps.getLocalInitFeature(block.region_pos, block.local_feature) then
+                    -- a feature index nothing answers to (a tube created by an
+                    -- earlier restore, gone after retire/unretire): unhook it; the
+                    -- spire phase repaints its adamantine as veins
+                    for x = 0, 15 do
+                        for y = 0, 15 do block.designation[x][y].feature_local = false end
+                    end
+                    block.local_feature = -1
+                    ctx.dangling_unhooked = (ctx.dangling_unhooked or 0) + 1
+                elseif block and block_is_tube(ctx, block) then
                     local init = dfhack.maps.getLocalInitFeature(block.region_pos,
                                                                  block.local_feature)
                     for x = 0, 15 do
