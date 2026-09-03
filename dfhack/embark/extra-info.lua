@@ -459,10 +459,325 @@ end
 
 -- `maxrows` is how many text rows the panel may occupy; the neighbour list is
 -- the only thing long enough to care, so it absorbs the whole budget.
+-- Restored: this whole block, MAX_STONE through stone_summary, was deleted in
+-- the commit that rewrote the adamantine reporting, while the call to it in
+-- build_lines survived. The overlay threw on every frame after that -- "attempt
+-- to call a nil value (global 'stone_summary')" -- which is what "the script
+-- isn't running" looked like from the outside.
+
+-- ---- stone and wood ----------------------------------------------------------
+
+local MAX_STONE = 7
+
+local function inorganics() return df.global.world.raws.inorganics.all end
+
+local function has_class(m, class)
+    for i = 0, #m.material.reaction_class - 1 do
+        if m.material.reaction_class[i].value == class then return true end
+    end
+    return false
+end
+
+local COAL_IDS = {LIGNITE = true, BITUMINOUS_COAL = true}
+
+-- What the embark is made of, from the geology column its world tiles point at.
+-- Layer stones are ranked by how many z-levels they occupy (that is what "most
+-- common" means when you are digging); veins and clusters are collected too, but
+-- only surface in the guaranteed slots below, because a vein is a seam and not a
+-- stone you cut a fortress out of.
+--
+-- Three things are pulled up into the list whatever their thickness, because
+-- they decide what you can build rather than how much rock there is: the biggest
+-- FLUX layer (steel), lignite or bituminous coal (fuel without a magma sea), and
+-- anything with the GYPSUM reaction class (plaster, so casts for broken bones).
+-- What the embark's geology holds: counts by kind, the three stones that decide
+-- what you can build, and whether a given metal can be dug up here.
+--
+-- Counting is by KIND, not by how much: at embark the useful question is "does
+-- this column have flux, coal and plaster, and how varied is it", not which
+-- layer happens to be thickest. Gems and ores are counted apart from plain
+-- stone because they answer different questions -- and because folding them in
+-- once turned "38 other stones" into "114 more", which told nobody anything.
+--
+-- Three stones are still named outright whatever their thickness, one each: the
+-- biggest FLUX layer (steel), lignite or bituminous coal (fuel without a magma
+-- sea), and anything with the GYPSUM reaction class (plaster, so casts for
+-- broken bones).
+local function stone_summary(wtiles)
+    local inor = inorganics()
+    local layer_weight, present, gems, ores = {}, {}, {}, {}
+    local seen_geo, ore_yield = {}, {}
+
+    pcall(function()
+        for _, t in ipairs(wtiles) do
+            local rme = region_entry(t.x, t.y)
+            if rme and not seen_geo[rme.geo_index] then
+                seen_geo[rme.geo_index] = true
+                local gb = wd().geo_biomes[rme.geo_index]
+                for i = 0, #gb.layers - 1 do
+                    local L = gb.layers[i]
+                    local idx = L.mat_index
+                    if idx >= 0 then
+                        local thick = math.max(1, L.top_height - L.bottom_height + 1)
+                        layer_weight[idx] = (layer_weight[idx] or 0) + thick
+                        present[idx] = true
+                    end
+                    for j = 0, #L.vein_mat - 1 do
+                        local v = L.vein_mat[j]
+                        local vm = v >= 0 and inor[v]
+                        if vm then
+                            if vm.material.flags.IS_GEM then gems[v] = true
+                            elseif vm.material.flags.IS_STONE then present[v] = true end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- which of those are ores, and what each yields -- so "could aluminium be
+    -- dug here" has an answer rather than a guess
+    for idx in pairs(present) do
+        local m = inor[idx]
+        pcall(function()
+            if m and #m.metal_ore.mat_index > 0 then
+                ores[idx] = true
+                local set = {}
+                for k = 0, #m.metal_ore.mat_index - 1 do
+                    set[m.metal_ore.mat_index[k]] = true
+                end
+                ore_yield[idx] = set
+            end
+        end)
+    end
+
+    local function name_of(idx)
+        local m = inor[idx]
+        if not m then return nil end
+        local nm = m.material.state_name.Solid
+        return (nm ~= '' and nm) or m.id:lower():gsub('_', ' ')
+    end
+
+    local best = {}
+    local function nominate(k, idx)
+        local w = layer_weight[idx] or 0
+        if not best[k] or w > best[k].w then best[k] = {idx = idx, w = w} end
+    end
+    for idx in pairs(present) do
+        local m = inor[idx]
+        if m then
+            -- the thickest layer, which is what the fort will actually be cut
+            -- out of.  Veins carry no weight, so they never win this.
+            if layer_weight[idx] then nominate('common', idx) end
+            if has_class(m, 'FLUX') then nominate('flux', idx) end
+            if has_class(m, 'GYPSUM') then nominate('casts', idx) end
+            if COAL_IDS[m.id] then nominate('coal', idx) end
+        end
+    end
+
+    local function tally(t)
+        local n = 0
+        for _ in pairs(t) do n = n + 1 end
+        return n
+    end
+
+    return {
+        stones = tally(present),
+        ores = tally(ores),
+        gems = tally(gems),
+        common = best.common and name_of(best.common.idx) or nil,
+        flux = best.flux and name_of(best.flux.idx) or nil,
+        coal = best.coal and name_of(best.coal.idx) or nil,
+        casts = best.casts and name_of(best.casts.idx) or nil,
+        -- obtainable from the rock here, as an ore or as the metal itself?
+        yields = function(metal_idx)
+            if present[metal_idx] then return true end
+            for _, set in pairs(ore_yield) do
+                if set[metal_idx] then return true end
+            end
+            return false
+        end,
+    }
+end
+
+-- The trees the region can grow.  DF gives no honest "most common" here: every
+-- tree population is recorded as unlimited and vanilla sets FREQUENCY:50 on all
+-- of them, so the pick is by `plant_raw.frequency` (the right field) and is only
+-- meaningful where a mod varies it.  Featherwood is called out by name because
+-- it is worth going out of your way for.
+--
+-- Restored with stone_summary: both were deleted by the adamantine rewrite while
+-- their calls in build_lines survived, and only stone_summary came back.
+local function wood_summary(wtiles)
+    local plants = df.global.world.raws.plants.all
+    local seen_region, trees, seen_id = {}, {}, {}
+    local feather
+    for _, t in ipairs(wtiles) do
+        local rme = region_entry(t.x, t.y)
+        local r = rme and region_of(rme)
+        if r and not seen_region[r.index] then
+            seen_region[r.index] = true
+            pcall(function()
+                for i = 0, #r.population - 1 do
+                    local p = r.population[i]
+                    if df.world_population_type[p.type] == 'Tree' then
+                        local pl = plants[p.plant]
+                        if pl and not seen_id[pl.id] then
+                            seen_id[pl.id] = true
+                            local nm = (pl.name ~= '' and pl.name) or pl.id:lower()
+                            -- how many biomes the species is declared for: a
+                            -- generalist is what you will actually be cutting
+                            local spread = 0
+                            for k, v in pairs(pl.flags) do
+                                if v == true and tostring(k):sub(1, 6) == 'BIOME_' then
+                                    spread = spread + 1
+                                end
+                            end
+                            trees[#trees + 1] =
+                                {name = nm, freq = pl.frequency or 0, spread = spread}
+                            if pl.id:find('FEATHER') or nm:find('feather') then feather = nm end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    if #trees == 0 then return end
+    table.sort(trees, function(a, b)
+        if a.freq ~= b.freq then return a.freq > b.freq end
+        if a.spread ~= b.spread then return a.spread > b.spread end
+        return a.name < b.name
+    end)
+    -- featherwood is worth going out of your way for, so it is always named
+    -- when it grows here; the most common species is named alongside it, or on
+    -- its own when there is no featherwood.
+    local named = trees[1].name
+    if feather and feather ~= named then named = named .. ' and ' .. feather end
+    return ('Wood: %d tree species including %s'):format(#trees, named)
+end
+
+-- ---- what your own civilization can supply --------------------------------
+--
+-- These come off the chosen origin civ's entity, not off the embark tile, so
+-- they are the same wherever you put the fort -- which is exactly why they go
+-- first: they decide whether a fortress can armour a squad at all, and no
+-- amount of good local stone makes up for a civ that cannot make breastplates.
+--
+-- `resources` on the entity holds one vector per item category (armor_type,
+-- helm_type, gloves_type, shoes_type, pants_type) of itemdef indices, and
+-- `resources.metals` holds the inorganic indices it can supply as bars. A civ
+-- that lacks an entry cannot make OR trade the thing, so its absence is worth
+-- knowing before the embark rather than after the first siege.
+local ARMOUR_WANTED = {
+    {vec = 'armor_type',  defs = 'armor',  id = 'ITEM_ARMOR_BREASTPLATE', name = 'breastplates'},
+    {vec = 'armor_type',  defs = 'armor',  id = 'ITEM_ARMOR_MAIL_SHIRT',  name = 'mail shirts'},
+    {vec = 'armor_type',  defs = 'armor',  id = 'ITEM_ARMOR_CLOAK',       name = 'cloaks'},
+    {vec = 'helm_type',   defs = 'helms',  id = 'ITEM_HELM_HELM',         name = 'helms'},
+    {vec = 'gloves_type', defs = 'gloves', id = 'ITEM_GLOVES_GAUNTLETS',  name = 'gauntlets'},
+    {vec = 'shoes_type',  defs = 'shoes',  id = 'ITEM_SHOES_BOOTS',       name = 'high boots'},
+    {vec = 'pants_type',  defs = 'pants',  id = 'ITEM_PANTS_GREAVES',     name = 'greaves'},
+}
+
+-- Inorganic index of a raw id, cached. The lookup is a linear scan of every
+-- inorganic in the world -- a few hundred in vanilla, a few thousand in a heavy
+-- mod list -- and this panel rebuilds several times a second while the mouse
+-- moves over the map, so doing it fresh each time is the one part of this that
+-- could actually be felt. The raws do not change while a world is loaded, so
+-- the answer is kept; the cache is dropped when the world is.
+local metal_index_cache = {}
+
+local function metal_index(raw_id)
+    local hit = metal_index_cache[raw_id]
+    if hit ~= nil then return hit or nil end
+    local all = df.global.world.raws.inorganics.all
+    for i = 0, #all - 1 do
+        if all[i].id == raw_id then
+            metal_index_cache[raw_id] = i
+            return i
+        end
+    end
+    metal_index_cache[raw_id] = false      -- remember the misses too
+end
+
+dfhack.onStateChange.extra_info_metal_cache = function(sc)
+    if sc == SC_WORLD_UNLOADED or sc == SC_WORLD_LOADED then
+        metal_index_cache = {}
+    end
+end
+
+local function itemdefs(kind)
+    return df.global.world.raws.itemdefs[kind]
+end
+
+-- does the civ carry the itemdef whose raw id is `id`?
+local function civ_has_itemdef(civ, entry)
+    local ok, found = pcall(function()
+        local defs = itemdefs(entry.defs)
+        for _, idx in ipairs(civ.resources[entry.vec]) do
+            local d = defs[idx]
+            if d and d.id == entry.id then return true end
+        end
+        return false
+    end)
+    return ok and found
+end
+
+local function civ_has_metal(civ, raw_id)
+    local ok, found = pcall(function()
+        local inor = df.global.world.raws.inorganics.all
+        for _, idx in ipairs(civ.resources.metals) do
+            local m = inor[idx]
+            if m and m.id == raw_id then return true end
+        end
+        return false
+    end)
+    return ok and found
+end
+
+-- Lines about the civ itself, or nothing when there is nothing to say. Missing
+-- armour is always worth a line; aluminium only gets one when the civ has it,
+-- since "no aluminium" is the normal case and would be noise on every embark.
+local function civ_lines(scr, geo)
+    local civ = scr.selected_civ >= 0 and scr.selected_civ < #scr.start_civ
+        and scr.start_civ[scr.selected_civ] or nil
+    if not civ then return {} end
+
+    local out = {}
+    -- Where aluminium could come from, which is the part that decides what to
+    -- do about it: dug up here, bought from the civ, or both. Nothing is said
+    -- when it is available neither way, since that is the ordinary case and a
+    -- line saying so on every embark is noise.
+    local mined = geo and geo.yields and geo.yields(metal_index('ALUMINUM'))
+    local imported = civ_has_metal(civ, 'ALUMINUM')
+    if mined and imported then
+        out[#out + 1] = 'ALUMINIUM may be mined or imported'
+    elseif mined then
+        out[#out + 1] = 'ALUMINIUM may be mined'
+    elseif imported then
+        out[#out + 1] = 'ALUMINIUM may be imported'
+    end
+
+    local missing = {}
+    for _, entry in ipairs(ARMOUR_WANTED) do
+        if not civ_has_itemdef(civ, entry) then missing[#missing + 1] = entry.name end
+    end
+    if #missing > 0 then
+        wrap(out, 'NO ' .. table.concat(missing, ', '), '')
+    end
+    return out
+end
+
 function build_lines(scr, maxrows)
     maxrows = maxrows or (df.global.gps.dimy - 8)
     local etiles, wtiles = covered(scr)
     local lines = {}
+
+    -- The geology is read first because the civ lines need it -- whether
+    -- aluminium can be MINED here is a fact about the rock, not about the civ --
+    -- but the civ lines are printed first: they are the same wherever the fort
+    -- goes, and they decide whether it can be armoured at all.
+    local geo = stone_summary(wtiles)
+    for _, l in ipairs(civ_lines(scr, geo)) do lines[#lines + 1] = l end
 
     local rme = region_entry(wtiles[1].x, wtiles[1].y)
     local r = rme and region_of(rme)
@@ -493,11 +808,16 @@ function build_lines(scr, maxrows)
     if water then parts[#parts + 1] = water end
     if #parts > 0 then lines[#lines + 1] = table.concat(parts, ', ') end
 
-    local stones, stone_total = stone_summary(wtiles)
-    if stones and #stones > 0 then
-        local rest = (stone_total or #stones) - #stones
-        wrap(lines, 'Stone: ' .. table.concat(stones, ', ')
-            .. (rest > 0 and (' (+%d more)'):format(rest) or ''), '')
+    if geo and geo.stones > 0 then
+        wrap(lines, ('Stone: %d types, %d ore, %d gem')
+            :format(geo.stones, geo.ores, geo.gems), '')
+        -- the three that decide what can be built, named or missed by name
+        local named = {}
+        if geo.common then named[#named + 1] = geo.common .. ' (most common)' end
+        named[#named + 1] = geo.flux and (geo.flux .. ' (flux)') or 'NO FLUX'
+        named[#named + 1] = geo.coal and (geo.coal .. ' (coal)') or 'no coal'
+        named[#named + 1] = geo.casts and (geo.casts .. ' (casts)') or 'no casts'
+        wrap(lines, table.concat(named, ', '), '  ')
     end
 
     local wood = wood_summary(wtiles)
