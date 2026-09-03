@@ -23,6 +23,9 @@ that dwarf's sheet is ALREADY the one on screen. So the sequence reads: click to
 this is, click again to replace them. Nothing is taken away, and the assignment list is
 never reached by accident -- you have to be looking at the dwarf you are about to replace.
 
+  * clicks are confined to the squads panel, which is located by finding the squad's own
+    name on screen: with another panel in front -- a zone's unit selector, a search box --
+    the panel is covered, its name is not drawn, and every click is handed back to DF;
   * an empty slot draws no portrait and holds no unit, so "Assign position 4" is untouched;
   * the squad name, Back to squads and the order buttons never reach this.
 
@@ -51,6 +54,7 @@ Registered automatically as overlay `fort/clickable-squad-members.click`.
 local overlay = require('plugins.overlay')
 
 local ROW_PITCH = 3          -- a member row is three lines tall, name in the middle
+local ART_WIDTH = 5          -- the portrait, drawn in the columns left of the name
 
 local function squads_panel()
     return df.global.game.main_interface.squads
@@ -117,6 +121,46 @@ local function panel_run(y)
         out[#out + 1] = string.char((p and p.ch and p.ch ~= 0) and p.ch or 32)
     end
     return first, table.concat(out)
+end
+
+-- ---- where the squads panel actually is --------------------------------------
+--
+-- `dwarfmode/Squads/Default` stays in the focus list while the panel is merely OPEN, so this
+-- overlay is asked about clicks that belong to whatever is drawn in front of it -- a zone's
+-- unit selector, a search box, a sheet. Those panels list the same dwarves by the same names,
+-- so reading "the rightmost text on the clicked line" matched them happily and swallowed the
+-- click: picking a dwarf for a dining hall opened his sheet instead of assigning him.
+--
+-- So the panel is LOCATED before anything is read out of it, by finding the squad's own name
+-- (which the header draws, truncated like everything else here). Two things fall out of that
+-- one measurement, and both are needed:
+--
+--   * if that name is nowhere on screen the panel is covered, and the click is not ours at
+--     all -- no row lookup, no matching, hand it straight back;
+--   * where it IS drawn gives the panel's left edge, and a click left of that edge is in some
+--     other panel however well its text matches.
+local function squad_name_prefix_at(squad, y)
+    local start, text = panel_run(y)
+    if not start then return nil end
+    text = text:gsub('%s+$', ''):gsub('^%s+', '')
+    local drawn = text:gsub('%.+$', '')
+    -- long enough that ordinary panel prose cannot match a squad name by accident
+    if #drawn < 6 then return nil end
+    -- Either spelling -- DF draws the alias when a squad has been renamed, the translated
+    -- name when it has not -- and CONTAINED rather than a prefix, because the header both
+    -- truncates from the right ("Rapidity of Merch...") and can drop the leading article.
+    for _, name in ipairs{squad.alias, dfhack.translation.translateName(squad.name, true)} do
+        if #name > 0 and name:find(drawn, 1, true) then return start end
+    end
+end
+
+-- the panel's left edge, or nil when the squad's name is not drawn anywhere
+local function panel_left_edge(squad)
+    local _, h = dfhack.screen.getWindowSize()
+    for y = 0, h - 1 do
+        local start = squad_name_prefix_at(squad, y)
+        if start then return start end
+    end
 end
 
 -- ---- which position a line holds ---------------------------------------------
@@ -186,7 +230,6 @@ end
 -- THE ROW DOES NOT RUN ALL THE WAY OUT, though: a CHECKBOX sits in the last few columns
 -- before the panel border, and it keeps its own behavior -- a click there toggles it, as it
 -- always did, and never opens a sheet.
-local ART_WIDTH = 5
 local RIGHT_MARGIN = 2       -- the panel's own border, past the checkbox
 local CHECKBOX_WIDTH = 4     -- only a fallback; normally measured off the screen (below)
 
@@ -259,7 +302,7 @@ SquadMemberClickOverlay.ATTRS{
     default_enabled = true,
     viewscreens = 'dwarfmode/Squads/Default',
     frame = {w = 1, h = 1},        -- draws nothing; onInput sees the whole screen anyway
-    version = 2,
+    version = 3,
 }
 
 function SquadMemberClickOverlay:onInput(keys)
@@ -271,6 +314,18 @@ function SquadMemberClickOverlay:onInput(keys)
 
     local squad = viewing_squad()
     if not squad then note('(%s,%s) no squad being viewed', x, y) return false end
+
+    -- the panel first, the row second: everything below reads the screen, and reading it
+    -- while another panel is in front is what made this fire on other people's lists
+    local left = panel_left_edge(squad)
+    if not left then
+        note('(%s,%s) squads panel is covered -- passing to DF', x, y)
+        return false
+    end
+    if x < left - ART_WIDTH then
+        note('(%s,%s) left of the squads panel (edge %d)', x, y, left)
+        return false
+    end
 
     local unit, name_y, how = row_at(squad, y)
     if not unit then note('(%s,%s) no member on lines %d-%d', x, y, y - 1, y + 1) return false end
