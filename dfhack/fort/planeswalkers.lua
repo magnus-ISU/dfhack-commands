@@ -48,9 +48,23 @@ What is carried
   containment (what is in which bin/barrel/cabinet, on which pedestal).
 - **Artifacts**, named and described, and the historical figure that made them.
 - **Units**: every dwarf, animal and visitor -- skills and their experience,
-  attributes, personality, appearance, wounds, inventory, professions and
-  labours, plus the surrounding historical-figure web (parents, spouses,
-  children, kills, and retired adventurers, who stay unretirable on arrival).
+  attributes, personality, appearance, wounds, inventory (worn, wielded and
+  strapped, and who owns which clothes), professions and labours, plus the
+  surrounding historical-figure web (parents, spouses, children, and retired
+  adventurers, who stay unretirable on arrival). Kill lists come along as
+  species tallies (so many goblins, so many demons, undead flagged as such);
+  the named victims stay in the old world's history.
+- **Rooms and offices**: who each bedroom, office, tomb or dining room is
+  assigned to, and which meeting area is which guildhall, temple, library or
+  tavern (the location is recreated in the new site with its name and guild;
+  a temple's deity is left unassigned, deities being figures of the old world).
+- **Nobles and administrators**: every position held by someone who came
+  along (mayor, manager, bookkeeper, broker, baron...) is reassigned in the
+  new site government or civilisation, where such a position exists.
+- **Doors and hatches** keep their locked/forbidden and closed state.
+- **Decorations**: an artifact's engraved images are redrawn in the new world
+  from what they depict (creatures, items, plants, shapes and their actions);
+  only images of particular figures become images of the species.
 
 Identity is stored as raw token strings, never world-local numeric ids, so a
 destination world with the same raws/mods restores near-losslessly. Procedurally
@@ -384,6 +398,9 @@ local function do_load(name, ...)
     if dfhack.filesystem.exists(dir .. '/units.json') then
         -- units before items so unit-held items can be re-attached
         for _, p in ipairs(req('units').load_phases(ctx)) do table.insert(phases, p) end
+        -- needs both the unit and the building maps
+        table.insert(phases, req('extras').positions_phase(ctx))
+        table.insert(phases, req('extras').owners_phase(ctx))
     end
     if dfhack.filesystem.exists(dir .. '/items.json') then
         for _, p in ipairs(req('items').load_phases(ctx)) do table.insert(phases, p) end

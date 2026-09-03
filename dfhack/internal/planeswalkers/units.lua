@@ -87,6 +87,9 @@ local function classify(u)
     return 'wild'
 end
 
+-- shared with the extras module (location names, image names)
+name_out_pub, name_in_pub = name_out, name_in
+
 local function link_type_name(link)
     return tostring(link._type):match('histfig_hf_link_(%w+)st')
 end
@@ -111,6 +114,8 @@ local function save_hf(ctx, hf, stub)
                                          s = l.link_strength})
             end
         end
+        -- what this figure has killed, by species
+        rec.kills = reqscript('internal/planeswalkers/extras').kills_out(hf)
         -- necromancer / curse signature (bound to dest world's secrets in M5)
         local okc, curse = pcall(function() return hf.info.curse end)
         if okc and curse and #curse.active_interactions > 0 then
@@ -262,6 +267,10 @@ function save_phases(ctx)
                 if hf then table.insert(out.list, save_hf(ctx, hf, true)) end
             end
             common.write_json(ctx.dir .. '/histfigs.json', out)
+            -- noble/administrator positions held by figures of this fort
+            local positions = reqscript('internal/planeswalkers/extras').positions_out(in_set)
+            common.write_json(ctx.dir .. '/positions.json', {v = 1, list = positions})
+            ctx.manifest.counts.positions = #positions
             ctx.manifest.counts.histfigs = #out.list
             ctx.manifest.complete.histfigs = true
             return true
@@ -581,6 +590,9 @@ function load_phases(ctx)
                             common.add_skip(ctx, 'histfig-link-type-unknown', l.t)
                         end
                     end
+                end
+                if hf and rec.kills then
+                    reqscript('internal/planeswalkers/extras').kills_in(ctx, hf, rec.kills)
                 end
                 if dfhack.getTickCount() >= deadline then return false end
             end

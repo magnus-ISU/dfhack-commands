@@ -105,8 +105,12 @@ local function save_one(ctx, bld)
             rec.zs2 = bld.zone_settings.whole.i2
             rec.spec = bld.spec_sub_flag.whole
         end)
+        -- owner, assigned units, and the guildhall/temple/... behind it
+        pcall(reqscript('internal/planeswalkers/extras').zone_out, bld, rec)
     elseif btype == df.building_type.Door then
         rec.door_flags = bld.door_flags.whole
+    elseif btype == df.building_type.Hatch then
+        pcall(function() rec.hatch_flags = bld.hatch_flags.whole end)
     elseif btype == df.building_type.FarmPlot then
         rec.crops = {}
         for season = 0, 3 do

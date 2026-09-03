@@ -104,6 +104,8 @@ local function save_one(ctx, item)
             rec.in_item = ref.item_id
         elseif df.general_ref_building_holderst:is_instance(ref) then
             rec.in_bld = ref.building_id
+        elseif df.general_ref_unit_itemownerst:is_instance(ref) then
+            rec.owner = ref.unit_id  -- a dwarf's own clothes stay theirs
         elseif df.general_ref_unit_holderst:is_instance(ref) then
             rec.on_unit = ref.unit_id
             local holder = df.unit.find(ref.unit_id)
@@ -138,6 +140,12 @@ local function save_one(ctx, item)
             }
             if imp.quality > 0 then e.q = imp.quality end
             if imp.skill_rating > 0 then e.sr = imp.skill_rating end
+            if df.itemimprovement_art_imagest:is_instance(imp) then
+                -- the picture itself, in tokens, so it can be redrawn there
+                local okimg, img = pcall(reqscript('internal/planeswalkers/extras').image_out,
+                                         imp.image.id, imp.image.subid)
+                if okimg then e.img = img end
+            end
             if df.itemimprovement_itemspecificst:is_instance(imp) then
                 e.spec = imp.type
             elseif df.itemimprovement_threadst:is_instance(imp)
@@ -263,7 +271,26 @@ local function restore_improvements(ctx, rec, item)
         local skip = IMP_SKIP[e.t or 'generic']
         local cls = not skip and df['itemimprovement_' .. e.t .. 'st'] or nil
         local minfo = e.mat and dfhack.matinfo.find(e.mat) or nil
-        if skip then
+        if e.t == 'art_image' and e.img then
+            -- redraw the image in this world, then decorate with it
+            local extras = reqscript('internal/planeswalkers/extras')
+            local okc, err = pcall(function()
+                local chunk, subid = extras.image_in(ctx, e.img)
+                if not chunk then error(subid) end
+                local imp = df.itemimprovement_art_imagest:new()
+                imp.mat_type = minfo and minfo.type or -1
+                imp.mat_index = minfo and minfo.index or -1
+                imp.maker = -1
+                imp.masterpiece_event = -1
+                imp.quality = math.min(e.q or 0, 5)
+                imp.skill_rating = e.sr or 0
+                imp.image.id, imp.image.subid = chunk, subid
+                imp.image.civ_id = df.global.plotinfo.civ_id
+                imp.image.site_id = df.global.plotinfo.site_id
+                imps:insert('#', imp)
+            end)
+            if not okc then common.add_skip(ctx, 'improvement-image-lost', tostring(err)) end
+        elseif skip then
             common.add_skip(ctx, skip, rec.t)
         elseif not cls then
             common.add_skip(ctx, 'improvement-type-unknown', e.t)
@@ -430,6 +457,11 @@ local function place_one(ctx, rec, item)
     elseif rec.on_unit then
         local u = ctx.unit_map and ctx.unit_map[rec.on_unit]
         if u and dfhack.items.moveToInventory(item, u, rec.mode or 0, rec.bp or -1) then
+            -- the item was minted at the creator's feet; a held item whose
+            -- position is not its wearer's is shed by DF on the next load
+            -- (half a fort's clothing ended up in one heap that way)
+            item.pos.x, item.pos.y, item.pos.z = u.pos.x, u.pos.y, u.pos.z
+            ctx.held_attached = (ctx.held_attached or 0) + 1
             return
         end
         common.add_skip(ctx, 'unit-held-item-grounded')
@@ -471,6 +503,19 @@ function load_phases(ctx)
                     if not okp then
                         common.add_skip(ctx, 'item-place-error', tostring(err))
                     end
+                    if rec.owner then
+                        local owner = ctx.unit_map and ctx.unit_map[rec.owner]
+                        if owner then
+                            pcall(function()
+                                local ref = df.general_ref_unit_itemownerst:new()
+                                ref.unit_id = owner.id
+                                item.general_refs:insert('#', ref)
+                                item.flags.owned = true
+                                owner.owned_items:insert('#', item.id)
+                                ctx.owned_restored = (ctx.owned_restored or 0) + 1
+                            end)
+                        end
+                    end
                 elseif ok and why == 'retry' then
                     job.retry = job.retry or {}
                     table.insert(job.retry, rec)
@@ -492,6 +537,10 @@ function load_phases(ctx)
             -- contain every restored item
             local upd = df.global.plotinfo.equipment.update
             for k in pairs(upd) do pcall(function() upd[k] = true end) end
+            local held = 0
+            for _, u in ipairs(df.global.world.units.active) do held = held + #u.inventory end
+            print(('planeswalkers: items: %d attached to units (%d held now across the map), %d ownerships restored')
+                :format(ctx.held_attached or 0, held, ctx.owned_restored or 0))
             return true
         end,
     }, {

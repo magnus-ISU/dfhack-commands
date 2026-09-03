@@ -82,9 +82,11 @@ are removed before the terrain lands, so the load itself can never set them off 
 constructions, buildings, stockpiles with their
 settings, zones, items (with containment, quality, decorations, and maker), artifacts (named,
 with their descriptions and full artifact status — value, quality and the Objects screen —
-even on pedestals), retired adventurers (unretirable on arrival), and
-every unit with skills, personality, appearance, family ties, and the surrounding
-historical-figure web — into
+even on pedestals, with their engraved images redrawn from what they depict), room and
+office assignments and the guildhalls/temples/libraries/taverns behind meeting areas,
+noble and administrator positions, locked doors and hatches, retired adventurers
+(unretirable on arrival), and every unit with skills, personality, appearance, family ties,
+kill tallies by species, clothing ownership, and the surrounding historical-figure web — into
 `dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world
 (same or larger embark size), `fort/planeswalkers load <name>` wipes the footprint
 (including the embark's own buildings — the wagon is dismantled, its supplies dropped)
