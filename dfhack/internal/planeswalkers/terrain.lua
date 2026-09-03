@@ -1015,8 +1015,13 @@ function spires_phase(ctx)
                     end
                 end
             end
-            -- every cluster with adamantine in it is a spire
-            local tubes = dest_tubes()
+            -- every cluster with adamantine in it is a spire. None is put on a
+            -- tube feature any more: a spire's identity is its adamantine, its
+            -- contents are world.event monitors, and a feature record is the
+            -- one thing a retire/reclaim can lose (created ones vanish, and a
+            -- reused one is a worldgen record whose position we would be
+            -- rewriting). Plain veins survive anything.
+            local tubes = {}
             local used = {}
             local reused, created, plain = 0, 0, 0
             for _, comp in ipairs(clusters) do
@@ -1063,8 +1068,6 @@ function spires_phase(ctx)
                     arm_spire(ctx, comp, tube, midx)
                 else
                     plain = plain + 1
-                    common.add_skip(ctx, 'spire-restored-as-plain-vein',
-                                    ctx.legend_mat:get(best) or '?')
                 end
                 ::next_cluster::
             end
@@ -1076,9 +1079,8 @@ function spires_phase(ctx)
                         string.pack('<I2I2I2I2B', x, y, z, mat_idx, 0)
                 end
             end
-            ctx.spire_report = ('%d spire(s) carried: %d on this world\'s tube features, ' ..
-                '%d as plain raw-adamantine veins; %d tile(s) of this world\'s own tubes ' ..
-                'disarmed'):format(reused + plain, reused, plain, ctx.tube_disarmed or 0)
+            ctx.spire_report = ('%d spire(s) carried as raw-adamantine veins; %d tile(s) of ' ..
+                'this world\'s own tubes disarmed'):format(plain, ctx.tube_disarmed or 0)
             print('planeswalkers: ' .. ctx.spire_report)
             return true
         end,

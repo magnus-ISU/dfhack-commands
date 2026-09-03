@@ -135,9 +135,9 @@ kill tallies by species, clothing ownership, and the surrounding historical-figu
 and rebuilds the fort there, dwarves and all. Everything is stored as raw tokens, so worlds
 with the same mod set restore near-losslessly; content the destination world lacks (modded
 materials, procedurally generated races and their materials, a deity's divine gear, necromantic
-secrets) is substituted with the closest equivalent or skipped with a report. Carried spires
-register on the destination's own tube features while it has spares; the rest are plain
-raw-adamantine veins, since a tube feature invented by a script does not survive retire/unretire. Make a manual DF save before loading — there is no
+secrets) is substituted with the closest equivalent or skipped with a report. Carried spires are laid
+down as plain raw-adamantine veins, which survive retire and reclaim; their contents are carried
+as DF's own hidden-fun-stuff records. Make a manual DF save before loading — there is no
 rollback. An in-game announcement tells you when the save is written and when the fort has
 been restored. Run it with no arguments for a walkthrough, or `help fort/planeswalkers` for
 the full description. A fort restored into a larger embark than it came from is saved again

@@ -27,18 +27,18 @@ What is carried
   sealed, but the surface may sit a few levels off from the surrounding world
   tiles. On a differently-sized embark the fort is aligned at the surface
   instead and the destination's deep structure is preserved.
-- **Adamantine spires** come along as real spires, contents included. Each
-  carried spire is registered on one of the destination's tube features (a
-  fresh one is created when the source had more spires than the destination),
-  and what DF keeps behind a spire -- the demon wave waiting in its hollow,
-  the divine treasures and the encased horrors and magma/water pockets, each
-  with its trigger tiles and whether it already went off -- is saved and
-  recreated at the fort's new position. The destination's own spire contents
-  under the fort are removed before the terrain lands, since the open tiles of
-  the incoming fort would otherwise read as a breach of every one of them and
-  the load itself would empty hell into the fort. ``fort/planeswalkers spires``
-  re-runs that pass on a fort restored before it existed; a snapshot saved
-  before this feature carries empty spires until the source is saved again.
+- **Adamantine spires** come along with their contents: the adamantine is
+  laid down as ordinary raw-adamantine veins (nothing that a retire/reclaim
+  can lose), and what DF keeps behind a spire -- the demon wave waiting in
+  its hollow, the divine treasures and the encased horrors and magma/water
+  pockets, each with its trigger tiles and whether it already went off -- is
+  saved and recreated at the fort's new position. The destination's own
+  spire contents under the fort are disarmed before the terrain lands, since
+  the open tiles of the incoming fort would otherwise read as a breach of
+  every one of them and the load itself would empty hell into the fort.
+  ``fort/planeswalkers spires`` re-runs that pass on a fort restored before
+  it existed; a snapshot saved before this feature carries empty spires until
+  the source is saved again.
 - **Constructions and buildings**: walls, floors, ramps and stairs; workshops,
   furnaces, doors, hatches, beds, tables, statues, wells, levers and traps, each
   with its own material.
