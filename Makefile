@@ -1,27 +1,35 @@
 # Makefile — deploy this repo into Dwarf Fortress + DFHack.
 #
-# `make install` ships EVERYTHING this repo produces, in this order:
+# `make install` is the PLAYER deploy: scripts, the all-in-one bundle, and the plugins.
 #
 #   1. install-scripts  dfhack/ -> $DF/dfhack-config/scripts/   (hot-reloads a running DF)
-#   2. install-mods     content-mods/high-adventure/* -> $DF/mods/, then prune-snapshots
-#   3. install-plugin   download + verify the prebuilt plugin binaries into DFHack:
-#                       df-smooth-movement (from $(REPO)) and ssaudio (from this repo's
-#                       ssaudio-v* releases; skipped with a warning until one exists)
+#   2. install-mods     content-mods/high-adventure/high-adventure -> $DF/mods/   (BUNDLE ONLY)
+#   3. install-plugin   install the plugin binaries into DFHack: df-smooth-movement (from
+#                       $(REPO)) and ssaudio (from this repo's ssaudio-v* releases). A prebuilt
+#                       is used ONLY when the release carries an asset built against the DFHack
+#                       version in play; otherwise the plugin is COMPILED FROM LOCAL SOURCE.
 #
 # The local steps run FIRST so a network failure in step 3 cannot cost you a mod deploy.
 #
-#   make install                              # everything, auto-detect paths
-#   make install-mods                         # mods + snapshot prune only
+#   make install                              # scripts + BUNDLE + plugins; deletes nothing
+#   make install-from-source                  # same, but the plugins are ALWAYS compiled
+#   make install-components                   # the bundle AND every ha-* member mod
+#   make dev-install                          # install-components + prune-snapshots (destructive)
+#   make install-mods                         # the bundle only, nothing else
 #   make mods-status                          # repo vs deployed vs snapshot, no changes
 #   make install DFHACK_DIR=/path/to/DFHack   # if your DFHack lives elsewhere
-#   make build                                # compile the plugin from submodule SOURCE instead
+#   make build-plugins                        # compile + install both plugins, nothing else
 #
 # THINGS THAT WILL BITE YOU (see instructions.md for the long version):
 #
-# * DELETING OLD VERSIONS IS THE POINT. `prune-snapshots` runs `rm -rf` on every snapshot under
-#   $B12/data/installed_mods whose version is below the one now in $DF/mods. This repo keeps
-#   exactly ONE version of each mod alive, and that BREAKS ANY SAVE generated against an older
-#   one. Old worlds are expendable here; a picker full of stale versions is not worth them.
+# * `make install` NO LONGER DELETES ANYTHING. Snapshot pruning moved to `make dev-install`
+#   (and `make prune-snapshots`), because deleting is a development choice, not a deploy step.
+#   When you do run it, `prune-snapshots` runs `rm -rf` on every snapshot under
+#   $B12/data/installed_mods whose version is below the one now in $DF/mods, which BREAKS ANY
+#   SAVE generated against an older one.
+# * `make install` deploys the BUNDLE ONLY. Shipping the bundle and its members side by side
+#   puts every creature, entity and reaction in the mod picker twice. Use `install-components`
+#   when you deliberately want the individual ha-* mods installable on their own.
 # * DF scans $DF/mods exactly ONCE, at startup. Deploying while the game runs is invisible to it
 #   — RESTART DF before generating a world, or worldgen silently uses the old raws.
 # * The `high-adventure` bundle is GENERATED from the sibling ha-* mods and never updates itself.
@@ -37,10 +45,14 @@ REPO           ?= anmej/df-smooth-movement
 # built by .github/workflows/ssaudio-release.yml for both linux and windows.
 SSAUDIO_REPO   ?= magnus-ISU/dfhack-commands
 PLUGIN         ?= smooth-movement
+# Which make target fetch-plugin falls back to when no correct-version prebuilt exists.
+# install-plugin overrides this per plugin (build / build-ssaudio).
+FETCH_BUILD    ?= build
 # Which release to pull from: "latest" or a tag like v0.5.1 (applies to smooth-movement).
 RELEASE        ?= latest
 # DFHack version the asset must match, e.g. 53.16-r1.1. Empty = auto-detect via dfhack-run when
-# the game is running, else fall back to the newest platform asset in the release.
+# the game is running, else assume $(DFHACK_TAG). An asset for any other version is never used —
+# fetch-plugin compiles from source instead.
 DFHACK_VERSION ?=
 
 SHELL       := bash
@@ -135,24 +147,33 @@ MERGED_SUBDIRS := objects graphics scripts_modactive
 # Deploy order matters (mods before the network step; prune after the deploy that defines
 # "current"), so never let -j interleave these.
 .NOTPARALLEL:
-.PHONY: help install install-scripts install-mods check-bundle prune-snapshots mods-status \
-        install-plugin fetch-plugin build build-ssaudio enable disable status uninstall readme docs-todo
+.PHONY: help install install-from-source dev-install install-scripts install-mods install-components \
+        uninstall-components check-bundle prune-snapshots mods-status \
+        install-plugin fetch-plugin build build-ssaudio build-plugins \
+        enable disable status uninstall readme docs-todo
 
 help:
 	@echo "dfhack-commands — make targets:"
 	echo
 	echo "Deploy the repo into the game:"
-	echo "  make install          EVERYTHING: scripts, then mods (+ prune), then the plugin"
-	echo "  make install-scripts  dfhack/ -> DF's script path; hot-reloads a running DF"
-	echo "  make install-mods     content mods -> \$$DF/mods, then prune-snapshots"
-	echo "  make prune-snapshots  rm -rf per-world snapshots older than what is deployed."
-	echo "                        THIS BREAKS SAVES made against those versions, by design."
-	echo "  make mods-status      repo vs deployed vs snapshot versions; changes nothing"
+	echo "  make install            scripts + the all-in-one BUNDLE + plugins. Deletes nothing."
+	echo "  make install-from-source   the same deploy, with both plugins ALWAYS compiled"
+	echo "  make install-scripts    dfhack/ -> DF's script path; hot-reloads a running DF"
+	echo "  make install-mods       the \$(BUNDLE) bundle only -> \$$DF/mods"
+	echo "  make install-components the bundle AND every individual ha-* mod"
+	echo "  make uninstall-components  rm -rf the individual ha-* mods from \$$DF/mods"
+	echo "                          (leaves the bundle, and touches no world snapshots)"
+	echo "  make dev-install        install-components, then prune-snapshots. DESTRUCTIVE."
+	echo "  make prune-snapshots    rm -rf per-world snapshots older than what is deployed."
+	echo "                          THIS BREAKS SAVES made against those versions, by design."
+	echo "  make mods-status        repo vs deployed vs snapshot versions; changes nothing"
 	echo
-	echo "Prebuilt plugins (smooth-movement + ssaudio; linux and windows):"
-	echo "  make install-plugin  download + checksum-verify the prebuilt plugins, install into DFHack"
-	echo "  make build      compile the plugin from the submodule source (clones the DFHack"
-	echo "                  source tree into build/ on first run) and install it. Restart DF after."
+	echo "Plugins (smooth-movement + ssaudio; linux and windows):"
+	echo "  make install-plugin  install both: a checksum-verified prebuilt when the release has one"
+	echo "                  for this DFHack version, otherwise COMPILED FROM SOURCE"
+	echo "  make build-plugins   compile + install both from local source, never downloading"
+	echo "  make build      compile one plugin ($(PLUGIN)) from the submodule source (clones the"
+	echo "                  DFHack source tree into build/ on first run). Restart DF after."
 	echo "  make enable     load + enable it now (Dwarf Fortress must be running)"
 	echo "  make disable    disable it now"
 	echo "  make status     show the plugin's status / installed binary"
@@ -170,10 +191,19 @@ help:
 	echo "  REPO            = $(REPO)"
 
 # Local deploys first: if the network step fails, the mods are already in place.
+# This is the PLAYER deploy: the bundle, and nothing removed.
 install: install-scripts install-mods install-plugin
 	@echo
 	echo "All deployed. RESTART Dwarf Fortress before generating a world — DF scans mods/ once,"
 	echo "at startup, so raws deployed into a running game are invisible to worldgen."
+
+# The DEVELOPER deploy: every individual ha-* mod as well as the bundle, and then the old
+# one-version-only policy applied to the baked world snapshots. Destructive on purpose; this is
+# where "delete anything superseded" lives now that `install` no longer does it.
+dev-install: install-scripts install-components prune-snapshots install-plugin
+	@echo
+	echo "Dev deploy complete: bundle + members installed, stale snapshots pruned."
+	echo "RESTART Dwarf Fortress before generating a world."
 
 # ---------------------------------------------------------------------------
 # dfhack/ mirrors the deployed layout exactly, so a plain recursive copy keeps every command's
@@ -198,9 +228,18 @@ install-scripts:
 	fi
 
 # ---------------------------------------------------------------------------
-# Deploy every mod that has an info.txt (art/ and the build script are skipped), each via an
-# atomic copy-then-swap so a half-written mod is never visible to a running game.
-install-mods: check-bundle
+# Deploy mods, each via an atomic copy-then-swap so a half-written mod is never visible to a
+# running game. WHICH mods depends on the target:
+#
+#   install-mods        the generated $(BUNDLE) bundle, and nothing else. This is what a player
+#                       wants: the bundle already contains every member's raws, so installing
+#                       the members alongside it lists everything in the picker twice.
+#   install-components  the bundle AND every individual ha-* mod, for testing one in isolation.
+#
+# Neither prunes anything. Deleting old snapshots is `prune-snapshots` / `dev-install`.
+install-mods:       MOD_SELECT := bundle
+install-components: MOD_SELECT := all
+install-mods install-components: check-bundle
 	@if [ ! -d "$(DF_DIR)/mods" ]; then
 	  echo "No mods/ dir under: $(DF_DIR)"
 	  echo "Point DF_DIR at your Dwarf Fortress install."
@@ -214,6 +253,8 @@ install-mods: check-bundle
 	for m in */; do
 	  m="$${m%/}"
 	  [ -f "$$m/info.txt" ] || continue
+	  # install-mods ships the bundle alone; install-components ships everything
+	  if [ "$(MOD_SELECT)" != "all" ] && [ "$$m" != "$(BUNDLE)" ]; then continue; fi
 	  new="$$(field "$$m" DISPLAYED_VERSION)"
 	  dst="$(DF_DIR)/mods/$$m"
 	  old="(new)"
@@ -244,45 +285,68 @@ install-mods: check-bundle
 	  echo "  its baked snapshot, which DF keys by version and will therefore never refresh."
 	  echo "  Bump those mods (and rebuild the bundle) if the change must reach existing worlds."
 	fi
-	# -C: this recipe has cd'd into the mod source dir, and the Makefile is not there.
-	$(MAKE) -C "$(ROOT)" --no-print-directory prune-snapshots
-
-# The bundle is generated, so it silently rots whenever a member changes. Two independent ways it
-# rots, both fatal here: its merged files no longer match the members (never rebuilt), or its
-# description advertises member versions that have moved on (rebuilt before the members bumped).
-check-bundle:
-	@cd "$(MODS_SRC)"
-	field() { sed -n "s/^\[$$2:\(.*\)\]/\1/p" "$$1/info.txt" | head -1 | tr -d '\r'; }
-	if [ ! -f "$(BUNDLE)/info.txt" ]; then
-	  echo "No generated bundle at $(MODS_SRC)/$(BUNDLE) — run: python3 build-high-adventure.py"
-	  exit 1
+	if [ "$(MOD_SELECT)" != "all" ]; then
+	  echo "  (bundle only — run 'make install-components' to also install the individual ha-* mods)"
 	fi
-	desc="$$(field "$(BUNDLE)" DESCRIPTION)"
-	stale=""
-	for m in */; do
-	  m="$${m%/}"
-	  [ -f "$$m/info.txt" ] || continue
-	  [ "$$m" = "$(BUNDLE)" ] && continue
-	  nm="$$(field "$$m" NAME)"; vr="$$(field "$$m" DISPLAYED_VERSION)"
-	  case "$$desc" in *"$$nm $$vr"*) ;; *) stale="$$stale $$m($$vr:not-in-bundle-description)" ;; esac
-	  for sub in $(MERGED_SUBDIRS); do
-	    [ -d "$$m/$$sub" ] || continue
-	    # every member file must appear byte-identical in the bundle; bundle-only files are the
-	    # other members' contributions and are expected
-	    d="$$(diff -rq "$$m/$$sub" "$(BUNDLE)/$$sub" 2>/dev/null | grep -v "^Only in $(BUNDLE)/" || true)"
-	    [ -n "$$d" ] && stale="$$stale $$m/$$sub"
+
+# ---------------------------------------------------------------------------
+# Remove every mod this repo ships EXCEPT the bundle -- the individual ha-* members and the
+# standalone content-mods helpers (crash-repro and friends). Mods you installed yourself are
+# never touched.
+#
+# This removes the BAKED SNAPSHOTS too, and it has to: DF lists a mod once per copy it can see,
+# so a mod deleted from $DF/mods still shows up in the picker for as long as a snapshot of it
+# survives under $B12/data/installed_mods. Deleting only one of the two is why "uninstalled"
+# mods keep reappearing. THE SNAPSHOT HALF BREAKS SAVES: any world generated against one of
+# these mods loads its scripts and graphics from that snapshot and will not load without it.
+uninstall-components:
+	@dst="$(DF_DIR)/mods"
+	if [ ! -d "$$dst" ]; then echo "No mods/ dir under: $(DF_DIR)"; exit 0; fi
+	# Only ever remove mods THIS REPO ships -- the ha-* members plus the standalone content-mods
+	# helpers like crash-repro. Anything else under mods/ belongs to the player and is left alone.
+	shopt -s nullglob
+	ours=""
+	for d in "$(MODS_SRC)"/*/ "$(ROOT)/content-mods"/*/; do
+	  b="$$(basename "$$d")"
+	  [ -f "$$d/info.txt" ] || continue
+	  [ "$$b" = "$(BUNDLE)" ] && continue
+	  ours="$$ours $$b"
+	done
+	removed=0
+	for b in $$ours; do
+	  [ -d "$$dst/$$b" ] || continue
+	  rm -rf "$$dst/$$b"
+	  printf '  REMOVED %s\n' "$$b"
+	  removed=$$((removed + 1))
+	done
+	if [ "$$removed" -eq 0 ]; then echo "  nothing to remove from mods/: only the $(BUNDLE) bundle is installed"
+	else echo "  -> $$removed mod(s) removed from mods/; the $(BUNDLE) bundle is untouched."; fi
+	# ...and the baked snapshots, or DF keeps listing them.
+	snap="$(B12_DIR)/data/installed_mods"
+	if [ ! -d "$$snap" ]; then exit 0; fi
+	ids=""
+	for d in "$(MODS_SRC)"/*/ "$(ROOT)/content-mods"/*/; do
+	  b="$$(basename "$$d")"
+	  [ -f "$$d/info.txt" ] || continue
+	  [ "$$b" = "$(BUNDLE)" ] && continue
+	  ids="$$ids $$(sed -n 's/^\[ID:\(.*\)\]/\1/p' "$$d/info.txt" | head -1 | tr -d '\r')"
+	done
+	snapped=0
+	for d in "$$snap"/*/; do
+	  b="$$(basename "$$d")"
+	  id="$${b%% (*}"
+	  for want in $$ids; do
+	    if [ "$$id" = "$$want" ]; then
+	      rm -rf "$$d"
+	      printf '  REMOVED snapshot %s\n' "$$b"
+	      snapped=$$((snapped + 1))
+	      break
+	    fi
 	  done
 	done
-	if [ -n "$$stale" ]; then
-	  echo "The generated $(BUNDLE) bundle has drifted from its members:"
-	  for s in $$stale; do echo "    $$s"; done
-	  echo
-	  echo "Bump NUMERIC_VERSION/DISPLAYED_VERSION at the top of build-high-adventure.py, then:"
-	  echo "    (cd $(MODS_SRC) && python3 build-high-adventure.py)"
-	  echo "Deploying a stale bundle ships old raws under a version DF thinks it already has."
-	  exit 1
+	if [ "$$snapped" -gt 0 ]; then
+	  echo "  -> $$snapped snapshot(s) removed. Worlds generated against them will no longer load."
 	fi
-	echo "bundle $$(field "$(BUNDLE)" DISPLAYED_VERSION) is in sync with its members"
 
 # ---------------------------------------------------------------------------
 # DF bakes a per-world snapshot named "<MOD_ID> (numeric_version)" and loads that world's scripts
@@ -355,21 +419,56 @@ mods-status:
 # on instead of failing the whole deploy.
 install-plugin:
 	@$(MAKE) --no-print-directory fetch-plugin \
-	  FETCH_PLUGIN=smooth-movement FETCH_REPO=$(REPO) FETCH_RELEASE=$(RELEASE) FETCH_ENABLE=1 FETCH_OPTIONAL=0
+	  FETCH_PLUGIN=smooth-movement FETCH_REPO=$(REPO) FETCH_RELEASE=$(RELEASE) FETCH_ENABLE=1 FETCH_OPTIONAL=0 \
+	  FETCH_BUILD=build
 	$(MAKE) --no-print-directory fetch-plugin \
-	  FETCH_PLUGIN=ssaudio FETCH_REPO=$(SSAUDIO_REPO) FETCH_RELEASE=latest FETCH_ENABLE=0 FETCH_OPTIONAL=1
+	  FETCH_PLUGIN=ssaudio FETCH_REPO=$(SSAUDIO_REPO) FETCH_RELEASE=latest FETCH_ENABLE=0 FETCH_OPTIONAL=1 \
+	  FETCH_BUILD=build-ssaudio
+
+# Compile BOTH plugins from source and install them -- no downloads, no version guessing.
+# This is what fetch-plugin falls back to; run it directly when you want the local source shipped
+# whatever a release says (a fork fix that is not upstream yet, a DFHack version nobody has
+# published assets for, an unsupported platform).
+build-plugins:
+	@$(MAKE) --no-print-directory build
+	$(MAKE) --no-print-directory build-ssaudio
+
+# The same deploy as `install`, with both plugins ALWAYS compiled from source.
+install-from-source: install-scripts install-mods build-plugins
+	@echo
+	echo "All deployed, plugins built from local source. RESTART Dwarf Fortress before generating"
+	echo "a world — DF scans mods/ once, at startup."
 
 # Download one prebuilt plugin from a GitHub release and unpack it into $(DFHACK_DIR). Assets are
 # named <plugin>-<ver>-dfhack-<dfver>-<platform>.zip and contain hack/... paths, so they extract
 # straight over the DFHack dir. Parameters (set by install-plugin above): FETCH_PLUGIN, FETCH_REPO,
 # FETCH_RELEASE ("latest" or a tag), FETCH_ENABLE (also `enable` after loading), FETCH_OPTIONAL
-# (missing release = warning, not error).
+# (a source build that also fails = warning, not error), FETCH_BUILD (the make target that
+# compiles this plugin from source).
+#
+# A DOWNLOAD IS ONLY EVER USED WHEN IT MATCHES THE RUNNING DFHACK. Plugins are ABI-bound to a
+# DFHack version, and this used to fall back to "the newest asset" when no asset named the right
+# one -- which ships a binary built against a different ABI. Every no-usable-download path now
+# compiles $(FETCH_BUILD) from local source instead, which is always the right version because it
+# builds against $(DFHACK_TAG).
 fetch-plugin:
 	@plugbin="$(PLUGDIR)/$(FETCH_PLUGIN)$(PLUGEXT)"
-	if [ -z "$(PLATFORM)" ]; then
-	  echo "No prebuilt $(FETCH_PLUGIN) binary for $(UNAME_S)/$(UNAME_M) (releases ship linux-x86_64 and windows-x86_64)."
-	  echo "Build from source instead — see 'make build' / 'make build-ssaudio' (linux only)."
+	# Every "no usable download" path lands here. A failed build is fatal for a required plugin
+	# and a warning for an optional one; either way nothing has been written to $$plugbin yet, so
+	# whatever is installed stays installed.
+	build_from_source() {
+	  echo "$$1"
+	  echo "Compiling $(FETCH_PLUGIN) from local source instead: make $(FETCH_BUILD)"
+	  if $(MAKE) --no-print-directory $(FETCH_BUILD); then exit 0; fi
+	  if [ "$(FETCH_OPTIONAL)" = "1" ]; then
+	    echo "warning: source build of $(FETCH_PLUGIN) failed — SKIPPING it."
+	    exit 0
+	  fi
+	  echo "Source build of $(FETCH_PLUGIN) failed, and no usable prebuilt exists."
 	  exit 1
+	}
+	if [ -z "$(PLATFORM)" ]; then
+	  build_from_source "No prebuilt $(FETCH_PLUGIN) binary for $(UNAME_S)/$(UNAME_M) (releases ship linux-x86_64 and windows-x86_64)."
 	fi
 	if [ ! -d "$(PLUGDIR)" ]; then
 	  echo "DFHack plugin dir not found: $(PLUGDIR)"
@@ -377,11 +476,22 @@ fetch-plugin:
 	  echo "    make install DFHACK_DIR=/path/to/DFHack"
 	  exit 1
 	fi
-	# Resolve the DFHack version to match against asset names.
+	# Resolve the DFHack version to match against asset names. This must never come back empty:
+	# an unknown version means every asset looks acceptable, which is how a wrong-ABI binary got
+	# installed. When the game is not running to be asked, $(DFHACK_TAG) is the answer — it is the
+	# version `make build` compiles against, so download and source build agree on what "correct"
+	# means.
 	dfver="$(DFHACK_VERSION)"
 	if [ -z "$$dfver" ] && [ -x "$(DFRUN)" ]; then
-	  dfver="$$("$(DFRUN)" lua 'print(dfhack.getDFHackVersion())' 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+-r[0-9.]+' || true)"
+	  # dfhack-run prefixes its output with an ANSI reset ("\e[0m53.16-r1.1"), so a ^-anchored
+	  # match silently found nothing and every version looked unknown. Strip escapes, no anchor.
+	  dfver="$$("$(DFRUN)" lua 'print(dfhack.getDFHackVersion())' 2>/dev/null | tr -d '\r' \
+	    | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -oE '[0-9]+\.[0-9]+-r[0-9.]+' | head -1 || true)"
 	  [ -n "$$dfver" ] && echo "Detected running DFHack $$dfver."
+	fi
+	if [ -z "$$dfver" ]; then
+	  dfver="$(DFHACK_TAG)"
+	  echo "DFHack version not detected (game not running); assuming the build pin, $$dfver."
 	fi
 	# Fetch the release metadata (public repos; GITHUB_TOKEN used only if set, to dodge rate
 	# limits). "latest" lists recent releases rather than hitting /releases/latest: the newest
@@ -397,24 +507,21 @@ fetch-plugin:
 	# Candidates = this plugin's archives for this platform, newest release first (the API's
 	# order); narrow by DFHack version when we know it.
 	cands="$$(printf '%s\n' "$$urls" | grep -E "/$(FETCH_PLUGIN)-[^/]*$(PLATFORM)\.(zip|tar\.gz)$$" || true)"
-	if [ -n "$$dfver" ] && [ -n "$$cands" ]; then
+	if [ -n "$$cands" ]; then
 	  esc="$$(printf '%s' "$$dfver" | sed 's/\./\\./g')"
 	  filtered="$$(printf '%s\n' "$$cands" | grep -E "dfhack-?$${esc}[.-]" || true)"
 	  if [ -n "$$filtered" ]; then cands="$$filtered"; \
-	  else echo "warning: no $(FETCH_PLUGIN) asset for DFHack $$dfver; using the newest $(PLATFORM) asset instead."; fi
+	  else build_from_source "No $(FETCH_PLUGIN) asset built against DFHack $$dfver in $(FETCH_REPO) (a release for another DFHack version is the wrong ABI, not a substitute)."; fi
 	fi
 	asset="$$(printf '%s\n' "$$cands" | head -1)"
 	if [ -z "$$asset" ]; then
-	  if [ "$(FETCH_OPTIONAL)" = "1" ]; then
-	    echo "No prebuilt $(FETCH_PLUGIN) release found in $(FETCH_REPO) — SKIPPING it."
-	    echo "  Publish one by pushing a tag: git tag ssaudio-v1.0.0 && git push origin ssaudio-v1.0.0"
-	    echo "  (CI builds linux+windows; see .github/workflows/ssaudio-release.yml)."
-	    echo "  Or build locally on linux: make build-ssaudio"
-	    exit 0
+	  echo "No $(PLATFORM) asset for $(FETCH_PLUGIN) in the $(FETCH_RELEASE) release(s) of $(FETCH_REPO)."
+	  [ -n "$$urls" ] && { echo "Available assets:"; printf '%s\n' "$$urls" | sed -E 's#.*/##'; }
+	  if [ "$(FETCH_PLUGIN)" = "ssaudio" ]; then
+	    echo "  (publish one by pushing a tag: git tag ssaudio-v1.0.0 && git push origin ssaudio-v1.0.0;"
+	    echo "   CI builds linux+windows — see .github/workflows/ssaudio-release.yml)"
 	  fi
-	  echo "No $(PLATFORM) asset for $(FETCH_PLUGIN) in the $(FETCH_RELEASE) release(s). Available assets:"
-	  printf '%s\n' "$$urls" | sed -E 's#.*/##'
-	  exit 1
+	  build_from_source "No prebuilt to install."
 	fi
 	echo "Selected asset: $${asset##*/}"
 	# Download, verify checksum when one is published, extract into the DFHack dir.
@@ -441,6 +548,24 @@ fetch-plugin:
 	esac
 	got="$$tmp/x/hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"
 	if [ ! -f "$$got" ]; then echo "Archive did not contain hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"; exit 1; fi
+	# smooth-movement: upstream's prebuilt DEADLOCKS DF. plugin_enable waits for the render
+	# thread, but every `enable smooth-movement` from a script (onMapLoad.init ->
+	# fort/magnus-scripts apply) runs on the simulation thread, which is holding the frame the
+	# render thread is waiting to start -- DF wedges on the way into a fort, threads in
+	# futex_wait, no error anywhere. The submodule carries the fix (a core-suspended inline
+	# path); until it is upstream and released, a fetched asset that lacks it must not land on
+	# top of a locally built one. The fix is the only thing in the plugin that calls
+	# Core::isSuspended, so the symbol is the marker.
+	# `nm | grep -q` would lie here: grep -q exits on the first match, nm dies of SIGPIPE, and
+	# under `set -o pipefail` a FOUND symbol reports failure. Match on a captured string instead.
+	if [ "$(FETCH_PLUGIN)" = "smooth-movement" ] && command -v nm >/dev/null 2>&1; then
+	  fixsym="_ZN6DFHack4Core11isSuspendedEv"
+	  newsyms="$$(nm -D --undefined-only "$$got" 2>/dev/null || true)"
+	  case "$$newsyms" in
+	    *"$$fixsym"*) ;;
+	    *) build_from_source "REFUSING $(FETCH_REPO)'s smooth-movement asset: it lacks the core-suspended deadlock fix and will hang DF on fort load." ;;
+	  esac
+	fi
 	# Publish the binary by ATOMIC RENAME, never by extracting/cp'ing onto the live path: if DF
 	# has the old .so mapped, overwriting its inode in place crashes the game (hit twice; same
 	# rule as `make build`). The staging copy lives in PLUGDIR so the rename stays same-fs.
