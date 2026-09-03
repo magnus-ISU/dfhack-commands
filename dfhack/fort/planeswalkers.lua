@@ -27,6 +27,18 @@ What is carried
   sealed, but the surface may sit a few levels off from the surrounding world
   tiles. On a differently-sized embark the fort is aligned at the surface
   instead and the destination's deep structure is preserved.
+- **Adamantine spires** come along as real spires, contents included. Each
+  carried spire is registered on one of the destination's tube features (a
+  fresh one is created when the source had more spires than the destination),
+  and what DF keeps behind a spire -- the demon wave waiting in its hollow,
+  the divine treasures and the encased horrors and magma/water pockets, each
+  with its trigger tiles and whether it already went off -- is saved and
+  recreated at the fort's new position. The destination's own spire contents
+  under the fort are removed before the terrain lands, since the open tiles of
+  the incoming fort would otherwise read as a breach of every one of them and
+  the load itself would empty hell into the fort. ``fort/planeswalkers spires``
+  re-runs that pass on a fort restored before it existed; a snapshot saved
+  before this feature carries empty spires until the source is saved again.
 - **Constructions and buildings**: walls, floors, ramps and stairs; workshops,
   furnaces, doors, hatches, beds, tables, statues, wells, levers and traps, each
   with its own material.
@@ -57,6 +69,12 @@ when a save or a load completes. ``status`` shows the current phase, ``cancel``
 aborts, and ``step`` pumps one chunk by hand (debug).
 
 Snapshots live in ``$DF/dfhack-config/scripts/data/planeswalkers/<name>/``.
+
+A fort that was restored into a larger embark than it came from keeps its
+original size and area: saving it again snapshots the footprint it was restored
+into, not the whole embark, so the snapshot stays loadable onto an embark of the
+fort's own size. Buildings and loose items outside that footprint stay behind
+(counted in the report); units outside it are pulled to its nearest edge.
 
 Walkthrough
 -----------
@@ -99,6 +117,7 @@ Usage::
                                           --force allows a same-world snapshot
                                           or a fort that already has buildings
     fort/planeswalkers delete <name> --yes  delete a snapshot
+    fort/planeswalkers spires             re-arm the carried spires on a restored fort
     fort/planeswalkers status             job progress / restored-from marker
     fort/planeswalkers cancel             abort the running job
     fort/planeswalkers step               pump the job once by hand (debug)
@@ -184,9 +203,28 @@ local function do_save(name)
 
     local terrain = req('terrain')
     local map = df.global.world.map
+    -- a fort that was restored here into a larger embark is saved at the size
+    -- and area it arrived with, not at the size of this embark
+    local marker = dfhack.persistent.getSiteData(GLOBAL_KEY)
+    local origin = marker and marker.state == 'done' and marker.anchor
+        and common.footprint_origin(marker.anchor) or nil
+    local footprint
+    if origin then
+        footprint = {
+            bx = origin.bx, by = origin.by, wb = origin.wb, hb = origin.hb,
+            from = marker.from, world = marker.world,
+        }
+        notify(('saving the %dx%d-block footprint this fort was restored into (from ' ..
+                '"%s" of world "%s"), not the whole %dx%d embark')
+               :format(origin.wb, origin.hb, marker.from or '?', marker.world or '?',
+                       map.x_count_block, map.y_count_block))
+    else
+        origin = common.whole_map_origin()
+    end
     local ctx = {
         name = name,
         dir = common.snap_dir(name),
+        origin = origin,
         legend_tt = common.Legend.new(),
         legend_mat = common.Legend.new(),
         legend_plant = common.Legend.new(),
@@ -200,9 +238,10 @@ local function do_save(name)
             created = os.date('%Y-%m-%d %H:%M:%S'),
             df_version = dfhack.getDFVersion(),
             dims = {
-                bx = map.x_count_block, by = map.y_count_block, bz = map.z_count_block,
-                surface = terrain.find_surface_z(),
+                bx = origin.wb, by = origin.hb, bz = map.z_count_block,
+                surface = terrain.find_surface_z(origin),
             },
+            footprint = footprint,
             counts = {},
             complete = {},
         },
@@ -213,6 +252,7 @@ local function do_save(name)
     }
 
     local phases = terrain.save_phases(ctx)
+    for _, p in ipairs(req('spires').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
@@ -294,6 +334,11 @@ local function do_load(name, ...)
         dir = dir,
         manifest = mf,
         anchor = anchor,
+        -- bisect switches: --no-spires paints carried spires as plain veins and
+        -- skips the tube-feature work; --no-contents leaves this world's spire
+        -- monitors alone and carries none of the source's
+        no_spires = flags['--no-spires'] or false,
+        no_contents = flags['--no-contents'] or false,
         legend_tt = legend_tt,
         legend_mat = common.Legend.new(legends.mats),
         legend_plant = common.Legend.new(legends.plants),
@@ -304,8 +349,14 @@ local function do_load(name, ...)
         end,
     }
 
+    -- the anchor is what a later save needs to keep this fort's own footprint
+    local marker_anchor = {
+        off_bx = anchor.off_bx, off_by = anchor.off_by, off_z = anchor.off_z,
+        bx = mf.dims.bx, by = mf.dims.by, full = anchor.full or false,
+    }
     dfhack.persistent.saveSiteData(GLOBAL_KEY,
-        {state = 'loading', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S')})
+        {state = 'loading', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S'),
+         anchor = marker_anchor})
 
     notify(('restoring "%s" (%dx%d blocks) anchored at block %d,%d, surface z %d -> %d%s; ' ..
             'the game stays paused until it finishes')
@@ -317,6 +368,16 @@ local function do_load(name, ...)
     local cleanup = table.remove(phases)  -- map cleanup runs last of all
     -- the embark's own buildings (the wagon!) go first, before terrain repaint
     table.insert(phases, 1, req('buildings').clear_phase(ctx))
+    -- and this world's spire contents under the fort go before the terrain
+    -- lands on their trigger tiles; the source's follow once it has
+    if not ctx.no_contents then
+        table.insert(phases, 1, req('spires').clear_phase(ctx))
+        table.insert(phases, req('spires').restore_phase(ctx))
+    end
+    if ctx.no_spires or ctx.no_contents then
+        notify(('bisect flags: %s%s'):format(ctx.no_spires and '--no-spires ' or '',
+                                             ctx.no_contents and '--no-contents' or ''))
+    end
     if dfhack.filesystem.exists(dir .. '/buildings.json') then
         for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
     end
@@ -330,14 +391,69 @@ local function do_load(name, ...)
     table.insert(phases, cleanup)
     common.start_job('load ' .. name, phases, ctx, function()
         dfhack.persistent.saveSiteData(GLOBAL_KEY,
-            {state = 'done', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S')})
+            {state = 'done', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S'),
+             anchor = marker_anchor})
         common.print_skips(ctx)
+        if ctx.spire_report then notify(ctx.spire_report) end
+        if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
         local cx = anchor.off_x + mf.dims.bx * 8
         local cy = anchor.off_y + mf.dims.by * 8
         dfhack.gui.revealInDwarfmodeMap(xyz2pos(cx, cy, anchor.dest_surface), true)
         notify(('fort "%s" restored from world "%s". SAVE NOW and reload the fort to ' ..
                 'verify -- units and jobs settle on the next load.')
                :format(name, mf.world or '?'), COLOR_LIGHTGREEN, true)
+    end)
+end
+
+-- re-run the spire pass on a fort restored here: disarm whatever is left of
+-- this world's own adamantine tubes and register the carried spires as live
+-- tube features again (forts restored before that pass existed, above all)
+local function do_spires()
+    require_fort()
+    local marker = dfhack.persistent.getSiteData(GLOBAL_KEY)
+    if not marker or marker.state ~= 'done' or not marker.from then
+        qerror('planeswalkers: this fort was not restored from a snapshot')
+    end
+    local dir = common.snap_dir(marker.from)
+    local mf = common.read_json(dir .. '/manifest.json')
+    if not mf then
+        qerror(('planeswalkers: snapshot "%s" this fort came from is gone'):format(marker.from))
+    end
+    local legends = common.read_json(dir .. '/legend.json') or {}
+    local terrain = req('terrain')
+    local legend_tt = common.Legend.new(legends.tiletypes)
+    local anchor = marker.anchor
+    if not anchor or not anchor.bx then
+        -- restored before the anchor was recorded: recompute it. Same-size
+        -- restores come out identical; a surface-anchored one may not, so say so
+        local a, err = terrain.compute_anchor(mf.dims, dir, legend_tt)
+        if not a then qerror('planeswalkers: ' .. err) end
+        anchor = a
+        if not a.full then
+            dfhack.printerr('planeswalkers: no anchor recorded for this fort; using a ' ..
+                'recomputed surface anchor, which may be off by a few z-levels')
+        end
+    end
+    anchor.off_x = (anchor.off_bx or 0) * 16
+    anchor.off_y = (anchor.off_by or 0) * 16
+    local ctx = {
+        name = marker.from, dir = dir, manifest = mf, anchor = anchor,
+        legend_tt = legend_tt,
+        legend_mat = common.Legend.new(legends.mats),
+        skips = {},
+        close_all = function(self)
+            if self.tiles_f then self.tiles_f:close(); self.tiles_f = nil end
+        end,
+    }
+    notify(('re-arming the spires of "%s" on this fort; the game stays paused until ' ..
+            'it finishes'):format(marker.from))
+    local phases = terrain.spire_repair_phases(ctx)
+    table.insert(phases, 1, req('spires').clear_phase(ctx))
+    table.insert(phases, req('spires').restore_phase(ctx))
+    common.start_job('spires ' .. marker.from, phases, ctx, function()
+        common.print_skips(ctx)
+        notify(ctx.spire_report or 'no spires found in the snapshot', COLOR_LIGHTGREEN, true)
+        if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
     end)
 end
 
@@ -409,6 +525,10 @@ Doing it, start to finish:
      <name> may also be the number shown by `list`. You get a notification when
      the fort is restored; SAVE and reload it right away to let DF settle.
 
+  A fort restored into a larger embark than it came from is saved again at
+  its original size and area (the footprint it was restored into), so it can
+  keep travelling to embarks of its own size.
+
 Removing a snapshot:
 
      fort/planeswalkers delete <name> --yes
@@ -427,6 +547,9 @@ All commands:
                                          (--force: allow a same-world snapshot
                                          or a non-empty fort)
   fort/planeswalkers delete <name> --yes  delete a snapshot
+  fort/planeswalkers spires              re-arm the carried adamantine spires
+                                         on a fort restored here (disarms this
+                                         world's own spires under the fort)
   fort/planeswalkers status              job progress / restored-from marker
   fort/planeswalkers cancel              abort the running save or load
   fort/planeswalkers step                pump the job once by hand (debug)
@@ -439,6 +562,7 @@ local function do_help() print(HELP) end
 local ACTIONS = {
     save = do_save, load = do_load, list = print_list, delete = do_delete,
     status = do_status, cancel = do_cancel, step = do_step, spike = do_spike,
+    spires = do_spires,
     help = do_help, ['--help'] = do_help, ['-h'] = do_help,
 }
 
@@ -449,7 +573,7 @@ local action = args[1]
 if not action then do_help() return end
 local fn = ACTIONS[action]
 if not fn then
-    qerror(('planeswalkers: unknown action "%s" (save|load|list|delete|status|' ..
+    qerror(('planeswalkers: unknown action "%s" (save|load|list|delete|spires|status|' ..
             'cancel); run `fort/planeswalkers` for help'):format(action))
 end
 fn(table.unpack(args, 2))

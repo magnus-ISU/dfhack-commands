@@ -8,13 +8,14 @@ local STOCKPILES_DIR = dfhack.getConfigPath() .. '/stockpiles'
 
 -- ---- save ------------------------------------------------------------------
 
-local function extents_out(bld)
+local function extents_out(ctx, bld)
     local room = bld.room
     if not room or not room.extents then return nil end
     local n = room.width * room.height
     local s = {}
     for i = 0, n - 1 do s[#s + 1] = tostring(room.extents[i]) end
-    return {x = room.x, y = room.y, w = room.width, h = room.height,
+    local o = ctx.origin
+    return {x = room.x - o.x, y = room.y - o.y, w = room.width, h = room.height,
             bits = table.concat(s)}
 end
 
@@ -39,16 +40,24 @@ local function save_one(ctx, bld)
     if bld.site_id >= 0 and bld.site_id ~= df.global.plotinfo.site_id then
         return nil
     end
+    -- a fort saved at its original footprint leaves behind what was built
+    -- outside it
+    if not common.in_footprint(ctx, bld.x1, bld.y1)
+        or not common.in_footprint(ctx, bld.x2, bld.y2) then
+        common.add_skip(ctx, 'building-outside-footprint', df.building_type[btype])
+        return nil
+    end
+    local o = ctx.origin
     local rec = {
         id = bld.id,
         type = df.building_type[btype],
         subtype = bld:getSubtype(),
-        x = bld.x1, y = bld.y1, z = bld.z,
+        x = bld.x1 - o.x, y = bld.y1 - o.y, z = bld.z,
         w = bld.x2 - bld.x1 + 1, h = bld.y2 - bld.y1 + 1,
         cx = bld.centerx - bld.x1, cy = bld.centery - bld.y1,
         mat = mat_token_of(bld.mat_type, bld.mat_index),
         name = bld.name and #bld.name > 0 and common.u(bld.name) or nil,
-        extents = extents_out(bld),
+        extents = extents_out(ctx, bld),
     }
     local custom = bld:getCustomType()
     if custom >= 0 then

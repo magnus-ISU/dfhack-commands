@@ -46,13 +46,28 @@ local function save_one(ctx, item)
     end
     if item.flags.construction then return nil end
     if item.flags.garbage_collect then return nil end
+    -- outside the saved footprint: carried only if a unit holds it (its
+    -- position is the holder's on load); anything lying there stays behind
+    local px, py = item.pos.x, item.pos.y
+    if not common.in_footprint(ctx, px, py) then
+        local held = false
+        for _, ref in ipairs(item.general_refs) do
+            if df.general_ref_unit_holderst:is_instance(ref) then held = true break end
+        end
+        if not held then
+            common.add_skip(ctx, 'item-outside-footprint', df.item_type[itype])
+            return nil
+        end
+        px, py = common.clamp_to_footprint(ctx, px, py)
+    end
     local mi = dfhack.matinfo.decode(item)
+    local o = ctx.origin
     local rec = {
         id = item.id,
         t = df.item_type[itype],
         st = subtype_token(item),
         mat = mi and mi:getToken() or nil,
-        x = item.pos.x, y = item.pos.y, z = item.pos.z,
+        x = px - o.x, y = py - o.y, z = item.pos.z,
     }
     local stack = item:getStackSize()
     if stack and stack > 1 then rec.n = stack end

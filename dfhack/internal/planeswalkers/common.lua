@@ -13,6 +13,45 @@ function fromu(s) return dfhack.utf2df(s or '') end
 
 function snap_dir(name) return SNAP_ROOT .. '/' .. name end
 
+-- ---- footprint: the part of this map a save covers ---------------------------
+-- Whole map by default. A fort that was itself restored here from a snapshot
+-- smaller than the embark keeps that original size and area when it is saved
+-- again: the footprint is then the rectangle it was restored into, and every
+-- coordinate written is relative to its corner.
+
+function whole_map_origin()
+    local map = df.global.world.map
+    return {bx = 0, by = 0, wb = map.x_count_block, hb = map.y_count_block,
+            x = 0, y = 0, w = map.x_count, h = map.y_count}
+end
+
+function footprint_origin(anchor)
+    local map = df.global.world.map
+    if not anchor or not anchor.bx or not anchor.by then return nil end
+    local bx, by = anchor.off_bx or 0, anchor.off_by or 0
+    if bx < 0 or by < 0 or bx + anchor.bx > map.x_count_block
+        or by + anchor.by > map.y_count_block then
+        return nil
+    end
+    if anchor.bx == map.x_count_block and anchor.by == map.y_count_block then
+        return nil  -- same size: nothing to cut
+    end
+    return {bx = bx, by = by, wb = anchor.bx, hb = anchor.by,
+            x = bx * 16, y = by * 16, w = anchor.bx * 16, h = anchor.by * 16}
+end
+
+function in_footprint(ctx, x, y)
+    local o = ctx.origin
+    return x >= o.x and x < o.x + o.w and y >= o.y and y < o.y + o.h
+end
+
+-- nearest tile of the footprint to (x, y)
+function clamp_to_footprint(ctx, x, y)
+    local o = ctx.origin
+    return math.max(o.x, math.min(o.x + o.w - 1, x)),
+           math.max(o.y, math.min(o.y + o.h - 1, y))
+end
+
 function valid_name(name)
     return type(name) == 'string' and name:match('^[%w_%-%.]+$') and name ~= '_spike'
 end
@@ -73,7 +112,8 @@ function Legend:get(i) return self.list[i] end
 -- ---- packed tile records ----------------------------------------------------
 -- header: '<c4 I2 I2 I2 I2 I2' = magic PWT1, dim_bx, dim_by, z_count, surface_z, flags
 -- per block: 256 x '<I2 I2 I2 B' = tiletype legend idx (0 = leave dest tile alone),
---   mat legend idx (0 = dest-native material), designation bits, spare.
+--   mat legend idx (0 = dest-native material), designation bits, flags
+--   (bit 0 soil layer, bit 1 tile of an adamantine tube feature).
 -- blocks in z-major order: for z 0..z_count-1, for by, for bx.
 
 TILE_REC = '<I2I2I2B'
@@ -176,7 +216,7 @@ end
 
 BUDGET_MS = 30
 
-function pump(budget_ms)
+local function pump_inner(budget_ms)
     local job = current_job()
     if not job then return false end
     -- every phase reads the live map/unit/item vectors; pumping without them is
@@ -216,19 +256,31 @@ function pump(budget_ms)
             tostring(err)))
         return false
     end
-    -- periodic progress line
+    -- periodic progress line. Everything here must be error-proof: pump runs
+    -- inside the overlay's update, and a Lua error escaping it took DF down
+    -- with a double-free abort (the next phase's total() was read before its
+    -- init had run, on a job field that init creates).
     job = current_job()
     if job and dfhack.getTickCount() - job.last_report > 2000 then
         job.last_report = dfhack.getTickCount()
         local phase = job.phases[job.phase_idx]
         local extra = ''
-        if phase and phase.pos and phase.total then
-            local p, t = phase.pos(job), phase.total(job)
-            if t and t > 0 then extra = (' %d/%d (%d%%)'):format(p, t, p * 100 // t) end
+        if phase and job.inited and phase.pos and phase.total then
+            local okp, p, t = pcall(function() return phase.pos(job), phase.total(job) end)
+            if okp and p and t and t > 0 then
+                extra = (' %d/%d (%d%%)'):format(p, t, p * 100 // t)
+            end
         end
-        print(('planeswalkers: %s: %s%s'):format(job.label, phase and phase.name or '?', extra))
+        pcall(print, ('planeswalkers: %s: %s%s'):format(job.label, phase and phase.name or '?', extra))
     end
     return current_job() ~= nil
+end
+
+function pump(budget_ms)
+    local ok, res = pcall(pump_inner, budget_ms)
+    if ok then return res end
+    dfhack.printerr('planeswalkers: pump error: ' .. tostring(res))
+    return false
 end
 
 function job_status()
@@ -246,14 +298,52 @@ end
 -- item into a FALLING PROJECTILE flagged in_job -- and building construction
 -- refuses in_job items, which once silently failed all 1000+ buildings of a
 -- restore. Mint at a unit standing on walkable ground whenever one exists.
-function creator_unit()
+local function solid_at(x, y, z)
+    local tt = dfhack.maps.getTileType(x, y, z)
+    if not tt then return false end
+    local shape = df.tiletype.attrs[tt].shape
+    return shape ~= df.tiletype_shape.EMPTY and df.tiletype_shape.attrs[shape].walkable
+end
+
+-- find solid, walkable ground near (x, y): same column first, then a widening
+-- square, a band of z-levels around the given one
+function find_ground_near(x, y, z, radius, zspan)
+    radius, zspan = radius or 24, zspan or 12
+    for r = 0, radius, 2 do
+        for dz = 0, zspan do
+            for _, zz in ipairs(dz == 0 and {z} or {z - dz, z + dz}) do
+                if zz >= 1 and zz < df.global.world.map.z_count - 1 then
+                    for dx = -r, r, 2 do
+                        for dy = -r, r, 2 do
+                            if math.max(math.abs(dx), math.abs(dy)) == r
+                                and solid_at(x + dx, y + dy, zz) then
+                                return xyz2pos(x + dx, y + dy, zz)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- a citizen standing on solid ground; when none does (the whole surface was
+-- just rewritten under the embark party), the first one is moved onto the
+-- nearest solid tile -- an item minted mid-air or inside rock is a falling
+-- projectile, which no building will accept
+function creator_unit(near)
     local fallback
     for _, u in ipairs(dfhack.units.getCitizens(true)) do
         fallback = fallback or u
-        local tt = dfhack.maps.getTileType(u.pos.x, u.pos.y, u.pos.z)
-        local shape = tt and df.tiletype.attrs[tt].shape
-        if shape and df.tiletype_shape.attrs[shape].walkable then
-            return u
+        if solid_at(u.pos.x, u.pos.y, u.pos.z) then return u end
+    end
+    if fallback then
+        local p = near or fallback.pos
+        local ground = find_ground_near(p.x, p.y, p.z)
+        if ground then
+            dfhack.units.teleport(fallback, ground)
+            print(('planeswalkers: no citizen on solid ground; moved %s to %d,%d,%d to mint items')
+                :format(dfhack.units.getReadableName(fallback), ground.x, ground.y, ground.z))
         end
     end
     return fallback
@@ -270,8 +360,11 @@ function unproject(item)
         if cur.item and cur.item.item == item then
             prev.next = cur.next
             if cur.next then cur.next.prev = prev end
-            cur.item:delete()
-            cur:delete()
+            -- unlink only. Deleting the projectile from Lua and then its list
+            -- link was a double free: DF's projectile destructor frees the
+            -- link itself (SIGABRT "double free detected in tcache", traced
+            -- to exactly this spot). The two orphaned records are a leak DF
+            -- never sees.
             break
         end
         prev, cur = cur, cur.next

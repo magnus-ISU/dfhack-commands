@@ -161,8 +161,15 @@ local function save_unit(ctx, u)
         adv = adventurer_bits(u),
         prof = df.profession[u.profession],
         cprof = #u.custom_profession > 0 and common.u(u.custom_profession) or nil,
-        x = u.pos.x, y = u.pos.y, z = u.pos.z,
     }
+    -- a unit wandering outside the saved footprint comes along regardless,
+    -- pulled to the nearest tile inside it
+    local px, py = u.pos.x, u.pos.y
+    if not common.in_footprint(ctx, px, py) then
+        px, py = common.clamp_to_footprint(ctx, px, py)
+        common.add_skip(ctx, 'unit-outside-footprint-moved-in', rtok)
+    end
+    rec.x, rec.y, rec.z = px - ctx.origin.x, py - ctx.origin.y, u.pos.z
     -- labors
     local labors = {}
     for i = 0, #u.status.labors - 1 do

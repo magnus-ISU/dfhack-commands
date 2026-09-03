@@ -32,6 +32,36 @@ local function inorganic_token(idx)
     return raw and ('INORGANIC:' .. raw.id) or nil
 end
 
+-- tile record flag bits (the 7th byte of common.TILE_REC)
+local TF_SOIL = 1       -- material is a soil layer, restored via geolayer remap
+local TF_TUBE = 2       -- tile belonged to an adamantine tube feature at the source
+
+-- is this block's local feature an adamantine spire ("deep special tube")?
+-- Local features are indexed per world tile, so the lookup goes through the
+-- block's own region_pos. Cached per (region, index).
+function block_is_tube(ctx, block)
+    local lf = block.local_feature
+    if lf < 0 then return false end
+    local key = block.region_pos.x .. ':' .. block.region_pos.y .. ':' .. lf
+    ctx.tube_lf = ctx.tube_lf or {}
+    local v = ctx.tube_lf[key]
+    if v == nil then
+        local ok, init = pcall(dfhack.maps.getLocalInitFeature, block.region_pos, lf)
+        v = ok and init ~= nil and df.feature_init_deep_special_tubest:is_instance(init)
+            or false
+        ctx.tube_lf[key] = v
+    end
+    return v
+end
+
+-- the map rectangle (tiles, inclusive-exclusive) the sampling scans cover:
+-- the whole map unless a footprint was given
+local function scan_rect(rect)
+    local map = df.global.world.map
+    if rect then return rect.x, rect.y, rect.x + rect.w, rect.y + rect.h end
+    return 0, 0, map.x_count, map.y_count
+end
+
 -- the hell ceiling: the world's bottom is slade floor, then the open
 -- underworld (demons!), capped by a semi-molten-rock ceiling, with the magma
 -- sea band above that. The magma sea band is fair game -- a fort's deepest
@@ -43,11 +73,12 @@ end
 -- everything at or below the LOWEST sampled ceiling is hard off-limits, and
 -- the band up to the HIGHEST needs per-tile care (see load_block).
 -- Returns max_ceiling_z, min_ceiling_z (-1, -1 if the world has no deep).
-function find_deep_top_z()
+function find_deep_top_z(rect)
     local map = df.global.world.map
     local maxc, minc = -1, math.huge
-    for x = 8, map.x_count - 1, 16 do
-        for y = 8, map.y_count - 1, 16 do
+    local x0, y0, x1, y1 = scan_rect(rect)
+    for x = x0 + 8, x1 - 1, 16 do
+        for y = y0 + 8, y1 - 1, 16 do
             for z = 0, math.min(map.z_count - 1, 80) do
                 local tt = dfhack.maps.getTileType(x, y, z)
                 if tt == df.tiletype.SemiMoltenRock then
@@ -63,11 +94,12 @@ function find_deep_top_z()
 end
 
 -- median of sampled highest-non-empty z: the cross-world alignment anchor
-function find_surface_z()
+function find_surface_z(rect)
     local map = df.global.world.map
     local zs = {}
-    for x = 8, map.x_count - 1, 16 do
-        for y = 8, map.y_count - 1, 16 do
+    local x0, y0, x1, y1 = scan_rect(rect)
+    for x = x0 + 8, x1 - 1, 16 do
+        for y = y0 + 8, y1 - 1, 16 do
             for z = map.z_count - 2, 0, -1 do
                 local tt = dfhack.maps.getTileType(x, y, z)
                 if tt and df.tiletype.attrs[tt].shape ~= df.tiletype_shape.EMPTY then
@@ -167,12 +199,18 @@ local function save_grass(ctx, block, bx, by, z)
     end
 end
 
+-- bx/by/z are ABSOLUTE block coords in this map; grass records (and the
+-- caller's tile records) are stored relative to the snapshot footprint
 local function save_block(ctx, block, bx, by, z)
     if not block then return common.ZERO_BLOCK end
-    save_grass(ctx, block, bx, by, z)
+    local o = ctx.origin
+    save_grass(ctx, block, bx - o.bx, by - o.by, z)
     local veins = vein_grid(block)
     local recs = {}
     local surface = ctx.manifest.dims.surface
+    -- a spire's tiles are flagged so the loader can rebuild the feature
+    -- around exactly them, hollow core and all
+    local tube = block_is_tube(ctx, block)
     for x = 0, 15 do
         local ttcol, dscol = block.tiletype[x], block.designation[x]
         for y = 0, 15 do
@@ -181,6 +219,7 @@ local function save_block(ctx, block, bx, by, z)
             local attrs = df.tiletype.attrs[tt]
             local mat_cat = attrs.material
             local tt_out, mat_idx, flags = tt, 0, 0
+            if tube and d.feature_local then flags = TF_TUBE end
             if GRASS_MATS[mat_cat] then
                 -- keep the grass tiletype as it stands (grass.bin carries the
                 -- plant behind it) and pin the soil under it the same way a
@@ -191,7 +230,7 @@ local function save_block(ctx, block, bx, by, z)
                                                      d.geolayer_index)
                 if tok and is_soil then
                     mat_idx = ctx.legend_mat:intern(tok)
-                    flags = 1
+                    flags = flags | TF_SOIL
                 end
             elseif PLANT_MATS[mat_cat] then
                 -- trees/plants don't transfer; degrade to what's underneath
@@ -222,7 +261,7 @@ local function save_block(ctx, block, bx, by, z)
                                                          d.geolayer_index)
                     if tok and is_soil then
                         mat_idx = ctx.legend_mat:intern(tok)
-                        flags = 1
+                        flags = flags | TF_SOIL
                     end
                 elseif mat_cat == df.tiletype_material.MINERAL then
                     if veins and veins[k] ~= nil then
@@ -261,7 +300,8 @@ end
 
 function save_phases(ctx)
     local map = df.global.world.map
-    local nb = map.x_count_block * map.y_count_block * map.z_count_block
+    local o = ctx.origin
+    local nb = o.wb * o.hb * map.z_count_block
     local phases = {}
 
     table.insert(phases, {
@@ -271,24 +311,25 @@ function save_phases(ctx)
             -- everything is saved, hell included; the loader decides what may
             -- be applied. The lowest hell-ceiling z is the cross-world
             -- alignment datum for same-size (underworld-anchored) restores.
-            ctx.deep_top = select(2, find_deep_top_z())
+            ctx.deep_top = select(2, find_deep_top_z(o))
             ctx.manifest.dims.deep_top = ctx.deep_top
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'wb')
             ctx.grass_f = io.open(ctx.dir .. '/grass.bin', 'wb')
+            -- header flag bit 0: tile records carry TF_TUBE
             ctx.tiles_f:write(string.pack(common.HEADER_FMT, 'PWT1',
-                map.x_count_block, map.y_count_block, map.z_count_block,
-                ctx.manifest.dims.surface, 0))
+                o.wb, o.hb, map.z_count_block,
+                ctx.manifest.dims.surface, 1))
             job.block_cursor = 0
         end,
         total = function() return nb end,
         pos = function(job) return job.block_cursor end,
         step = function(job, deadline)
-            local bw, bh = map.x_count_block, map.y_count_block
+            local bw, bh = o.wb, o.hb
             while job.block_cursor < nb do
                 local i = job.block_cursor
                 local z = i // (bw * bh)
-                local by = (i % (bw * bh)) // bw
-                local bx = i % bw
+                local by = (i % (bw * bh)) // bw + o.by
+                local bx = i % bw + o.bx
                 ctx.tiles_f:write(save_block(ctx, dfhack.maps.getBlock(bx, by, z), bx, by, z))
                 job.block_cursor = i + 1
                 if dfhack.getTickCount() >= deadline then return false end
@@ -312,15 +353,18 @@ function save_phases(ctx)
         name = 'constructions',
         step = function(job)
             local out = {v = 1, list = {}}
+            local o = ctx.origin
             for _, c in ipairs(df.global.world.event.constructions) do
                 local mi = dfhack.matinfo.decode(c.mat_type, c.mat_index)
+                if not common.in_footprint(ctx, c.pos.x, c.pos.y) then goto continue end
                 table.insert(out.list, {
-                    x = c.pos.x, y = c.pos.y, z = c.pos.z,
+                    x = c.pos.x - o.x, y = c.pos.y - o.y, z = c.pos.z,
                     item_type = df.item_type[c.item_type],
                     item_subtype = c.item_subtype,
                     mat = mi and mi:getToken() or nil,
                     original_tile = df.tiletype[c.original_tile],
                 })
+                ::continue::
             end
             common.write_json(ctx.dir .. '/constructions.json', out)
             ctx.manifest.counts.constructions = #out.list
@@ -569,6 +613,54 @@ local function column_ceiling(ctx, x, y)
     return c
 end
 
+-- cross-world spires ------------------------------------------------------
+-- An adamantine spire is a "deep special tube" feature: the block points at
+-- the feature (local_feature) and every tile of the spire -- the raw
+-- adamantine and the hollow core alike -- carries designation.feature_local.
+-- That registration is what makes DF treat a breach as THE breach: the
+-- horde from below, the encased horror, the divine treasure and its guardian
+-- all spawn off it. Two consequences for a transfer:
+--   * the destination's own tubes must be DISARMED before the source's
+--     terrain lands on them, or the moment an open source tile covers a
+--     registered tube tile DF sees a breached spire and empties hell into the
+--     fort (seen live: seven announcements and forty demons on load);
+--   * the source's spires arrive as raw-adamantine FEATURE tiles with no
+--     feature behind them, so they are re-registered onto the destination's
+--     tube features (one per spire; extra spires get a freshly created tube),
+--     and only then does digging into a carried spire do what it should.
+
+local function spire_key(x, y, z) return (z * 4096 + y) * 4096 + x end
+local function spire_unkey(k)
+    return k % 4096, (k // 4096) % 4096, k // 4096 // 4096
+end
+
+local function mat_is_slade(ctx, mat_idx)
+    ctx.slade_cache = ctx.slade_cache or {}
+    local v = ctx.slade_cache[mat_idx]
+    if v == nil then
+        v = ctx.legend_mat:get(mat_idx) == 'INORGANIC:SLADE'
+        ctx.slade_cache[mat_idx] = v
+    end
+    return v
+end
+
+-- note a source tile that is part of a spire. FEATURE-material tiles other
+-- than slade are the spire's own adamantine; TF_TUBE-flagged tiles are
+-- whatever the source's tube feature registered (hollow core included)
+local function gather_spire_tile(ctx, x, y, z, tt, mat_idx, rflags)
+    if ctx.no_spires then return false end  -- bisect: everything paints as a vein
+    local is_feat = tt and mat_idx ~= 0
+        and df.tiletype.attrs[tt].material == df.tiletype_material.FEATURE
+        and not mat_is_slade(ctx, mat_idx)
+    if is_feat then
+        ctx.spire_feat[#ctx.spire_feat + 1] = string.pack('<I2I2I2I2I2', x, y, z, mat_idx, tt)
+    end
+    if rflags & 2 == 2 then
+        ctx.spire_hint[#ctx.spire_hint + 1] = spire_key(x, y, z)
+    end
+    return is_feat
+end
+
 local function load_block(ctx, data, src_bx, src_by, src_z)
     local anchor = ctx.anchor
     local z = src_z + anchor.off_z
@@ -607,6 +699,10 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
             end
         end
     end
+    -- a destination spire under the incoming terrain: every tile the source
+    -- writes leaves the tube's registration, so no source tile can ever read
+    -- as a breach of a tube that no longer exists there
+    local tube = block_is_tube(ctx, block)
     local off = 1
     local touched = false
     for x = 0, 15 do
@@ -647,12 +743,33 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
                 d.outside = bits.outside
                 d.water_stagnant = bits.water_stagnant
                 d.water_salt = bits.water_salt
-                if mat_idx ~= 0 then
+                if tube and d.feature_local then
+                    d.feature_local = false
+                    ctx.tube_disarmed = (ctx.tube_disarmed or 0) + 1
+                end
+                -- a spire's own adamantine is not painted as a vein here: the
+                -- spires phase registers it on a tube feature and only paints
+                -- what could not be registered
+                local spire = gather_spire_tile(ctx, bx * 16 + x, by * 16 + y, z,
+                                                tt, mat_idx, rflags)
+                if mat_idx ~= 0 and not spire then
                     ctx.paint_list[#ctx.paint_list + 1] =
                         string.pack('<I2I2I2I2B', bx * 16 + x, by * 16 + y, z, mat_idx, rflags)
                 end
             end
         end
+    end
+    if tube then
+        -- nothing of the destination's tube left in this block: unhook it
+        local left = false
+        for x = 0, 15 do
+            local dscol = block.designation[x]
+            for y = 0, 15 do
+                if dscol[y].feature_local then left = true break end
+            end
+            if left then break end
+        end
+        if not left then block.local_feature = -1 end
     end
     if touched then
         -- the destination's own grass sat on terrain that no longer exists; left
@@ -725,6 +842,396 @@ local function apply_grass(ctx, bx, by, src_z, plant_index, amounts)
     end
 end
 
+-- the destination's tube features: {init=, local_idx=, cell='wx:wy'}
+local function dest_tubes()
+    local out = {}
+    local fl = df.global.world.features
+    for i = 0, #fl.map_features - 1 do
+        local init = fl.map_features[i]
+        if df.feature_init_deep_special_tubest:is_instance(init) then
+            local cell
+            local f = init.feature
+            if f and #f.embark_pos.x > 0 then
+                cell = (f.embark_pos.x[0] // 16) .. ':' .. (f.embark_pos.y[0] // 16)
+            end
+            table.insert(out, {init = init, local_idx = fl.feature_local_idx[i], cell = cell})
+        end
+    end
+    return out
+end
+
+-- mint a new tube feature in the world tile `wx,wy` (modelled on `template`
+-- when one exists) and register it on this map; returns {init, local_idx}
+local function create_tube(wx, wy, template)
+    local wd = df.global.world.world_data
+    local shell = wd.feature_map[wx // 16]:_displace(wy // 16)
+    if not shell.features then return nil, 'no feature map for the world tile' end
+    local vec = shell.features.feature_init[wx % 16][wy % 16]
+    local init = df.feature_init_deep_special_tubest:new()
+    init.flags:resize(template and #template.flags or 8)
+    init.start_depth = template and template.start_depth or df.layer_type.MagmaSea
+    init.end_depth = template and template.end_depth or df.layer_type.Underworld
+    init.mat_type = 0
+    init.mat_index = template and template.mat_index or -1
+    local feat = init:createFeature()
+    if not init.feature then init.feature = feat end
+    if not init.feature then
+        return nil, 'createFeature returned nothing'  -- leaked on purpose: never free DF objects
+    end
+    init.feature.min_map_z:insert('#', -29977)
+    init.feature.max_map_z:insert('#', -29977)
+    vec:insert('#', init)
+    local fl = df.global.world.features
+    fl.map_features:insert('#', init)
+    fl.feature_local_idx:insert('#', #vec - 1)
+    fl.feature_global_idx:insert('#', -1)
+    return {init = init, local_idx = #vec - 1, cell = wx .. ':' .. wy, created = true}
+end
+
+-- register one spire (a cluster of tile keys) on a tube feature
+local function arm_spire(ctx, cluster, tube, midx)
+    local map = df.global.world.map
+    local init = tube.init
+    init.mat_type = 0
+    init.mat_index = midx
+    init.flags.Discovered = false
+    init.flags.Announced = false
+    init.flags.AnnouncedFully = false
+    local sqs, sq_list = {}, {}
+    local sx0, sy0, sx1, sy1 = 16, 16, -1, -1
+    for _, k in ipairs(cluster) do
+        local x, y, z = spire_unkey(k)
+        local block = dfhack.maps.getBlock(x // 16, y // 16, z)
+        if block then
+            block.designation[x % 16][y % 16].feature_local = true
+            if block.local_feature ~= tube.local_idx then
+                block.local_feature = tube.local_idx
+            end
+            ctx.spire_flagged[k] = true
+            -- embark squares (48 tiles) the spire touches, absolute and
+            -- relative to the world tile
+            local ax, ay = map.region_x + x // 48, map.region_y + y // 48
+            local sk = ax .. ':' .. ay
+            if not sqs[sk] then
+                sqs[sk] = true
+                table.insert(sq_list, {ax, ay})
+            end
+            local rx, ry = ax % 16, ay % 16
+            if rx < sx0 then sx0 = rx end
+            if ry < sy0 then sy0 = ry end
+            if rx > sx1 then sx1 = rx end
+            if ry > sy1 then sy1 = ry end
+        end
+    end
+    init.start_x, init.start_y, init.end_x, init.end_y = sx0, sy0, sx1, sy1
+    local f = init.feature
+    if f then
+        f.embark_pos.x:resize(0)
+        f.embark_pos.y:resize(0)
+        for _, sq in ipairs(sq_list) do
+            f.embark_pos.x:insert('#', sq[1])
+            f.embark_pos.y:insert('#', sq[2])
+        end
+    end
+end
+
+-- connected components (26-neighbourhood) over a set of tile keys
+local function cluster_keys(set)
+    local clusters, seen = {}, {}
+    for k in pairs(set) do
+        if not seen[k] then
+            seen[k] = true
+            local comp, stack = {}, {k}
+            while #stack > 0 do
+                local c = table.remove(stack)
+                comp[#comp + 1] = c
+                local x, y, z = spire_unkey(c)
+                for dz = -1, 1 do
+                    for dy = -1, 1 do
+                        for dx = -1, 1 do
+                            local n = spire_key(x + dx, y + dy, z + dz)
+                            if set[n] and not seen[n] then
+                                seen[n] = true
+                                stack[#stack + 1] = n
+                            end
+                        end
+                    end
+                end
+            end
+            table.insert(clusters, comp)
+        end
+    end
+    table.sort(clusters, function(a, b) return #a > #b end)
+    return clusters
+end
+
+-- phase: re-register the carried spires as live tube features
+function spires_phase(ctx)
+    return {
+        name = 'adamantine spires',
+        step = function(job)
+            ctx.spire_flagged = {}
+            local set, feat_at, mats = {}, {}, {}
+            for _, rec in ipairs(ctx.spire_feat) do
+                local x, y, z, mat_idx, tt = string.unpack('<I2I2I2I2I2', rec)
+                local k = spire_key(x, y, z)
+                set[k] = true
+                feat_at[k] = {mat_idx, tt}
+            end
+            local have_hints = #ctx.spire_hint > 0
+            for _, k in ipairs(ctx.spire_hint) do set[k] = true end
+            if not next(set) then return true end
+            local clusters = cluster_keys(set)
+            if not have_hints then
+                -- a snapshot from before the tube bit: the hollow core is not
+                -- marked, so take the hidden open tiles inside each spire's
+                -- per-level bounding box along with the adamantine
+                for _, comp in ipairs(clusters) do
+                    local bb = {}
+                    for _, k in ipairs(comp) do
+                        local x, y, z = spire_unkey(k)
+                        local b = bb[z] or {x, y, x, y}
+                        if x < b[1] then b[1] = x end
+                        if y < b[2] then b[2] = y end
+                        if x > b[3] then b[3] = x end
+                        if y > b[4] then b[4] = y end
+                        bb[z] = b
+                    end
+                    for z, b in pairs(bb) do
+                        for x = b[1], b[3] do
+                            for y = b[2], b[4] do
+                                local k = spire_key(x, y, z)
+                                if not set[k] then
+                                    local tt = dfhack.maps.getTileType(x, y, z)
+                                    local d = tt and dfhack.maps.getTileFlags(xyz2pos(x, y, z))
+                                    if d and d.hidden
+                                        and df.tiletype.attrs[tt].shape == df.tiletype_shape.EMPTY then
+                                        set[k] = true
+                                        comp[#comp + 1] = k
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- every cluster with adamantine in it is a spire
+            local tubes = dest_tubes()
+            local used = {}
+            local reused, created, plain = 0, 0, 0
+            for _, comp in ipairs(clusters) do
+                local counts, best, best_n = {}, nil, 0
+                for _, k in ipairs(comp) do
+                    local fa = feat_at[k]
+                    if fa then
+                        counts[fa[1]] = (counts[fa[1]] or 0) + 1
+                        if counts[fa[1]] > best_n then best, best_n = fa[1], counts[fa[1]] end
+                    end
+                end
+                -- registered rock with no adamantine in it is not a spire
+                if not best then goto next_cluster end
+                local midx = resolve_mat(ctx, best)
+                local tube
+                if midx then
+                    local x, y, z = spire_unkey(comp[1])
+                    local block = dfhack.maps.getBlock(x // 16, y // 16, z)
+                    local cell = block and (block.region_pos.x .. ':' .. block.region_pos.y)
+                    for i, t in ipairs(tubes) do
+                        if not used[i] and (t.cell == nil or t.cell == cell) then
+                            used[i] = true
+                            tube = t
+                            reused = reused + 1
+                            break
+                        end
+                    end
+                    if not tube and block then
+                        local ok, t, err = pcall(create_tube, block.region_pos.x,
+                                                 block.region_pos.y, tubes[1] and tubes[1].init)
+                        if ok and t then
+                            tube = t
+                            created = created + 1
+                        else
+                            common.add_skip(ctx, 'spire-feature-create-failed',
+                                            tostring(ok and err or t))
+                        end
+                    end
+                end
+                if tube then
+                    -- carried spires keep their FEATURE tiletypes; the feature
+                    -- behind them now resolves the material
+                    for _, k in ipairs(comp) do
+                        local fa = feat_at[k]
+                        if fa then
+                            local x, y, z = spire_unkey(k)
+                            local block = dfhack.maps.getBlock(x // 16, y // 16, z)
+                            if block then block.tiletype[x % 16][y % 16] = fa[2] end
+                        end
+                    end
+                    arm_spire(ctx, comp, tube, midx)
+                else
+                    plain = plain + 1
+                    common.add_skip(ctx, 'spire-restored-as-plain-vein',
+                                    ctx.legend_mat:get(best) or '?')
+                end
+                ::next_cluster::
+            end
+            -- whatever was not registered becomes an ordinary vein
+            for _, rec in ipairs(ctx.spire_feat) do
+                local x, y, z, mat_idx = string.unpack('<I2I2I2I2I2', rec)
+                if not ctx.spire_flagged[spire_key(x, y, z)] then
+                    ctx.paint_list[#ctx.paint_list + 1] =
+                        string.pack('<I2I2I2I2B', x, y, z, mat_idx, 0)
+                end
+            end
+            ctx.spire_report = ('%d spire(s) carried as live adamantine tubes (%d on this ' ..
+                'world\'s tube features, %d newly created, %d as plain veins); %d tile(s) of ' ..
+                'this world\'s own tubes disarmed'):format(reused + created, reused, created,
+                plain, ctx.tube_disarmed or 0)
+            print('planeswalkers: ' .. ctx.spire_report)
+            return true
+        end,
+    }
+end
+
+-- standalone repair of a restored fort (fort/planeswalkers spires): the
+-- destination's tubes are disarmed wherever they still hold tiles, and the
+-- carried spires are located from the snapshot and re-registered
+function spire_repair_phases(ctx)
+    local phases = {}
+    table.insert(phases, {
+        name = 'disarm native tubes',
+        init = function(job)
+            job.bi = 0
+            local map = df.global.world.map
+            job.nb = map.x_count_block * map.y_count_block * map.z_count_block
+            ctx.paint_list = ctx.paint_list or {}
+        end,
+        total = function(job) return job.nb end,
+        pos = function(job) return job.bi end,
+        step = function(job, deadline)
+            local map = df.global.world.map
+            local bw, bh = map.x_count_block, map.y_count_block
+            while job.bi < job.nb do
+                local i = job.bi
+                local z = i // (bw * bh)
+                local by = (i % (bw * bh)) // bw
+                local bx = i % bw
+                local block = dfhack.maps.getBlock(bx, by, z)
+                if block and block_is_tube(ctx, block) then
+                    local init = dfhack.maps.getLocalInitFeature(block.region_pos,
+                                                                 block.local_feature)
+                    for x = 0, 15 do
+                        local dscol, ttcol = block.designation[x], block.tiletype[x]
+                        for y = 0, 15 do
+                            local d = dscol[y]
+                            if d.feature_local then
+                                d.feature_local = false
+                                ctx.tube_disarmed = (ctx.tube_disarmed or 0) + 1
+                                local attrs = df.tiletype.attrs[ttcol[y]]
+                                if attrs.material == df.tiletype_material.FEATURE
+                                    and not d.feature_global and init.mat_index >= 0 then
+                                    -- the tube's own adamantine, nothing else
+                                    -- left to resolve it: keep it as a vein
+                                    tiletypes.tiletypes_setTile(
+                                        xyz2pos(bx * 16 + x, by * 16 + y, z), {
+                                        shape = attrs.shape,
+                                        material = df.tiletype_material.STONE,
+                                        special = attrs.special == df.tiletype_special.NONE
+                                            and df.tiletype_special.NORMAL or attrs.special,
+                                        variant = attrs.variant,
+                                        hidden = d.hidden and 1 or 0,
+                                        light = d.light and 1 or 0,
+                                        subterranean = d.subterranean and 1 or 0,
+                                        skyview = d.outside and 1 or 0,
+                                        aquifer = -1, autocorrect = 0,
+                                        stone_material = init.mat_index,
+                                        vein_type = df.inclusion_type.CLUSTER,
+                                    })
+                                end
+                            end
+                        end
+                    end
+                    block.local_feature = -1
+                    dfhack.maps.enableBlockUpdates(block, true, true)
+                end
+                job.bi = i + 1
+                if dfhack.getTickCount() >= deadline then return false end
+            end
+            ctx.tube_lf = {}
+            return true
+        end,
+    })
+    table.insert(phases, {
+        name = 'locate carried spires',
+        init = function(job)
+            ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'rb')
+            ctx.src = read_header(ctx.tiles_f)
+            ctx.tt_cache, ctx.mat_cache = {}, {}
+            ctx.spire_feat, ctx.spire_hint = {}, {}
+            job.block_cursor = 0
+            job.nb = ctx.src.bx * ctx.src.by * ctx.src.bz
+        end,
+        total = function(job) return job.nb end,
+        pos = function(job) return job.block_cursor end,
+        step = function(job, deadline)
+            local s, a = ctx.src, ctx.anchor
+            local map = df.global.world.map
+            while job.block_cursor < job.nb do
+                local data = ctx.tiles_f:read(common.BLOCK_SIZE)
+                if not data then break end
+                local i = job.block_cursor
+                job.block_cursor = i + 1
+                local z = i // (s.bx * s.by) + a.off_z
+                if z >= 1 and z < map.z_count - 1 then
+                    local by = (i % (s.bx * s.by)) // s.bx + a.off_by
+                    local bx = i % s.bx + a.off_bx
+                    local off = 1
+                    for x = 0, 15 do
+                        for y = 0, 15 do
+                            local tt_idx, mat_idx, _, rflags = string.unpack(common.TILE_REC, data, off)
+                            off = off + common.TILE_REC_SIZE
+                            gather_spire_tile(ctx, bx * 16 + x, by * 16 + y, z,
+                                              resolve_tt(ctx, tt_idx), mat_idx, rflags)
+                        end
+                    end
+                end
+                if dfhack.getTickCount() >= deadline then return false end
+            end
+            ctx.tiles_f:close()
+            ctx.tiles_f = nil
+            return true
+        end,
+    })
+    table.insert(phases, spires_phase(ctx))
+    table.insert(phases, {
+        name = 'paint leftovers',
+        step = function(job)
+            for _, rec in ipairs(ctx.paint_list) do
+                local x, y, z, mat_idx = string.unpack('<I2I2I2I2B', rec)
+                local midx = resolve_mat(ctx, mat_idx)
+                local tt = dfhack.maps.getTileType(x, y, z)
+                if midx and tt then
+                    local attrs = df.tiletype.attrs[tt]
+                    local d = dfhack.maps.getTileFlags(xyz2pos(x, y, z))
+                    tiletypes.tiletypes_setTile(xyz2pos(x, y, z), {
+                        shape = attrs.shape, material = df.tiletype_material.STONE,
+                        special = attrs.special == df.tiletype_special.NONE
+                            and df.tiletype_special.NORMAL or attrs.special,
+                        variant = attrs.variant,
+                        hidden = d.hidden and 1 or 0, light = d.light and 1 or 0,
+                        subterranean = d.subterranean and 1 or 0,
+                        skyview = d.outside and 1 or 0,
+                        aquifer = -1, autocorrect = 0,
+                        stone_material = midx, vein_type = df.inclusion_type.CLUSTER,
+                    })
+                end
+            end
+            return true
+        end,
+    })
+    return phases
+end
+
 function load_phases(ctx)
     local phases = {}
 
@@ -735,6 +1242,7 @@ function load_phases(ctx)
             ctx.src = read_header(ctx.tiles_f)
             ctx.dest_deep_top, ctx.dest_deep_min = find_deep_top_z()
             ctx.paint_list = {}
+            ctx.spire_feat, ctx.spire_hint = {}, {}
             ctx.mat_cache, ctx.tt_cache = {}, {}
             build_geo_remaps(ctx)
             job.block_cursor = 0
@@ -875,6 +1383,10 @@ function load_phases(ctx)
         end,
     })
 
+    -- before the veins are painted: a registered spire keeps its FEATURE
+    -- tiles, and only what could not be registered joins the paint list
+    if not ctx.no_spires then table.insert(phases, spires_phase(ctx)) end
+
     table.insert(phases, {
         name = 'materials/veins',
         init = function(job) job.paint_cursor = 1 end,
@@ -900,8 +1412,21 @@ function load_phases(ctx)
                 elseif midx then
                     local tt = dfhack.maps.getTileType(x, y, z)
                     local attrs = df.tiletype.attrs[tt]
-                    if attrs.material == df.tiletype_material.CONSTRUCTION then
+                    if attrs.material == df.tiletype_material.CONSTRUCTION
+                        or df.tiletype[tt]:find('Constructed') then
                         goto continue  -- never repaint a construction tile
+                    end
+                    local raw = df.global.world.raws.inorganics.all[midx]
+                    if raw and raw.flags.SOIL_ANY then
+                        -- a soil recorded off a stone-shaped tile's geolayer: pin it
+                        -- the soil way; the tiletypes plugin refuses soils as veins
+                        set_soil_layer(ctx, x, y, z, midx)
+                        goto continue
+                    end
+                    if not raw or raw.material.flags.IS_METAL then
+                        -- same test the tiletypes plugin applies (it logs each refusal)
+                        common.add_skip(ctx, 'material-not-paintable-stone', raw and raw.id or midx)
+                        goto continue
                     end
                     local d = select(1, dfhack.maps.getTileFlags(xyz2pos(x, y, z)))
                     tiletypes.tiletypes_setTile(xyz2pos(x, y, z), {
@@ -1005,7 +1530,7 @@ function load_phases(ctx)
                     end
                     con.original_tile = df.tiletype[c.original_tile] or df.tiletype.OpenSpace
                     if not dfhack.constructions.insert(con) then
-                        con:delete()
+                        -- leaked on purpose rather than freed from Lua
                         common.add_skip(ctx, 'construction-pos-occupied')
                     end
                 end
