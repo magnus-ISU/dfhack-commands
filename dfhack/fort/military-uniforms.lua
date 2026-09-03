@@ -2950,6 +2950,11 @@ OVERLAY_WIDGETS = {entry = MilitaryUniformOverlay}
 -- need"), which parks them asleep in the barracks on the job instead of working while equipped.
 -- NB: `positions` is a vector<bool> -- it must be RESIZEd; inserting into a bit-packed vector<bool>
 -- segfaults DF.
+-- NB: the Schedule screen will show these routines as "Monthly orders" with a [Clear] button rather
+-- than a name with an [Edit] one, and that is not something this can avoid: DF works that label out
+-- by comparing the twelve months, and offers [Edit] only when they are all identical. Any routine
+-- that varies by month -- which is the whole point of these two -- is edited through the "View
+-- monthly schedule" button instead.
 local function setup_alt_schedules()
     local function set_assignments(e, idx)
         e.order_assignments:resize(0)
