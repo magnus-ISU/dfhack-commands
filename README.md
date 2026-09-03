@@ -233,6 +233,17 @@ Each order it queues is announced — who mandated it, and what was ordered.
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
 
+### **`fort/harvest-plants`**
+Posts a gathering job on every shrub standing in a Gather Fruit zone once a month, instead of
+waiting for the zone to trickle a few tiles out at a time — vegetables and fruitless plants
+included, not just what DF picks on its own. Tiles DF has already posted a job on are skipped,
+so nothing is ever doubled up. A `[Harvest]` button on the zone panel, below the three gather settings,
+turns a zone's auto-posting off and on and acts immediately: on posts that zone's jobs there
+and then, off pulls its outstanding gathering jobs back out of the queue (anything a dwarf
+already picked up is left to finish). It is on by default, and a zone with "Pick shrubs"
+switched off is skipped. A tile whose job dies with the shrub still standing is retired for
+the session, so an unreachable plant can't spam cancellations.
+
 ### **`fort/adamantine-hospital`**
 Stops the hospital spending adamantine on bruises. DF gives a hospital no material filter, so
 dressings and sutures happily consume adamantine cloth and strands. This watches the job list
