@@ -173,26 +173,8 @@ local function held_count()
     return n
 end
 
--- after a load, report what the fort's units hold on each of the first game
--- ticks that run: this is where held gear has gone missing before, and the
--- count per tick says whether DF sheds it, and when
-local function watch_tick()
-    local w = dfhack.internal.planeswalkers_watch
-    if not w or not dfhack.isMapLoaded() then return end
-    local tick = df.global.cur_year_tick
-    if tick ~= w.last_tick then
-        w.last_tick = tick
-        w.n = w.n + 1
-        local held = held_count()
-        print(('planeswalkers watch: tick %d (+%d) units hold %d item(s) (%d right after the load)')
-            :format(tick, tick - w.tick0, held, w.held0))
-        if w.n >= 12 then dfhack.internal.planeswalkers_watch = nil end
-    end
-end
-
 function PumpOverlay:overlay_onupdate()
-    if common.current_job() then common.pump()
-    else pcall(watch_tick) end
+    if common.current_job() then common.pump() end
 end
 
 OVERLAY_WIDGETS = {pump = PumpOverlay}
@@ -469,8 +451,6 @@ local function do_load(name, ...)
             print(('planeswalkers: %d building(s) needed their components put in a second time')
                 :format(ctx.components_reminted))
         end
-        dfhack.internal.planeswalkers_watch = {tick0 = df.global.cur_year_tick,
-            last_tick = df.global.cur_year_tick, n = 0, held0 = held}
         if ctx.spire_report then notify(ctx.spire_report) end
         if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
         if ctx.magma_report then notify(ctx.magma_report) end
