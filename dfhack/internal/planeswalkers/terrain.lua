@@ -1271,6 +1271,47 @@ local function is_hell_tile(tt)
         or tt == df.tiletype.GlowingFloor or a.material == df.tiletype_material.FEATURE
 end
 
+-- DF's own answer for a block: the embark's region details list, per embark
+-- square, every layer under it with the region_tile_idx it registers blocks
+-- with (the value it compares against). The region_coords lookup is the
+-- fallback when the square lists no such layer.
+local function layer_sq_from_region(gidx, bx, by)
+    local ok, idx = pcall(function()
+        local map = df.global.world.map
+        local rd = df.global.world.world_data.midmap_data.region_details[0]
+        local vec = rd.features[map.region_x % 16 + bx * 16 // 48][map.region_y % 16 + by * 16 // 48]
+        for i = 0, #vec - 1 do
+            if vec[i].layer == gidx then return vec[i].region_tile_idx end
+        end
+        return -1
+    end)
+    return ok and idx or -1
+end
+
+-- let the liquids REST: the load flags every block for liquid processing,
+-- and a whole sea under processing churns -- surface tiles thin out and
+-- evaporate, the rest flows after them, and the sea is gone within a season
+-- (measured ~3 units/tick; a vanilla sea's blocks are never flagged and DF
+-- flags the few it needs on its own). Cleared after the terrain and again at
+-- the very end of the load.
+function clear_liquid_flags()
+    local map = df.global.world.map
+    local n = 0
+    for z = 0, map.z_count - 1 do
+        for by = 0, map.y_count_block - 1 do
+            for bx = 0, map.x_count_block - 1 do
+                local b = dfhack.maps.getBlock(bx, by, z)
+                if b and (b.flags.update_liquid or b.flags.update_liquid_twice) then
+                    b.flags.update_liquid = false
+                    b.flags.update_liquid_twice = false
+                    n = n + 1
+                end
+            end
+        end
+    end
+    return n
+end
+
 -- refill: also put back the liquid the snapshot recorded (a sea that already
 -- drained), from tiles.bin
 -- global_feature_sq: a block registered on a layer also names WHICH world
@@ -1418,8 +1459,11 @@ function magma_sea_phase(ctx, refill)
                                 local key = layer.gidx .. ':' .. sqk
                                 local idx = job.sq_index[key]
                                 if idx == nil then
+                                    idx = layer_sq_from_region(layer.gidx, bx, by)
                                     local wc = job.sq_coords[sqk]
-                                    idx = wc and layer_sq_index(layer.gidx, wc[1], wc[2]) or -1
+                                    if idx < 0 then
+                                        idx = wc and layer_sq_index(layer.gidx, wc[1], wc[2]) or -1
+                                    end
                                     if idx < 0 then
                                         idx = layer_sq_index(layer.gidx, block.region_pos.x, block.region_pos.y)
                                     end
@@ -1458,6 +1502,7 @@ function magma_sea_phase(ctx, refill)
             end
             pcall(set_band, job.magma, 'mmin', 'mmax')
             pcall(set_band, job.hell, 'hmin', 'hmax')
+            clear_liquid_flags()
             ctx.magma_report = ('magma sea: %d tile(s) newly registered to the magma layer, %d made static%s')
                 :format(job.registered, job.statics, refill and (', %d tile(s) refilled'):format(job.refilled) or '')
             print('planeswalkers: ' .. ctx.magma_report)
@@ -1845,6 +1890,7 @@ function load_phases(ctx)
             df.global.world.reindex_pathfinding = true
             df.global.gps.force_full_display_count = 1
             dfhack.run_command('fix/occupancy')
+            clear_liquid_flags()
             return true
         end,
     })

@@ -95,9 +95,17 @@ end
 function adult_size(craw, caste)
     local c = craw.caste[caste or 0] or craw.caste[0]
     if not c then return 0 end
-    local ok, sz = pcall(function() return c.body_size_2 end)
-    return ok and sz or 0
+    -- misc.adult_size is what tells a vault's colossal guardian (1,000,000)
+    -- from a rank-and-file angel (6-9k); body_size_2 is a fallback
+    local ok, sz = pcall(function() return c.misc.adult_size end)
+    if ok and sz and sz > 0 then return sz end
+    local ok2, sz2 = pcall(function() return c.body_size_2 end)
+    return ok2 and sz2 or 0
 end
+
+-- a token with its numerals removed: 'HF595 DIVINE_2' -> 'HF DIVINE_', which
+-- every world's angels share, while experiments ('HFEXP E_HUM') do not
+local function skeleton(token) return (token:gsub('%d+', '')) end
 
 -- match a generated race by class stem + closest adult body size
 function match_generated(ctx, token, want_size)
@@ -109,12 +117,21 @@ function match_generated(ctx, token, want_size)
         return nil
     end
     local stem = stem_of(token)
+    local skel = skeleton(token)
     local best, best_d
-    for i, craw in ipairs(df.global.world.raws.creatures.all) do
-        if craw.flags.GENERATED and craw.creature_id:find(stem, 1, true) == 1 then
-            local d = math.abs(adult_size(craw) - (want_size or 0))
-            if not best or d < best_d then best, best_d = i, d end
+    -- first the creatures of exactly the same kind (same token skeleton), by
+    -- closest adult size: an archangel's kill lands on an archangel, an
+    -- angel's on an angel; then anything of the same stem
+    for pass = 1, 2 do
+        for i, craw in ipairs(df.global.world.raws.creatures.all) do
+            local id = craw.creature_id
+            if craw.flags.GENERATED and ((pass == 1 and skeleton(id) == skel)
+                                          or (pass == 2 and id:find(stem, 1, true) == 1)) then
+                local d = math.abs(adult_size(craw) - (want_size or 0))
+                if not best or d < best_d then best, best_d = i, d end
+            end
         end
+        if best then break end
     end
     ctx.gen_cache[key] = best or false
     if best then

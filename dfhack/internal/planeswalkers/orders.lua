@@ -186,5 +186,23 @@ function load_phases(ctx)
     }}
 end
 
+-- repair: replace the whole queue with the snapshot's, through the plugin.
+-- Orders a hand-built restore left behind crash the manager screen; nothing
+-- of a restored fort's queue predates the restore, so the queue is dropped
+-- (unlinked, never freed) and imported afresh
+function repair_phase(ctx)
+    local load = load_phases(ctx)[1]
+    return {
+        name = 'manager orders (replace)',
+        step = function(job)
+            local all = df.global.world.manager_orders.all
+            local dropped = #all
+            for i = #all - 1, 0, -1 do all:erase(i) end
+            print(('planeswalkers: %d existing manager order(s) dropped'):format(dropped))
+            return load.step(job)
+        end,
+    }
+end
+
 if dfhack_flags and dfhack_flags.module then return end
 qerror('internal module; use fort/planeswalkers')
