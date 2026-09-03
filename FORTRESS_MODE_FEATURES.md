@@ -26,9 +26,13 @@ with districts as it is laid; a road with nothing along it is refused; a second 
 leftover frontage; noble suites and guild complexes are placed as suites with one door on the
 road. Then every room, road and hallway piece is started as a `fort/quickfort` job, so digging,
 smoothing, engraving and furniture sequence themselves per tile. The burrow's outer ring is never
-dug and nothing outside it is touched. Only "apply now" exists so far; the presets and stamps
-live in `internal/builder-burrow/presets.lua`. `fort/builder-burrow status` lists the plans made
-for this fort.
+dug and nothing outside it is touched. Only "apply now" exists so far. "New preset" and "Edit
+preset" open a three-column editor: actions and the settings of the selection, the passes with
+their districts and blueprints, and the blueprint library filtered by what is being edited; Enter
+on a library entry adds it. Presets save to `dfhack-config/scripts/data/builder-burrow/presets.json`
+and copy and paste as JSON through the system clipboard, the same JSON the browser prototype in
+`prototypes/burrow-stamper` produces. `fort/builder-burrow status` lists the plans made for this
+fort.
 
 ### **`fort/dig-shapes`**
 Right-click to dig; drag shapes that automatically become staircases, constructions, mining,

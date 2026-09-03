@@ -17,6 +17,21 @@ sequence themselves per tile as the miners get to them.
     fort/builder-burrow            open the picker
     fort/builder-burrow status     the plans stored for this fort
 
+PRESETS
+  The picker's "New preset" and "Edit preset" open the preset editor: three
+  columns. The first holds the actions (create district, add blueprint, remove,
+  a different second pass, hallway blueprints, paste and copy JSON, save) and
+  the settings of whatever is selected; the second lists the passes with their
+  districts and blueprints; the third is the blueprint library, filtered by what
+  is being edited (rooms by type, then surface rooms; hallway pieces when the
+  hallway section is selected). Enter on a library entry adds it: to the
+  selected district, as an alternative of the selected blueprint, or, with only
+  a pass selected, in a new district named after it. Presets are saved to
+  dfhack-config/scripts/data/builder-burrow/presets.json and override shipped
+  ones of the same name. Copy and paste use the system clipboard, in the same
+  JSON the browser sandbox (prototypes/burrow-stamper) copies out, so a preset
+  designed there pastes straight in.
+
 BUILD WHEN
   Only "apply now" exists yet: every blueprint of the plan is started the moment
   you confirm. Gating on a need (a noble without rooms, a house short) is the next
@@ -46,6 +61,7 @@ local widgets = require('gui.widgets')
 
 local packer = reqscript('internal/builder-burrow/packer')
 local presets = reqscript('internal/builder-burrow/presets')
+local editor = reqscript('internal/builder-burrow/editor')
 local qf = reqscript('fort/quickfort')
 
 local GLOBAL_KEY = 'builder-burrow'
@@ -257,7 +273,8 @@ end
 -- Plan `burrow` with `preset_name`, then start every blueprint. `on_status(text)`
 -- is called with progress, `on_done(summary or nil, err)` at the end.
 function plan_and_apply(burrow, preset_name, on_status, on_done)
-    local preset = presets.PRESETS[preset_name]
+    local allp = editor.all_presets()
+    local preset = allp[preset_name]
     if not preset then on_done(nil, 'unknown preset ' .. tostring(preset_name)) return end
     if preset.surface then on_done(nil, 'surface presets are not applied yet') return end
     local z = choose_z(burrow)
@@ -343,25 +360,50 @@ function BuilderWindow:init()
         local name = b.name ~= '' and b.name or ('burrow #' .. b.id)
         burrows[#burrows + 1] = {text = name, burrow = b}
     end
-    local plist = {}
-    for _, name in ipairs(presets.PRESET_ORDER) do plist[#plist + 1] = {text = name, preset = name} end
     self.busy = false
     self:addviews{
         widgets.Label{frame = {t = 0, l = 0}, text = 'Burrow'},
         widgets.List{view_id = 'burrows', frame = {t = 1, l = 0, w = 28, h = 12}, choices = burrows},
         widgets.Label{frame = {t = 0, l = 31}, text = 'Preset'},
-        widgets.List{view_id = 'presets', frame = {t = 1, l = 31, w = 28, h = 12}, choices = plist},
+        widgets.List{view_id = 'presets', frame = {t = 1, l = 31, w = 28, h = 12}, choices = {}},
         widgets.CycleHotkeyLabel{view_id = 'when', frame = {t = 14, l = 0}, key = 'CUSTOM_W',
             label = 'Build when', options = WHEN, initial_option = 'now'},
         widgets.HotkeyLabel{frame = {t = 16, l = 0}, key = 'SELECT', label = 'Plan and apply',
             on_activate = self:callback('apply')},
+        widgets.HotkeyLabel{frame = {t = 14, l = 31}, key = 'CUSTOM_N', label = 'New preset',
+            on_activate = self:callback('new_preset')},
+        widgets.HotkeyLabel{frame = {t = 15, l = 31}, key = 'CUSTOM_E', label = 'Edit preset',
+            on_activate = self:callback('edit_preset')},
         widgets.Label{view_id = 'status', frame = {t = 18, l = 0}, text = ''},
     }
+    self:refresh_presets()
     if #burrows == 0 then self:status('this fort has no burrows: paint one over the rock to build in') end
 end
 
 function BuilderWindow:status(text)
     self.subviews.status:setText(text)
+end
+
+function BuilderWindow:refresh_presets(select_name)
+    local allp, order = editor.all_presets()
+    local plist, idx = {}, 1
+    for i, name in ipairs(order) do
+        plist[#plist + 1] = {text = name, preset = name}
+        if name == select_name then idx = i end
+    end
+    self.subviews.presets:setChoices(plist, idx)
+end
+
+function BuilderWindow:new_preset()
+    editor.open(nil, nil, function(name) self:refresh_presets(name); self:status(('preset "%s" saved'):format(name)) end)
+end
+
+function BuilderWindow:edit_preset()
+    local _, psel = self.subviews.presets:getSelected()
+    if not psel then return end
+    local allp = editor.all_presets()
+    editor.open(allp[psel.preset], psel.preset,
+        function(name) self:refresh_presets(name); self:status(('preset "%s" saved'):format(name)) end)
 end
 
 function BuilderWindow:apply()
