@@ -143,6 +143,7 @@ function pack_dsgn(d)
         | (d.outside and 1 or 0) << 7
         | (d.water_stagnant and 1 or 0) << 8
         | (d.water_salt and 1 or 0) << 9
+        | (d.flow_forbid and 1 or 0) << 10  -- the magma sea is STATIC; without this it runs off the map
 end
 
 function unpack_dsgn(bits)
@@ -155,6 +156,7 @@ function unpack_dsgn(bits)
         outside = (bits >> 7) & 1 == 1,
         water_stagnant = (bits >> 8) & 1 == 1,
         water_salt = (bits >> 9) & 1 == 1,
+        flow_forbid = (bits >> 10) & 1 == 1,
     }
 end
 

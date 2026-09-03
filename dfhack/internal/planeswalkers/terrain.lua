@@ -315,10 +315,11 @@ function save_phases(ctx)
             ctx.manifest.dims.deep_top = ctx.deep_top
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'wb')
             ctx.grass_f = io.open(ctx.dir .. '/grass.bin', 'wb')
-            -- header flag bit 0: tile records carry TF_TUBE
+            -- header flag bit 0: tile records carry TF_TUBE; bit 1: designation
+            -- bits carry flow_forbid
             ctx.tiles_f:write(string.pack(common.HEADER_FMT, 'PWT1',
                 o.wb, o.hb, map.z_count_block,
-                ctx.manifest.dims.surface, 1))
+                ctx.manifest.dims.surface, 3))
             job.block_cursor = 0
         end,
         total = function() return nb end,
@@ -743,6 +744,10 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
                 d.outside = bits.outside
                 d.water_stagnant = bits.water_stagnant
                 d.water_salt = bits.water_salt
+                if ctx.src.flags & 2 == 2 then d.flow_forbid = bits.flow_forbid end
+                if bits.liquid_type == 1 and bits.flow_size > 0 and z > (ctx.magma_zmax or -1) then
+                    ctx.magma_zmax = z
+                end
                 if tube and d.feature_local then
                     d.feature_local = false
                     ctx.tube_disarmed = (ctx.tube_disarmed or 0) + 1
@@ -1236,6 +1241,231 @@ function spire_repair_phases(ctx)
     return phases
 end
 
+-- ---- the magma sea and the underworld: layer registration -------------------
+-- DF keeps the magma sea full by refilling, at the map edges, the tiles it
+-- knows belong to the magma-core layer: the block's global_feature and each
+-- tile's feature_global bit, within the layer's z band per embark square.
+-- Imported terrain keeps the destination's registration, which describes the
+-- destination's sea, not the one that arrived; magma outside it simply flows
+-- off the map (a whole sea was gone within a few seasons). This pass
+-- registers every magma tile on the magma-core layer, every hell tile on the
+-- underworld layer, and widens each layer's z band to what is actually there.
+
+local function layer_features()
+    local fl = df.global.world.features
+    local magma, hell
+    for i = 0, #fl.map_features - 1 do
+        local fi = fl.map_features[i]
+        if df.feature_init_magma_core_from_layerst:is_instance(fi) then
+            magma = {init = fi, gidx = fl.feature_global_idx[i]}
+        elseif df.feature_init_underworld_from_layerst:is_instance(fi) then
+            hell = {init = fi, gidx = fl.feature_global_idx[i]}
+        end
+    end
+    return magma, hell
+end
+
+local function is_hell_tile(tt)
+    local a = df.tiletype.attrs[tt]
+    return tt == df.tiletype.EeriePit or tt == df.tiletype.GlowingBarrier
+        or tt == df.tiletype.GlowingFloor or a.material == df.tiletype_material.FEATURE
+end
+
+-- refill: also put back the liquid the snapshot recorded (a sea that already
+-- drained), from tiles.bin
+-- global_feature_sq: a block registered on a layer also names WHICH world
+-- tile of that layer applies, as an index into the layer's region_coords.
+-- DF assigns squares near a world-tile boundary to the neighbouring tile's
+-- entry, so the index is taken from a block DF itself registered in the same
+-- embark square (any layer, translated by world coordinate), falling back to
+-- the block's own region_pos. Without it a registered block is not part of
+-- the sea for DF, and the sea runs off the map edges (measured: walling the
+-- edges stopped the loss; nothing else did).
+local function square_world_coords(zmax)
+    local map = df.global.world.map
+    local regions = df.global.world.world_data.underground_regions
+    local out = {}
+    for z = 0, zmax do
+        for by = 0, map.y_count_block - 1 do
+            for bx = 0, map.x_count_block - 1 do
+                local sqk = (bx * 16 // 48) .. ':' .. (by * 16 // 48)
+                if not out[sqk] then
+                    local b = dfhack.maps.getBlock(bx, by, z)
+                    if b and b.global_feature >= 0 and b.global_feature_sq >= 0 then
+                        local r = regions[b.global_feature]
+                        if r and b.global_feature_sq < #r.region_coords.x then
+                            out[sqk] = {r.region_coords.x[b.global_feature_sq],
+                                        r.region_coords.y[b.global_feature_sq]}
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function layer_sq_index(gidx, wx, wy)
+    local r = df.global.world.world_data.underground_regions[gidx]
+    if not r then return -1 end
+    for i = 0, #r.region_coords.x - 1 do
+        if r.region_coords.x[i] == wx and r.region_coords.y[i] == wy then return i end
+    end
+    return -1
+end
+
+function magma_sea_phase(ctx, refill)
+    return {
+        name = refill and 'magma sea (refill + register)' or 'magma sea (register)',
+        init = function(job)
+            job.magma, job.hell = layer_features()
+            job.sq_coords = square_world_coords(math.min(df.global.world.map.z_count - 2, 60))
+            job.sq_index = {}  -- 'gidx:sqk' -> index
+            job.zmax = math.min(df.global.world.map.z_count - 2,
+                                math.max(ctx.magma_zmax or 0, (ctx.dest_deep_top or 0) + 20, 40))
+            job.z = 0
+            job.by = 0
+            job.sq = {}  -- per embark square: {mmin, mmax, hmin, hmax}
+            job.registered, job.refilled, job.statics = 0, 0, 0
+            -- a snapshot without the flow_forbid bit (or a repair): make the
+            -- sea static the way DF generates it, or it runs off the map edges
+            job.make_static = refill or not (ctx.src and ctx.src.flags & 2 == 2)
+            if refill and ctx.dir then
+                job.f = io.open(ctx.dir .. '/tiles.bin', 'rb')
+                job.src = read_header(job.f)
+            end
+        end,
+        total = function(job) return job.zmax + 1 end,
+        pos = function(job) return job.z end,
+        step = function(job, deadline)
+            local map = df.global.world.map
+            local a = ctx.anchor
+            while job.z <= job.zmax do
+                local z = job.z
+                while job.by < map.y_count_block do
+                    local by = job.by
+                    for bx = 0, map.x_count_block - 1 do
+                        local block = dfhack.maps.getBlock(bx, by, z)
+                        if block then
+                            if job.f then
+                                -- the snapshot's liquid on this block, if it covers it
+                                local sbx, sby, sz = bx - a.off_bx, by - a.off_by, z - a.off_z
+                                if sbx >= 0 and sby >= 0 and sz >= 0 and sbx < job.src.bx
+                                    and sby < job.src.by and sz < job.src.bz then
+                                    local i = (sz * job.src.by + sby) * job.src.bx + sbx
+                                    job.f:seek('set', common.HEADER_SIZE + i * common.BLOCK_SIZE)
+                                    local data = job.f:read(common.BLOCK_SIZE)
+                                    if data then
+                                        local off = 1
+                                        for x = 0, 15 do
+                                            for y = 0, 15 do
+                                                local _, _, dbits = string.unpack(common.TILE_REC, data, off)
+                                                off = off + common.TILE_REC_SIZE
+                                                local bits = common.unpack_dsgn(dbits)
+                                                if bits.liquid_type == 1 and bits.flow_size > 0 then
+                                                    local tt = block.tiletype[x][y]
+                                                    if df.tiletype.attrs[tt].shape ~= df.tiletype_shape.WALL then
+                                                        local d = block.designation[x][y]
+                                                        if d.flow_size < bits.flow_size or not (d.liquid_type == true or d.liquid_type == 1) then
+                                                            d.flow_size = bits.flow_size
+                                                            d.liquid_type = 1
+                                                            job.refilled = job.refilled + 1
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            local nm, nh = 0, 0
+                            for x = 0, 15 do
+                                local dcol, tcol = block.designation[x], block.tiletype[x]
+                                for y = 0, 15 do
+                                    local d = dcol[y]
+                                    -- the one-bit liquid_type reads back as a boolean
+                                    local magma = d.flow_size > 0 and (d.liquid_type == true or d.liquid_type == 1)
+                                    local hell = is_hell_tile(tcol[y])
+                                    if magma and job.magma then
+                                        if not d.feature_global then job.registered = job.registered + 1 end
+                                        d.feature_global = true
+                                        nm = nm + 1
+                                        if job.make_static and not d.flow_forbid then
+                                            d.flow_forbid = true
+                                            job.statics = job.statics + 1
+                                        end
+                                    elseif hell and job.hell then
+                                        d.feature_global = true
+                                        nh = nh + 1
+                                    end
+                                    if magma or hell then
+                                        local sqk = (bx * 16 // 48) .. ':' .. (by * 16 // 48)
+                                        local sq = job.sq[sqk] or {}
+                                        job.sq[sqk] = sq
+                                        if magma then
+                                            sq.mmin = math.min(sq.mmin or z, z); sq.mmax = math.max(sq.mmax or z, z)
+                                        else
+                                            sq.hmin = math.min(sq.hmin or z, z); sq.hmax = math.max(sq.hmax or z, z)
+                                        end
+                                    end
+                                end
+                            end
+                            -- a block belongs to one layer: the sea where it holds
+                            -- magma, hell where it holds hell and no magma
+                            local function assign(layer)
+                                block.global_feature = layer.gidx
+                                local sqk = (bx * 16 // 48) .. ':' .. (by * 16 // 48)
+                                local key = layer.gidx .. ':' .. sqk
+                                local idx = job.sq_index[key]
+                                if idx == nil then
+                                    local wc = job.sq_coords[sqk]
+                                    idx = wc and layer_sq_index(layer.gidx, wc[1], wc[2]) or -1
+                                    if idx < 0 then
+                                        idx = layer_sq_index(layer.gidx, block.region_pos.x, block.region_pos.y)
+                                    end
+                                    job.sq_index[key] = idx
+                                end
+                                block.global_feature_sq = idx
+                            end
+                            if nm > 0 and job.magma then
+                                assign(job.magma)
+                            elseif nh > 0 and job.hell and block.global_feature < 0 then
+                                assign(job.hell)
+                            end
+                        end
+                    end
+                    job.by = by + 1
+                    if dfhack.getTickCount() >= deadline then return false end
+                end
+                job.by = 0
+                job.z = z + 1
+            end
+            if job.f then job.f:close() job.f = nil end
+            -- the layers' z bands per embark square (16 entries for a 4x4
+            -- embark, in square order x-major as DF lays them out)
+            local function set_band(feat, key_min, key_max)
+                if not feat or not feat.init.feature then return end
+                local ft = feat.init.feature
+                local w = df.global.world.map.x_count // 48
+                for i = 0, #ft.min_map_z - 1 do
+                    local sx, sy = i // math.max(1, (#ft.min_map_z // math.max(1, w))), i % math.max(1, (#ft.min_map_z // math.max(1, w)))
+                    local sq = job.sq[sx .. ':' .. sy]
+                    if sq and sq[key_min] then
+                        ft.min_map_z[i] = math.min(ft.min_map_z[i], sq[key_min])
+                        ft.max_map_z[i] = math.max(ft.max_map_z[i], sq[key_max])
+                    end
+                end
+            end
+            pcall(set_band, job.magma, 'mmin', 'mmax')
+            pcall(set_band, job.hell, 'hmin', 'hmax')
+            ctx.magma_report = ('magma sea: %d tile(s) newly registered to the magma layer, %d made static%s')
+                :format(job.registered, job.statics, refill and (', %d tile(s) refilled'):format(job.refilled) or '')
+            print('planeswalkers: ' .. ctx.magma_report)
+            return true
+        end,
+    }
+end
+
 function load_phases(ctx)
     local phases = {}
 
@@ -1454,6 +1684,8 @@ function load_phases(ctx)
             return true
         end,
     })
+
+    table.insert(phases, magma_sea_phase(ctx, false))
 
     table.insert(phases, {
         name = 'grass/moss',

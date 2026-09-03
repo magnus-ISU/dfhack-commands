@@ -473,6 +473,7 @@ local function do_load(name, ...)
             last_tick = df.global.cur_year_tick, n = 0, held0 = held}
         if ctx.spire_report then notify(ctx.spire_report) end
         if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
+        if ctx.magma_report then notify(ctx.magma_report) end
         local cx = anchor.off_x + mf.dims.bx * 8
         local cy = anchor.off_y + mf.dims.by * 8
         dfhack.gui.revealInDwarfmodeMap(xyz2pos(cx, cy, anchor.dest_surface), true)
@@ -550,10 +551,23 @@ local function do_repair()
         end
     end
     local phases = {req('buildings').repair_components_phase(ctx)}
+    if ctx.dir then
+        -- a sea that drained for lack of registration comes back from the snapshot
+        local legends = common.read_json(ctx.dir .. '/legend.json') or {}
+        ctx.legend_tt = common.Legend.new(legends.tiletypes)
+        ctx.dest_deep_top = select(1, req('terrain').find_deep_top_z())
+        table.insert(phases, req('terrain').magma_sea_phase(ctx, true))
+    end
+    if ctx.dir and dfhack.filesystem.exists(ctx.dir .. '/orders.json') then
+        -- the building map is gone; workshop restrictions cannot be relinked here
+        ctx.bld_map = {}
+        table.insert(phases, req('orders').repair_phase(ctx))
+    end
     common.start_job('repair', phases, ctx, function()
         common.print_skips(ctx)
-        notify(('repair: %d piece(s) of furniture got their missing component')
-               :format(ctx.components_fixed or 0), COLOR_LIGHTGREEN, true)
+        notify(('repair: %d piece(s) of furniture got their missing component; %d manager order(s) rebuilt')
+               :format(ctx.components_fixed or 0, ctx.orders_restored or 0), COLOR_LIGHTGREEN, true)
+        if ctx.magma_report then notify(ctx.magma_report) end
     end)
 end
 
@@ -655,7 +669,8 @@ All commands:
                                          on a fort restored here (disarms this
                                          world's own spires under the fort)
   fort/planeswalkers repair              give furniture that lost its component
-                                         item (pedestals drawing wrong) one
+                                         item (pedestals drawing wrong) one, and
+                                         rebuild the manager orders from the snapshot
   fort/planeswalkers status              job progress / restored-from marker
   fort/planeswalkers cancel              abort the running save or load
   fort/planeswalkers step                pump the job once by hand (debug)
