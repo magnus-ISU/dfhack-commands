@@ -186,6 +186,14 @@ a limit; marks you made by hand it never touches.
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).
 
+### **`fort/filter-other-units`**
+Category filter buttons on the Units screen's **Other** tab, where the Dead/Missing tab
+keeps its `[Show death cause]`: `[Friendly] [Wildlife] [Hostile]` are independent toggles
+(none lit = unfiltered, so clicking one filters to just that and clicking a second adds
+it), and `[Caged?]` cycles separately through *cages don't matter* → `[No Cage]` →
+`[Caged!]`, so Hostile + `[Caged!]` is your prisoner list. The categories are DF's own,
+read out of the `Cat` column it already draws rather than guessed again from unit flags.
+
 ### **`fort/animal-training`**
 Assigns a trainer to many caged animals at once.
 
