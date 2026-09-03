@@ -2942,8 +2942,10 @@ OVERLAY_WIDGETS = {entry = MilitaryUniformOverlay}
 -- EVERY fort squad matching 6-entry schedules. All squads must stay length-synced with the routine
 -- list, or the Schedule screen reads past the end of a squad's shorter list. Re-run after adding
 -- squads (this is NOT automatic -- it would clobber hand edits). Per-month entries are built from
--- scratch: a train month is one squad_order_trainst (min_count 10) with 10 order_assignments ->
--- order 0; a ready month has 10 order_assignments -> -1. BOTH use sleep_mode AnywhereAtWill (0) so
+-- scratch: a train month is THREE squad_order_trainst orders of min_count 3, with every
+-- order_assignment left at -1 so DF spreads the squad across them itself -- ten soldiers all
+-- ordered to train at once mob one barracks and mostly stand about, where three shifts of three
+-- actually spar. A ready month has no orders at all. BOTH use sleep_mode AnywhereAtWill (0) so
 -- soldiers sleep in their OWN bedrooms when they choose -- never InBarracksAtNeed (2, "sleep at
 -- need"), which parks them asleep in the barracks on the job instead of working while equipped.
 -- NB: `positions` is a vector<bool> -- it must be RESIZEd; inserting into a bit-packed vector<bool>
@@ -2954,13 +2956,19 @@ local function setup_alt_schedules()
         for _ = 1, 10 do local mp = df.squad_month_positionst:new(); mp.assigned_order_idx = idx; e.order_assignments:insert('#', mp) end
     end
     local SLEEP_AT_WILL = df.squad_sleep_option_type.AnywhereAtWill   -- own bed, at will (never barracks-at-need)
+    local TRAIN_ORDERS, TRAIN_MIN = 3, 3      -- three shifts of three
     local function make_train(e)
         e.sleep_mode = SLEEP_AT_WILL; e.uniform_mode = 0; e.orders:resize(0)
-        local so = df.squad_schedule_order:new(); so.min_count = 10
-        local t = df.squad_order_trainst:new(); t.issuer_hf = -1; t.recipient_hf = -1; t.origin_army_controller = -1
-        so.order = t; so.positions:resize(10)
-        e.orders:insert('#', so)
-        set_assignments(e, 0)
+        for _ = 1, TRAIN_ORDERS do
+            local so = df.squad_schedule_order:new(); so.min_count = TRAIN_MIN
+            local t = df.squad_order_trainst:new(); t.issuer_hf = -1; t.recipient_hf = -1; t.origin_army_controller = -1
+            so.order = t; so.positions:resize(10)
+            e.orders:insert('#', so)
+        end
+        -- -1, not order 0: an unassigned slot is DF's to fill, and it deals the
+        -- squad round the three orders as the month comes up. Naming an order
+        -- here would nail every soldier to the same shift.
+        set_assignments(e, -1)
     end
     local function make_ready(e)
         e.sleep_mode = SLEEP_AT_WILL; e.uniform_mode = 0; e.orders:resize(0)
@@ -3156,6 +3164,7 @@ if args[1] == 'altsched' then
     local n, eidx, oidx = setup_alt_schedules()
     print(('military-uniforms: "even month" (idx %d) + "odd month" (idx %d) schedules ready on %d fort squads.'):format(eidx, oidx, n))
     print('  even month = train even months / Ready odd;  odd month = train odd months / Ready even.')
+    print('  each training month carries 3 "at least 3" Train orders, so the squad trains in shifts.')
     print('  Assign squads to them on the Schedule screen. Re-run after adding new squads.')
     return
 end
