@@ -447,50 +447,31 @@ local COLUMNS = {
             end
          end,
          disable = cmd('disable', 'smooth-movement')},
+        -- fort/autobutcher REPLACES the stock plugin: one adult limit per species
+        -- instead of four numbers, and the cull rules the plugin hardcodes are
+        -- settings. Enabling it turns the plugin off (they would fight over marks).
         {key = 'autobutcher', label = 'autobutcher (+embark prot.)', mode = 'fort',
          enable = function()
-            -- NEVER disturb custom settings: only enable fresh when off and unconfigured
-            local ab = require('plugins.autobutcher')
-            local configured = ab.isEnabled()
-            if not configured then
-                local ok, wl = pcall(ab.autobutcher_getWatchList)
-                configured = ok and wl and #wl > 0
-            end
-            if not configured then dfhack.run_command('enable', 'autobutcher') end
-            -- embark protection, once per fort: raise-only targets so the animals you
-            -- ARRIVED with are never butchered down to the defaults
+            local ab = reqscript('fort/autobutcher')
+            ab.set_enabled(true)
+            -- embark protection, once per fort: raise-only limits, so the animals you
+            -- ARRIVED with are never butchered down to the default
             if not dfhack.isMapLoaded() then return end
             local KEY = 'magnus-scripts/autobutcher-embark'
             if (dfhack.persistent.getSiteData(KEY) or {}).done then return end
-            local defaults = ab.autobutcher_getSettings()
-            local watch = {}
-            for _, d in ipairs(ab.autobutcher_getWatchList()) do watch[d.id] = d end
-            local counts = {}
-            for _, u in ipairs(df.global.world.units.active) do
-                if dfhack.units.isFortControlled(u) and dfhack.units.isTame(u)
-                    and dfhack.units.isAlive(u) and dfhack.units.isAnimal(u) then
-                    local c = counts[u.race] or {fk = 0, mk = 0, fa = 0, ma = 0}
-                    local adult = dfhack.units.isAdult(u)
-                    local male = u.sex == df.pronoun_type.he
-                    local k = adult and (male and 'ma' or 'fa') or (male and 'mk' or 'fk')
-                    c[k] = c[k] + 1
-                    counts[u.race] = c
+            for _, b in ipairs(ab.census()) do
+                local cfg = ab.cfg_for(b.race)
+                if b.adults > cfg.limit then
+                    local own = ab.own_cfg(b.race)
+                    own.limit = b.adults
+                    print(('       %s: limit raised to %d (arrived with them)')
+                        :format(b.name, b.adults))
                 end
             end
-            for race, c in pairs(counts) do
-                local base = watch[race] or defaults
-                local fk, mk = math.max(base.fk, c.fk), math.max(base.mk, c.mk)
-                local fa, ma = math.max(base.fa, c.fa), math.max(base.ma, c.ma)
-                if fk > base.fk or mk > base.mk or fa > base.fa or ma > base.ma then
-                    ab.autobutcher_setWatchListRace(race, fk, mk, fa, ma, true)
-                    local cr = df.creature_raw.find(race)
-                    print(('       %s: targets raised to %d/%d/%d/%d (fk/mk/fa/ma)')
-                        :format(cr and cr.name[1] or ('race ' .. race), fk, mk, fa, ma))
-                end
-            end
+            ab.save()
             dfhack.persistent.saveSiteData(KEY, {done = true})
          end,
-         disable = cmd('disable', 'autobutcher')},
+         disable = function() reqscript('fort/autobutcher').set_enabled(false) end},
         {key = 'autoclothing', label = 'autoclothing', mode = 'fort',
          enable = cmd('enable', 'autoclothing'), disable = cmd('disable', 'autoclothing')},
         {key = 'autonestbox', label = 'autonestbox', mode = 'fort',

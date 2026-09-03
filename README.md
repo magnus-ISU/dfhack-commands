@@ -210,6 +210,20 @@ A Squads-screen button that selects or deselects all squads.
 Auto-pens new tame animals, warns when a pasture is overcrowded, and adds graze/butcher
 buttons to caged animals.
 
+### **`fort/autobutcher`**
+Replaces the stock `autobutcher` plugin and its GUI. One number per species -- how many
+ADULTS you want -- instead of four (female kids, male kids, female adults, male adults),
+and nothing is butchered until the herd grows past it: then males first, down to a floor
+of four, then females. Click the number to type one, the arrows to nudge it, `[edit]` for
+the per-species rules the plugin hardcodes -- keep the N oldest (so a herd can age while
+every new adult goes to the butcher), infertile first, oldest or youngest first, war
+animals last, a juvenile limit, a custom adult age. War-trained, chained and zoo-caged
+animals are excluded from the reckoning entirely by default. Small numbers behave
+differently on purpose: 2-4 keeps one male and the rest females and never butchers the
+last breeding pair, 1 turns the left buttons into `[m] [f]` for which sex survives, and 0
+turns them into a `[kids:cull|grow]` toggle. Marks it made it takes back off if you raise
+a limit; marks you made by hand it never touches.
+
 ### **`fort/butcher-shop`**
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).
