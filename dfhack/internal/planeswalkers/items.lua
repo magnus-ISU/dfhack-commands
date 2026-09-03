@@ -275,7 +275,7 @@ local function restore_improvements(ctx, rec, item)
             -- redraw the image in this world, then decorate with it
             local extras = reqscript('internal/planeswalkers/extras')
             local okc, err = pcall(function()
-                local chunk, subid = extras.image_in(ctx, e.img)
+                local chunk, subid = extras.image_in(ctx, e.img, rec.id, item)
                 if not chunk then error(subid) end
                 local imp = df.itemimprovement_art_imagest:new()
                 imp.mat_type = minfo and minfo.type or -1

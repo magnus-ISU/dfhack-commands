@@ -321,6 +321,7 @@ function image_out(chunk_id, subid)
         if df.art_image_element_creaturest:is_instance(el) then
             e.k = 'creature'
             e.r, e.c, e.g, e.s = race_tokens(el.race, el.caste)
+            if el.histfig >= 0 then e.hf = el.histfig end  -- a particular figure
         elseif df.art_image_element_itemst:is_instance(el) then
             e.k = 'item'
             e.t = df.item_type[el.item_type]
@@ -330,6 +331,7 @@ function image_out(chunk_id, subid)
             end
             local mi = dfhack.matinfo.decode(el.mat_type, el.mat_index)
             e.mat = mi and mi:getToken() or nil
+            if el.item_id >= 0 then e.item_id = el.item_id end  -- a particular item (an artifact)
         elseif df.art_image_element_plantst:is_instance(el) then
             e.k = 'plant'
             local pr = df.plant_raw.find(el.plant_id)
@@ -391,9 +393,12 @@ local function free_image_slot()
 end
 
 -- rebuild an image in this world; returns chunk id, subid (or nil + reason).
--- Elements naming a figure of the old world become a generic creature of
--- that race; anything the world cannot name is dropped and reported.
-function image_in(ctx, rec)
+-- Elements naming a figure keep naming them when that figure came along
+-- (hf_map), else become a generic creature of that race; an element showing
+-- a particular item points at its restored copy (the artifact itself, via
+-- self_old/self_item, or anything already in item_map); anything the world
+-- cannot name is dropped and reported.
+function image_in(ctx, rec, self_old, self_item)
     local ch, slot = free_image_slot()
     if not ch then return nil, 'no free art image slot' end
     local im = df.art_image:new()
@@ -419,6 +424,13 @@ function image_in(ctx, rec)
             if r then
                 el = df.art_image_element_creaturest:new()
                 el.race, el.caste, el.histfig = r, c or -1, -1
+                local hf = e.hf and ctx.hf_map and ctx.hf_map[e.hf]
+                if hf then
+                    el.histfig = hf.id
+                    if hf.race >= 0 then el.race, el.caste = hf.race, hf.caste end
+                elseif e.hf then
+                    common.add_skip(ctx, 'image-figure-generalized', e.r)
+                end
             end
         elseif e.k == 'item' and e.t and df.item_type[e.t] then
             el = df.art_image_element_itemst:new()
@@ -432,6 +444,15 @@ function image_in(ctx, rec)
             el.mat_type = mi and mi.type or -1
             el.mat_index = mi and mi.index or -1
             el.item_id = -1
+            if e.item_id then
+                if self_old and e.item_id == self_old and self_item then
+                    el.item_id = self_item.id
+                elseif ctx.item_map and ctx.item_map[e.item_id] then
+                    el.item_id = ctx.item_map[e.item_id].id
+                else
+                    common.add_skip(ctx, 'image-item-generalized', e.t)
+                end
+            end
         elseif (e.k == 'plant' or e.k == 'tree') and e.p then
             local pid
             for i2, pr in ipairs(df.global.world.raws.plants.all) do
