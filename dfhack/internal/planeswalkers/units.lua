@@ -270,6 +270,8 @@ function save_phases(ctx)
             -- noble/administrator positions held by figures of this fort
             local positions = reqscript('internal/planeswalkers/extras').positions_out(in_set)
             common.write_json(ctx.dir .. '/positions.json', {v = 1, list = positions})
+            common.write_json(ctx.dir .. '/workdetails.json',
+                              reqscript('internal/planeswalkers/extras').workdetails_out())
             ctx.manifest.counts.positions = #positions
             ctx.manifest.counts.histfigs = #out.list
             ctx.manifest.complete.histfigs = true

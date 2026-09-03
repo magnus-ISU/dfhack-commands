@@ -20,8 +20,7 @@ What is carried
   hidden/light/outside flags. Grass cover comes along too, surface grasses and
   the subterranean ones (cave moss, floor fungi, underlichen) alike, each tile
   keeping how much of it had grown; a destination world missing a particular
-  grass gets the closest local one of the same depth. Trees and shrubs do not
-  transfer and regrow on their own. On a same-size embark the fort is aligned at the
+  grass gets the closest local one of the same depth. On a same-size embark the fort is aligned at the
   underworld and the whole column is carried, magma sea and hell geometry
   included -- the destination keeps its own demons and its underworld stays
   sealed, but the surface may sit a few levels off from the surrounding world
@@ -58,9 +57,15 @@ What is carried
   assigned to, and which meeting area is which guildhall, temple, library or
   tavern (the location is recreated in the new site with its name and guild;
   a temple's deity is left unassigned, deities being figures of the old world).
-- **Nobles and administrators**: every position held by someone who came
-  along (mayor, manager, bookkeeper, broker, baron...) is reassigned in the
-  new site government or civilisation, where such a position exists.
+- **Squads**: every squad with its name, members, per-slot uniform,
+  ammunition, supplies, schedule routine and barracks; the commander and
+  captains hold the military positions again. Civilian positions (mayor,
+  manager, bookkeeper, baron...) are left to the new site to appoint.
+- **Work details**: every work detail with its labours, options and
+  assigned dwarves, so labour assignments are what they were.
+- **Burrows**: name, colours, options, members and every tile.
+- **Trees, saplings and shrubs**: each one is re-planted where it stood
+  (trees grown back on the spot), keeping its species and growth.
 - **Doors and hatches** keep their locked/forbidden and closed state.
 - **Manager orders**: the whole work-order queue, with item, material,
   conditions, repeat schedule and workshop restriction. Gear and materials the
@@ -136,6 +141,7 @@ Usage::
                                           or a fort that already has buildings
     fort/planeswalkers delete <name> --yes  delete a snapshot
     fort/planeswalkers spires             re-arm the carried spires on a restored fort
+    fort/planeswalkers repair             give furniture missing its component item one
     fort/planeswalkers status             job progress / restored-from marker
     fort/planeswalkers cancel             abort the running job
     fort/planeswalkers step               pump the job once by hand (debug)
@@ -161,8 +167,32 @@ PumpOverlay.ATTRS{
     frame = {w = 1, h = 1},
 }
 
+local function held_count()
+    local n = 0
+    for _, u in ipairs(df.global.world.units.active) do n = n + #u.inventory end
+    return n
+end
+
+-- after a load, report what the fort's units hold on each of the first game
+-- ticks that run: this is where held gear has gone missing before, and the
+-- count per tick says whether DF sheds it, and when
+local function watch_tick()
+    local w = dfhack.internal.planeswalkers_watch
+    if not w or not dfhack.isMapLoaded() then return end
+    local tick = df.global.cur_year_tick
+    if tick ~= w.last_tick then
+        w.last_tick = tick
+        w.n = w.n + 1
+        local held = held_count()
+        print(('planeswalkers watch: tick %d (+%d) units hold %d item(s) (%d right after the load)')
+            :format(tick, tick - w.tick0, held, w.held0))
+        if w.n >= 12 then dfhack.internal.planeswalkers_watch = nil end
+    end
+end
+
 function PumpOverlay:overlay_onupdate()
-    if common.current_job() then common.pump() end
+    if common.current_job() then common.pump()
+    else pcall(watch_tick) end
 end
 
 OVERLAY_WIDGETS = {pump = PumpOverlay}
@@ -271,10 +301,13 @@ local function do_save(name)
 
     local phases = terrain.save_phases(ctx)
     for _, p in ipairs(req('spires').save_phases(ctx)) do table.insert(phases, p) end
+    for _, p in ipairs(req('plants').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('orders').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
     for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
+    for _, p in ipairs(req('squads').save_phases(ctx)) do table.insert(phases, p) end
+    for _, p in ipairs(req('burrows').save_phases(ctx)) do table.insert(phases, p) end
     common.start_job('save ' .. name, phases, ctx, function()
         common.write_json(ctx.dir .. '/legend.json',
             {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list,
@@ -397,6 +430,9 @@ local function do_load(name, ...)
         notify(('bisect flags: %s%s'):format(ctx.no_spires and '--no-spires ' or '',
                                              ctx.no_contents and '--no-contents' or ''))
     end
+    if dfhack.filesystem.exists(dir .. '/plants.json') then
+        for _, p in ipairs(req('plants').load_phases(ctx)) do table.insert(phases, p) end
+    end
     if dfhack.filesystem.exists(dir .. '/buildings.json') then
         for _, p in ipairs(req('buildings').load_phases(ctx)) do table.insert(phases, p) end
         for _, p in ipairs(req('orders').load_phases(ctx)) do table.insert(phases, p) end
@@ -404,9 +440,13 @@ local function do_load(name, ...)
     if dfhack.filesystem.exists(dir .. '/units.json') then
         -- units before items so unit-held items can be re-attached
         for _, p in ipairs(req('units').load_phases(ctx)) do table.insert(phases, p) end
-        -- needs both the unit and the building maps
-        table.insert(phases, req('extras').positions_phase(ctx))
+        -- needs both the unit and the building maps. Civilian positions are
+        -- deliberately NOT reassigned (the destination's own appointments
+        -- stand); the military ones come with their squads.
         table.insert(phases, req('extras').owners_phase(ctx))
+        table.insert(phases, req('extras').workdetails_phase(ctx))
+        for _, p in ipairs(req('squads').load_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('burrows').load_phases(ctx)) do table.insert(phases, p) end
     end
     if dfhack.filesystem.exists(dir .. '/items.json') then
         for _, p in ipairs(req('items').load_phases(ctx)) do table.insert(phases, p) end
@@ -417,6 +457,15 @@ local function do_load(name, ...)
             {state = 'done', from = name, world = mf.world, when = os.date('%Y-%m-%d %H:%M:%S'),
              anchor = marker_anchor})
         common.print_skips(ctx)
+        local held = held_count()
+        print(('planeswalkers: units hold %d item(s) at the end of the load (%d were attached)')
+            :format(held, ctx.held_attached or 0))
+        if ctx.components_reminted then
+            print(('planeswalkers: %d building(s) needed their components put in a second time')
+                :format(ctx.components_reminted))
+        end
+        dfhack.internal.planeswalkers_watch = {tick0 = df.global.cur_year_tick,
+            last_tick = df.global.cur_year_tick, n = 0, held0 = held}
         if ctx.spire_report then notify(ctx.spire_report) end
         if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
         local cx = anchor.off_x + mf.dims.bx * 8
@@ -477,6 +526,29 @@ local function do_spires()
         common.print_skips(ctx)
         notify(ctx.spire_report or 'no spires found in the snapshot', COLOR_LIGHTGREEN, true)
         if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
+    end)
+end
+
+-- fix up a restored fort in place: furniture missing its component item,
+-- and the spire pass (see do_spires)
+local function do_repair()
+    require_fort()
+    local ctx = {skips = {}}
+    local marker = dfhack.persistent.getSiteData(GLOBAL_KEY)
+    if marker and marker.state == 'done' and marker.from and marker.anchor then
+        local dir = common.snap_dir(marker.from)
+        if dfhack.filesystem.isdir(dir) then
+            ctx.dir = dir
+            ctx.anchor = {off_bx = marker.anchor.off_bx or 0, off_by = marker.anchor.off_by or 0,
+                          off_z = marker.anchor.off_z or 0}
+            ctx.anchor.off_x, ctx.anchor.off_y = ctx.anchor.off_bx * 16, ctx.anchor.off_by * 16
+        end
+    end
+    local phases = {req('buildings').repair_components_phase(ctx)}
+    common.start_job('repair', phases, ctx, function()
+        common.print_skips(ctx)
+        notify(('repair: %d piece(s) of furniture got their missing component')
+               :format(ctx.components_fixed or 0), COLOR_LIGHTGREEN, true)
     end)
 end
 
@@ -573,6 +645,8 @@ All commands:
   fort/planeswalkers spires              re-arm the carried adamantine spires
                                          on a fort restored here (disarms this
                                          world's own spires under the fort)
+  fort/planeswalkers repair              give furniture that lost its component
+                                         item (pedestals drawing wrong) one
   fort/planeswalkers status              job progress / restored-from marker
   fort/planeswalkers cancel              abort the running save or load
   fort/planeswalkers step                pump the job once by hand (debug)
@@ -585,7 +659,7 @@ local function do_help() print(HELP) end
 local ACTIONS = {
     save = do_save, load = do_load, list = print_list, delete = do_delete,
     status = do_status, cancel = do_cancel, step = do_step, spike = do_spike,
-    spires = do_spires,
+    spires = do_spires, repair = do_repair,
     help = do_help, ['--help'] = do_help, ['-h'] = do_help,
 }
 

@@ -126,7 +126,9 @@ settings, zones, items (with containment, quality, decorations, and maker), arti
 with their descriptions and full artifact status — value, quality and the Objects screen —
 even on pedestals, with their engraved images redrawn from what they depict), room and
 office assignments and the guildhalls/temples/libraries/taverns behind meeting areas,
-noble and administrator positions, the manager's work-order queue, locked doors and hatches, retired adventurers
+squads (members, uniforms, ammunition, barracks) and their commander and captains, work details
+and labour assignments, burrows, trees and shrubs (re-planted and regrown where they stood), the
+manager's work-order queue, locked doors and hatches, retired adventurers
 (unretirable on arrival), and every unit with skills, personality, appearance, family ties,
 kill tallies by species, clothing ownership, and the surrounding historical-figure web — into
 `dfhack-config/scripts/data/planeswalkers/<name>/`. On a fresh embark in ANY other world

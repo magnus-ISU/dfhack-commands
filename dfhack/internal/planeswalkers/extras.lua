@@ -27,19 +27,97 @@ end
 -- are world-local), the species tallies are what the kill list shows anyway.
 function kills_out(hf)
     local ok, k = pcall(function() return hf.info.kills end)
-    if not ok or not k or #k.killed_race == 0 then return nil end
-    local out = {}
+    if not ok or not k then return nil end
+    local out, index = {}, {}
+    local function tally(rt, ct, gen, sz, undead, n)
+        local key = rt .. ':' .. tostring(ct) .. ':' .. undead
+        local e = index[key]
+        if e then e.n = e.n + n return end
+        e = {r = rt, c = ct, g = gen or nil, s = sz, u = undead, n = n}
+        index[key] = e
+        table.insert(out, e)
+    end
     for i = 0, #k.killed_race - 1 do
         local rt, ct, gen, sz = race_tokens(k.killed_race[i], k.killed_caste[i])
         if rt then
-            table.insert(out, {
-                r = rt, c = ct, g = gen or nil, s = sz,
-                u = k.killed_undead[i] and k.killed_undead[i].whole or 0,
-                n = k.killed_count[i],
-            })
+            tally(rt, ct, gen, sz, k.killed_undead[i] and k.killed_undead[i].whole or 0,
+                  k.killed_count[i])
+        end
+    end
+    -- notable kills (named figures: an archangel, a forgotten beast...) are
+    -- history events of the old world; each becomes one more of its species
+    for _, evid in ipairs(k.events) do
+        local ev = df.history_event.find(evid)
+        if ev and df.history_event_hist_figure_diedst:is_instance(ev) then
+            local victim = df.historical_figure.find(ev.victim_hf)
+            if victim then
+                local rt, ct, gen, sz = race_tokens(victim.race, victim.caste)
+                if rt then tally(rt, ct, gen, sz, 0, 1) end
+            end
         end
     end
     return #out > 0 and out or nil
+end
+
+-- ---- work details (what DF 50 actually drives labours from) ------------------
+
+function workdetails_out()
+    local li = df.global.plotinfo.labor_info
+    local out = {flags = li.flags.whole, list = {}}
+    for _, wd in ipairs(li.work_details) do
+        local labors = {}
+        for i = 0, #wd.allowed_labors - 1 do labors[#labors + 1] = wd.allowed_labors[i] and '1' or '0' end
+        local units = {}
+        for _, id in ipairs(wd.assigned_units) do table.insert(units, id) end
+        table.insert(out.list, {name = common.u(wd.name), flags = wd.flags.whole, icon = wd.icon,
+                                labors = table.concat(labors), units = units})
+    end
+    return out
+end
+
+function workdetails_phase(ctx)
+    return {
+        name = 'work details',
+        step = function(job)
+            local data = common.read_json(ctx.dir .. '/workdetails.json')
+            if not data then return true end
+            local li = df.global.plotinfo.labor_info
+            local byname = {}
+            for _, wd in ipairs(li.work_details) do byname[common.u(wd.name)] = wd end
+            local updated, created, assigned = 0, 0, 0
+            pcall(function() li.flags.whole = data.flags or li.flags.whole end)
+            for _, rec in ipairs(data.list or {}) do
+                local ok, err = pcall(function()
+                    local wd = byname[rec.name]
+                    if wd then updated = updated + 1
+                    else
+                        wd = df.work_detail:new()
+                        wd.name = common.fromu(rec.name)
+                        li.work_details:insert('#', wd)
+                        byname[rec.name] = wd
+                        created = created + 1
+                    end
+                    wd.flags.whole = rec.flags or 0
+                    wd.icon = rec.icon or 0
+                    for i = 0, math.min(#wd.allowed_labors, #(rec.labors or '')) - 1 do
+                        wd.allowed_labors[i] = rec.labors:sub(i + 1, i + 1) == '1'
+                    end
+                    wd.assigned_units:resize(0)
+                    for _, old in ipairs(rec.units or {}) do
+                        local u = ctx.unit_map and ctx.unit_map[old]
+                        if u then
+                            wd.assigned_units:insert('#', u.id)
+                            assigned = assigned + 1
+                        end
+                    end
+                end)
+                if not ok then common.add_skip(ctx, 'work-detail-restore-failed', tostring(err)) end
+            end
+            print(('planeswalkers: work details: %d updated, %d created, %d unit assignment(s)')
+                :format(updated, created, assigned))
+            return true
+        end,
+    }
 end
 
 local function resolve_kill_race(ctx, rec)

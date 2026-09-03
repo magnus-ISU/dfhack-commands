@@ -215,8 +215,52 @@ local function mint_component(ctx, comp)
     return common.unproject(item)
 end
 
+-- the item a piece of furniture is made of, by building type
+local COMPONENT_OF = {
+    DisplayFurniture = {t = 'TOOL', st = 'ITEM_TOOL_PEDESTAL'},
+    OfferingPlace = {t = 'TOOL', st = 'ITEM_TOOL_ALTAR'}, TractionBench = {t = 'TRACTION_BENCH'},
+    ArcheryTarget = {t = 'BLOCKS'}, Workshop = {t = 'BOULDER'}, Furnace = {t = 'BOULDER'},
+    TradeDepot = {t = 'BOULDER'}, GrateFloor = {t = 'GRATE'}, GrateWall = {t = 'GRATE'},
+    BarsFloor = {t = 'BARS'}, BarsVertical = {t = 'BARS'}, Bridge = {t = 'BLOCKS'},
+    Well = {t = 'BLOCKS'}, Trap = {t = 'TRAPPARTS'}, ScrewPump = {t = 'PIPE_SECTION'},
+    Support = {t = 'BLOCKS'}, AnimalTrap = {t = 'ANIMALTRAP'}, Hive = {t = 'TOOL', st = 'ITEM_TOOL_HIVE'},
+    NestBox = {t = 'TOOL', st = 'ITEM_TOOL_NEST_BOX'}, Bookcase = {t = 'TOOL', st = 'ITEM_TOOL_BOOKCASE'},
+    Instrument = {t = 'INSTRUMENT'}, Wagon = nil,
+    Bed = {t = 'BED'}, Chair = {t = 'CHAIR'}, Table = {t = 'TABLE'}, Door = {t = 'DOOR'},
+    Cabinet = {t = 'CABINET'}, Box = {t = 'BOX'}, Statue = {t = 'STATUE'}, Coffin = {t = 'COFFIN'},
+    Armorstand = {t = 'ARMORSTAND'}, Weaponrack = {t = 'WEAPONRACK'}, Cage = {t = 'CAGE'},
+    Hatch = {t = 'HATCH_COVER'}, Floodgate = {t = 'FLOODGATE'}, Slab = {t = 'SLAB'},
+    Chain = {t = 'CHAIN'}, Windmill = {t = 'BOULDER'},
+}
+
+-- a built thing must hold its construction components (use_mode 2) or it
+-- draws wrong (pedestals as broken tiles, altars and workshops as their
+-- displayed items alone). Whatever the construct/complete path did with the
+-- first set, put a fresh, never-job-bound set in when none stuck.
+function ensure_components(ctx, bld, comps)
+    if not df.building_actual:is_instance(bld) then return false end
+    for _, ci in ipairs(bld.contained_items) do
+        if ci.use_mode == 2 then return false end
+    end
+    local list = comps
+    if not list or #list == 0 then
+        local guess = COMPONENT_OF[df.building_type[bld:getType()]]
+        if not guess then return false end
+        local mi = dfhack.matinfo.decode(bld.mat_type, bld.mat_index)
+        list = {{t = guess.t, st = guess.st, mat = mi and mi:getToken() or 'INORGANIC:MICROCLINE'}}
+    end
+    local n = 0
+    for _, comp in ipairs(list) do
+        local item = mint_component(ctx, comp)
+        if item and dfhack.items.moveToBuilding(item, bld, 2) then n = n + 1
+        else common.add_skip(ctx, 'component-remint-failed', df.building_type[bld:getType()]) end
+    end
+    if n > 0 then ctx.components_reminted = (ctx.components_reminted or 0) + 1 end
+    return n > 0
+end
+
 -- mirror of build-now.lua's instant completion
-local function complete_build(bld, items)
+local function complete_build(bld, items, ctx)
     for _, job in ipairs(bld.jobs) do
         dfhack.job.removeJob(job)
         break
@@ -224,7 +268,13 @@ local function complete_build(bld, items)
     for _, item in ipairs(items) do
         if not item.flags.in_building then
             local use = bld:getType() == df.building_type.Construction and 0 or 2
-            dfhack.items.moveToBuilding(item, bld, use)
+            if not dfhack.items.moveToBuilding(item, bld, use) then
+                -- a component that will not attach (still bound to a job or a
+                -- projectile record) leaves furniture that draws wrong: note it
+                -- so the repair pass can put a fresh one in
+                if ctx then common.add_skip(ctx, 'component-attach-failed',
+                                            df.building_type[bld:getType()]) end
+            end
         end
     end
     if bld:needsDesign() then
@@ -385,7 +435,8 @@ local function load_one(ctx, rec)
         common.add_skip(ctx, 'building-place-failed', rec.type .. ': ' .. tostring(err))
         return
     end
-    complete_build(bld, items)
+    complete_build(bld, items, ctx)
+    ensure_components(ctx, bld, rec.components)
     if rec.name then bld.name = common.fromu(rec.name) end
     if rec.door_flags and btype == df.building_type.Door then
         bld.door_flags.whole = rec.door_flags
@@ -518,6 +569,44 @@ function load_phases(ctx)
         end,
     })
     return phases
+end
+
+
+-- phase: give every piece of built furniture that has no construction
+-- component one of the right kind in the building's own material (a load
+-- whose components failed to attach leaves pedestals and the like drawing as
+-- broken or as the displayed item alone)
+function repair_components_phase(ctx)
+    return {
+        name = 'furniture components',
+        step = function(job)
+            -- the snapshot this fort came from knows what each thing was
+            -- built of; match its records to buildings by type and place
+            local recs = {}
+            if ctx.dir and ctx.anchor then
+                local blds = common.read_json(ctx.dir .. '/buildings.json') or {list = {}}
+                local a = ctx.anchor
+                for _, rec in ipairs(blds.list) do
+                    recs[rec.type .. ':' .. (rec.x + a.off_x) .. ':' .. (rec.y + a.off_y) .. ':' .. (rec.z + a.off_z)] = rec
+                end
+            end
+            local fixed, seen = 0, 0
+            for _, bld in ipairs(df.global.world.buildings.all) do
+                if df.building_actual:is_instance(bld) and bld:getBuildStage() == bld:getMaxBuildStage() then
+                    local tname = df.building_type[bld:getType()]
+                    local rec = recs[tname .. ':' .. bld.x1 .. ':' .. bld.y1 .. ':' .. bld.z]
+                    if rec or COMPONENT_OF[tname] then
+                        seen = seen + 1
+                        if ensure_components(ctx, bld, rec and rec.components) then fixed = fixed + 1 end
+                    end
+                end
+            end
+            print(('planeswalkers: furniture components: %d of %d building(s) were missing theirs and got one')
+                :format(fixed, seen))
+            ctx.components_fixed = fixed
+            return true
+        end,
+    }
 end
 
 if dfhack_flags and dfhack_flags.module then return end
