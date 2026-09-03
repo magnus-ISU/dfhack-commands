@@ -184,6 +184,19 @@ last breeding pair, 1 turns the left buttons into `[m] [f]` for which sex surviv
 turns them into a `[kids:cull|grow]` toggle. Marks it made it takes back off if you raise
 a limit; marks you made by hand it never touches.
 
+### **`fort/help-mood`**
+Run by hand during a strange mood (`fort/help-mood`). If the fort cannot satisfy the mood it
+says one thing and no more -- *"The gods are testing you"* -- because knowing what a mood wants
+IS the blessing. Otherwise it lists one row per ITEM the mood needs, read from the job's own
+filters, proposes the highest-value candidate for each, and lets you click any row to choose
+from everything that fits. Where the dwarf's preferences and moodable skill settle it, it says
+what is coming: *"...announces they will create a table!"* Then `[build selected artifact]`
+forbids every other candidate in the fort -- including ones mined, butchered or woven while the
+dwarf walks -- so DF has one legal choice per row and takes it, instead of the nearest boulder.
+Requirements already hauled in are shown as claimed and cannot be changed; candidates are
+limited to what the dwarf can actually walk to; worn, part-used and forbidden items are shown,
+labelled, and never chosen by default. Everything it touches is put back.
+
 ### **`fort/butcher-shop`**
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).
@@ -259,6 +272,11 @@ skills. Everything else rusts as normal. Swept once a game season. There is no s
 DFHack tool for this.
 
 ## Information
+
+### **`fort/unit-attributes`**
+An `[Attributes]` button on a unit sheet's *Other Skills* tab, above the Progress Bar toggles,
+opening all nineteen attributes at once: current value, the highest that dwarf can ever reach,
+and how far the value sits from the median for that creature's own caste in DF's steps of 250.
 
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill
