@@ -588,19 +588,32 @@ end
 -- ignoring that holds back a few more tiles than strictly necessary, which is
 -- the safe direction to be wrong in.
 
--- the walkability group the fort itself lives in, by majority of its citizens
-function fort_group()
-    local counts, best, bestn = {}, nil, 0
-    local citizens = dfhack.units.getCitizens(true)
-    for i, u in ipairs(citizens) do
-        if i > 10 then break end
+-- EVERY walkability group the fort's citizens are standing in, as a set.
+--
+-- This was "the group the majority of the first ten citizens are in", one number, and it was
+-- wrong in the way that matters: a fort is not one connected component. The miners on the
+-- surface and the brewers three levels down are in different groups, and a designation drawn
+-- where the sampled ten do not happen to be reads as unreachable no matter how ordinary the
+-- floor is. Four plain, revealed, walkable floor tiles were held that way -- and DF had posted
+-- jobs for all four, which this tool then took back, four times over. When DF's own answer and
+-- ours disagree about reachability, ours is the one that is wrong.
+--
+-- Group IDs are also recomputed as the map changes -- seven different ids over one session --
+-- so nothing may be cached across passes; it is rebuilt each time it is asked for.
+function fort_groups()
+    local groups = {}
+    for _, u in ipairs(dfhack.units.getCitizens(true)) do
         local g = dfhack.maps.getWalkableGroup(u.pos)
-        if g and g ~= 0 then
-            counts[g] = (counts[g] or 0) + 1
-            if counts[g] > bestn then best, bestn = g, counts[g] end
-        end
+        if g and g ~= 0 then groups[g] = true end
     end
-    return best
+    return groups
+end
+
+-- one group or a set of them, so a caller may pass either
+local function in_groups(g, groups)
+    if not g or g == 0 or not groups then return false end
+    if type(groups) == 'table' then return groups[g] == true end
+    return g == groups
 end
 
 -- walkable, fort-connected neighbours of pos on its own z level
@@ -608,7 +621,7 @@ function standing_spots(pos, group)
     local spots = {}
     for _, d in ipairs(NEIGHBOURS) do
         local n = {x = pos.x + d.x, y = pos.y + d.y, z = pos.z}
-        if dfhack.maps.getWalkableGroup(n) == group then
+        if in_groups(dfhack.maps.getWalkableGroup(n), group) then
             spots[#spots + 1] = n
         end
     end
@@ -639,10 +652,10 @@ end
 -- excavation opens from the one corner a miner can get to, and each tile dug
 -- makes its neighbours reachable in turn.
 function workable(pos, group)
-    if not group then return true end          -- no fort to judge against: allow
+    if not group or not next(group) then return true end   -- no fort to judge against: allow
     local d = designation_of(pos)
     if d and d.hidden then return false end
-    if dfhack.maps.getWalkableGroup(pos) == group then return true end
+    if in_groups(dfhack.maps.getWalkableGroup(pos), group) then return true end
     if #standing_spots(pos, group) > 0 then return true end
 
     -- And the way INTO an excavation that is already under way. A tile that has
@@ -670,7 +683,7 @@ function workable(pos, group)
             if ublock
                 and df.tiletype.attrs[ublock.tiletype[ux][uy]].shape
                     == df.tiletype_shape.RAMP
-                and dfhack.maps.getWalkableGroup(under) == group then
+                and in_groups(dfhack.maps.getWalkableGroup(under), group) then
                 return true
             end
         end
@@ -679,7 +692,7 @@ function workable(pos, group)
 end
 
 function access_holds(active)
-    local group = fort_group()
+    local group = fort_groups()
     if not group then return {}, {} end
     local pending = {}
     for _, pos in ipairs(active) do pending[key(pos)] = true end
@@ -977,7 +990,7 @@ end
 -- nowhere to stand that reaches the outside? Walkability comes from DF's own
 -- groups, read straight out of the blocks, with the pretend holes knocked out.
 function strands_work(active, hyp, group)
-    if not group then return false end
+    if not group or not next(group) then return false end
     local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
     for _, p in ipairs(active) do
         x0, y0 = math.min(x0, p.x), math.min(y0, p.y)
@@ -997,7 +1010,7 @@ function strands_work(active, hyp, group)
                 b = dfhack.maps.getTileBlock({x = x, y = y, z = z}) or false
                 blocks[bk] = b
             end
-            local ok = b and b.walkable[x % 16][y % 16] == group
+            local ok = b and in_groups(b.walkable[x % 16][y % 16], group)
             if ok and hyp[key({x = x, y = y, z = z})] then ok = false end
             walk[ix * h + iy] = ok and true or false
         end
@@ -1221,7 +1234,7 @@ local function apply(found, top)
     -- nobody can touch and nothing else is ever released.
     do
         local jobs = inflight_channels()
-        local group = fort_group()
+        local group = fort_groups()
         for k in pairs(out) do
             if not jobs[k] then
                 local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
@@ -1253,7 +1266,7 @@ local function apply(found, top)
     local picks, phantom = {}, {}
     for k in pairs(out) do phantom[k] = true end
     if #active > 0 then
-        local group = fort_group()
+        local group = fort_groups()
         while count(phantom) < MAX_CONCURRENT do
             local cand = choose_release(active, phantom, group)
             if not cand then break end
@@ -1624,7 +1637,7 @@ function why(x, y, z)
         end
     end
     print(('  reachability: %s'):format(
-        strands_work({pos}, hyp, fort_group()) and 'WOULD STRAND WORK' or 'fine'))
+        strands_work({pos}, hyp, fort_groups()) and 'WOULD STRAND WORK' or 'fine'))
 end
 
 if dfhack_flags and dfhack_flags.module then return end
