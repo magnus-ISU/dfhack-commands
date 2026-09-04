@@ -13,7 +13,7 @@ WHAT IT TELLS YOU
 If the fort cannot satisfy the mood, the panel says one thing and no more: **"The gods are
 testing you"**. Not which requirement is short, not what the others are -- knowing what a mood
 wants IS the blessing, and a fort that cannot answer it does not get to read the list and go
-shopping. Otherwise it opens with **"The gods have blessed <dwarf> with a mood"** and, where
+shopping. Otherwise it opens with **"The gods have blessed <dwarf> "** and, where
 the dwarf's own preferences and moodable skill settle the question, what is coming:
 *"<dwarf> announces they will create a hammer!"* A weaponsmith who likes war hammers makes a
 war hammer; a dwarf whose preferences say nothing the skill can make gets no prediction rather
@@ -513,7 +513,7 @@ local function skill_makes(skill_name, ...)
     SKILL_ITEMS[skill] = {...}
 end
 
-skill_makes('FORGE_WEAPON', df.item_type.WEAPON, df.item_type.TRAPCOMP, df.item_type.AMMO)
+skill_makes('FORGE_WEAPON', df.item_type.WEAPON, df.item_type.TRAPCOMP)
 skill_makes('FORGE_ARMOR', df.item_type.ARMOR, df.item_type.HELM, df.item_type.SHOES, df.item_type.GLOVES, df.item_type.PANTS, df.item_type.SHIELD)
 skill_makes('FORGE_FURNITURE', df.item_type.CHAIR, df.item_type.TABLE, df.item_type.DOOR, df.item_type.CABINET, df.item_type.BOX, df.item_type.STATUE)
 skill_makes('CARPENTRY', df.item_type.CHAIR, df.item_type.TABLE, df.item_type.DOOR, df.item_type.BED, df.item_type.CABINET, df.item_type.BOX)
@@ -521,7 +521,7 @@ skill_makes('MASONRY', df.item_type.CHAIR, df.item_type.TABLE, df.item_type.DOOR
 skill_makes('BOWYER', df.item_type.WEAPON)
 skill_makes('LEATHERWORK', df.item_type.ARMOR, df.item_type.SHOES, df.item_type.BACKPACK)
 skill_makes('CLOTHESMAKING', df.item_type.ARMOR, df.item_type.SHOES, df.item_type.PANTS)
-skill_makes('BONECARVE', df.item_type.CRAFTS, df.item_type.ARMOR, df.item_type.AMMO)
+skill_makes('BONECARVE', df.item_type.CRAFTS, df.item_type.ARMOR)
 
 local PREF_LIKE_ITEM = 4     -- unit_preference type 4 is "likes <item>"
 
@@ -544,6 +544,53 @@ local function subtype_name(item_type, subtype)
     return d and d.name or nil
 end
 
+-- Item types are not enough: the SUBTYPE has to be something your civilisation knows how to
+-- make. A dwarf here prefers blowdarts, a weaponsmith mood can plausibly make ammo, and the
+-- panel duly promised a blowdart -- but the civ's entire ammo list is one entry, bolts. It has
+-- never heard of a blowdart and no mood of theirs will produce one.
+--
+-- So a preference with a subtype is checked against the civ's own list for that item class
+-- (`entity.resources.*_type`, the same vectors that decide what a caravan can bring). Classes
+-- with no such list -- furniture, crafts -- carry no subtype and are left alone.
+-- Built through a helper: `df.item_type.DIGGER` does not exist on this build, and a nil key
+-- in a table constructor fails the whole file with "table index is nil" -- the same trap the
+-- job_skill list hit earlier.
+local CIV_LIST = {}
+
+local function civ_list(type_name, field)
+    local t = df.item_type[type_name]
+    if t ~= nil then CIV_LIST[t] = field end
+end
+
+civ_list('WEAPON', 'weapon_type')
+civ_list('ARMOR', 'armor_type')
+civ_list('HELM', 'helm_type')
+civ_list('GLOVES', 'gloves_type')
+civ_list('SHOES', 'shoes_type')
+civ_list('PANTS', 'pants_type')
+civ_list('SHIELD', 'shield_type')
+civ_list('AMMO', 'ammo_type')
+civ_list('TRAPCOMP', 'trapcomp_type')
+civ_list('TOOL', 'tool_type')
+civ_list('TOY', 'toy_type')
+civ_list('INSTRUMENT', 'instrument_type')
+civ_list('DIGGER', 'digger_type')
+civ_list('SIEGEAMMO', 'siegeammo_type')
+civ_list('DIGGER', 'digger_type')   -- absent on some builds; skipped when so
+
+local function civ_can_make(item_type, subtype)
+    local list = CIV_LIST[item_type]
+    if not list or subtype < 0 then return true end   -- no subtype list: nothing to check
+    local ok = false
+    pcall(function()
+        local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
+        for _, idx in ipairs(civ.resources[list]) do
+            if idx == subtype then ok = true; return end
+        end
+    end)
+    return ok
+end
+
 function prediction(unit)
     if not unit or not df.unit:is_instance(unit) then return nil end
     local skill = unit.job.mood_skill
@@ -554,7 +601,8 @@ function prediction(unit)
     local soul = unit.status.current_soul
     if not soul then return nil end
     for _, p in ipairs(soul.preferences) do
-        if p.type == PREF_LIKE_ITEM and ok_set[p.item_type] then
+        if p.type == PREF_LIKE_ITEM and ok_set[p.item_type]
+            and civ_can_make(p.item_type, p.item_subtype) then
             local name = subtype_name(p.item_type, p.item_subtype)
             if not name then
                 local t = df.item_type[p.item_type]
@@ -1023,10 +1071,13 @@ function Planner:init()
     end
     self:addviews{
         widgets.Label{view_id = 'headline', frame = {t = 0, l = 0}, text = ''},
-        widgets.Label{view_id = 'omen', frame = {t = 1, l = 0}, text = ''},
+        -- wrapped: "<dwarf> announces they will create a <thing>!" with a long dwarf name
+        -- runs off the default screen otherwise
+        widgets.WrappedLabel{view_id = 'omen', frame = {t = 1, l = 0, r = 0, h = 2},
+                             text_to_wrap = ''},
         widgets.List{
             view_id = 'list',
-            frame = {t = 3, l = 0, r = 0, b = 3},
+            frame = {t = 4, l = 0, r = 0, b = 3},
             on_submit = function(_, ch) self:pick(ch) end,
         },
         -- h = 1 on both: a TextButton is a BannerPanel, and a frame without a height
@@ -1112,11 +1163,12 @@ function Planner:refresh()
     local name = dfhack.units.getReadableName(self.unit)
     if self:satisfied() then
         self.subviews.headline:setText({{
-            text = ('The gods have blessed %s with a mood'):format(name), pen = COLOR_LIGHTGREEN}})
+            text = ('The gods have blessed %s'):format(name), pen = COLOR_LIGHTGREEN}})
         local what = prediction(self.unit)
         self.subviews.omen:setText(what
-            and {{text = ('%s announces they will create a %s!'):format(name, what), pen = COLOR_YELLOW}}
-            or {{text = 'What they will make is anyone\'s guess.', pen = COLOR_GREY}})
+            and ('%s announces they will create a %s!'):format(name, what)
+            or 'What they will make is anyone\'s guess.')
+        self.subviews.omen.text_pen = what and COLOR_YELLOW or COLOR_GREY
     else
         -- and NOTHING else. No row, no requirement name, no hint at which one is short:
         -- the whole value of this panel is knowing what the mood wants, and a fort that
