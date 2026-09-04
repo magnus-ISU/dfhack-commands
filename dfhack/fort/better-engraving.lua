@@ -433,26 +433,56 @@ function parse(line)
     for _, mt in ipairs(get_mats()) do
         local head, rest = q:match('^(%S+)%s+(.+)$')
         if head and head_is_material(head, mt.lname) then
-            local tail = rest
+            -- EVERY item the tail could mean, not just the first one found. Taking the first
+            -- meant "adamantine shi" offered a mail shirt and nothing else, and the shield only
+            -- turned up once the word was finished -- the combination was there all along, it
+            -- was just the wrong one of several. They are scored the way bare names are, so the
+            -- closest reading leads and the rest are underneath it.
+            local combos = {}
             for _, entry in ipairs(get_vocab()) do
-                if entry.kind == 'item' and entry.lname:find(tail, 1, true) then
-                    local base, mi, mname = entry, mt.index, mt.name
-                    table.insert(hits, 1, {
-                        name = ('%s %s'):format(mname, base.name),
-                        lname = ('%s %s'):format(mt.lname, base.lname),
-                        kind = 'item',
-                        make = function()
-                            local e = base.make()
-                            e.mat_type, e.mat_index = 0, mi
-                            return e
-                        end,
-                    })
-                    break
+                if entry.kind == 'item' then
+                    local score
+                    if entry.lname == rest then score = 1000
+                    elseif entry.lname:sub(1, #rest) == rest then score = 500 - #entry.lname
+                    elseif entry.lname:find(rest, 1, true) then score = 200 - #entry.lname
+                    end
+                    if score then
+                        local base, mi, mname = entry, mt.index, mt.name
+                        combos[#combos + 1] = {score = score, entry = {
+                            name = ('%s %s'):format(mname, base.name),
+                            lname = ('%s %s'):format(mt.lname, base.lname),
+                            kind = 'item',
+                            make = function()
+                                local e = base.make()
+                                e.mat_type, e.mat_index = 0, mi
+                                return e
+                            end,
+                        }}
+                    end
                 end
+            end
+            table.sort(combos, function(a, b)
+                if a.score ~= b.score then return a.score > b.score end
+                return a.entry.name < b.entry.name
+            end)
+            for i = math.min(#combos, 20), 1, -1 do
+                table.insert(hits, 1, combos[i].entry)
             end
             break
         end
     end
+
+    -- Collapse rows that read identically. Several vocabulary sources can land on the same
+    -- word -- "shield" is an item type and more than one item definition -- and four identical
+    -- lines in the suggestions look like a bug and hide the next real answer. Castes and
+    -- historical figures that genuinely share a name are kept apart by their kind.
+    local seen, unique = {}, {}
+    for _, e in ipairs(hits) do
+        local key = e.kind .. '\0' .. e.lname
+        if not seen[key] then seen[key] = true; unique[#unique + 1] = e end
+    end
+    hits = unique
+
     return {kind = 'element', hits = hits}
 end
 
