@@ -1135,16 +1135,17 @@ function choose_release(active, phantom, group)
             release_cursor = start + n - 1
             return nil
         end
-        -- Anything standing ON the tile comes down with the floor, and anything
-        -- on the tile BELOW is buried by the ramp the channel leaves there. The
-        -- tile ABOVE is not touched: channelling removes the floor UNDER the
-        -- tile, and the floor a bed one level up is standing on is the same
-        -- floor it was standing on before. Checking upward as well looked
-        -- careful and was simply wrong -- it refused the last 32 tiles of an
-        -- excavation because a barracks sat over them, work that was never in
-        -- any danger.
-        if has_building(cand)
-                or has_building({x = cand.x, y = cand.y, z = cand.z - 1}) then
+        -- ONLY a building on the tile itself. That one loses the floor it is
+        -- standing on, which is the whole of the hazard here.
+        --
+        -- Neither neighbour is in danger, and guarding them was not caution but
+        -- error. ABOVE: channelling removes the floor UNDER the tile, so the
+        -- floor a bed one level up stands on is the one it always stood on --
+        -- that guard held the last 32 tiles of an excavation hostage to the
+        -- barracks over them. BELOW: the ramp a channel leaves behind is cut
+        -- out of ROCK, so where there is a building below there was never rock
+        -- to carve, and the tile simply becomes a hole in that room's ceiling.
+        if has_building(cand) then
             goto continue
         end
 
@@ -1312,8 +1313,7 @@ local function apply(found, top)
     last_pass_under_building = 0
     if last_pass_blocked > 0 then
         for _, pos in ipairs(active) do
-            if has_building(pos)
-                or has_building({x = pos.x, y = pos.y, z = pos.z - 1}) then
+            if has_building(pos) then
                 last_pass_under_building = last_pass_under_building + 1
             end
         end
@@ -1543,8 +1543,8 @@ function status()
     end
     if (last_pass_blocked or 0) > 0 then
         if last_pass_under_building >= last_pass_blocked then
-            print(('  %d designation%s carry a building, or sit directly over one, and '
-                .. 'are never cut; move it, or set them to priority %d')
+            print(('  %d designation%s carry a building and are never cut; move it, or '
+                .. 'set them to priority %d')
                 :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's',
                         EXEMPT_PRIORITY))
         elseif unreachable_pass then
