@@ -49,7 +49,11 @@ WHAT IT DOES
 Reserving the items is the point. While the dwarf is fetching a chosen one, every OTHER item
 in the fort that could satisfy that requirement is forbidden, so DF has one legal choice and
 takes it -- left alone it takes the NEAREST one, which is how a mood ends up spending gneiss
-while the adamantine sits in the next room. The dwarf is also
+while the adamantine sits in the next room. THE REST OF THE PLAN IS FORBIDDEN TOO, and opened
+one slot at a time as the mood becomes ready for it: a chosen item left loose while the dwarf
+walks off for something else is a chosen item any other job can take, and moods are slow. (With
+a valve: if nothing is hauled for a while, another slot opens, so a mood that wants its
+requirements out of order is slowed down rather than stopped.) The dwarf is also
 confined to a burrow holding the item's tile AND the whole of the workshop they have claimed
 -- the item alone would be a dwarf with nowhere to carry it back to -- which stops them
 wandering off to a nearer candidate that appears mid-walk. The moment they actually pick it
@@ -863,6 +867,10 @@ end
 -- "Not seen" is decided by id, because DF hands them out in order: anything above the
 -- highest id the last pass looked at is new. That makes the check a single integer compare
 -- per item, which is what lets it run several times a second over a fort's whole item list.
+-- How long the mood may go without picking anything up before another slot of the plan is
+-- opened. A safety valve, not a schedule: see the note in steer().
+local STALL_SECONDS = 30
+
 local FULL_SWEEP_SECONDS = 5
 
 local function sweep_new(job, unit)
@@ -929,36 +937,57 @@ local function steer(unit, job)
             state.step, state.step_item = idx, item.id
         end
 
-        -- What is still wanted, and what may be taken for it: the item you chose, and -- for
-        -- a row that wants more than one -- the next best candidates after it, so the extras
-        -- DF helps itself to are the best in the fort rather than the nearest.
+        -- What is still wanted, and what may be taken for it.
+        --
+        -- ONE ITEM IS LEGAL AT A TIME. Everything else in the plan is forbidden along with
+        -- everything else in the fort -- because a chosen item that sits unforbidden while
+        -- the dwarf walks off to fetch something else is a chosen item any other job can
+        -- take, and moods are slow. The plan is opened one slot at a time, in the order the
+        -- job asks for them, and each slot only when the dwarf is actually ready for it.
+        --
+        -- With a stall valve. If DF ever wants a later requirement first, holding the
+        -- earlier one open and nothing else would leave the mood standing still forever, so
+        -- an extra slot is opened for every STALL_SECONDS that pass without anything being
+        -- hauled. Slower than a free-for-all, never stuck.
         local lists = all_candidates(job, unit)
         local open_rows, keep = {}, {}
+        local plan = {}
         for i, filter in ipairs(job.job_items.elements) do
             local got = #claimed_items(job, i)
             local want = needed(filter)
             if want > got then
-                local slots = state.picks[i] or {}
                 open_rows[#open_rows + 1] = {filter = filter}
-                local short = want - got
-                -- every OPEN slot's choice stays reachable, one item each
+                local slots = state.picks[i] or {}
                 for slot = got + 1, want do
-                    local chosen = df.item.find(slots[slot] or -1)
-                    if chosen and not keep[chosen.id] then
-                        keep[chosen.id] = true
-                        short = short - 1
-                        if is_forbidden(chosen) then
-                            set_forbidden(chosen, false)
-                            state.freed[chosen.id] = true
-                        end
-                    end
+                    plan[#plan + 1] = {row = i, want = want - got,
+                                       item = df.item.find(slots[slot] or -1)}
                 end
-                -- a slot nobody chose for falls back to the best still going
-                for _, alt in ipairs(lists[i] or {}) do
-                    if short <= 0 then break end
+            end
+        end
+
+        local hauled = #job.items
+        if state.hauled ~= hauled then
+            state.hauled, state.hauled_at = hauled, now
+        end
+        local waited = now - (state.hauled_at or now)
+        local expose = 1 + math.floor(waited / STALL_SECONDS)
+
+        for k, entry in ipairs(plan) do
+            if k > expose then break end
+            local chosen = entry.item
+            if chosen and not keep[chosen.id] then
+                keep[chosen.id] = true
+                if is_forbidden(chosen) then
+                    set_forbidden(chosen, false)
+                    state.freed[chosen.id] = true
+                end
+            elseif not chosen then
+                -- a slot nobody chose for falls back to the best still going, so what DF
+                -- helps itself to is the best in the fort rather than the nearest
+                for _, alt in ipairs(lists[entry.row] or {}) do
                     if not keep[alt.id] and df.item.find(alt.id) then
                         keep[alt.id] = true
-                        short = short - 1
+                        break
                     end
                 end
             end
