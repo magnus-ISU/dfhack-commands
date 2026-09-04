@@ -653,16 +653,26 @@ function workable(pos, group)
     -- stops dead with the excavation half cut: measured at 333 designations left,
     -- 49 of them revealed, every one beside a ramp, and none of them "reachable".
     --
-    -- The neighbour has to be OPEN as well as ramped-into. A wall with a corridor
-    -- running underneath it is not a way in, and counting it would put us back to
-    -- releasing tiles nobody can stand near.
+    -- The neighbour has to be OPEN **and have a RAMP under it**, both. Open alone
+    -- is not a way in and neither is walkable-below: a dwarf standing on a plain
+    -- floor cannot climb into the empty tile above it. It is the ramp that carries
+    -- them up, which is exactly the shape a channelled tile leaves behind -- ramp
+    -- below, ramp top above. A wall with a corridor running underneath it is not a
+    -- way in either, and counting either of those would put us back to releasing
+    -- tiles nobody can stand near.
     local codes = shape_code_table()
     for _, dir in ipairs(NEIGHBOURS) do
         local n = {x = pos.x + dir.x, y = pos.y + dir.y, z = pos.z}
         local block, bx, by = tile_parts(n)
-        if block and codes[block.tiletype[bx][by]] ~= SHAPE_WALL
-            and dfhack.maps.getWalkableGroup({x = n.x, y = n.y, z = n.z - 1}) == group then
-            return true
+        if block and codes[block.tiletype[bx][by]] ~= SHAPE_WALL then
+            local under = {x = n.x, y = n.y, z = n.z - 1}
+            local ublock, ux, uy = tile_parts(under)
+            if ublock
+                and df.tiletype.attrs[ublock.tiletype[ux][uy]].shape
+                    == df.tiletype_shape.RAMP
+                and dfhack.maps.getWalkableGroup(under) == group then
+                return true
+            end
         end
     end
     return false
@@ -1292,12 +1302,29 @@ local function apply(found, top)
     for k in pairs(s.released) do s.allowed[k] = true end
     last_pass_blocked = (next(picks) == nil and next(out) == nil) and #active or 0
 
+    -- When nothing could be let out, say WHICH refusal it was. "No safe order"
+    -- reads as a fault in the shape you drew, and for a barracks floor sitting on
+    -- top of the last 32 tiles of an excavation that is simply wrong: the tool is
+    -- refusing to cut the floor out from under somebody's bed, which is a decision
+    -- you can act on -- move the furniture, or set those tiles to priority 1.
+    last_pass_under_building = 0
+    if last_pass_blocked > 0 then
+        for _, pos in ipairs(active) do
+            if has_building(pos)
+                or has_building({x = pos.x, y = pos.y, z = pos.z + 1})
+                or has_building({x = pos.x, y = pos.y, z = pos.z - 1}) then
+                last_pass_under_building = last_pass_under_building + 1
+            end
+        end
+    end
+
     save_state()
     return held, freed
 end
 
 last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
 last_pass_blocked = last_pass_blocked or 0
+last_pass_under_building = last_pass_under_building or 0
 reclaimed = reclaimed or 0
 reclaim_error = reclaim_error or nil
 
@@ -1514,7 +1541,12 @@ function status()
             :format(reclaimed, reclaimed == 1 and '' or 's'))
     end
     if (last_pass_blocked or 0) > 0 then
-        if unreachable_pass then
+        if last_pass_under_building >= last_pass_blocked then
+            print(('  %d designation%s sit directly under or over a building and are '
+                .. 'never cut; move it, or set them to priority %d')
+                :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's',
+                        EXEMPT_PRIORITY))
+        elseif unreachable_pass then
             print(('  %d designation%s cannot be reached yet -- no miner can stand at '
                 .. 'or beside any of them; they stay planned until something is dug '
                 .. 'through to them')
