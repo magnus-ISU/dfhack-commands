@@ -643,7 +643,29 @@ function workable(pos, group)
     local d = designation_of(pos)
     if d and d.hidden then return false end
     if dfhack.maps.getWalkableGroup(pos) == group then return true end
-    return #standing_spots(pos, group) > 0
+    if #standing_spots(pos, group) > 0 then return true end
+
+    -- And the way INTO an excavation that is already under way. A tile that has
+    -- been channelled is a ramp top, and DF gives a ramp top no walkability group
+    -- of its own -- but the ramp beneath it is fort-walkable, and coming up that
+    -- ramp is how the miners have been reaching the next wall all along. Without
+    -- this the tool digs until the last tile that touches ordinary floor and then
+    -- stops dead with the excavation half cut: measured at 333 designations left,
+    -- 49 of them revealed, every one beside a ramp, and none of them "reachable".
+    --
+    -- The neighbour has to be OPEN as well as ramped-into. A wall with a corridor
+    -- running underneath it is not a way in, and counting it would put us back to
+    -- releasing tiles nobody can stand near.
+    local codes = shape_code_table()
+    for _, dir in ipairs(NEIGHBOURS) do
+        local n = {x = pos.x + dir.x, y = pos.y + dir.y, z = pos.z}
+        local block, bx, by = tile_parts(n)
+        if block and codes[block.tiletype[bx][by]] ~= SHAPE_WALL
+            and dfhack.maps.getWalkableGroup({x = n.x, y = n.y, z = n.z - 1}) == group then
+            return true
+        end
+    end
+    return false
 end
 
 function access_holds(active)
