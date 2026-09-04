@@ -708,6 +708,11 @@ function DigBuilding:onInput(keys)
             return false                                         -- no match: leave Enter to DF
         end
         if keys.LEAVESCREEN and self.search ~= '' then self.search = ''; return true end   -- Esc clears filter
+        -- Eat the keys that would act on the map behind the box. A printable keypress is
+        -- normally consumed above, but under a heavy frame the same press can arrive carrying
+        -- only its BINDING and no `_STRING`, and then a name typed into the filter starts
+        -- switching designation tools and opening panels.
+        if reqscript('internal/typed-keys').swallows(keys) then return true end
     end
 
     -- from here on it's mouse handling: yield when the cursor is over a DF hover element / another

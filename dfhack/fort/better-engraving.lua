@@ -234,30 +234,83 @@ end
 -- type are those split apart and lowered. Matching takes the LONGEST verb that the text starts
 -- with, so "striking down a dragon" reads as StrikingDown + "a dragon" and not Striking + ...
 
--- Which verbs take an object, learned from the images this world has already made rather than
--- from my own sense of English. A sample of the resident image chunks splits cleanly: eight
--- verbs only ever appear with an object (Admiring, Fighting, Raising, StrikingDown...), the
--- rest only ever without. A verb the sample has not seen gets no marking -- the parser accepts
--- it either way, and a guess would only mislead.
-local transitive = nil
+-- Which verbs take an object, and which ones DF has any words for at all.
+--
+-- This was MEASURED, not guessed, and it had to be: an image saying "the dragon is melting the
+-- shield" carved as "The three-headed ancient dragon." and nothing else. DF has no transitive
+-- phrase for Melting, and rather than complain it drops the whole clause -- silently, in the
+-- finished engraving, where you find out about it a season later.
+--
+-- The measurement: put one property at a time on a live image an open engraving sheet was
+-- showing, force the sheet to re-wrap (`view_sheets.description_width = 0` makes DF rebuild
+-- `raw_description`, which is otherwise cached from when the sheet opened), and read the text
+-- back off the screen. Both forms of all 48 verbs. A verb is transitive here only if its
+-- transitive phrase actually NAMED the object -- HangingFrom and Suffering render text with an
+-- object attached but say nothing about it, which is the same trap in a quieter form.
+--
+-- Verbs with neither form are not offered at all: DF prints nothing for them.
+VERB_FORM = {
+    Withering               = 'intransitive',   -- is withering away
+    SurroundedBy            = 'transitive',     -- is surrounded by X
+    Massacring              = 'transitive',     -- is massacring X
+    Fighting                = 'transitive',     -- is fighting with X
+    Laboring                = 'intransitive',   -- is laboring
+    Greeting                = 'transitive',     -- is greeting X
+    Refusing                = 'transitive',     -- is refusing X
+    Speaking                = 'transitive',     -- is speaking with X
+    Embracing               = 'transitive',     -- is embracing X
+    StrikingDown            = 'transitive',     -- is striking down X
+    MenacingPose            = 'intransitive',   -- is striking a menacing pose
+    Traveling               = 'intransitive',   -- is traveling
+    Raising                 = 'transitive',     -- is raising X
+    Hiding                  = 'transitive',     -- is hiding X
+    LookingConfused         = 'intransitive',   -- looks confused
+    LookingTerrified        = 'intransitive',   -- looks terrified
+    Devouring               = 'transitive',     -- is devouring X
+    Admiring                = 'transitive',     -- is admiring X
+    Burning                 = 'both',           -- is burning X
+    Weeping                 = 'intransitive',   -- is weeping
+    LookingDejected         = 'intransitive',   -- looks dejected
+    Cringing                = 'intransitive',   -- is cringing
+    Screaming               = 'intransitive',   -- is screaming
+    SubmissiveGesture       = 'intransitive',   -- is making a submissive gesture
+    FetalPosition           = 'intransitive',   -- is in a fetal position
+    SmearedIntoSpiral       = 'intransitive',   -- is smeared out into a spiral
+    Falling                 = 'intransitive',   -- is falling
+    Dead                    = 'intransitive',   -- is dead
+    Laughing                = 'intransitive',   -- is laughing
+    LookingOffended         = 'intransitive',   -- looks offended
+    BeingShot               = 'intransitive',   -- is being shot
+    PlaintiveGesture        = 'intransitive',   -- is making a plaintive gesture
+    Melting                 = 'intransitive',   -- is melting
+    Shooting                = 'transitive',     -- is shooting X
+    Torturing               = 'both',           -- is torturing X
+    CommittingDepravedAct   = 'both',           -- is committing a depraved act upon X
+    Praying                 = 'both',           -- is praying to X
+    Contemplating           = 'both',           -- is contemplating X
+    Cooking                 = 'both',           -- is cooking X
+    Engraving               = 'both',           -- is engraving X
+    Prostrating             = 'transitive',     -- is prostrating itself before X
+    Suffering               = 'intransitive',   -- is suffering
+    BeingImpaled            = 'transitive',     -- is impaled on X
+    BeingContorted          = 'intransitive',   -- is unnaturally contorted
+    BeingFlayed             = 'transitive',     -- is being flayed by X
+    HangingFrom             = 'transitive',     -- is hanging from X
+    BeingMutilated          = 'both',           -- is being mutilated by X
+    TriumphantPose          = 'intransitive',   -- is striking a triumphant pose
+}
+
+function verb_form(verb)
+    return VERB_FORM[df.art_image_property_verb[verb]] or 'none'
+end
 
 function takes_object(verb)
-    if not transitive then
-        transitive = {}
-        for _, c in ipairs(df.global.world.art_image_chunks.all) do
-            for i = 0, 499 do
-                local img = c.images[i].art_image
-                if img then
-                    for _, pr in ipairs(img.properties) do
-                        if df.art_image_property_transitive_verbst:is_instance(pr) then
-                            transitive[pr.verb] = true
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return transitive[verb] or false
+    local f = verb_form(verb)
+    return f == 'transitive' or f == 'both'
+end
+
+function verb_usable(verb)
+    return verb_form(verb) ~= 'none'
 end
 
 local VERBS = nil
@@ -308,6 +361,153 @@ local function find_element(text)
 end
 
 -- ---------------------------------------------------------------------------
+-- naming the image
+-- ---------------------------------------------------------------------------
+--
+-- DF names the images it invents -- "The Dark Cross", "The Holiness of Morality" -- and an
+-- engraving whose image has no name reads "Untitled" on its sheet. A name is a
+-- `language_name`, not a string: DF stores INDICES into your civilization's word list and
+-- renders them in whatever language it is showing, so you cannot simply write "Dark Cross"
+-- into it. What you can do is say which of its words you meant, which is what this does.
+--
+-- Measured off the images this world generated (art_image.name):
+--
+--   type            = ArtImage
+--   language        = your civ's, from historical_entity.name.language
+--   words[2]        = an adjective, parts_of_speech[2] = Adjective   -- "Dark"
+--   words[5]        = the noun,     Noun or NounPlural               -- "Cross" / "Meats"
+--   words[6]        = a second noun, rendered after "of"             -- "of Morality"
+--
+-- Every other slot is -1. So the grammar is "The [adjective] <noun> [of <noun>]", and that is
+-- the grammar the box accepts:  name dark cross  /  name the holiness of morality
+
+local NAME_ADJ, NAME_NOUN, NAME_OF = 2, 5, 6
+
+local function civ_language()
+    local e = df.historical_entity.find(df.global.plotinfo.civ_id)
+    return (e and e.name.language) or 0
+end
+
+-- every word whose form of the given part of speech is, or begins with, or contains what you
+-- typed -- scored the way element names are, so the closest reading leads
+local function word_matches(token, forms)
+    local hits = {}
+    for i, w in ipairs(df.global.world.raws.language.words) do
+        for _, form in ipairs(forms) do
+            local text = w.forms[form]
+            if text and text ~= '' then
+                local lt = text:lower()
+                local score
+                if lt == token then score = 1000
+                elseif lt:sub(1, #token) == token then score = 500 - #lt
+                elseif lt:find(token, 1, true) then score = 200 - #lt
+                end
+                if score then
+                    hits[#hits + 1] = {word = i, form = form, text = text, score = score}
+                    break
+                end
+            end
+        end
+    end
+    table.sort(hits, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return a.text < b.text
+    end)
+    return hits
+end
+
+local function titlecase(s)
+    return (s:gsub('%S+', function(w) return w:sub(1, 1):upper() .. w:sub(2) end))
+end
+
+-- the English form DF would print, so what the suggestion says is what the sheet will say
+local function name_text(spec)
+    local s = 'The '
+    if spec.adj then s = s .. titlecase(spec.adj.text) .. ' ' end
+    s = s .. titlecase(spec.noun.text)
+    if spec.of then s = s .. ' of ' .. titlecase(spec.of.text) end
+    return s
+end
+
+-- "name the dark cross of morality" -> the names it could mean
+local function name_plan(text)
+    text = normalise(text):gsub('^the%s+', '')
+    if text == '' then
+        return {kind = 'error',
+                why = 'name it with words from your language -- "name the dark cross"'}
+    end
+    local head, of_token = text:match('^(.-)%s+of%s+(.+)$')
+    head = head or text
+    local tokens = {}
+    for w in head:gmatch('%S+') do tokens[#tokens + 1] = w end
+    if #tokens == 0 then
+        return {kind = 'error', why = 'name what? -- "name the dark cross"'}
+    end
+
+    -- last word is the noun; anything before it is the adjective. Only one adjective fits, so
+    -- a longer phrase uses the word nearest the noun and ignores the rest rather than failing.
+    local noun_token = tokens[#tokens]
+    local adj_token = #tokens > 1 and tokens[#tokens - 1] or nil
+
+    local nouns = word_matches(noun_token, {'Noun', 'NounPlural'})
+    if #nouns == 0 then
+        return {kind = 'error',
+                why = ('your language has no noun like "%s"'):format(noun_token)}
+    end
+    local adjs = adj_token and word_matches(adj_token, {'Adjective'}) or nil
+    if adjs and #adjs == 0 then
+        return {kind = 'error',
+                why = ('your language has no adjective like "%s"'):format(adj_token)}
+    end
+    local ofs = of_token and word_matches(of_token, {'Noun', 'NounPlural'}) or nil
+    if ofs and #ofs == 0 then
+        return {kind = 'error',
+                why = ('your language has no noun like "%s"'):format(of_token)}
+    end
+
+    local hits = {}
+    for ni = 1, math.min(#nouns, 8) do
+        for ai = 1, adjs and math.min(#adjs, 3) or 1 do
+            for oi = 1, ofs and math.min(#ofs, 3) or 1 do
+                local spec = {noun = nouns[ni], adj = adjs and adjs[ai] or nil,
+                              of = ofs and ofs[oi] or nil}
+                spec.text = name_text(spec)
+                hits[#hits + 1] = spec
+                if #hits >= MAX_SUGGEST then return {kind = 'name', hits = hits} end
+            end
+        end
+    end
+    return {kind = 'name', hits = hits}
+end
+
+-- write a chosen name into a df language_name
+local function apply_name(n, spec)
+    n.has_name = true
+    n.type = df.language_name_type.ArtImage
+    n.language = civ_language()
+    for i = 0, 6 do
+        n.words[i] = -1
+        n.parts_of_speech[i] = df.part_of_speech.Noun
+    end
+    if spec.adj then
+        n.words[NAME_ADJ] = spec.adj.word
+        n.parts_of_speech[NAME_ADJ] = df.part_of_speech.Adjective
+    end
+    n.words[NAME_NOUN] = spec.noun.word
+    n.parts_of_speech[NAME_NOUN] = df.part_of_speech[spec.noun.form]
+    if spec.of then
+        n.words[NAME_OF] = spec.of.word
+        n.parts_of_speech[NAME_OF] = df.part_of_speech[spec.of.form]
+    end
+end
+
+function set_name(spec)
+    local img = get_image()
+    img.name = spec
+    img.rev = (img.rev or 0) + 1
+end
+
+-- ---------------------------------------------------------------------------
 -- parsing a typed line
 -- ---------------------------------------------------------------------------
 
@@ -316,6 +516,11 @@ end
 function parse(line)
     line = (line or ''):gsub('^%s+', ''):gsub('%s+$', '')
     if line == '' then return {kind = 'empty'} end
+
+    -- "name ..." titles the image rather than adding to it
+    local nt = line:match('^name%s*(.*)$') or line:match('^named%s*(.*)$')
+        or line:match('^title%s*(.*)$')
+    if nt then return name_plan(nt) end
 
     -- "<subject> is <something>" and also a bare "<subject> is", which is how you ask what the
     -- subject could be doing. The trailing-word patterns are separate on purpose: a single
@@ -343,7 +548,9 @@ function parse(line)
         -- dragon can be doing rather than with an error.
         local partial = {}
         for _, vb in ipairs(get_verbs()) do
-            if lower == '' or vb.text:find(lower, 1, true) then partial[#partial + 1] = vb end
+            if verb_usable(vb.verb) and (lower == '' or vb.text:find(lower, 1, true)) then
+                partial[#partial + 1] = vb
+            end
         end
         local exact = false
         for _, vb in ipairs(get_verbs()) do
@@ -362,8 +569,21 @@ function parse(line)
         for _, vb in ipairs(get_verbs()) do
             if lower:sub(1, #vb.text) == vb.text then
                 local tail = lower:sub(#vb.text + 1):gsub('^%s+', ''):gsub('^an?%s+', '')
+                local form = verb_form(vb.verb)
                 if tail == '' then
+                    -- a transitive-only verb with nothing to act on carves as the subject's
+                    -- name alone, so it is refused here rather than discovered in the stone
+                    if form == 'transitive' then
+                        return {kind = 'error',
+                                why = ('"%s" needs something to be %s -- name it'):format(
+                                    sel.name, vb.text)}
+                    end
                     return {kind = 'property', subject = si, sname = sel.name, verb = vb}
+                end
+                if form == 'intransitive' then
+                    return {kind = 'error',
+                            why = ('DF has no "%s something": %s takes no object'):format(
+                                vb.text, vb.text)}
                 end
                 local oi, oel = find_element(tail)
                 if not oi then
@@ -544,6 +764,7 @@ function register(img)
 
     local art = df.art_image:new()
     art.id, art.subid, art.quality = CHUNK_ID, slot, 0
+    if img.name then apply_name(art.name, img.name) end
     for _, el in ipairs(img.elements) do
         art.elements:insert('#', el.make())
     end
@@ -728,6 +949,9 @@ function BetterEngraving:preview_rows()
     local img = get_image()
     if #img.elements == 0 then return {{text = 'nothing yet'}} end
     local rows = {}
+    if img.name then
+        rows[#rows + 1] = {text = {{text = img.name.text, pen = COLOR_LIGHTCYAN}}}
+    end
     for i, el in ipairs(img.elements) do
         rows[#rows + 1] = {text = ('%d. %-30s %s'):format(i, el.name, el.kind)}
     end
@@ -757,6 +981,10 @@ function BetterEngraving:refresh()
                 -- name re-parses a longer string that may match a different element
                 complete = ('%s is %s '):format(plan.subject_text, vb.text)}
         end
+    elseif plan.kind == 'name' then
+        for _, spec in ipairs(plan.hits) do
+            choices[#choices + 1] = {text = spec.text, name_spec = spec}
+        end
     elseif plan.kind == 'property' then
         local o = plan.oname and (' ' .. plan.oname) or ''
         choices[#choices + 1] = {text = ('%s is %s%s'):format(plan.sname, plan.verb.text, o),
@@ -768,7 +996,7 @@ function BetterEngraving:refresh()
     self.subviews.preview:setChoices(self:preview_rows(), self.subviews.preview:getSelected())
     self.subviews.status:setText(self.status ~= '' and self.status
         or (armed and 'Live: tiles you designate now carve this image. Ctrl-X clears.'
-                  or 'Enter adds a line. Ctrl-X clears.'))
+                  or 'Enter adds a line. "name ..." titles it. Ctrl-X clears.'))
     return plan
 end
 
@@ -781,6 +1009,13 @@ function BetterEngraving:take(choice)
     if choice.complete then
         self.search = choice.complete
         self.status = 'now name what it is done to, or press Enter'
+        self:refresh()
+        return
+    end
+    if choice.name_spec then
+        set_name(choice.name_spec)
+        self.status = ('named it %s'):format(choice.name_spec.text)
+        self.search = ''
         self:refresh()
         return
     end
@@ -848,6 +1083,11 @@ function BetterEngraving:onInput(keys)
     elseif keys._STRING and keys._STRING >= 32 then
         self.search = self.search .. string.char(keys._STRING); self:refresh(); return true
     end
+    -- Last: eat the keys that would act on the map behind the box. A printable keypress is
+    -- normally consumed above, but under a heavy frame the same press can arrive carrying only
+    -- its BINDING and no `_STRING` -- typing "adamantine shield" switched the tool to carving
+    -- tracks on the `t` that way.
+    if reqscript('internal/typed-keys').swallows(keys) then return true end
     return false
 end
 
