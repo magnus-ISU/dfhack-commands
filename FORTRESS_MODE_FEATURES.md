@@ -322,6 +322,10 @@ DFHack tool for this.
 An `[Attributes]` button on a unit sheet's *Other Skills* tab, above the Progress Bar toggles,
 opening all nineteen attributes at once: current value, the highest that dwarf can ever reach,
 and how far the value sits from the median for that creature's own caste in DF's steps of 250.
+The window measures itself against what it is showing, so nothing is cut off at either edge,
+and it does not pause the fort. Click any attribute for the list of jobs and skills that
+exercise it — transcribed from the DF wiki, since the game does not expose that mapping at all,
+and the panel says so.
 
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill

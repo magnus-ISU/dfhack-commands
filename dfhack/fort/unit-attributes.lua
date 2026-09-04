@@ -105,6 +105,7 @@ local function read_attrs(unit, kind)
             local median = median_of(unit, kind, token)
             rows[#rows + 1] = {
                 name = title_case(token),
+                token = token,
                 value = value,
                 cap = cap,
                 tier = tier_of(value, median),
@@ -129,13 +130,87 @@ local function tier_pen(tier)
     return COLOR_GREY
 end
 
+
+-- ---------------------------------------------------------------------------
+-- what trains an attribute
+-- ---------------------------------------------------------------------------
+--
+-- NOT READABLE FROM THE GAME. `df.job_skill.attrs` carries a caption, a labor and a
+-- profession and nothing else -- which skill exercises which attribute is hardcoded inside
+-- DF and never exposed, so there is no honest way to compute this list. It is transcribed
+-- from the Dwarf Fortress wiki's Attribute page instead, and it is worth knowing that is
+-- where it comes from: it is documentation, not data, and it can be out of date in a way the
+-- rest of this panel cannot.
+--
+-- Names are the wiki's, which are DF's own profession words rather than skill tokens -- what
+-- you would look for in the labor list.
+local TRAINS = {
+    STRENGTH = {'Miner', 'Carpenter', 'Wood cutter', 'Mason', 'Bone doctor', 'Beekeeper',
+        'Brewer', 'Cheese maker', 'Dyer', 'Grower', 'Lye maker', 'Milker', 'Miller',
+        'Potash maker', 'Presser', 'Soaper', 'Spinner', 'Thresher', 'Wood burner',
+        'Fisherdwarf', 'Armorsmith', 'Furnace operator', 'Metal crafter', 'Metalsmith',
+        'Weaponsmith', 'Glassmaker', 'Leatherworker', 'Strand extractor', 'Mechanic',
+        'Pump operator', 'Siege engineer', 'Siege operator', 'Papermaker', 'Swimmer',
+        'All combat skills except Dodger'},
+    AGILITY = {'Bowyer', 'Carpenter', 'Wood cutter', 'Engraver', 'Mason', 'Animal caretaker',
+        'Animal trainer', 'Trapper', 'Bone doctor', 'Crutch-walker', 'Surgeon', 'Suturer',
+        'Wound dresser', 'Beekeeper', 'Brewer', 'Butcher', 'Cheese maker', 'Cook', 'Dyer',
+        'Grower', 'Herbalist', 'Milker', 'Miller', 'Presser', 'Spinner', 'Tanner', 'Thresher',
+        'Fish cleaner', 'Fish dissector', 'Fisherdwarf', 'Armorsmith', 'Metal crafter',
+        'Metalsmith', 'Weaponsmith', 'Gem cutter', 'Gem setter', 'Bone carver', 'Clothier',
+        'Glassmaker', 'Glazer', 'Leatherworker', 'Potter', 'Stone crafter', 'Wood crafter',
+        'Wax worker', 'Strand extractor', 'Mechanic', 'Siege engineer', 'Papermaker',
+        'Bookbinder', 'Swimmer', 'Comedian', 'Intimidator', 'Student',
+        'All combat skills except Biter and Armor user'},
+    TOUGHNESS = {'Miner', 'Animal trainer', 'Lye maker', 'Potash maker', 'Soaper',
+        'Wood burner', 'Furnace operator', 'Pump operator', 'Siege operator',
+        'All close combat skills'},
+    ENDURANCE = {'Miner', 'Wood cutter', 'Mason', 'Animal trainer', 'Crutch-walker',
+        'Beekeeper', 'Butcher', 'Cheese maker', 'Dyer', 'Grower', 'Lye maker', 'Milker',
+        'Miller', 'Potash maker', 'Presser', 'Soaper', 'Spinner', 'Thresher', 'Wood burner',
+        'Fish cleaner', 'Armorsmith', 'Furnace operator', 'Metal crafter', 'Metalsmith',
+        'Weaponsmith', 'Glassmaker', 'Leatherworker', 'Strand extractor', 'Mechanic',
+        'Pump operator', 'Siege engineer', 'Siege operator', 'Swimmer', 'Armor user',
+        'Biter', 'Dodger'},
+    RECUPERATION = {},
+    DISEASE_RESISTANCE = {},
+
+    ANALYTICAL_ABILITY = {'Animal caretaker', 'Trapper', 'Beekeeper', 'Cheese maker', 'Cook',
+        'Furnace operator', 'Strand extractor', 'Gem cutter', 'Siege engineer',
+        'Siege operator', 'Mechanic', 'Architecture', 'Diagnostician', 'Appraiser',
+        'Organizer', 'Record keeper', 'Student', 'Knapper'},
+    FOCUS = {'Fisherdwarf', 'Archer', 'Siege operator', 'Ambusher', 'Surgeon', 'Bone doctor',
+        'Suturer', 'Record keeper', 'Student', 'Concentration', 'Observer'},
+    WILLPOWER = {'Miner', 'Wood cutter', 'Fighter', 'Crutch-walker', 'Pump operator',
+        'Swimmer', 'Concentration', 'Resisting exertion and pain'},
+    CREATIVITY = {'Bone carver', 'Clothier', 'Glassmaker', 'Glazer', 'Leatherworker', 'Potter',
+        'Stone crafter', 'Weaver', 'Wood crafter', 'Wax worker', 'Trapper', 'Cheese maker',
+        'Cook', 'Architecture', 'Organizer', 'Liar', 'Comedian'},
+    INTUITION = {'Animal trainer', 'Judge of intent', 'Appraiser', 'Observer', 'Diagnostician'},
+    PATIENCE = {'Animal trainer', 'Fisherdwarf', 'Concentration', 'Some non-skill tasks'},
+    MEMORY = {'Animal caretaker', 'Herbalist', 'Diagnostician', 'Appraiser', 'Record keeper',
+        'Student'},
+    LINGUISTIC_ABILITY = {'Persuader', 'Negotiator', 'Liar', 'Intimidator', 'Conversationalist',
+        'Comedian', 'Flatterer', 'Consoler', 'Pacifier', 'Leader', 'Teacher'},
+    SPATIAL_SENSE = {'Miner', 'Wood cutter', 'Bone carver', 'Clothier', 'Glassmaker',
+        'Leatherworker', 'Potter', 'Glazer', 'Wax worker', 'Stone crafter', 'Weaver',
+        'Wood crafter', 'Trapper', 'Spinner', 'Siege operator', 'Ambusher', 'Architecture',
+        'Wound dresser', 'Surgeon', 'Bone doctor', 'Suturer', 'Crutch-walker', 'Papermaker',
+        'Bookbinder', 'Swimmer', 'Observer', 'Knapper', 'Combat skills'},
+    MUSICALITY = {},
+    KINESTHETIC_SENSE = {'Most skills involving movement of any kind, and unskilled work too'},
+    EMPATHY = {'Animal trainer', 'Animal caretaker', 'Wound dresser', 'Persuader', 'Negotiator',
+        'Judge of intent', 'Conversationalist', 'Flatterer', 'Consoler', 'Pacifier', 'Leader',
+        'Teacher'},
+    SOCIAL_AWARENESS = {'Persuader', 'Negotiator', 'Judge of intent', 'Organizer', 'Liar',
+        'Conversationalist', 'Flatterer', 'Consoler', 'Pacifier', 'Leader', 'Teacher'},
+}
+
 Attributes = defclass(Attributes, widgets.Window)
 Attributes.ATTRS{
     frame_title = 'Attributes',
-    -- tall enough for the lot without scrolling: 6 physical + 13 mental, their two headings
-    -- and the blank between them, plus the two header lines, the footer and the frame; and
-    -- wide enough for the longest row -- "Disease Resistance" is 18 characters before the
-    -- value/cap pair and the tier word, and a dwarf's readable name is longer than any of it
+    -- a starting size only: init() measures the rows it actually built and resizes to fit
+    -- them, since guessing once against one dwarf is what left the panel too small
     frame = {w = 74, h = 31},
     resizable = true,
     unit = DEFAULT_NIL,
@@ -150,13 +225,17 @@ function Attributes:init()
     local function heading(text)
         choices[#choices + 1] = {text = {{text = text, pen = COLOR_LIGHTCYAN}}}
     end
+    local widest = 0
     local function rows(kind)
         for _, r in ipairs(read_attrs(self.unit, kind)) do
             local cap = r.cap and ('%5d / %-5d'):format(r.value, r.cap) or ('%5d'):format(r.value)
-            choices[#choices + 1] = {text = {
-                {text = ('  %s %s  '):format(r.name .. (' '):rep(math.max(0, NAME_W - #r.name)), cap)},
-                {text = ('%+d %s'):format(r.tier, TIER_WORD[r.tier] or ''), pen = tier_pen(r.tier)},
-            }}
+            local left = ('  %s %s  '):format(r.name .. (' '):rep(math.max(0, NAME_W - #r.name)), cap)
+            local right = ('%+d %s'):format(r.tier, TIER_WORD[r.tier] or '')
+            widest = math.max(widest, #left + #right)
+            choices[#choices + 1] = {
+                token = r.token, name = r.name,
+                text = {{text = left}, {text = right, pen = tier_pen(r.tier)}},
+            }
         end
     end
     heading('Physical')
@@ -176,18 +255,97 @@ function Attributes:init()
             text_pen = COLOR_GREY,
         },
         -- b = 3 clears the two-line footer; at b = 2 the last attribute sat under it
-        widgets.List{frame = {t = 3, l = 0, r = 0, b = 3}, choices = choices},
+        widgets.List{
+            frame = {t = 3, l = 0, r = 0, b = 3},
+            choices = choices,
+            on_submit = function(_, ch)
+                if ch and ch.token then
+                    TrainedByScreen{name = ch.name, token = ch.token}:show()
+                end
+            end,
+        },
         widgets.Label{
             frame = {b = 0, l = 0},
             text = {
                 'The tier is distance from this caste\'s median attribute, in DF\'s',
                 NEWLINE,
-                'own steps of 250. Esc closes.',
+                'own steps of 250. Click an attribute for what trains it. Esc closes.',
             },
             text_pen = COLOR_GREY,
         },
     }
+
+    -- Sized from what is actually in it rather than from a pair of numbers worked out once
+    -- against one dwarf. The height is every row plus the headers, the footer and the frame;
+    -- the width is the longest row against the dwarf's name, which is easily the longest
+    -- line here. Clamped to the screen, since a small window is better than one whose bottom
+    -- rows are off the edge.
+    -- EVERY line, not just the attribute rows: the footer is the longest line in this
+    -- window and measuring only the rows cut it off mid-sentence.
+    local FOOTER = 'own steps of 250. Click an attribute for what trains it. Esc closes.'
+    widest = math.max(widest,
+                      #FOOTER,
+                      #'The tier is distance from this caste\'s median attribute, in DF\'s',
+                      NAME_W + 2 + #'value / cap   vs. caste median',
+                      #dfhack.units.getReadableName(self.unit))
+    local sw, sh = dfhack.screen.getWindowSize()
+    -- +10, measured rather than reasoned: the frame, the title, the two header lines, the
+    -- gap and the two footer lines. At +8 the last two attributes were off the bottom.
+    self.frame.w = math.max(48, math.min(sw - 4, widest + 4))
+    self.frame.h = math.max(20, math.min(sh - 4, #choices + 10))
 end
+
+-- ---------------------------------------------------------------------------
+-- "what trains this?"
+-- ---------------------------------------------------------------------------
+
+TrainedBy = defclass(TrainedBy, widgets.Window)
+TrainedBy.ATTRS{
+    frame_title = 'Trained by',
+    -- a default frame is REQUIRED, not decoration: a Window whose ATTRS omit one has no
+    -- self.frame at all, and init's resize then indexes nil
+    frame = {w = 62, h = 20},
+    resizable = true,
+    name = DEFAULT_NIL,
+    token = DEFAULT_NIL,
+}
+
+function TrainedBy:init()
+    local list = TRAINS[self.token] or {}
+    local choices, widest = {}, 0
+    for _, job in ipairs(list) do
+        widest = math.max(widest, #job)
+        choices[#choices + 1] = {text = '  ' .. job}
+    end
+    if #choices == 0 then
+        choices[1] = {text = {{text = '  Nothing known to train it.', pen = COLOR_GREY}}}
+        widest = 30
+    end
+    self:addviews{
+        widgets.Label{frame = {t = 0, l = 0},
+            text = {{text = self.name or '?', pen = COLOR_LIGHTCYAN},
+                    {text = ' is exercised by:'}}},
+        widgets.List{frame = {t = 2, l = 0, r = 0, b = 2}, choices = choices},
+        widgets.Label{frame = {b = 0, l = 0}, text_pen = COLOR_GREY,
+            text = 'From the DF wiki -- the game does not expose this. Esc closes.'},
+    }
+    local FOOTER = 'From the DF wiki -- the game does not expose this. Esc closes.'
+    local sw, sh = dfhack.screen.getWindowSize()
+    self.frame.w = math.max(40, math.min(sw - 6, math.max(widest + 8, #FOOTER + 4)))
+    self.frame.h = math.max(10, math.min(sh - 6, #choices + 9))
+end
+
+TrainedByScreen = defclass(TrainedByScreen, gui.ZScreenModal)
+TrainedByScreen.ATTRS{
+    focus_path = 'unit-attributes/trained-by',
+    force_pause = false,
+    name = DEFAULT_NIL,
+    token = DEFAULT_NIL,
+}
+function TrainedByScreen:init()
+    self:addviews{TrainedBy{name = self.name, token = self.token}}
+end
+function TrainedByScreen:onDismiss() end
 
 AttributesScreen = defclass(AttributesScreen, gui.ZScreenModal)
 -- `unit` MUST be declared here. An attribute the class does not declare is not carried
@@ -195,6 +353,8 @@ AttributesScreen = defclass(AttributesScreen, gui.ZScreenModal)
 -- Units::getPhysicalAttrValue below dereferences null in C++ and takes DF down with it.
 AttributesScreen.ATTRS{
     focus_path = 'unit-attributes',
+    -- reading a dwarf's numbers is not a reason to stop the fort
+    force_pause = false,
     unit = DEFAULT_NIL,
 }
 function AttributesScreen:init() self:addviews{Attributes{unit = self.unit}} end
