@@ -134,8 +134,14 @@ end
 -- forbidden, and being able to see one is the point of showing them.
 local function usable(item)
     local f = item.flags
+    -- FOREIGN IS NOT AN EXCLUSION. It was, on the reading that another civilization's goods
+    -- are not ours to spend -- but a mood does not read flags, it takes what it can reach, and
+    -- a foreign clay boulder left lying in the fort is exactly as reachable as any other. Two
+    -- of them sat unforbidden in this fort while every one of the other 3169 boulders was
+    -- locked down, which is the whole game: DF only needs ONE legal alternative to ruin the
+    -- artifact. It is offered last rather than not at all -- see the picker's ordering.
     return not (f.dump or f.hostile or f.artifact or f.owned or f.garbage_collect
-        or f.removed or f.in_building or f.encased or f.trader or f.foreign)
+        or f.removed or f.in_building or f.encased or f.trader)
 end
 
 local function is_forbidden(item)
@@ -291,18 +297,20 @@ end
 -- actually get drawn -- through `df.item.find`, so a dead id yields nil instead of a
 -- dangling pointer.
 local function snapshot(item)
-    local q, dq, dim, wear, injob = 0, 0, 0, 0, false
+    local q, dq, dim, wear, injob, alien = 0, 0, 0, 0, false, false
     pcall(function() q = item:getQuality() end)
     pcall(function() dq = item:getSubtype() end)
     pcall(function() dim = item.dimension end)
     pcall(function() wear = item.wear end)
     pcall(function() injob = item.flags.in_job end)
+    pcall(function() alien = item.flags.foreign end)
     return {
         id = item.id,
         value = item_value(item),
         forbidden = is_forbidden(item),
         worn = wear > 0,
         busy = injob,
+        foreign = alien,
         dim = dim,
         key = ('%d/%d/%d/%d/%d'):format(item:getType(), dq, item:getMaterial(),
             item:getMaterialIndex(), q),
@@ -518,6 +526,7 @@ local function item_name(item, snap)
     pcall(function() wear = item.wear end)
     if wear > 0 then tags[#tags + 1] = 'worn' end
     if snap and snap.part_used then tags[#tags + 1] = 'part-used' end
+    if snap and snap.foreign then tags[#tags + 1] = 'foreign' end
     if snap and snap.busy then tags[#tags + 1] = 'in another job' end
     if #tags > 0 then n = ('%s (%s)'):format(n, table.concat(tags, ', ')) end
     return n
@@ -1101,8 +1110,9 @@ function Picker:init()
     -- you take is a real decision, and one this tool will not make quietly.
     local seen, order = {}, {}
     for _, snap in ipairs(self.options or {}) do
-        local key = ('%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
-            snap.worn and 'w' or '', snap.part_used and 'p' or '')
+        local key = ('%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
+            snap.worn and 'w' or '', snap.part_used and 'p' or '',
+            snap.foreign and 'f' or '')
         local row = seen[key]
         if row then
             row.count = row.count + 1
@@ -1185,7 +1195,7 @@ function Planner:init()
             -- the best CLEAN one: not forbidden, not worn, not part-used, not spoken for
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.busy then
+                    and not snap.part_used and not snap.busy and not snap.foreign then
                     pick = snap
                     break
                 end
@@ -1310,7 +1320,7 @@ function Planner:reconcile()
             local pick
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and df.item.find(snap.id) then
+                    and not snap.part_used and not snap.foreign and df.item.find(snap.id) then
                     pick = snap
                     break
                 end
