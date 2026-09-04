@@ -236,7 +236,8 @@ local function prepStamp(s)
     end
     return {name = s.name, weight = s.weight or 1, max = s.max or math.huge,
             byDir = byDir, plain = plain, turned = turned, floors = floors,
-            grid = s.grid, zone_code = s.zone}   -- `zone_code` here: `zone` alone is an entrance's approach area
+            grid = s.grid, zone_code = s.zone, engrave_floor = s.engrave_floor}
+            -- `zone_code`: `zone` alone is an entrance's approach area
 end
 M.prepStamp = prepStamp
 
@@ -300,12 +301,13 @@ function M.pack(opts)
     -- districts -----------------------------------------------------------
     local function slot(s)
         local alts = s.alts or {{grid = s.grid, weight = s.weight, max = s.max, setback = s.setback,
-                                 name = s.name, zone = s.zone}}
+                                 name = s.name, zone = s.zone, engrave_floor = s.engrave_floor}}
         local out = {name = s.name, max = s.max or 1, weight = s.weight or 1, alts = {}}
         for _, a in ipairs(alts) do
             -- the zone is declared on the slot and may be overridden by one alternative
             local p = prepStamp({name = a.name or s.name, grid = a.grid, weight = a.weight, max = a.max,
-                                 zone = a.zone or s.zone})
+                                 zone = a.zone or s.zone,
+                                 engrave_floor = a.engrave_floor or s.engrave_floor})
             out.alts[#out.alts + 1] = {name = a.name or s.name, weight = a.weight or 1,
                                        p = p, setback = a.setback or 0}
         end
@@ -626,7 +628,8 @@ function M.pack(opts)
                         if fits(v, e, ax, ay, inside, D.shared and -1 or 0) then
                             local room = {stamp = s.name, cells = {}, door = nil,
                                           front = {x = pos.fx, y = pos.fy}, floors = s.p.floors,
-                                          grid = s.p.grid, zone_code = s.p.zone_code}
+                                          grid = s.p.grid, zone_code = s.p.zone_code,
+                                          engrave_floor = s.p.engrave_floor}
                             if dIdx < 0 then
                                 dIdx = #districts + 1
                                 districts[dIdx] = {type = D, rooms = {}}
@@ -689,7 +692,8 @@ function M.pack(opts)
         local ax, ay = doorX - b.e.x, doorY - b.e.y
         if not fits(b.v, b.e, ax, ay, inside, 0) then return nil end
         local hubRoom = {stamp = hub.name, cells = {}, door = nil, front = {x = doorX - px, y = doorY - py},
-                         hub = true, floors = hub.p.floors, grid = hub.p.grid, zone_code = hub.p.zone_code}
+                         hub = true, floors = hub.p.floors, grid = hub.p.grid, zone_code = hub.p.zone_code,
+                         engrave_floor = hub.p.engrave_floor}
         commitRoom(b.v, b.e, ax, ay, 1, hubRoom, dIdx)
         placed[#placed + 1] = hubRoom
         local function bbox()
@@ -768,7 +772,7 @@ function M.pack(opts)
             claim[c.ty][c.tx] = 0
             local room = {stamp = stamp.name, cells = {}, door = nil, front = nil,
                           parent = c.parent.stamp, floors = stamp.p.floors, grid = stamp.p.grid,
-                          zone_code = stamp.p.zone_code}
+                          zone_code = stamp.p.zone_code, engrave_floor = stamp.p.engrave_floor}
             commitRoom(c.v, c.e, c.ax, c.ay, 1, room, dIdx)
             placed[#placed + 1] = room
             return true

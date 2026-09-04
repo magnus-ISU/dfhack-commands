@@ -6,6 +6,10 @@
 --   P pedestal  A altar  B bookcase  i stair  F farm plot  # built wall (surface)
 -- A stamp may be {floors = {ground, first, ...}} for a multi-z blueprint.
 --
+-- A stamp may declare `engrave_floor`, which engraves the floor square under every piece
+-- of furniture it places (the engraving goes down before the furniture does, since a bed
+-- cannot be moved aside to carve under it later).
+--
 -- A stamp may declare `zone`, the activity zone the finished room carries, written as
 -- the quickfort zone code the blueprint will use: 'b' bedroom, 'o' office, 'h' dining
 -- hall, 'T' tomb, 'm' meeting area, 'D' dormitory, 'B' barracks. A stamp with no `zone`
@@ -24,22 +28,22 @@ local G = {
     hovel     = {'d', 'b', 'f', 'h'},
     house2    = {'d ', '.f', 'bh'},
     house3    = {' d ', '...', 'fbh', '...'},
-    luxury3   = {' d ', 'f.h', 'rbs', 'a.A'},
-    nbed      = {' d ', 'f.h', '.b.', '...'},
-    nbed4     = {'  d ', 'f..h', '..b.', '....', '....'},
-    nbed35    = {' d ', 'f.h', '...', '.b.', '...', '...'},
-    noffice   = {' d ', '...', 'tc.', 'f.h'},
-    noffice4  = {'  d ', '....', 'tc..', 'c...', 'f..h'},
-    ndining   = {'  d  ', '.....', '.ttt.', '.ccc.', 'f...h'},
-    ndining7  = {'   d   ', '.......', '..ttt..', '..ccc..', '.......', 'f.....h'},
-    ndining3  = {' d ', '...', 'tc.', 'f.h'},
+    luxury3   = {' d ', 'f.h', 'rbP', 'a.A'},
+    nbed      = {' d ', 'f.h', 'rbP', 'a.A'},
+    nbed4     = {'  d ', 'f..h', 'r.b.', 'a..P', '...A'},
+    nbed35    = {' d ', 'f.h', 'r.a', '.b.', 'P.A', '...'},
+    noffice   = {' d ', '...', 'tcP', 'f.h'},
+    noffice4  = {'  d ', '....', 'tc.P', 'c...', 'f..h'},
+    ndining   = {'  d  ', '.....', '.ttt.', '.ccc.', 'f.P.h'},
+    ndining7  = {'   d   ', '.......', '..ttt..', '..ccc..', '...P...', 'f.....h'},
+    ndining3  = {' d ', '...', 'tcP', 'f.h'},
     dhall73   = {'   d   ', 'f.....h', '.ttttt.', '.ccccc.'},
-    ntomb     = {' d ', '...', '.x.', 'f.h'},
-    ntomb5    = {'  d  ', 's...s', '..x..', 'f...h'},
-    ngarden3  = {' d ', 's.s', '...', 's.s'},
-    ngarden5  = {'  d  ', 's...s', '.....', '..s..', 's...s'},
-    nthrone   = {'  d  ', '.....', '.....', '..c..', 'f.s.h'},
-    nlibrary  = {'  d  ', 'B...B', '.tc..', 'B...B', 'f...h'},
+    ntomb     = {' d ', '..P', '.x.', 'f.h'},
+    ntomb5    = {'  d  ', 's...s', '..x..', 'f.P.h'},
+    ngarden3  = {' d ', 's.s', '.P.', 's.s'},
+    ngarden5  = {'  d  ', 's...s', '..P..', '..s..', 's...s'},
+    nthrone   = {'  d  ', '.....', '..P..', '..c..', 'f.s.h'},
+    nlibrary  = {'  d  ', 'B...B', '.tc.P', 'B...B', 'f...h'},
     plaza7    = {'.......', '.s...s.', '.......', '...s...', '.......', '.s...s.', '.......'},
     seg13     = {'s.....s.....s', '.............', 's.....s.....s'},
     catacomb  = {'   d   ', 'x.....x', 'x.....x', 'x..s..x', 'x.....x', 'x.....x', 'x..s..x', 'x.....x', 'x.....x'},
@@ -83,21 +87,21 @@ DISTRICTS = {
     ['dining halls'] = {margin = 1, maxLen = 10, stamps = {{name = 'dining hall 7x3', grid = G.dhall73, max = 1, zone = 'h'}}},
     ['noble'] = {margin = 1, set = true, depth = 16,
         stamps = {
-            {name = 'dining (hub)', zone = 'h', alts = {{grid = G.ndining, weight = 2, name = 'dining 5x4'}, {grid = G.ndining7, name = 'dining 7x5'}}},
-            {name = 'bedroom', zone = 'b', alts = {{grid = G.nbed, weight = 2, name = 'bedroom 3x3'}, {grid = G.nbed4, name = 'bedroom 4x4'}, {grid = G.nbed35, name = 'bedroom 3x5'}}},
-            {name = 'office', zone = 'o', alts = {{grid = G.noffice, weight = 2, name = 'office 3x3'}, {grid = G.noffice4, name = 'office 4x4'}}},
-            {name = 'tomb', zone = 'T', alts = {{grid = G.ntomb, weight = 2, name = 'tomb 3x3'}, {grid = G.ntomb5, name = 'tomb 5x3'}}},
+            {name = 'dining (hub)', zone = 'h', engrave_floor = true, alts = {{grid = G.ndining, weight = 2, name = 'dining 5x4'}, {grid = G.ndining7, name = 'dining 7x5'}}},
+            {name = 'bedroom', zone = 'b', engrave_floor = true, alts = {{grid = G.nbed, weight = 2, name = 'bedroom 3x3'}, {grid = G.nbed4, name = 'bedroom 4x4'}, {grid = G.nbed35, name = 'bedroom 3x5'}}},
+            {name = 'office', zone = 'o', engrave_floor = true, alts = {{grid = G.noffice, weight = 2, name = 'office 3x3'}, {grid = G.noffice4, name = 'office 4x4'}}},
+            {name = 'tomb', zone = 'T', engrave_floor = true, alts = {{grid = G.ntomb, weight = 2, name = 'tomb 3x3'}, {grid = G.ntomb5, name = 'tomb 5x3'}}},
         },
         optional = {
-            {name = 'sculpture garden', max = 2, alts = {{grid = G.ngarden3, name = 'garden 3x3'}, {grid = G.ngarden5, name = 'garden 5x5'}}},
-            {name = 'throne room / library', max = 1, alts = {{grid = G.nthrone, name = 'throne room 5x5', zone = 'o'}, {grid = G.nlibrary, name = 'library 5x5'}}},
+            {name = 'sculpture garden', max = 2, engrave_floor = true, alts = {{grid = G.ngarden3, name = 'garden 3x3'}, {grid = G.ngarden5, name = 'garden 5x5'}}},
+            {name = 'throne room / library', max = 1, engrave_floor = true, alts = {{grid = G.nthrone, name = 'throne room 5x5', zone = 'o'}, {grid = G.nlibrary, name = 'library 5x5'}}},
         }},
     ['minor noble'] = {margin = 1, set = true, depth = 12,
-        stamps = {{name = 'bedroom 3x3 (hub)', zone = 'b', alts = {{grid = G.nbed}}}},
+        stamps = {{name = 'bedroom 3x3 (hub)', zone = 'b', engrave_floor = true, alts = {{grid = G.nbed}}}},
         optional = {
-            {name = 'dining 3x3', max = 1, zone = 'h', alts = {{grid = G.ndining3}}},
-            {name = 'office 3x3', max = 1, zone = 'o', alts = {{grid = G.noffice}}},
-            {name = 'tomb 3x3', max = 1, zone = 'T', alts = {{grid = G.ntomb}}},
+            {name = 'dining 3x3', max = 1, zone = 'h', engrave_floor = true, alts = {{grid = G.ndining3}}},
+            {name = 'office 3x3', max = 1, zone = 'o', engrave_floor = true, alts = {{grid = G.noffice}}},
+            {name = 'tomb 3x3', max = 1, zone = 'T', engrave_floor = true, alts = {{grid = G.ntomb}}},
         }},
     ['catacombs']    = {margin = 0, maxLen = 12, stamps = {{name = 'catacomb 7x9', grid = G.catacomb, max = 1}}},
     ['memorials']    = {margin = 1, maxLen = 8, stamps = {{name = 'memorial 5x5', grid = G.memorial, max = 1, zone = 'T'}}},

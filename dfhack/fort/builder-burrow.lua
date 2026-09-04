@@ -70,7 +70,13 @@ CODES
   EVERY wall around what the plan digs is smoothed, not just the walls a room formally
   owns, or the margin rock between two rooms would be left bare.
 
-  ENGRAVING is narrower still: walls, and only a ROOM's walls. Floors stay plain so the
+  A stamp may also ask for `engrave_floor`, which carves the floor square under each piece
+  of furniture it places -- the noble suites do. That work has to happen BEFORE the
+  furniture arrives, since nothing can be carved under a bed, and it does:
+  fort/quickfort holds a building until every square beneath it has finished its own
+  steps, and the engraving is one of them.
+
+  ENGRAVING is otherwise narrower: walls, and only a ROOM's walls. Floors stay plain so the
   pictures are at eye level, and hallways stay plain so the carvings belong to the rooms
   people live in. Each wall belongs to exactly one blueprint (two jobs would fight over
   the square, and two room zones covering it would overlap, which DF refuses), and rooms
@@ -319,7 +325,15 @@ local function emit_jobs(result, slab, preset_name, yield, on_status, in_burrow)
                 smooth[#smooth + 1] = {c.x, c.y, 's'}
                 if zcode then zone[#zone + 1] = {c.x, c.y, zcode} end
                 local b = BUILD[c.ch]
-                if b then build[#build + 1] = {c.x, c.y, b} end
+                if b then
+                    build[#build + 1] = {c.x, c.y, b}
+                    -- a stamp may ask for the floor under its furniture to be engraved.
+                    -- fort/quickfort holds a building until every square under it has
+                    -- finished ITS steps, and engraving is one of them, so the carving is
+                    -- always done before the bed goes down on top of it -- which is the
+                    -- only order that works, since you cannot carve under furniture.
+                    if room.engrave_floor then engrave[#engrave + 1] = {c.x, c.y, 'e'} end
+                end
             end
         end
         for _, w in ipairs(claim_walls(dig)) do

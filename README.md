@@ -72,7 +72,9 @@ digging,
 smoothing, engraving and furniture sequence themselves per tile, and the three blueprints that
 want a given square wait for each other on it — a mine designation and a smooth designation never
 share a tile, because DF works the smoothing, the mining never happens, and the wall just stays. Every wall around the plan is smoothed, and a room's walls are engraved as well — hallway
-walls are left plain, so the carvings belong to the rooms. Each stamp declares the activity zone its
+walls are left plain, so the carvings belong to the rooms. A noble suite goes further: the floor
+under every piece of its furniture is engraved too, carved before the furniture arrives, since
+nothing can be carved under a bed. Each stamp declares the activity zone its
 room carries (`zone = 'b'`/`'o'`/`'h'`/`'T'` in the preset), and the blueprint gets a `#zone`
 section next to its dig, smooth, engrave and build sections — bedrooms, offices, dining rooms and
 single-coffin tombs. A catacomb or family tomb declares none and is left to `fort/auto-tomb`,
