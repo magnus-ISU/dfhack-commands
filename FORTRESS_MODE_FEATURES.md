@@ -258,7 +258,10 @@ so nothing is ever doubled up. A `[Harvest]` button on the zone panel, below the
 turns a zone's auto-posting off and on and acts immediately: on posts that zone's jobs there
 and then, off pulls its outstanding gathering jobs back out of the queue (anything a dwarf
 already picked up is left to finish). It is on by default, and a zone with "Pick shrubs"
-switched off is skipped. A tile whose job dies with the shrub still standing is retired for
+switched off is skipped. Only shrubs with something on them get a job — a plant with growths
+has produce only while one is in *season*, and leaves and flowers are not produce — and its own
+outstanding jobs are re-checked daily and taken back when their season ends, so a summer berry
+patch is not still queued in late autumn on bare twigs. A tile whose job dies with the shrub still standing is retired for
 the session, so an unreachable plant can't spam cancellations.
 
 ### **`fort/adamantine-hospital`**

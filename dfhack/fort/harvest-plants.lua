@@ -22,6 +22,11 @@ has the labor -- and the [Harvest] button does it on the spot.
   * A tile whose job disappears while the shrub is still standing (unreachable, no
     free barrel, gathering forbidden there) is dropped for the rest of the session
     rather than re-posted every day, so a stuck plant can't spam job cancellations.
+  * Only shrubs with something ON them are posted -- a plant with growths has produce
+    only while one is in SEASON, and leaves and flowers are not produce -- and OUR
+    outstanding jobs are re-checked daily and taken back when their season ends. A job
+    posted over a summer berry patch is still queued in late autumn otherwise, on bare
+    twigs; this fort had 114 of them.
 
     enable harvest-plants     post jobs once a month (persists with the fort)
     disable harvest-plants    stop
@@ -43,17 +48,40 @@ local MAX_NEW_JOBS = 60   -- per cycle, so a freshly painted forest zone doesn't
 -- zone you never touched harvests itself; JSON keys are strings, hence tostring().
 state = state or nil
 enabled = enabled or false
-mine = mine or nil        -- job id -> {x,y,z}: jobs this script posted, this session
+-- job id -> {x,y,z}: the jobs this script posted. PERSISTED, not session state: a job that
+-- goes out of season two months after it was posted has to be recognisable as ours in order to
+-- be taken back, and a save in between must not make it anonymous.
+mine = mine or nil
 skip = skip or nil        -- 'x,y,z' -> true: tiles whose job died with the shrub still there
 
 local function load_state()
     if not state then
         state = dfhack.persistent.getSiteData(GLOBAL_KEY, {enabled = false, off = {}})
         if type(state.off) ~= 'table' then state.off = {} end
+        if type(state.mine) ~= 'table' then state.mine = {} end
     end
-    if not mine then mine = {} end
+    if not mine then
+        mine = {}
+        for id, at in pairs(state.mine or {}) do
+            local x, y, z = tostring(at):match('^(-?%d+),(-?%d+),(-?%d+)$')
+            if x then
+                mine[tonumber(id)] = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+            end
+        end
+    end
     if not skip then skip = {} end
     return state
+end
+
+-- written once at the end of a sweep rather than per job: sixty saves in a row for one
+-- cycle's posting is sixty writes of the same table
+local function save_mine()
+    if not state then return end
+    state.mine = {}
+    for id, pos in pairs(mine) do
+        state.mine[tostring(id)] = ('%d,%d,%d'):format(pos.x, pos.y, pos.z)
+    end
+    pcall(dfhack.persistent.saveSiteData, GLOBAL_KEY, state)
 end
 
 local function save_state()
@@ -192,35 +220,71 @@ local function retire_dead_jobs(live)
     end
 end
 
+-- A SEASON ENDS WHILE THE JOBS ARE STILL QUEUED.
+--
+-- Checking for produce before posting is only half the job. Berries are in season from
+-- year-tick 120000 to 200000; a job posted in the summer is still sitting in the queue in
+-- late autumn, on a bush with nothing on it, and the dwarf who finally walks out to it finds
+-- bare twigs. This fort had 114 of them, every one posted legitimately months earlier.
+--
+-- So our own outstanding jobs are re-checked daily and taken back when the tile stops having
+-- anything to pick. ONLY ours, and only while nobody has picked the job up: removing a job a
+-- dwarf is working segfaults DF, and removing a job DF's own zone posted segfaulted it once
+-- ten seconds later, inside an unrelated overlay, and cost this fort its unsaved progress.
+function retire_stale()
+    load_state()
+    local doomed = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        if job and job.job_type == df.job_type.GatherPlants and mine[job.id]
+            and not dfhack.job.getWorker(job)
+            and not (is_shrub(job.pos.x, job.pos.y, job.pos.z)
+                     and has_produce(job.pos.x, job.pos.y, job.pos.z)) then
+            doomed[#doomed + 1] = job          -- collect first: removeJob unlinks the list
+        end
+        link = link.next
+    end
+    for _, job in ipairs(doomed) do
+        mine[job.id] = nil
+        dfhack.job.removeJob(job)
+    end
+    if #doomed > 0 then save_mine() end
+    return #doomed
+end
+
 -- Is this tile inside the zone? (Cheap z check first -- zones are one z-level.)
 local function in_zone(zone, x, y, z)
     return z == zone.z and x >= zone.x1 and x <= zone.x2 and y >= zone.y1 and y <= zone.y2
         and dfhack.buildings.containsTile(zone, x, y)
 end
 
--- Pull every outstanding gathering job inside `zone` back out of the queue, ours and DF's
--- alike -- switching the button off means "stop working this patch", and DF re-posts its
--- own jobs when the zone timer next comes round anyway.
--- Two rules: collect the whole list BEFORE removing anything (removeJob unlinks from the
--- list we would still be walking), and never touch a job a dwarf has already taken --
--- removing a unit's current job segfaults DF.
+-- Pull our outstanding gathering jobs inside `zone` back out of the queue.
+--
+-- THREE rules, each of them paid for. Collect the whole list BEFORE removing anything
+-- (removeJob unlinks from the list we would still be walking). Never touch a job a dwarf has
+-- already taken -- removing a unit's current job segfaults DF. And never touch a job DF's own
+-- zone posted, only ones in `mine`: doing that segfaulted DF ten seconds later, inside an
+-- unrelated overlay walking a building's job list, and cost this fort its unsaved progress.
+-- This used to remove DF's too, on the reasoning that the zone re-posts them anyway.
 function clear_zone_jobs(zone)
+    load_state()
     local doomed = {}
     local link = df.global.world.jobs.list.next
     while link do
         local job = link.item
-        if job and job.job_type == df.job_type.GatherPlants
+        if job and job.job_type == df.job_type.GatherPlants and mine[job.id]
             and in_zone(zone, job.pos.x, job.pos.y, job.pos.z)
             and not dfhack.job.getWorker(job) then
             doomed[#doomed + 1] = job
         end
         link = link.next
     end
-    load_state()
     for _, job in ipairs(doomed) do
         mine[job.id] = nil
         dfhack.job.removeJob(job)
     end
+    if #doomed > 0 then save_mine() end
     return #doomed
 end
 
@@ -240,7 +304,7 @@ function do_cycle(only_zone)
     if not dfhack.world.isFortressMode() then return 0 end
     local tiles, live = gather_job_tiles()
     retire_dead_jobs(live)
-    local posted = 0
+    local posted, dirty = 0, false
     for _, zone in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
         if (not only_zone or zone.id == only_zone.id)
             and is_gather_zone(zone) and zone.spec_sub_flag.active
@@ -254,11 +318,13 @@ function do_cycle(only_zone)
                         post_job(x, y, zone.z)
                         tiles[k] = true
                         posted = posted + 1
+                        dirty = true
                     end
                 end
             end
         end
     end
+    if dirty then save_mine() end
     return posted
 end
 
@@ -268,7 +334,8 @@ end
 -- count rendered frames on this build and fire every few game-days, so gate a per-frame
 -- timeout on the calendar instead.
 local CYCLE_TICKS = 1200 * 28 * CYCLE_MONTHS
-local last_run = nil
+local RETIRE_TICKS = 1200          -- one day
+local last_run, last_retire = nil, nil
 local hb_gen = 0
 
 local function start()
@@ -279,6 +346,12 @@ local function start()
     local function heartbeat()
         if not enabled or my_gen ~= hb_gen then return end
         local now = df.global.cur_year * 403200 + df.global.cur_year_tick
+        -- Daily, not monthly: a season ends on a particular day, and a bush that stopped
+        -- fruiting this morning should not have a job on it this afternoon.
+        if not last_retire or now - last_retire >= RETIRE_TICKS then
+            last_retire = now
+            pcall(retire_stale)
+        end
         if not last_run or now - last_run >= CYCLE_TICKS then
             last_run = now
             do_cycle()
