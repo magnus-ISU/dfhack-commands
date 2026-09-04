@@ -165,6 +165,14 @@ what was merely reserved. One rung at a time, and only what that rung asks for.
 ### **`fort/labor-groups`**
 Tidies the Labor screen and creates any missing crafting work details.
 
+### **`fort/sort-locations`**
+When you assign a new temple or guildhall, the deities and professions that have actually
+*petitioned* for one are moved to the top of the list, in DF's order otherwise — instead of
+sitting somewhere among sixty-odd entries that look exactly the same. Petitions are read from
+the agreements themselves and filtered to your own site, so another settlement's guild never
+pulls a profession up your list. *(No particular deity)* keeps its place at the head, and a
+list already in the right order is left alone so nothing shifts while you read it.
+
 ### **`fort/choose-labor-icon`**
 Pick a work detail's icon from a grid of the actual icons instead of cycling DF's little
 selector one at a time.
