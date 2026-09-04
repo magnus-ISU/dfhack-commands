@@ -1180,6 +1180,70 @@ end
 -- ---- standing-order producers (brewing, fuel, smelting, melting) ------------
 
 -- the missing-workshop labels for a set of FIXED_WS keys (jobs/reactions)
+-- ---- posting jobs directly ---------------------------------------------------
+--
+-- Some asks post JOBS rather than manager orders, because a manager order's conditions cannot
+-- express what they need. The one that forced this: "cut gems while more than 10 rough gems
+-- remain" is a condition on item_type ROUGH, and DF counts every ROUGH item under that --
+-- raw glass and raw adamantine included. This fort had 20 "rough" items and exactly ONE gem,
+-- so the order was permanently satisfied and cut nothing. There is no material class for
+-- "gem" in a condition, so the count has to be done here and the work posted directly.
+
+local function find_shop(req)
+    if not req then return nil end
+    for _, b in ipairs(df.global.world.buildings.all) do
+        local t, st = b:getType(), b:getSubtype()
+        if req.ws and t == df.building_type.Workshop
+            and (st == req.ws or st == WS_MAGMA_ALT[req.ws]) then return b end
+        if req.ws2 and t == df.building_type.Workshop and st == req.ws2 then return b end
+        if req.fu and t == df.building_type.Furnace
+            and (st == req.fu or st == FU_MAGMA_ALT[req.fu]) then return b end
+        if req.def and t == df.building_type.Workshop and st == df.workshop_type.Custom then
+            local d = df.building_def.find(b:getCustomType())
+            if d and d.code == req.def then return b end
+        end
+    end
+end
+
+-- how many jobs of this type are already queued anywhere in the fort, so clicking an ask
+-- twice does not double the pile
+local function jobs_queued(job_type, reaction)
+    local n = 0
+    local link = df.global.world.jobs.list.next
+    while link do
+        local j = link.item
+        if j and j.job_type == job_type
+            and (not reaction or j.reaction_name == reaction) then n = n + 1 end
+        link = link.next
+    end
+    return n
+end
+
+-- Post one job into `shop`. `items` is a list of job_item specs; each becomes a reagent, and
+-- DF fetches them the way it would for a manager-dispatched job.
+local function post_job(shop, spec)
+    if not shop then return nil end
+    local job = dfhack.job.createLinked()
+    job.job_type = spec.job_type
+    job.mat_type = spec.mat_type or -1
+    job.mat_index = spec.mat_index or -1
+    job.item_subtype = spec.item_subtype or -1
+    if spec.reaction then job.reaction_name = spec.reaction end
+    for _, it in ipairs(spec.items or {}) do
+        local jitem = df.job_item:new()
+        jitem.item_type = it.item_type or -1
+        jitem.item_subtype = it.item_subtype or -1
+        jitem.mat_type = it.mat_type or -1
+        jitem.mat_index = it.mat_index or -1
+        jitem.quantity = it.quantity or 1
+        jitem.min_dimension = it.min_dimension or -1
+        if it.vector_id then jitem.vector_id = it.vector_id end
+        job.job_items.elements:insert('#', jitem)
+    end
+    dfhack.job.assignToWorkshop(job, shop)
+    return job
+end
+
 local function missing_shops(keys)
     local seen, out = {}, {}
     for _, k in ipairs(keys) do
@@ -1349,8 +1413,11 @@ local ROCK_NUT_MIN = 100   -- only press nuts for oil above this many (it eats t
 local GLASS_WOOD_MIN = 50  -- pearlash chain starts at wood; only offer with a real surplus
 local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
 local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
-local ROUGH_GEM_MIN = 10   -- start cutting once the rough pile is bigger than this
+local ROUGH_GEM_MIN = 10   -- start cutting once the rough GEM pile is bigger than this
+local CUT_GEM_BATCH = 10   -- jobs posted per click, so one ask cannot flood the jeweler
 local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then cloth, then thread
+local ADAM_THRONE = 9      -- ...but hold this many WAFERS once the rest is stocked and there
+                           -- are this many raw boulders spare: nine is a true throne
 local ADAM_BATCH = 1       -- ...one job at a time, so an order reads 1/1, not 3/3
 
 -- Every bag-consuming order must leave a FLOOR of empty bags behind, or whichever job runs
@@ -1684,21 +1751,56 @@ STANDING = {
             end}}
     end,
     function()   -- cut gems: turn the rough surplus into cut stones
-        local rough = 0
+        -- Counted by MATERIAL, not by item type. `items.other.ROUGH` holds raw glass and raw
+        -- adamantine as well as gems, and so does a manager order's ROUGH condition -- which is
+        -- why the old order sat permanently satisfied on a fort with one gem in it.
+        local by_mat, total = {}, 0
         for _, it in ipairs(df.global.world.items.other.ROUGH) do
-            if usable_stock(it) then rough = rough + (it.stack_size or 1) end
+            if usable_stock(it) then
+                local mi = dfhack.matinfo.decode(it)
+                local gem = false
+                if mi then pcall(function() gem = mi.material.flags.IS_GEM end) end
+                if gem then
+                    local n = it.stack_size or 1
+                    local key = it:getMaterialIndex()
+                    by_mat[key] = (by_mat[key] or 0) + n
+                    total = total + n
+                end
+            end
         end
-        if rough <= ROUGH_GEM_MIN then return {} end
-        if has_order(df.job_type.CutGems, -1) then return {} end
+        if total <= ROUGH_GEM_MIN then return {} end
+        local queued = jobs_queued(df.job_type.CutGems)
+        local want = total - ROUGH_GEM_MIN - queued
+        if want <= 0 then return {} end
+        if want > CUT_GEM_BATCH then want = CUT_GEM_BATCH end
         return {{name = 'Cut gems', shops = {'CutGems'},
-            note = ('You have %d rough gems. Cut ones are worth far more and are what a jeweler\n'):format(rough)
-                .. 'encrusts with, so a rough pile sitting in a stockpile is wasted value.\n\n'
-                .. ('Creates: Cut gems, Daily x1, while over %d rough gems remain -- it takes the\n'):format(ROUGH_GEM_MIN)
-                .. 'surplus one at a time and always leaves that many uncut, so it never empties\n'
-                .. 'the pile or floods the jeweler with work.',
+            note = ('You have %d rough GEMS (DF counts %d "rough" items here -- the rest is raw\n'):format(
+                    total, #df.global.world.items.other.ROUGH)
+                .. 'glass and raw adamantine, which is why a manager order gated on rough stone\n'
+                .. 'sits satisfied and cuts nothing). Cut gems are worth far more and are what a\n'
+                .. 'jeweler encrusts with.\n\n'
+                .. ('Creates: %d Cut Gem JOBS at the jeweler, one per surplus gem, each pinned to\n'):format(want)
+                .. ('a gem you actually have. No manager order, so nothing is left running on a\n')
+                .. ('condition that cannot tell a gem from a lump of glass. Always leaves %d uncut.'):format(ROUGH_GEM_MIN),
             build = function()
-                add_order{job_type = df.job_type.CutGems, amount = 1, frequency = Daily,
-                    conds = {C('GreaterThan', ROUGH_GEM_MIN, df.item_type.ROUGH)}}
+                local shop = find_shop(FIXED_WS.CutGems)
+                if shop then
+                    -- spend the biggest piles first, one job per gem
+                    local mats = {}
+                    for idx, n in pairs(by_mat) do mats[#mats + 1] = {idx = idx, n = n} end
+                    table.sort(mats, function(a, b) return a.n > b.n end)
+                    local left = want
+                    for _, m in ipairs(mats) do
+                        for _ = 1, m.n do
+                            if left <= 0 then break end
+                            post_job(shop, {job_type = df.job_type.CutGems,
+                                items = {{item_type = df.item_type.ROUGH, mat_type = 0,
+                                          mat_index = m.idx, quantity = 1}}})
+                            left = left - 1
+                        end
+                        if left <= 0 then break end
+                    end
+                end
                 return missing_shops({'CutGems'})
             end}}
     end,
@@ -1959,63 +2061,102 @@ STANDING = {
         if not RAW or not ADAM then return {} end
         if not boulder_present(RAW) then return {} end    -- only while raw adamantine is on hand
         local THREAD, CLOTH = df.item_type.THREAD, df.item_type.CLOTH
+
+        -- Posted as JOBS, not as manager orders on conditions. The chain is capped at
+        -- ADAM_KEEP of each product, and a cap is exactly what a condition cannot express
+        -- honestly here: FORBIDDEN adamantine still counts. A forbidden wafer is stock you
+        -- own -- fort/help-mood forbids items for a mood, a stockpile may hold some aside --
+        -- and a chain that ignores it extracts more boulders to replace what is only set
+        -- aside. So every count below includes forbidden items, and the jobs already queued
+        -- count too, so clicking twice does not double the work.
+        local function stock(item_type, mat_index)
+            local n = 0
+            for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+                if it:getType() == item_type and it:getMaterial() == 0
+                    and it:getMaterialIndex() == mat_index then
+                    local f = it.flags
+                    -- forbidden: counted. destroyed or somebody else's: not.
+                    if not (f.dump or f.garbage_collect or f.removed or f.hostile
+                            or f.trader or f.foreign or f.artifact) then
+                        n = n + (it.stack_size or 1)
+                    end
+                end
+            end
+            return n
+        end
+
+        local wafers = stock(df.item_type.BAR, ADAM)
+        local cloth  = stock(CLOTH, ADAM)
+        local thread = stock(THREAD, ADAM)
+        local boulders = stock(df.item_type.BOULDER, RAW)
         local out = {}
-        -- Priority is the ORDER THESE ARE ADDED: DF works the manager list top-down, so wafers
-        -- are filled before cloth and cloth before a thread reserve. Everything is capped at
-        -- ADAM_KEEP, which is what leaves the remainder sitting as raw adamantine -- extraction
-        -- stops once thread is stocked, so the boulders are never drained "just in case".
-        --
-        -- Cloth explicitly waits for the wafer step: it will not run until 3 wafers exist.
-        --
-        -- The THREAD step is deliberately NOT gated on the step "before" it. Thread is the input
-        -- to both wafers and cloth, so requiring cloth (or wafers) first would deadlock the whole
-        -- chain -- with nothing extracted there is no thread, so no wafers, so no cloth, so the
-        -- gate never opens. Its cap alone does the job: extraction stops at 3 thread, the other
-        -- two consume it, extraction tops it back up, and everything halts at 3/3/3 with the
-        -- remaining boulders untouched.
-        --
-        -- Every order is a batch of ONE (ADAM_BATCH) against a cap of 3: the amount is how many
-        -- jobs each trigger queues, not the target, so 1/1 walks up to the cap a job at a time
-        -- rather than committing three jobs to material that isn't extracted yet.
-        if not reaction_ordered('ADAMANTINE_WAFERS') then
+
+        -- The wafer cap lifts once the rest of the chain is stocked and there is raw
+        -- adamantine to spare. Three wafers is a reserve; NINE is a true adamantine throne,
+        -- and there is no point holding the boulders back for a rainy day once cloth and
+        -- thread are covered and nine boulders are sitting there. Below that it stays at
+        -- three, so a fort with one lucky vein does not spend it all on furniture.
+        local wafer_target = ADAM_KEEP
+        if cloth >= ADAM_KEEP and thread >= ADAM_KEEP and wafers >= ADAM_KEEP
+            and boulders >= ADAM_THRONE then
+            wafer_target = ADAM_THRONE
+        end
+
+        -- Wafers first, then cloth, then a thread reserve -- the order these are offered is
+        -- the order the fort should work them. Cloth waits for the wafer step to finish;
+        -- thread is NOT gated on the others, because it is their input and gating it would
+        -- deadlock the chain (no thread -> no wafers -> no cloth -> no gate ever opens).
+        local want_wafers = wafer_target - wafers - jobs_queued(df.job_type.CustomReaction, 'ADAMANTINE_WAFERS')
+        if want_wafers > 0 and thread > 0 then
             out[#out + 1] = {name = 'Adamantine wafers', shops = {'ADAMANTINE_WAFERS'},
-                note = ('Smelts adamantine thread into wafers at a Smelter -- keeps %d in stock,\n'):format(ADAM_KEEP)
-                    .. 'running while you have adamantine thread to smelt. First call on the\n'
-                    .. 'chain: wafers are what adamantine is actually worth forging.',
+                note = ('You have %d adamantine wafers, %d thread, %d raw boulders (forbidden\ncounted).\n\n'):format(wafers, thread, boulders)
+                    .. (wafer_target > ADAM_KEEP
+                        and ('Target raised to %d: cloth and thread are stocked and you have %d\nboulders spare, which is enough for a true adamantine throne.\n\n'):format(wafer_target, boulders)
+                        or '')
+                    .. ('Creates: %d smelter JOB(S) turning thread into wafers, up to %d in stock.\n'):format(want_wafers, wafer_target)
+                    .. 'Posted as jobs rather than a repeating order so the cap can count stock\n'
+                    .. 'you have set aside -- a forbidden wafer is still a wafer, and an order\n'
+                    .. 'that cannot see it would mine and extract more to replace it.',
                 build = function()
-                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'ADAMANTINE_WAFERS',
-                        amount = ADAM_BATCH, frequency = Daily, conds = {
-                            C('LessThan', ADAM_KEEP, BAR, 0, ADAM),  -- wafers are bars
-                            C('GreaterThan', 0, THREAD, 0, ADAM)}}   -- while thread is on hand
+                    local shop = find_shop(FIXED_WS.ADAMANTINE_WAFERS)
+                    for _ = 1, want_wafers do
+                        post_job(shop, {job_type = df.job_type.CustomReaction,
+                                        reaction = 'ADAMANTINE_WAFERS'})
+                    end
                     return missing_shops({'ADAMANTINE_WAFERS'})
                 end}
         end
-        if not order_exists_mat(df.job_type.WeaveCloth, 0, ADAM) then
+
+        local want_cloth = ADAM_KEEP - cloth - jobs_queued(df.job_type.WeaveCloth)
+        if want_cloth > 0 and thread > 0 and wafers >= ADAM_KEEP then
             out[#out + 1] = {name = 'Adamantine cloth', shops = {'WeaveCloth'},
-                note = ('Weaves adamantine thread into cloth at a Loom -- keeps %d in stock, and\n'):format(ADAM_KEEP)
-                    .. ('will not start until %d adamantine WAFERS exist, so the wafer step really\n'):format(ADAM_KEEP)
-                    .. 'is finished before any thread goes to cloth.',
+                note = ('You have %d adamantine cloth, %d thread (forbidden ones counted).\n\n'):format(cloth, thread)
+                    .. ('Creates: %d loom JOB(S), up to %d in stock. Offered only now the wafer\n'):format(want_cloth, ADAM_KEEP)
+                    .. 'step is finished, so thread goes to wafers first.',
                 build = function()
-                    add_order{job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
-                        amount = ADAM_BATCH, frequency = Daily, conds = {
-                            C('LessThan', ADAM_KEEP, CLOTH, 0, ADAM),
-                            -- the wafer step must be FINISHED first: no cloth until 3 wafers exist
-                            C('AtLeast', ADAM_KEEP, BAR, 0, ADAM),
-                            C('GreaterThan', 0, THREAD, 0, ADAM)}}
+                    local shop = find_shop(FIXED_WS.WeaveCloth)
+                    for _ = 1, want_cloth do
+                        post_job(shop, {job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
+                            items = {{item_type = THREAD, mat_type = 0, mat_index = ADAM, quantity = 1}}})
+                    end
                     return missing_shops({'WeaveCloth'})
                 end}
         end
-        if not order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW) then
+
+        local want_thread = ADAM_KEEP - thread - jobs_queued(df.job_type.ExtractMetalStrands)
+        if want_thread > 0 then
             out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
-                note = ('Extracts raw adamantine into thread at a Craftsdwarf\'s Workshop -- keeps\n%d in stock, running while raw adamantine remains.\n\n'):format(ADAM_KEEP)
-                    .. 'Last in the chain on purpose: it is the reserve the wafer and cloth orders\n'
-                    .. 'draw from, and capping it is what stops the fort extracting every boulder.\n'
-                    .. 'Whatever is left over stays as raw adamantine.',
+                note = ('You have %d adamantine thread (forbidden ones counted).\n\n'):format(thread)
+                    .. ('Creates: %d Craftsdwarf JOB(S) extracting raw adamantine, up to %d in\n'):format(want_thread, ADAM_KEEP)
+                    .. 'stock. Capping this is what stops the fort extracting every boulder --\n'
+                    .. 'whatever is left over stays as raw adamantine.',
                 build = function()
-                    add_order{job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
-                        amount = ADAM_BATCH, frequency = Daily, conds = {
-                            C('LessThan', ADAM_KEEP, THREAD, 0, ADAM),
-                            C('AtLeast', 1, BOULDER, 0, RAW)}}       -- while RAW adamantine is on hand
+                    local shop = find_shop(FIXED_WS.ExtractMetalStrands)
+                    for _ = 1, want_thread do
+                        post_job(shop, {job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
+                            items = {{item_type = df.item_type.BOULDER, mat_type = 0,
+                                      mat_index = RAW, quantity = 1}}})
+                    end
                     return missing_shops({'ExtractMetalStrands'})
                 end}
         end
@@ -2054,11 +2195,19 @@ STANDING_INFO = {
         local w = #df.global.world.items.other.WOOD
         if w <= GLASS_WOOD_MIN then
             return ('only %d wood logs, needs over %d'):format(w, GLASS_WOOD_MIN) end end},
-    {name = 'Cut gems',               done  = function() return has_order(df.job_type.CutGems, -1) end,
+    -- counted by MATERIAL and judged by queued JOBS, matching the ask itself. Counting
+    -- `items.other.ROUGH` here reported "19 rough gems" for a fort holding one, because
+    -- raw glass and raw adamantine are ROUGH items too.
+    {name = 'Cut gems',               done  = function() return jobs_queued(df.job_type.CutGems) > 0 end,
                                       blocked = function()
         local n = 0
         for _, it in ipairs(df.global.world.items.other.ROUGH) do
-            if usable_stock(it) then n = n + (it.stack_size or 1) end
+            if usable_stock(it) then
+                local mi = dfhack.matinfo.decode(it)
+                local gem = false
+                if mi then pcall(function() gem = mi.material.flags.IS_GEM end) end
+                if gem then n = n + (it.stack_size or 1) end
+            end
         end
         if n <= ROUGH_GEM_MIN then
             return ('only %d rough gems, needs over %d'):format(n, ROUGH_GEM_MIN) end end},
@@ -2090,11 +2239,39 @@ STANDING_INFO = {
         local RAW = inorg_idx('RAW_ADAMANTINE')
         if not RAW or not boulder_present(RAW) then return 'no raw adamantine on hand' end end,
                                       done  = function()
+        -- "done" is now the chain being AT ITS CAP, not a manager order existing: the asks
+        -- post jobs, and stock counts include forbidden items the same way they do.
         local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
         if not (RAW and ADAM) then return false end
-        return order_exists_mat(df.job_type.ExtractMetalStrands, 0, RAW)
-            and reaction_ordered('ADAMANTINE_WAFERS')
-            and order_exists_mat(df.job_type.WeaveCloth, 0, ADAM) end},
+        local function stock(item_type)
+            local n = 0
+            for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+                if it:getType() == item_type and it:getMaterial() == 0
+                    and it:getMaterialIndex() == ADAM then
+                    local f = it.flags
+                    if not (f.dump or f.garbage_collect or f.removed or f.hostile
+                            or f.trader or f.foreign or f.artifact) then
+                        n = n + (it.stack_size or 1)
+                    end
+                end
+            end
+            return n
+        end
+        local wafers, cloth, thread = stock(df.item_type.BAR), stock(df.item_type.CLOTH), stock(df.item_type.THREAD)
+        if not (cloth >= ADAM_KEEP and thread >= ADAM_KEEP and wafers >= ADAM_KEEP) then return false end
+        -- the raised throne target applies here too, or the status would call the chain
+        -- finished while it is still working up to nine wafers
+        local boulders = 0
+        for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+            if it:getType() == df.item_type.BOULDER and it:getMaterial() == 0
+                and it:getMaterialIndex() == RAW then
+                local f = it.flags
+                if not (f.dump or f.garbage_collect or f.removed or f.hostile
+                        or f.trader or f.foreign or f.artifact) then boulders = boulders + 1 end
+            end
+        end
+        if boulders >= ADAM_THRONE then return wafers >= ADAM_THRONE end
+        return true end},
 }
 if #STANDING_INFO ~= #STANDING then
     qerror(('planner-orders: %d standing checks but %d names -- they must stay in step')
