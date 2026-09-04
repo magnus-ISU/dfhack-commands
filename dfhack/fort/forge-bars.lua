@@ -9,6 +9,7 @@ find out is to open the menu or leave for the stocks screen. This overlay paints
 bar count over that "(opens menu)" tail on every row -- "iron (14 bars)", "gold (no
 bars)" -- read straight from the bars on the map. Forbidden bars are not counted;
 bars already claimed by a job are counted but noted: "steel (6 bars, 2 in use)".
+Metals you have no bars of are moved to the bottom of the list, in DF's order.
 
 Lives on the forge and magma forge building sheet only (the smelter lists ores and
 reactions, not metals). Auto-discovered by `overlay rescan`; toggle as
@@ -86,6 +87,62 @@ local function label(c)
     local s = ('(%d bar%s'):format(c.n, c.n == 1 and '' or 's')
     if c.busy > 0 then s = s .. (', %d in use'):format(c.busy) end
     return s .. ')'
+end
+
+-- ---------------------------------------------------------------------------
+-- metals you have first
+-- ---------------------------------------------------------------------------
+-- `filtered_button` is the DISPLAY vector (DFHack's own slab overlay reorders it the
+-- same way). Stable partition: metals with bars keep DF's order at the top, the
+-- "(no bars)" ones follow in DF's order. Only runs when the list is out of order,
+-- so a list DF has just rebuilt (opened, typed in the filter box) is fixed once and
+-- then left alone; `selected` is remapped so the highlight stays on its row.
+local function has_bars(counts, b)
+    local c = counts[b.material .. ':' .. b.matgloss]
+    return c and c.n > 0
+end
+
+local function needs_sort(vec, counts)
+    local seen_empty = false
+    for i = 0, #vec - 1 do
+        local b = vec[i]
+        if MATSEL:is_instance(b) then
+            if has_bars(counts, b) then
+                if seen_empty then return true end
+            else
+                seen_empty = true
+            end
+        end
+    end
+    return false
+end
+
+function sort_materials(counts)
+    if not list_live() then return 0 end
+    local vec = building.filtered_button
+    local n = #vec
+    if n < 2 or not needs_sort(vec, counts) then return 0 end
+    local sel = (building.selected >= 0 and building.selected < n) and vec[building.selected] or nil
+    local arr = {}
+    for i = 0, n - 1 do
+        local b = vec[i]
+        local empty = MATSEL:is_instance(b) and not has_bars(counts, b)
+        arr[i + 1] = {b = b, rank = i, empty = empty and 1 or 0}
+    end
+    table.sort(arr, function(x, y)
+        if x.empty ~= y.empty then return x.empty < y.empty end
+        return x.rank < y.rank
+    end)
+    local out, newsel, moved = {}, nil, 0
+    for i, e in ipairs(arr) do
+        out[i] = e.b
+        if e.rank ~= i - 1 then moved = moved + 1 end
+        if sel and e.b == sel then newsel = i - 1 end
+    end
+    vec:assign(out)
+    vec:resize(n)
+    if newsel then building.selected = newsel end
+    return moved
 end
 
 -- ---------------------------------------------------------------------------
@@ -176,6 +233,10 @@ function CountsOverlay:overlay_onupdate()
     if not self.counts or now - self.counted_at > 1000 then
         self.counts = count_bars()
         self.counted_at = now
+    end
+    if sort_materials(self.counts) > 0 then
+        sig = list_signature()             -- the order just changed: rows must be re-found
+        self.sig = nil
     end
     local stale = sig ~= self.sig
     if not stale and self.rows then

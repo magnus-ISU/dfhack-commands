@@ -175,7 +175,8 @@ round out the set.
 The forge's "Add new task" list names every metal it could work as "iron (opens menu)",
 whether you own a bar of it or not. This overlay paints the count over that tail on every row —
 "iron (40 bars)", "steel (no bars)", "bronze (319 bars, 2 in use)" — read from the bars on the map
-(forbidden bars are not counted; bars a job has already claimed are counted and noted). Metalsmith's
+(forbidden bars are not counted; bars a job has already claimed are counted and noted), and the metals
+you have none of are moved to the bottom of the list, in DF's order. Metalsmith's
 forge and magma forge only. Auto-discovered by `overlay rescan`; `forge-bars` on the console prints
 the same counts for the open menu.
 
