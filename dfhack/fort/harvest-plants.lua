@@ -1,4 +1,4 @@
--- Post a plant-gathering job for every shrub standing in a Gather Fruit zone.
+-- Designate every ripe shrub standing in a Gather Fruit zone for gathering.
 --@module = true
 --@enable = true
 --[[
@@ -6,12 +6,16 @@ harvest-plants
 
 A Gather Fruit zone hands its plants out slowly: DF picks a few tiles at a time and
 trickles the rest in as the zone timer comes round again, so a big patch of shrubs
-sits half-picked for seasons. Once a month this walks every Gather Fruit zone and posts
-a `GatherPlants` job on each shrub in it, so the whole zone is worked at once by whoever
-has the labor -- and the [Harvest] button does it on the spot.
+sits half-picked for seasons. Once a month this walks every Gather Fruit zone and
+DESIGNATES each ripe shrub in it for gathering -- the same tile designation the Designate >
+Gather tool paints (`dfhack.designations.markPlant`) -- so DF itself posts and runs the
+`GatherPlants` jobs, exactly as if you had dragged the tool over the zone. The [Harvest]
+button does it on the spot.
 
-  * Every shrub tile inside an active Gather Fruit zone gets a job, unless one is
-    already posted there -- DF's own zone jobs count, so nothing is ever duplicated.
+  * Every LIVE shrub tile inside an active Gather Fruit zone gets designated, unless it
+    already is or a gathering job is already posted there -- DF's own zone jobs count, so
+    nothing is ever duplicated. Withered shrubs (the ShrubDead tile, or a plant record
+    flagged dead) are never touched: they are what the zone has already given up on.
   * A zone with "Pick shrubs" switched off is skipped: the zone's own settings still
     decide what gets gathered.
   * Per zone, on by default. The [Harvest] button on the zone panel (below the three
@@ -19,18 +23,16 @@ has the labor -- and the [Harvest] button does it on the spot.
     switching it ON posts the zone's jobs there and then, switching it OFF pulls the
     zone's outstanding gathering jobs back out of the queue (any job a dwarf has
     already picked up is left to finish). The choice persists with the fort.
-  * A tile whose job disappears while the shrub is still standing (unreachable, no
-    free barrel, gathering forbidden there) is dropped for the rest of the session
-    rather than re-posted every day, so a stuck plant can't spam job cancellations.
-  * Only shrubs with something ON them are posted -- a plant with growths has produce
-    only while one is in SEASON, and leaves and flowers are not produce -- and OUR
-    outstanding jobs are re-checked daily and taken back when their season ends. A job
-    posted over a summer berry patch is still queued in late autumn otherwise, on bare
-    twigs; this fort had 114 of them.
+  * Only shrubs with something ON them are designated -- a plant with growths has
+    produce only while one is in SEASON, and leaves and flowers are not produce -- and
+    OUR designations are re-checked daily and cleared when their season ends, so DF stops
+    handing the tile out. A job DF already posted for it is left alone (never pull a job
+    DF owns: that has segfaulted this fort); a job a dwarf is already on is finished.
+    Designations painted by hand or by DF are never cleared, only ours.
 
-    enable harvest-plants     post jobs once a month (persists with the fort)
+    enable harvest-plants     designate once a month (persists with the fort)
     disable harvest-plants    stop
-    harvest-plants            one pass right now, and report what was posted
+    harvest-plants            one pass right now, and report what was designated
 
 Add `enable fort/harvest-plants` to magnus-scripts / dfhack.init to run it every
 session.
@@ -41,18 +43,17 @@ local widgets = require('gui.widgets')
 
 local GLOBAL_KEY = 'harvest-plants'
 local CYCLE_MONTHS = 1     -- a DF month is 28 days; a daily sweep is far more than plants need
-local MAX_NEW_JOBS = 60   -- per cycle, so a freshly painted forest zone doesn't flood the queue
+local MAX_NEW_MARKS = 60  -- per cycle, so a freshly painted forest zone doesn't flood the queue
 
 -- ---- state ----------------------------------------------------------------
 -- Persisted per fort: {enabled, off = {['<zone id>'] = true}}. Absent id = ON, so a
 -- zone you never touched harvests itself; JSON keys are strings, hence tostring().
 state = state or nil
 enabled = enabled or false
--- job id -> {x,y,z}: the jobs this script posted. PERSISTED, not session state: a job that
--- goes out of season two months after it was posted has to be recognisable as ours in order to
--- be taken back, and a save in between must not make it anonymous.
+-- 'x,y,z' -> true: the tiles this script designated. PERSISTED, not session state: a
+-- designation that goes out of season two months after it was painted has to be recognisable
+-- as ours in order to be cleared, and a save in between must not make it anonymous.
 mine = mine or nil
-skip = skip or nil        -- 'x,y,z' -> true: tiles whose job died with the shrub still there
 
 local function load_state()
     if not state then
@@ -62,25 +63,21 @@ local function load_state()
     end
     if not mine then
         mine = {}
-        for id, at in pairs(state.mine or {}) do
-            local x, y, z = tostring(at):match('^(-?%d+),(-?%d+),(-?%d+)$')
-            if x then
-                mine[tonumber(id)] = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
-            end
+        for k, v in pairs(state.mine or {}) do
+            -- older saves kept job id -> 'x,y,z'; the tile is what matters either way
+            local at = type(v) == 'string' and v or k
+            if tostring(at):match('^(-?%d+),(-?%d+),(-?%d+)$') then mine[at] = true end
         end
     end
-    if not skip then skip = {} end
     return state
 end
 
--- written once at the end of a sweep rather than per job: sixty saves in a row for one
--- cycle's posting is sixty writes of the same table
+-- written once at the end of a sweep rather than per tile: sixty saves in a row for one
+-- cycle's painting is sixty writes of the same table
 local function save_mine()
     if not state then return end
     state.mine = {}
-    for id, pos in pairs(mine) do
-        state.mine[tostring(id)] = ('%d,%d,%d'):format(pos.x, pos.y, pos.z)
-    end
+    for k in pairs(mine) do state.mine[k] = true end
     pcall(dfhack.persistent.saveSiteData, GLOBAL_KEY, state)
 end
 
@@ -100,18 +97,14 @@ function zone_enabled(zone)
     return not state.off[tostring(zone.id)]
 end
 
--- Toggling the button acts at once: ON posts this zone's jobs now (and un-retires any
--- tiles this session gave up on -- asking again is asking for a fresh try), OFF pulls the
--- zone's outstanding gathering jobs back out of the queue.
+-- Toggling the button acts at once: ON designates this zone's ripe shrubs now, OFF clears
+-- the designations we painted in it.
 function set_zone_enabled(zone, on)
     load_state()
     state.off[tostring(zone.id)] = (not on) or nil
     save_state()
-    if on then
-        clear_zone_skips(zone)
-        return do_cycle(zone)
-    end
-    return clear_zone_jobs(zone)
+    if on then return do_cycle(zone) end
+    return clear_zone_marks(zone)
 end
 
 -- the Gather Fruit zone shown on the zone panel right now, or nil
@@ -120,13 +113,18 @@ function cur_zone()
     if is_gather_zone(bld) then return bld end
 end
 
--- ---- job posting ----------------------------------------------------------
+-- ---- designating ----------------------------------------------------------
 
 local function key(x, y, z) return ('%d,%d,%d'):format(x, y, z) end
 
+-- A standing, LIVE shrub. ShrubDead has the SHRUB shape too, and it is exactly the tile DF's
+-- own zone never picks -- so treating every SHRUB-shaped tile as a bush meant every job this
+-- script added was on a withered one (the live ones already had DF's).
 local function is_shrub(x, y, z)
     local tt = dfhack.maps.getTileType(x, y, z)
-    return tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.SHRUB
+    if not tt then return false end
+    local attrs = df.tiletype.attrs[tt]
+    return attrs.shape == df.tiletype_shape.SHRUB and attrs.special ~= df.tiletype_special.DEAD
 end
 
 -- ---- is there anything on it to pick? ----------------------------------------
@@ -157,12 +155,19 @@ end
 
 local NOT_PRODUCE = {LEAVES = true, FLOWERS = true}
 
-local function has_produce(x, y, z)
+-- the df.plant standing on this tile, if it is alive
+local function live_plant_at(x, y, z)
     local plant = plants_by_pos()[('%d/%d/%d'):format(x, y, z)]
-    if not plant then return false end                   -- shrub tile with no plant record
-    local dead = false
-    pcall(function() dead = plant.damage_flags.is_dead end)
-    if dead then return false end
+    if not plant then return nil end                     -- shrub tile with no plant record
+    -- the flags are `dead` and `season_dead` -- an earlier `is_dead` under pcall read as
+    -- "never dead" and let every withered bush through
+    if plant.damage_flags.dead or plant.damage_flags.season_dead then return nil end
+    return plant
+end
+
+local function has_produce(x, y, z)
+    local plant = live_plant_at(x, y, z)
+    if not plant then return false end
     local raw = df.global.world.raws.plants.all[plant.material]
     if not raw then return false end
     if #raw.growths == 0 then return true end            -- picked whole
@@ -180,77 +185,72 @@ end
 -- Walking the job list once per cycle is far cheaper than a per-tile search, and it is
 -- the only way to see DF's own zone jobs -- they are not attached to the zone building.
 local function gather_job_tiles()
-    local tiles, live = {}, {}
+    local tiles = {}
     local link = df.global.world.jobs.list.next
     while link do
         local job = link.item
-        if job then
-            if job.job_type == df.job_type.GatherPlants then
-                tiles[key(job.pos.x, job.pos.y, job.pos.z)] = true
-            end
-            live[job.id] = true
+        if job and job.job_type == df.job_type.GatherPlants then
+            tiles[key(job.pos.x, job.pos.y, job.pos.z)] = true
         end
         link = link.next
     end
-    return tiles, live
+    return tiles
 end
 
--- A bare df.job is enough for a designation-style job like this one: no building holder,
--- no job items. DF assigns, runs and cleans it up like one of its own.
-local function post_job(x, y, z)
-    local job = df.job:new()
-    job.job_type = df.job_type.GatherPlants
-    job.pos.x, job.pos.y, job.pos.z = x, y, z
-    job.completion_timer = -1
-    dfhack.job.linkIntoWorld(job, true)
-    mine[job.id] = {x = x, y = y, z = z}
-    return job
+-- DF's own mechanism: the Designate > Gather tool sets the tile's dig designation and flags
+-- the block, and DF posts the GatherPlants job itself. markPlant does exactly that.
+local function mark(plant)
+    if not dfhack.designations.canMarkPlant(plant) then return false end
+    if not dfhack.designations.markPlant(plant) then return false end
+    mine[key(plant.pos.x, plant.pos.y, plant.pos.z)] = true
+    return true
 end
 
--- A job of ours that is gone while its shrub still stands never got done: something
--- refuses that tile. Retire the tile so the next cycle doesn't post it all over again.
-local function retire_dead_jobs(live)
-    for id, pos in pairs(mine) do
-        if not live[id] then
-            mine[id] = nil
-            if is_shrub(pos.x, pos.y, pos.z) then
-                skip[key(pos.x, pos.y, pos.z)] = true
-            end
-        end
+-- Clear a designation of ours WITHOUT touching jobs. DFHack's unmarkPlant also pulls the
+-- GatherPlants job, and removing a job DF posted segfaulted this fort once, ten seconds
+-- later inside an unrelated overlay. With the designation gone DF stops handing the tile
+-- out; a job it already posted runs or cancels on DF's own terms.
+local function unmark(x, y, z)
+    local block = dfhack.maps.getTileBlock(x, y, z)
+    if block then
+        block.designation[x % 16][y % 16].dig = df.tile_dig_designation.No
+        block.flags.designated = true
     end
+    mine[key(x, y, z)] = nil
 end
 
--- A SEASON ENDS WHILE THE JOBS ARE STILL QUEUED.
+local function is_marked(x, y, z)
+    local block = dfhack.maps.getTileBlock(x, y, z)
+    return block and block.designation[x % 16][y % 16].dig ~= df.tile_dig_designation.No
+end
+
+-- A SEASON ENDS WHILE THE DESIGNATION IS STILL UP.
 --
--- Checking for produce before posting is only half the job. Berries are in season from
--- year-tick 120000 to 200000; a job posted in the summer is still sitting in the queue in
--- late autumn, on a bush with nothing on it, and the dwarf who finally walks out to it finds
--- bare twigs. This fort had 114 of them, every one posted legitimately months earlier.
+-- Checking for produce before designating is only half the job. Berries are in season from
+-- year-tick 120000 to 200000; a tile painted in the summer is still designated in late
+-- autumn, on a bush with nothing on it, and the dwarf who finally walks out to it finds
+-- bare twigs. This fort had 114 such jobs, every one posted legitimately months earlier.
 --
--- So our own outstanding jobs are re-checked daily and taken back when the tile stops having
--- anything to pick. ONLY ours, and only while nobody has picked the job up: removing a job a
--- dwarf is working segfaults DF, and removing a job DF's own zone posted segfaulted it once
--- ten seconds later, inside an unrelated overlay, and cost this fort its unsaved progress.
+-- So our own designations are re-checked daily and cleared when the tile stops having
+-- anything to pick. ONLY ours: a tile DF gathered (designation gone) or that the player
+-- painted by hand is not ours to clear. Note the window is short: DF clears the designation
+-- bit the moment it posts the GatherPlants job (verified: designated tile -> job 197539 and
+-- dig=No within a day), and from then on the job is DF's and is left alone.
 function retire_stale()
     load_state()
-    local doomed = {}
-    local link = df.global.world.jobs.list.next
-    while link do
-        local job = link.item
-        if job and job.job_type == df.job_type.GatherPlants and mine[job.id]
-            and not dfhack.job.getWorker(job)
-            and not (is_shrub(job.pos.x, job.pos.y, job.pos.z)
-                     and has_produce(job.pos.x, job.pos.y, job.pos.z)) then
-            doomed[#doomed + 1] = job          -- collect first: removeJob unlinks the list
+    local n = 0
+    for k in pairs(mine) do
+        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        x, y, z = tonumber(x), tonumber(y), tonumber(z)
+        if not is_marked(x, y, z) then
+            mine[k] = nil                                 -- DF took it: gathered or gone
+        elseif not (is_shrub(x, y, z) and has_produce(x, y, z)) then
+            unmark(x, y, z)
+            n = n + 1
         end
-        link = link.next
     end
-    for _, job in ipairs(doomed) do
-        mine[job.id] = nil
-        dfhack.job.removeJob(job)
-    end
-    if #doomed > 0 then save_mine() end
-    return #doomed
+    if n > 0 then save_mine() end
+    return n
 end
 
 -- Is this tile inside the zone? (Cheap z check first -- zones are one z-level.)
@@ -259,51 +259,28 @@ local function in_zone(zone, x, y, z)
         and dfhack.buildings.containsTile(zone, x, y)
 end
 
--- Pull our outstanding gathering jobs inside `zone` back out of the queue.
---
--- THREE rules, each of them paid for. Collect the whole list BEFORE removing anything
--- (removeJob unlinks from the list we would still be walking). Never touch a job a dwarf has
--- already taken -- removing a unit's current job segfaults DF. And never touch a job DF's own
--- zone posted, only ones in `mine`: doing that segfaulted DF ten seconds later, inside an
--- unrelated overlay walking a building's job list, and cost this fort its unsaved progress.
--- This used to remove DF's too, on the reasoning that the zone re-posts them anyway.
-function clear_zone_jobs(zone)
+-- Clear the designations we painted inside `zone`. Only ours (in `mine`), and jobs are
+-- left alone -- see unmark.
+function clear_zone_marks(zone)
     load_state()
-    local doomed = {}
-    local link = df.global.world.jobs.list.next
-    while link do
-        local job = link.item
-        if job and job.job_type == df.job_type.GatherPlants and mine[job.id]
-            and in_zone(zone, job.pos.x, job.pos.y, job.pos.z)
-            and not dfhack.job.getWorker(job) then
-            doomed[#doomed + 1] = job
-        end
-        link = link.next
-    end
-    for _, job in ipairs(doomed) do
-        mine[job.id] = nil
-        dfhack.job.removeJob(job)
-    end
-    if #doomed > 0 then save_mine() end
-    return #doomed
-end
-
--- Forget the tiles in this zone that were retired as unworkable, so they are tried again.
-function clear_zone_skips(zone)
-    load_state()
-    for k in pairs(skip) do
+    local n = 0
+    for k in pairs(mine) do
         local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
-        if x and in_zone(zone, tonumber(x), tonumber(y), tonumber(z)) then skip[k] = nil end
+        x, y, z = tonumber(x), tonumber(y), tonumber(z)
+        if in_zone(zone, x, y, z) then
+            if is_marked(x, y, z) then unmark(x, y, z); n = n + 1 else mine[k] = nil end
+        end
     end
+    save_mine()
+    return n
 end
 
--- Post a job on every unposted shrub in every enabled Gather Fruit zone (or just in
--- `only_zone`, when given). Returns the number of jobs posted.
+-- Designate every ripe, undesignated shrub in every enabled Gather Fruit zone (or just in
+-- `only_zone`, when given). Returns the number of tiles designated.
 function do_cycle(only_zone)
     load_state()
     if not dfhack.world.isFortressMode() then return 0 end
-    local tiles, live = gather_job_tiles()
-    retire_dead_jobs(live)
+    local tiles = gather_job_tiles()
     local posted, dirty = 0, false
     for _, zone in ipairs(df.global.world.buildings.other.ACTIVITY_ZONE) do
         if (not only_zone or zone.id == only_zone.id)
@@ -312,10 +289,11 @@ function do_cycle(only_zone)
             for x = zone.x1, zone.x2 do
                 for y = zone.y1, zone.y2 do
                     local k = key(x, y, zone.z)
-                    if posted < MAX_NEW_JOBS and not tiles[k] and not skip[k]
+                    if posted < MAX_NEW_MARKS and not tiles[k]
                         and dfhack.buildings.containsTile(zone, x, y)
-                        and is_shrub(x, y, zone.z) and has_produce(x, y, zone.z) then
-                        post_job(x, y, zone.z)
+                        and is_shrub(x, y, zone.z) and has_produce(x, y, zone.z)
+                        and not is_marked(x, y, zone.z)
+                        and mark(live_plant_at(x, y, zone.z)) then
                         tiles[k] = true
                         posted = posted + 1
                         dirty = true
@@ -425,8 +403,8 @@ if dfhack_flags and dfhack_flags.enable ~= nil then
 else
     load_state()
     local n = do_cycle()
-    print(('harvest-plants: posted %d gathering job%s'):format(n, n == 1 and '' or 's'))
+    print(('harvest-plants: designated %d shrub%s for gathering'):format(n, n == 1 and '' or 's'))
     if n == 0 then
-        print('  (nothing to pick: no shrubs in a Gather Fruit zone without a job already on them)')
+        print('  (nothing to pick: no ripe live shrub in a Gather Fruit zone without a designation or job already on it)')
     end
 end

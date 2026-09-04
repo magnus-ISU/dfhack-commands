@@ -105,7 +105,8 @@ with their descriptions and full artifact status — value, quality and the Obje
 even on pedestals, with their engraved images redrawn from what they depict), room and
 office assignments and the guildhalls/temples/libraries/taverns behind meeting areas,
 squads (members, uniforms, ammunition, barracks) and their commander and captains, work details
-and labour assignments, burrows, trees and shrubs (re-planted and regrown where they stood), the
+and labour assignments, burrows, trees and shrubs (shrubs and saplings re-planted where they stood; every tree rebuilt with
+its own trunk, branch and root layout and the exact tiles it stood on), the
 manager's work-order queue, locked doors and hatches, retired adventurers
 (unretirable on arrival), and every unit with skills, personality, appearance, family ties,
 kill tallies by species, clothing ownership, and the surrounding historical-figure web — into
@@ -251,18 +252,20 @@ Each order it queues is announced — who mandated it, and what was ordered.
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
 
 ### **`fort/harvest-plants`**
-Posts a gathering job on every shrub standing in a Gather Fruit zone once a month, instead of
-waiting for the zone to trickle a few tiles out at a time — vegetables and fruitless plants
-included, not just what DF picks on its own. Tiles DF has already posted a job on are skipped,
-so nothing is ever doubled up. A `[Harvest]` button on the zone panel, below the three gather settings,
-turns a zone's auto-posting off and on and acts immediately: on posts that zone's jobs there
-and then, off pulls its outstanding gathering jobs back out of the queue (anything a dwarf
-already picked up is left to finish). It is on by default, and a zone with "Pick shrubs"
-switched off is skipped. Only shrubs with something on them get a job — a plant with growths
-has produce only while one is in *season*, and leaves and flowers are not produce — and its own
-outstanding jobs are re-checked daily and taken back when their season ends, so a summer berry
-patch is not still queued in late autumn on bare twigs. A tile whose job dies with the shrub still standing is retired for
-the session, so an unreachable plant can't spam cancellations.
+Designates every ripe shrub standing in a Gather Fruit zone for gathering once a month, instead
+of waiting for the zone to trickle a few tiles out at a time — vegetables and fruitless plants
+included, not just what DF picks on its own. It uses DF's own mechanism: the same tile
+designation the Designate › Gather tool paints, so DF posts and runs the jobs exactly as if you
+had dragged the tool over the zone. Tiles already designated or with a gathering job are skipped,
+so nothing is ever doubled up, and withered shrubs (`ShrubDead`, or a plant flagged dead) are never
+touched. A `[Harvest]` button on the zone panel, below the three gather settings, turns a zone's
+auto-designating off and on and acts immediately: on designates that zone's ripe shrubs there and
+then, off clears the designations it painted (jobs DF already posted are left to run — pulling a
+job DF owns has crashed this fort). It is on by default, and a zone with "Pick shrubs" switched off
+is skipped. Only shrubs with something on them are designated — a plant with growths has produce
+only while one is in *season*, and leaves and flowers are not produce — and its own designations
+are re-checked daily and cleared when their season ends, so a summer berry patch is not still
+designated in late autumn on bare twigs. Hand-painted designations are never cleared.
 
 ### **`fort/adamantine-hospital`**
 Stops the hospital spending adamantine on bruises. DF gives a hospital no material filter, so
