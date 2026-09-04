@@ -230,7 +230,12 @@ from everything that fits. Where the dwarf's preferences and moodable skill sett
 what is coming: *"...announces they will create a table!"* Then `[build selected artifact]`
 forbids every other candidate in the fort -- including ones mined, butchered or woven while the
 dwarf walks -- so DF has one legal choice per row and takes it, instead of the nearest boulder.
-Requirements already hauled in are shown as claimed and cannot be changed; candidates are
+A requirement's MATERIAL can be changed as well as its item: the mood rolls "adamantine bar"
+from whatever the fort held when it struck, and that is a filter DF re-reads every time it
+looks, so the picker offers every other material that item type comes in — each marked
+*changes the requirement to slade* — and choosing one rewrites the mood. Never a default, and
+only against stock you actually have. Requirements already hauled in are shown as claimed and
+cannot be changed; candidates are
 limited to what the dwarf can actually walk to; worn, part-used and forbidden items are shown,
 labelled, and never chosen by default. And when the fort is short of what the mood wants,
 `[delay work]` (Ctrl-D) buys the time to make it: the dwarf gets a burrow of nothing but their

@@ -61,6 +61,16 @@ them onto the item and the workshop, which strands a dwarf whenever the two are 
 a burrow of two disjoint patches has no route between them.) The moment they pick the item up,
 the forbids for that row come off and the next row's choice is opened.
 
+CHANGING WHAT IT ASKS FOR. A mood rolls its base material from what the fort happened to hold
+when it struck -- "adamantine bar", "cave spider silk cloth" -- and that roll is a FILTER, not
+a law. DF re-reads it every time the dwarf goes looking for something, so pointing it at
+another material you already have is enough to change what gets made: pick a requirement, and
+the list offers what it currently wants first, then every other material in the fort that item
+type comes in, each marked CHANGES THE REQUIREMENT TO <material>. Choosing one rewrites the
+mood. Nothing does this by default and no fallback ever reaches for one -- it is a decision
+about what the artifact will BE, and it stays yours. What it cannot do is invent stock: swaps
+are only offered against items you actually have.
+
 DELAYING. A mood does not wait for you. It claims a workshop, gathers what it can reach, and
 starts building with that -- so when the panel says the gods are testing you, the useful move
 is usually not a better forbid but more time. `delay work` (Ctrl-D) gives the dwarf a burrow
@@ -206,11 +216,16 @@ local function material_of(item)
     return mi and mi.material or nil
 end
 
-local function filter_matches(ji, item)
+-- `ignore_mat` asks the other question: would this item do IF the requirement named its
+-- material instead? That is what makes retargeting a requirement possible -- see
+-- all_candidates. Everything that forbids or reserves calls this WITHOUT it.
+local function filter_matches(ji, item, ignore_mat)
     if ji.item_type >= 0 and item:getType() ~= ji.item_type then return false end
     if ji.item_subtype >= 0 and item:getSubtype() ~= ji.item_subtype then return false end
-    if ji.mat_type >= 0 and item:getMaterial() ~= ji.mat_type then return false end
-    if ji.mat_index >= 0 and item:getMaterialIndex() ~= ji.mat_index then return false end
+    if not ignore_mat then
+        if ji.mat_type >= 0 and item:getMaterial() ~= ji.mat_type then return false end
+        if ji.mat_index >= 0 and item:getMaterialIndex() ~= ji.mat_index then return false end
+    end
 
     for bit, itype in pairs(ITEM_CATEGORY) do
         local wanted = false
@@ -304,8 +319,16 @@ local function snapshot(item)
     pcall(function() wear = item.wear end)
     pcall(function() injob = item.flags.in_job end)
     pcall(function() alien = item.flags.foreign end)
+    local matname
+    pcall(function()
+        local mi = dfhack.matinfo.decode(item)
+        matname = mi and mi:toString() or nil
+    end)
     return {
         id = item.id,
+        mat_type = item:getMaterial(),
+        mat_index = item:getMaterialIndex(),
+        mat_name = matname,
         value = item_value(item),
         forbidden = is_forbidden(item),
         worn = wear > 0,
@@ -363,6 +386,15 @@ local function all_candidates(job, unit)
     local lists = {}
     local filters = job.job_items.elements
     for idx in ipairs(filters) do lists[idx] = {} end
+    -- A requirement that names a MATERIAL -- "adamantine bar", the base material a mood rolls
+    -- from what the fort had when it struck -- can be pointed at another one. DF re-reads
+    -- these filters every time it looks for an item, so rewriting mat_index is the whole of
+    -- it: the dwarf then goes and fetches slade bars and thinks nothing of it. What it cannot
+    -- do is invent stock, which is why the swap is only offered against items you already
+    -- have. Alternates are collected here and kept SEPARATE, after the real options: this is
+    -- a decision, never a default, and nothing picks one on your behalf.
+    local alts = {}
+    for idx in ipairs(filters) do alts[idx] = {} end
     for _, item in ipairs(df.global.world.items.other.IN_PLAY) do
         if usable(item) and reachable(item, group) then
             local snap
@@ -371,6 +403,11 @@ local function all_candidates(job, unit)
                     snap = snap or snapshot(item)
                     local l = lists[idx]
                     l[#l + 1] = snap
+                elseif (ji.mat_type >= 0 or ji.mat_index >= 0)
+                        and filter_matches(ji, item, true) then
+                    snap = snap or snapshot(item)
+                    local a = alts[idx]
+                    a[#a + 1] = snap
                 end
             end
         end
@@ -382,6 +419,18 @@ local function all_candidates(job, unit)
             if a.value ~= b.value then return a.value > b.value end
             return a.id < b.id
         end)
+        -- the swaps, best first, tagged so every layer above knows what they are
+        local a = alts[idx] or {}
+        table.sort(a, function(x, y)
+            if x.value ~= y.value then return x.value > y.value end
+            return x.id < y.id
+        end)
+        for _, snap in ipairs(a) do
+            local copy = {}
+            for k, v in pairs(snap) do copy[k] = v end
+            copy.retarget = true
+            list[#list + 1] = copy
+        end
     end
     return lists
 end
@@ -527,6 +576,9 @@ local function item_name(item, snap)
     if wear > 0 then tags[#tags + 1] = 'worn' end
     if snap and snap.part_used then tags[#tags + 1] = 'part-used' end
     if snap and snap.foreign then tags[#tags + 1] = 'foreign' end
+    if snap and snap.retarget then
+        tags[#tags + 1] = ('CHANGES THE REQUIREMENT TO %s'):format(snap.mat_name or 'this material')
+    end
     if snap and snap.busy then tags[#tags + 1] = 'in another job' end
     if #tags > 0 then n = ('%s (%s)'):format(n, table.concat(tags, ', ')) end
     return n
@@ -1110,9 +1162,9 @@ function Picker:init()
     -- you take is a real decision, and one this tool will not make quietly.
     local seen, order = {}, {}
     for _, snap in ipairs(self.options or {}) do
-        local key = ('%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
+        local key = ('%s%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
             snap.worn and 'w' or '', snap.part_used and 'p' or '',
-            snap.foreign and 'f' or '')
+            snap.foreign and 'f' or '', snap.retarget and 'R' or '')
         local row = seen[key]
         if row then
             row.count = row.count + 1
@@ -1195,14 +1247,15 @@ function Planner:init()
             -- the best CLEAN one: not forbidden, not worn, not part-used, not spoken for
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.busy and not snap.foreign then
+                    and not snap.part_used and not snap.busy and not snap.foreign
+                    and not snap.retarget then
                     pick = snap
                     break
                 end
             end
             for _, snap in ipairs(r.options) do
                 if pick then break end
-                if not taken[snap.id] then pick = snap end
+                if not taken[snap.id] and not snap.retarget then pick = snap end
             end
             if pick then
                 taken[pick.id] = true
@@ -1320,7 +1373,8 @@ function Planner:reconcile()
             local pick
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.foreign and df.item.find(snap.id) then
+                    and not snap.part_used and not snap.foreign and not snap.retarget
+                    and df.item.find(snap.id) then
                     pick = snap
                     break
                 end
@@ -1415,6 +1469,24 @@ end
 function Planner:choose(r, snap)
     local slots = self.picks[r.fidx] or {}
     self.picks[r.fidx] = slots
+
+    -- Point the requirement at this item's material. The mood rolled "adamantine bar" from
+    -- what the fort happened to hold when it struck; that is a filter, not a law, and DF
+    -- re-reads it every time it goes looking. Picks already made for this row are dropped --
+    -- they were the old material and no longer match.
+    if snap.retarget then
+        local ji = r.filter
+        local was = requirement_name(ji)
+        ji.mat_type, ji.mat_index = snap.mat_type, snap.mat_index
+        self.picks[r.fidx] = {}
+        slots = self.picks[r.fidx]
+        self.rows = requirements(self.job, self.unit)
+        for _, row in ipairs(self.rows) do
+            if row.fidx == r.fidx and row.slot == r.slot then r = row end
+        end
+        self.subviews.status:setText(
+            ('Requirement changed: %s is now %s.'):format(was, requirement_name(ji)))
+    end
 
     -- across EVERY row, not just this requirement's: two requirements are two items even
     -- when the same one would satisfy both, and DF can only carry it to one of them
