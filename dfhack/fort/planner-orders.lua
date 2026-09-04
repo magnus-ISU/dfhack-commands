@@ -2084,12 +2084,16 @@ STANDING = {
         if melt_count() == 0 or has_order(df.job_type.MeltMetalObject, -1) then return {} end
         return {{name = 'Melting', shops = {'MeltMetalObject'},
             note = 'Some items are marked for melting but nothing is melting them. Adds a melt\n'
-                .. 'order that runs while there is anything to melt.',
+                .. 'order that runs while there is anything to melt, on as many smelters as are\n'
+                .. 'free.',
             build = function()
                 -- the "anything to melt" condition: GreaterThan 0 with item_type = NONE, which
                 -- DF reads on a melt order as "items available to melt".
+                -- No workshop cap. It used to be pinned to one Smelter so melting could not
+                -- hog every shop, which gets it backwards: melting is what you do to a pile
+                -- of goblin junk after a siege, and a pile is exactly when you want every
+                -- smelter you own on it. DF's default (0) is no limit.
                 add_order{job_type = df.job_type.MeltMetalObject, amount = 30, frequency = Daily,
-                    max_workshops = 1,   -- cap it at one Smelter so melting doesn't hog every shop
                     conds = {C('GreaterThan', 0, df.item_type.NONE)}}
                 return missing_shops({'MeltMetalObject'})
             end}}
