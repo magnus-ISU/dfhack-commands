@@ -171,6 +171,14 @@ re-registers and refills the magma sea, rebuilds manager orders, and points deep
 back at a stone layer where an older load left it reading as soil), `status`, and `cancel`
 round out the set.
 
+### **`fort/forge-bars`**
+The forge's "Add new task" list names every metal it could work as "iron (opens menu)",
+whether you own a bar of it or not. This overlay paints the count over that tail on every row —
+"iron (40 bars)", "steel (no bars)", "bronze (319 bars, 2 in use)" — read from the bars on the map
+(forbidden bars are not counted; bars a job has already claimed are counted and noted). Metalsmith's
+forge and magma forge only. Auto-discovered by `overlay rescan`; `forge-bars` on the console prints
+the same counts for the open menu.
+
 ### **`fort/workshop-tools`**
 Puts a `+` on every queued workshop task that queues another one just like it, and sorts
 a shop's "Add new task" list so the jobs you can actually do come before the ones you can't.
