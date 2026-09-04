@@ -54,10 +54,12 @@ one slot at a time as the mood becomes ready for it: a chosen item left loose wh
 walks off for something else is a chosen item any other job can take, and moods are slow. (With
 a valve: if nothing is hauled for a while, another slot opens, so a mood that wants its
 requirements out of order is slowed down rather than stopped.) The dwarf is also
-confined to a burrow holding the item's tile AND the whole of the workshop they have claimed
--- the item alone would be a dwarf with nowhere to carry it back to -- which stops them
-wandering off to a nearer candidate that appears mid-walk. The moment they actually pick it
-up, the forbids come off and the burrow moves on to the next requirement.
+left to walk wherever they like: the forbidding is what makes the choice, and anything that
+comes into being mid-walk -- mined, butchered, woven -- is swept up and forbidden within the
+tick, so there is never a nearer legal candidate to wander to. (An earlier version burrowed
+them onto the item and the workshop, which strands a dwarf whenever the two are not next door:
+a burrow of two disjoint patches has no route between them.) The moment they pick the item up,
+the forbids for that row come off and the next row's choice is opened.
 
 DELAYING. A mood does not wait for you. It claims a workshop, gathers what it can reach, and
 starts building with that -- so when the panel says the gods are testing you, the useful move
@@ -1016,31 +1018,24 @@ local function steer(unit, job)
     -- and anything that has come into being since
     sweep_new(job, unit)
 
-    local pos = xyz2pos(dfhack.items.getPosition(item))
-    local shop = workshop_tiles(job)
     if delaying then
         -- the forbids above still stand; the burrow is the workshop alone
         apply_delay(unit, job)
         return true
     end
-    if pos and pos.x >= 0 then
-        local b = get_burrow()
-        pcall(function()
-            dfhack.burrows.clearTiles(b)
-            dfhack.burrows.setAssignedTile(b, pos, true)
-            -- and the workshop, always: a burrow holding only the item is a dwarf with
-            -- nowhere to carry it back to, and the mood stalls on the doorstep
-            for _, tile in ipairs(shop) do
-                dfhack.burrows.setAssignedTile(b, tile, true)
-            end
-            dfhack.burrows.clearUnits(b)
-            -- and NOT before there is a workshop to include. Until the dwarf claims one the
-            -- job has no position at all (DF parks it at -30000), so restricting them now
-            -- would pen them on the item with nowhere legal to go. The forbids alone are
-            -- enough at that stage: there is only one item they can take anyway.
-            if #shop > 0 then dfhack.burrows.setAssignedUnit(b, unit, true) end
-        end)
-    end
+
+    -- NO BURROW WHILE FETCHING. There used to be one, holding the chosen item's tile and the
+    -- workshop's, to stop the dwarf wandering off to a nearer candidate that appeared
+    -- mid-walk. Two disjoint patches of map are not a burrow a dwarf can use: every tile of
+    -- the route between them is outside it, so the moment the item is not next door the dwarf
+    -- simply cannot go and get it. Measured here -- forge at 112,89,11, chosen oak log at
+    -- 74,120,146, both in the burrow, a hundred and thirty-five levels of corridor not in it,
+    -- and a moody dwarf who could not find a log that was sitting in the open.
+    --
+    -- It was belt and braces anyway: the forbidding is what makes the choice, and it already
+    -- covers the thing the burrow was for -- items that come into being mid-walk are swept and
+    -- forbidden by id every tick, so there is never a nearer legal candidate to wander to.
+    clear_burrow()
     return true
 end
 
