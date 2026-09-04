@@ -106,18 +106,21 @@ local function read_row(y, x0, x1)
     return table.concat(chars)
 end
 
--- returns {{y, x, name, mat}, ...}: x is the column of the '(' in "(opens menu)"
+-- returns {{y, x, name, mat}, ...}: x is the column of the '(' after the name.
+-- Matched on the NAME, not on "(opens menu)": readTile hands back the last rendered
+-- frame, which by then carries our own "(40 bars)" -- looking for DF's tail found
+-- nothing every other scan and the rows flickered between the two.
 local function scan_rows(mats)
     local sw, sh = dfhack.screen.getWindowSize()
     local rows = {}
     for y = 0, sh - 1 do
         local text = read_row(y, PANEL_X0, sw - 1)
-        local c = text:find(TAIL, 1, true)
-        if c then
-            local name = text:sub(1, c - 1):match('^%s*(.-)%s*$'):lower()
-            local mat = mats[name]
+        local lead, name = text:match('^(%s*)([^%(]-)%s%(')
+        if name then
+            local mat = mats[name:lower()]
             if mat then
-                rows[#rows + 1] = {y = y, x = PANEL_X0 + c - 1, name = name, mat = mat}
+                local x = PANEL_X0 + #lead + #name + 1
+                rows[#rows + 1] = {y = y, x = x, name = name:lower(), mat = mat}
             end
         end
     end
