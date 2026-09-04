@@ -490,7 +490,34 @@ function CreatureDescOverlay:init()
     }
 end
 
+-- Panels that TAKE THE SCREEN while the unit sheet is merely still open behind them. DF keeps
+-- `dwarfmode/ViewSheets/UNIT` in the focus list the whole time one of these is up, so the
+-- overlay is asked to draw and lands on top of somebody else's window -- the squad
+-- fill-position list, say, with this box printed across the bottom of it.
+--
+-- Tested on the FOCUS STRINGS, not on the panels' own fields. `unit_selector.context` looks
+-- like the obvious flag and is a trap: it keeps the last context it was used with long after
+-- the selector has closed (SQUAD_FILL_POSITION still sitting there with nothing on screen), so
+-- reading it hid this box permanently. The focus list says what is actually being drawn.
+--
+-- The list is by name because there is no general "is my panel in front" flag, and the focus
+-- strings are NOT ordered front-to-back -- the sheet's own comes first while the selector is
+-- over it. Add to it if another panel is found drawing over this corner.
+local COVERING = {'/UnitSelector', '/ImageCreator', '/LocationDetails'}
+
+local function covered()
+    local ok, focus = pcall(dfhack.gui.getFocusStrings, dfhack.gui.getDFViewscreen(true))
+    if not ok or not focus then return false end
+    for _, f in ipairs(focus) do
+        for _, pattern in ipairs(COVERING) do
+            if f:find(pattern, 1, true) then return true end
+        end
+    end
+    return false
+end
+
 function CreatureDescOverlay:overlay_onupdate()
+    if covered() then self.visible = false; return end
     local text = unit_info()
     self.visible = text ~= nil
     if not text then return end
