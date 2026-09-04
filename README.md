@@ -186,7 +186,11 @@ up it also stocks the supplies one needs, traction benches included — the benc
 mechanism and chain each get their own ask. Some asks are standing preferences rather than
 one-off gaps: say yes to cutting the rough-gem surplus once and it is handled from then on, one
 Cut Gem job at a time, posted again whenever that one is finished and the pile is still over ten
-— no second ask, and `planner-orders disable` hands it back.
+— no second ask, and `planner-orders disable` hands it back. Adamantine is the same, and has to
+be: its ladder — keep 3 raw boulders always, then 3 wafers, 3 thread, 3 cloth, 9 wafers for a
+true throne, and the rest stays raw — counts the adamantine you have set *aside*, and a manager
+order gated on a condition cannot see a forbidden wafer, so it would extract more to replace
+what was merely reserved. One rung at a time, and only what that rung asks for.
 
 ![fort/planner-orders demo](demos/fort-planner-orders.gif)
 

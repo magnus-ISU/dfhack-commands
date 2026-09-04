@@ -88,14 +88,16 @@ accepting creates it (all conditioned so they only run when sensible):
     needs ash + an empty bucket), render fat (keep under 20 tallow, needs fat) -- so the
     chain self-sustains instead of draining a one-time batch.
   - Melting: a melt order when items are marked for melting but nothing melts them.
-  - Adamantine: once you have raw adamantine, three keep-3-in-stock orders queued in priority
-    order -- wafers first (ADAMANTINE_WAFERS at a Smelter), then cloth (Loom), then a thread
-    reserve (extract at a Craftsdwarf's Workshop). Thread feeds the other two, so capping it
-    last is what halts the chain: everything beyond 3/3/3 stays as raw adamantine instead of
-    being extracted "just in case". Each targets adamantine specifically and only runs while
-    its input is on hand. Each order is amount 1 (it reads 1/1, not 3/3): the cap is what the
-    condition holds, so a batch of one per trigger walks up to it instead of queueing three
-    jobs against material that may not be extracted yet.
+  - Adamantine: a ladder, climbed one rung at a time -- keep 3 raw boulders always, then 3
+    wafers (ADAMANTINE_WAFERS at a Smelter), then 3 thread (extract at a Craftsdwarf's
+    Workshop), then 3 cloth (Loom), then 9 wafers for a true adamantine throne, and everything
+    past that stays a raw boulder. Thread is the input to both wafers and cloth, so a rung that
+    needs thread and has none asks for extraction first -- the same rung taking its first step.
+    The boulder reserve is a floor, never a target: it is what stops a lucky vein being spent
+    down to the last lump. Posted as JOBS rather than manager orders, because the caps have to
+    count adamantine you have set ASIDE -- a forbidden wafer is still a wafer, and an order
+    gated on a condition cannot see one, so it would extract more to replace what is merely
+    reserved. Say yes once and the whole ladder is managed for you thereafter.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
 Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
@@ -1444,7 +1446,8 @@ local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to ge
 local ROUGH_GEM_MIN = 10   -- start cutting once the rough GEM pile is bigger than this
 -- ONE cut gem job at a time, ever. A jeweler with ten queued jobs is a jeweler doing nothing
 -- else, and there is no hurry: the next one is posted when this one is finished.
-local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then cloth, then thread
+local ADAM_RESERVE = 3     -- adamantine: raw boulders never extracted, whatever else is short
+local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then thread, then cloth
 local ADAM_THRONE = 9      -- ...but hold this many WAFERS once the rest is stocked and there
                            -- are this many raw boulders spare: nine is a true throne
 local ADAM_BATCH = 1       -- ...one job at a time, so an order reads 1/1, not 3/3
@@ -2089,7 +2092,7 @@ STANDING = {
                 return missing_shops({'MeltMetalObject'})
             end}}
     end,
-    function()   -- adamantine: 3 wafers, then 3 cloth, then 3 thread; the rest stays raw
+    function()   -- adamantine: a priority ladder, and what is left stays raw
         -- TWO distinct inorganics: RAW_ADAMANTINE is the mined boulder (the extract INPUT);
         -- ADAMANTINE is the processed material (thread / wafer / cloth -- the products).
         local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
@@ -2097,13 +2100,12 @@ STANDING = {
         if not boulder_present(RAW) then return {} end    -- only while raw adamantine is on hand
         local THREAD, CLOTH = df.item_type.THREAD, df.item_type.CLOTH
 
-        -- Posted as JOBS, not as manager orders on conditions. The chain is capped at
-        -- ADAM_KEEP of each product, and a cap is exactly what a condition cannot express
-        -- honestly here: FORBIDDEN adamantine still counts. A forbidden wafer is stock you
-        -- own -- fort/help-mood forbids items for a mood, a stockpile may hold some aside --
-        -- and a chain that ignores it extracts more boulders to replace what is only set
-        -- aside. So every count below includes forbidden items, and the jobs already queued
-        -- count too, so clicking twice does not double the work.
+        -- Posted as JOBS, not as manager orders on conditions. The caps are exactly what a
+        -- condition cannot express honestly here: FORBIDDEN adamantine still counts. A
+        -- forbidden wafer is stock you own -- fort/help-mood forbids items for a mood, a
+        -- stockpile may hold some aside -- and a chain that ignores it extracts more boulders
+        -- to replace what is only set aside. So every count below includes forbidden items,
+        -- and the jobs already queued count too, so nothing is ordered twice.
         local function stock(item_type, mat_index)
             local n = 0
             for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
@@ -2120,82 +2122,128 @@ STANDING = {
             return n
         end
 
-        local wafers = stock(df.item_type.BAR, ADAM)
-        local cloth  = stock(CLOTH, ADAM)
-        local thread = stock(THREAD, ADAM)
+        local wafers   = stock(df.item_type.BAR, ADAM)
+        local cloth    = stock(CLOTH, ADAM)
+        local thread   = stock(THREAD, ADAM)
         local boulders = stock(df.item_type.BOULDER, RAW)
-        local out = {}
+        local qw = jobs_queued(df.job_type.CustomReaction, 'ADAMANTINE_WAFERS')
+        local qc = jobs_queued(df.job_type.WeaveCloth)
+        local qt = jobs_queued(df.job_type.ExtractMetalStrands)
 
-        -- The wafer cap lifts once the rest of the chain is stocked and there is raw
-        -- adamantine to spare. Three wafers is a reserve; NINE is a true adamantine throne,
-        -- and there is no point holding the boulders back for a rainy day once cloth and
-        -- thread are covered and nine boulders are sitting there. Below that it stays at
-        -- three, so a fort with one lucky vein does not spend it all on furniture.
-        local wafer_target = ADAM_KEEP
-        if cloth >= ADAM_KEEP and thread >= ADAM_KEEP and wafers >= ADAM_KEEP
-            and boulders >= ADAM_THRONE then
-            wafer_target = ADAM_THRONE
+        -- The three steps as closures, so the managed path and the ask post exactly the same
+        -- work. Each is a no-op without its workshop rather than an error.
+        local function do_wafers(n)
+            local shop = find_shop(FIXED_WS.ADAMANTINE_WAFERS)
+            if shop then
+                for _ = 1, n do
+                    post_job(shop, {job_type = df.job_type.CustomReaction,
+                                    reaction = 'ADAMANTINE_WAFERS'})
+                end
+            end
+            return missing_shops({'ADAMANTINE_WAFERS'})
+        end
+        local function do_cloth(n)
+            local shop = find_shop(FIXED_WS.WeaveCloth)
+            if shop then
+                for _ = 1, n do
+                    post_job(shop, {job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
+                        items = {{item_type = THREAD, mat_type = 0, mat_index = ADAM, quantity = 1}}})
+                end
+            end
+            return missing_shops({'WeaveCloth'})
+        end
+        local function do_thread(n)
+            local shop = find_shop(FIXED_WS.ExtractMetalStrands)
+            if shop then
+                for _ = 1, n do
+                    post_job(shop, {job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
+                        items = {{item_type = df.item_type.BOULDER, mat_type = 0,
+                                  mat_index = RAW, quantity = 1}}})
+                end
+            end
+            return missing_shops({'ExtractMetalStrands'})
         end
 
-        -- Wafers first, then cloth, then a thread reserve -- the order these are offered is
-        -- the order the fort should work them. Cloth waits for the wafer step to finish;
-        -- thread is NOT gated on the others, because it is their input and gating it would
-        -- deadlock the chain (no thread -> no wafers -> no cloth -> no gate ever opens).
-        local want_wafers = wafer_target - wafers - jobs_queued(df.job_type.CustomReaction, 'ADAMANTINE_WAFERS')
-        if want_wafers > 0 and thread > 0 then
-            out[#out + 1] = {name = 'Adamantine wafers', shops = {'ADAMANTINE_WAFERS'},
-                note = ('You have %d adamantine wafers, %d thread, %d raw boulders (forbidden\ncounted).\n\n'):format(wafers, thread, boulders)
-                    .. (wafer_target > ADAM_KEEP
-                        and ('Target raised to %d: cloth and thread are stocked and you have %d\nboulders spare, which is enough for a true adamantine throne.\n\n'):format(wafer_target, boulders)
-                        or '')
-                    .. ('Creates: %d smelter JOB(S) turning thread into wafers, up to %d in stock.\n'):format(want_wafers, wafer_target)
-                    .. 'Posted as jobs rather than a repeating order so the cap can count stock\n'
-                    .. 'you have set aside -- a forbidden wafer is still a wafer, and an order\n'
-                    .. 'that cannot see it would mine and extract more to replace it.',
-                build = function()
-                    local shop = find_shop(FIXED_WS.ADAMANTINE_WAFERS)
-                    for _ = 1, want_wafers do
-                        post_job(shop, {job_type = df.job_type.CustomReaction,
-                                        reaction = 'ADAMANTINE_WAFERS'})
-                    end
-                    return missing_shops({'ADAMANTINE_WAFERS'})
-                end}
+        -- THE LADDER. One rung at a time, in this order, and never more than the rung asks
+        -- for:
+        --
+        --   1. keep %d raw boulders, always -- extraction never eats into them
+        --   2. %d wafers
+        --   3. %d thread
+        --   4. %d cloth
+        --   5. %d wafers, a true adamantine throne
+        --   6. everything past that stays a raw boulder
+        --
+        -- Thread is the input to both wafers and cloth, so a rung that needs thread and has
+        -- none asks for extraction instead -- that is not skipping ahead, it is the same rung
+        -- taking its first step. Working one rung at a time is what stops the fort spending a
+        -- whole vein on the first thing it can make.
+        local spare = boulders - ADAM_RESERVE - qt      -- boulders extraction may still take
+
+        local function rung()
+            local function via_thread(short, kind)
+                if thread > 0 then return {kind = kind, n = math.min(short, thread)} end
+                return {kind = 'thread', n = short}
+            end
+            if wafers + qw < ADAM_KEEP then
+                return via_thread(ADAM_KEEP - wafers - qw, 'wafers')
+            end
+            if thread + qt < ADAM_KEEP then
+                return {kind = 'thread', n = ADAM_KEEP - thread - qt}
+            end
+            if cloth + qc < ADAM_KEEP then
+                return via_thread(ADAM_KEEP - cloth - qc, 'cloth')
+            end
+            if wafers + qw < ADAM_THRONE then
+                return via_thread(ADAM_THRONE - wafers - qw, 'wafers')
+            end
         end
 
-        local want_cloth = ADAM_KEEP - cloth - jobs_queued(df.job_type.WeaveCloth)
-        if want_cloth > 0 and thread > 0 and wafers >= ADAM_KEEP then
-            out[#out + 1] = {name = 'Adamantine cloth', shops = {'WeaveCloth'},
-                note = ('You have %d adamantine cloth, %d thread (forbidden ones counted).\n\n'):format(cloth, thread)
-                    .. ('Creates: %d loom JOB(S), up to %d in stock. Offered only now the wafer\n'):format(want_cloth, ADAM_KEEP)
-                    .. 'step is finished, so thread goes to wafers first.',
-                build = function()
-                    local shop = find_shop(FIXED_WS.WeaveCloth)
-                    for _ = 1, want_cloth do
-                        post_job(shop, {job_type = df.job_type.WeaveCloth, mat_type = 0, mat_index = ADAM,
-                            items = {{item_type = THREAD, mat_type = 0, mat_index = ADAM, quantity = 1}}})
-                    end
-                    return missing_shops({'WeaveCloth'})
-                end}
+        local step = rung()
+        if not step then return {} end
+        if step.kind == 'thread' then
+            -- the boulder reserve is a floor, not a target: it is the one rung that is never
+            -- spent, so a lucky vein is not turned into furniture down to the last lump
+            step.n = math.min(step.n, spare)
+            if step.n <= 0 then return {} end
         end
 
-        local want_thread = ADAM_KEEP - thread - jobs_queued(df.job_type.ExtractMetalStrands)
-        if want_thread > 0 then
-            out[#out + 1] = {name = 'Adamantine thread', shops = {'ExtractMetalStrands'},
-                note = ('You have %d adamantine thread (forbidden ones counted).\n\n'):format(thread)
-                    .. ('Creates: %d Craftsdwarf JOB(S) extracting raw adamantine, up to %d in\n'):format(want_thread, ADAM_KEEP)
-                    .. 'stock. Capping this is what stops the fort extracting every boulder --\n'
-                    .. 'whatever is left over stays as raw adamantine.',
-                build = function()
-                    local shop = find_shop(FIXED_WS.ExtractMetalStrands)
-                    for _ = 1, want_thread do
-                        post_job(shop, {job_type = df.job_type.ExtractMetalStrands, mat_type = 0, mat_index = RAW,
-                            items = {{item_type = df.item_type.BOULDER, mat_type = 0,
-                                      mat_index = RAW, quantity = 1}}})
-                    end
-                    return missing_shops({'ExtractMetalStrands'})
-                end}
+        local WHERE = {wafers = 'Adamantine wafers', cloth = 'Adamantine cloth',
+                       thread = 'Adamantine thread'}
+        local SHOP = {wafers = 'ADAMANTINE_WAFERS', cloth = 'WeaveCloth',
+                      thread = 'ExtractMetalStrands'}
+        local DO = {wafers = do_wafers, cloth = do_cloth, thread = do_thread}
+
+        -- Handed over for good, like cut gems. This chain HAS to be run by posting jobs rather
+        -- than by manager orders -- the caps count adamantine you have set aside, and a
+        -- condition cannot see a forbidden wafer -- which means the work only happens when
+        -- something posts it. Asking again every time the stock dips is asking the same
+        -- question over and over; saying yes once says it for the whole ladder.
+        if is_auto('Adamantine') then
+            DO[step.kind](step.n)
+            return {}
         end
-        return out
+
+        local ladder = ('  1. keep %d raw boulders, always\n'):format(ADAM_RESERVE)
+            .. ('  2. %d wafers\n'):format(ADAM_KEEP)
+            .. ('  3. %d thread\n'):format(ADAM_KEEP)
+            .. ('  4. %d cloth\n'):format(ADAM_KEEP)
+            .. ('  5. %d wafers -- a true adamantine throne\n'):format(ADAM_THRONE)
+            .. '  6. the rest stays raw\n'
+        return {{name = WHERE[step.kind], shops = {SHOP[step.kind]},
+            note = ('You have %d wafers, %d thread, %d cloth, %d raw boulders (forbidden\ncounted).\n\n'):format(
+                    wafers, thread, cloth, boulders)
+                .. 'The adamantine ladder, one rung at a time:\n' .. ladder .. '\n'
+                .. ('Creates: %d %s JOB(S) -- the next rung.\n\n'):format(step.n, WHERE[step.kind]:lower())
+                .. 'Posted as jobs rather than a repeating order so the caps can count stock you\n'
+                .. 'have set aside -- a forbidden wafer is still a wafer, and an order that\n'
+                .. 'cannot see it would mine and extract more to replace it.\n\n'
+                .. 'Say yes ONCE and the whole ladder is handled from then on, with nothing more\n'
+                .. 'asked. `planner-orders disable` hands it back.',
+            build = function()
+                set_auto('Adamantine')
+                return DO[step.kind](step.n)
+            end}}
     end,
 }
 
@@ -2276,6 +2324,7 @@ STANDING_INFO = {
         local RAW = inorg_idx('RAW_ADAMANTINE')
         if not RAW or not boulder_present(RAW) then return 'no raw adamantine on hand' end end,
                                       done  = function()
+        if is_auto('Adamantine') then return true end   -- managed: the tool posts the work
         -- "done" is now the chain being AT ITS CAP, not a manager order existing: the asks
         -- post jobs, and stock counts include forbidden items the same way they do.
         local RAW, ADAM = inorg_idx('RAW_ADAMANTINE'), inorg_idx('ADAMANTINE')
