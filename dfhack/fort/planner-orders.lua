@@ -1,5 +1,7 @@
 -- Notify + one-click manager orders for planned-building items with no production.
---@module = false
+-- @module = true so the notification can resolve its callbacks through reqscript at call time;
+-- everything with a side effect already sits below the `dfhack_flags.module` guard.
+--@module = true
 --[[
 planner-orders
 
@@ -2505,7 +2507,7 @@ end
 -- ---- notification message ---------------------------------------------------
 -- Stays up while there are gaps OR while a queued order's workshop isn't built.
 
-local function message()
+function message()   -- module-level: the notification resolves it live, see register()
     if not dfhack.world.isFortressMode() then return end
     local r = get_scan()
     local parts = {}
@@ -2778,7 +2780,7 @@ function PlannerScreen:onDismiss() status_view = nil end
 status_view = status_view or nil
 -- This script is not a module, so every CLI invocation gets a FRESH environment and the global
 -- above is always nil on entry -- it cannot dedupe across runs. Ask the game what is on screen.
-local function show_status()
+function show_status()   -- module-level: the notification resolves it live, see register()
     local ok, up = pcall(dfhack.gui.matchFocusString, 'dfhack/lua/planner-orders/status')
     if ok and up then return end
     status_view = PlannerScreen{}:show()
@@ -2795,8 +2797,25 @@ local function register()
         n.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
     entry.desc = 'Notifies when a building-planner item has no manager order to produce it.'
-    entry.dwarf_fn = message
-    entry.on_click = show_status
+    -- Resolved through reqscript AT CALL TIME, deliberately. Storing the function value here
+    -- pins the notification to the copy of this file that happened to be loaded when it was
+    -- registered -- so after the script is edited, the command line runs the new code while
+    -- the panel keeps printing the old answer. That is invisible from the outside: it looks
+    -- live, it just quietly reports something that stopped being true. It said "Adamantine
+    -- wafers needs a manager order" for a chain that was already being managed, and the only
+    -- cure was knowing to run the script bare again.
+    local function live()
+        local ok, m = pcall(reqscript, 'fort/planner-orders')
+        return (ok and m) or nil
+    end
+    entry.dwarf_fn = function()
+        local m = live()
+        return (m and m.message or message)()
+    end
+    entry.on_click = function()
+        local m = live()
+        return (m and m.show_status or show_status)()
+    end
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
     end

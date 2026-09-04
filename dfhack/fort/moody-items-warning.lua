@@ -263,7 +263,7 @@ end
 
 -- ---- the notification --------------------------------------------------------
 
-local function message()
+function message()   -- module-level: the notification resolves it live, see register()
     if not dfhack.world.isFortressMode() then return end
     local ok, s = pcall(survey)
     if not ok or not s then return end
@@ -283,7 +283,7 @@ local function message()
     return ('No %s for a mood'):format(table.concat(gone, ', '))
 end
 
-local function show_dialog()
+function show_dialog()   -- module-level: the notification resolves it live, see register()
     local s = survey()
     local lines = {'What a strange mood can demand, and what you have:', ''}
     for _, h in ipairs(s.have) do
@@ -315,8 +315,21 @@ local function register()
         n.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
     entry.desc = 'Notifies when the fort has none of a material a strange mood could demand.'
-    entry.dwarf_fn = message
-    entry.on_click = show_dialog
+    -- Resolved live rather than pinned: a stored function value keeps the notification running
+    -- the copy of this file that was loaded when it registered, so an edited script reports the
+    -- old answer from the panel while the command line reports the new one.
+    local function live()
+        local ok, m = pcall(reqscript, 'fort/moody-items-warning')
+        return (ok and m) or nil
+    end
+    entry.dwarf_fn = function()
+        local m = live()
+        return (m and m.message or message)()
+    end
+    entry.on_click = function()
+        local m = live()
+        return (m and m.show_dialog or show_dialog)()
+    end
     if n.config and n.config.data and not n.config.data[NAME] then
         n.config.data[NAME] = {enabled = true, version = 1}
     end
