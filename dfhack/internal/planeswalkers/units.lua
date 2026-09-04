@@ -81,6 +81,12 @@ local function classify(u)
     if dfhack.units.isCitizen(u, true) then return 'citizen' end
     local ok = pcall(function() return dfhack.units.isPet(u) end)
     if (ok and dfhack.units.isPet(u)) or dfhack.units.isTame(u) then return 'pet' end
+    -- livestock in 50.x: the fort's own animal with a training level, whether
+    -- or not the old tame flag is set
+    local okd, dom = pcall(function()
+        return dfhack.units.isOwnCiv(u) or u.training_level ~= df.animal_training_level.WildUntamed
+    end)
+    if okd and dom then return 'pet' end
     if dfhack.units.isInvader(u) then return 'invader' end
     if dfhack.units.isMerchant(u) or dfhack.units.isForest(u) then return 'merchant' end
     if dfhack.units.isVisitor(u) then return 'visitor' end
@@ -166,6 +172,8 @@ local function save_unit(ctx, u)
         adv = adventurer_bits(u),
         prof = df.profession[u.profession],
         cprof = #u.custom_profession > 0 and common.u(u.custom_profession) or nil,
+        tame = u.flags1.tame or nil,
+        train = df.animal_training_level[u.training_level],
     }
     -- a unit wandering outside the saved footprint comes along regardless,
     -- pulled to the nearest tile inside it
@@ -461,6 +469,17 @@ local function spawn_unit(ctx, rec)
     u.birth_year = dest_birth_year(rec.age)
     if rec.class == 'citizen' or rec.class == 'pet' then
         dfhack.units.makeown(u)
+        if rec.class == 'pet' then
+            -- livestock: the fort's own tame animal, at its training level
+            pcall(function()
+                u.flags1.tame = true
+                local lvl = rec.train and df.animal_training_level[rec.train]
+                if not lvl or lvl == df.animal_training_level.WildUntamed then
+                    lvl = df.animal_training_level.Domesticated
+                end
+                u.training_level = lvl
+            end)
+        end
     else
         u.civ_id = -1
         if rec.class == 'invader' then
