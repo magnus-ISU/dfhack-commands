@@ -136,7 +136,7 @@ Attributes.ATTRS{
     -- and the blank between them, plus the two header lines, the footer and the frame; and
     -- wide enough for the longest row -- "Disease Resistance" is 18 characters before the
     -- value/cap pair and the tier word, and a dwarf's readable name is longer than any of it
-    frame = {w = 74, h = 30},
+    frame = {w = 74, h = 31},
     resizable = true,
     unit = DEFAULT_NIL,
 }
@@ -175,7 +175,8 @@ function Attributes:init()
             text = ('%s%s'):format((' '):rep(NAME_W + 2), 'value / cap   vs. caste median'),
             text_pen = COLOR_GREY,
         },
-        widgets.List{frame = {t = 3, l = 0, r = 0, b = 2}, choices = choices},
+        -- b = 3 clears the two-line footer; at b = 2 the last attribute sat under it
+        widgets.List{frame = {t = 3, l = 0, r = 0, b = 3}, choices = choices},
         widgets.Label{
             frame = {b = 0, l = 0},
             text = {
