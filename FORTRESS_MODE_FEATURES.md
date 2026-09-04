@@ -203,8 +203,9 @@ a limit; marks you made by hand it never touches.
 
 ### **`fort/help-mood`**
 Run by hand during a strange mood (`fort/help-mood`). If the fort cannot satisfy the mood it
-says one thing and no more -- *"The gods are testing you"* -- because knowing what a mood wants
-IS the blessing. Otherwise it lists one row per ITEM the mood needs, read from the job's own
+says so -- *"The gods are testing you"* -- and names what is short: *no raw crystal glass*. It
+still will not say what the artifact would have been; that much is unearned. Otherwise it lists
+one row per ITEM the mood needs, read from the job's own
 filters, proposes the highest-value candidate for each, and lets you click any row to choose
 from everything that fits. Where the dwarf's preferences and moodable skill settle it, it says
 what is coming: *"...announces they will create a table!"* Then `[build selected artifact]`

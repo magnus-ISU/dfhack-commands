@@ -39,6 +39,10 @@ everything. (`fort/help-mood stop` is the same thing from the command line.)
 A requirement the dwarf has ALREADY hauled in is shown as claimed and cannot be changed --
 that decision is behind you, and DF will not let go of it.
 
+When the fort CANNOT meet the mood it says so and names the rows it cannot fill -- "no raw
+crystal glass" -- but still not what the artifact would have been. Which requirement is short is
+something you can act on in an afternoon at a glass furnace; what it would have become is not.
+
 WHAT IT DOES
 
 Reserving the items is the point. While the dwarf is fetching a chosen one, every OTHER item
@@ -455,7 +459,7 @@ local function filter_tags(ji)
 end
 
 -- a readable name for a requirement, since DF's filter is only numbers and bits
-local function requirement_name(ji)
+function requirement_name(ji)   -- module-level so it can be checked from the command line
     local parts = {}
     if ji.mat_type >= 0 then
         local ok, info = pcall(dfhack.matinfo.decode, ji.mat_type, ji.mat_index)
@@ -468,6 +472,23 @@ local function requirement_name(ji)
         -- no item type at all: the category IS the requirement ("any bones")
         if #parts == 0 then return 'any item' end
         return 'any ' .. table.concat(parts, ' ')
+    end
+    -- DF does not call these "rough": raw glass is RAW, and the word matters when the whole
+    -- point of the line is you reading it and going to make some. A rough gem stays rough.
+    if ji.item_type == df.item_type.ROUGH then
+        local glass = false
+        if ji.mat_type >= 0 then
+            local ok, info = pcall(dfhack.matinfo.decode, ji.mat_type, ji.mat_index)
+            if ok and info then pcall(function() glass = info.material.flags.IS_GLASS end) end
+        end
+        -- a tag the material name already says ("glass" beside "crystal glass") is noise
+        local mat = parts[1] or ''
+        local kept = {}
+        for i, part in ipairs(parts) do
+            if i == 1 or not mat:find(part, 1, true) then kept[#kept + 1] = part end
+        end
+        table.insert(kept, 1, glass and 'raw' or 'rough')
+        return table.concat(kept, ' ')
     end
     local t = df.item_type[ji.item_type]
     parts[#parts + 1] = t and t:lower():gsub('_', ' ') or 'item'
@@ -1289,12 +1310,25 @@ function Planner:refresh()
             or 'What they will make is anyone\'s guess.')
         self.subviews.omen.text_pen = what and COLOR_YELLOW or COLOR_GREY
     else
-        -- and NOTHING else. No row, no requirement name, no hint at which one is short:
-        -- the whole value of this panel is knowing what the mood wants, and a fort that
-        -- cannot meet it has not earned that. The dwarf goes mad or does not on their own.
+        -- AND WHAT IS MISSING. This used to say the headline and nothing else, on the
+        -- reasoning that knowing what a mood wants is the blessing and a fort that cannot
+        -- meet it has not earned that. That is a nice idea and it nearly cost a mood: "the
+        -- gods are testing you" does not tell you that one raw crystal glass, an hour's work
+        -- at a glass furnace, is the whole of the difference. The rows the fort cannot fill
+        -- are named, and nothing else is -- what the artifact will BE is still unearned.
+        local missing = {}
+        for _, r in ipairs(self.rows) do
+            if not r.claimed and #r.options == 0 then
+                missing[#missing + 1] = requirement_name(r.filter)
+            end
+        end
         self.subviews.headline:setText({{text = 'The gods are testing you', pen = COLOR_LIGHTRED}})
-        self.subviews.omen:setText('')
-        self.subviews.list:setChoices({})
+        self.subviews.omen:setText(('%s wants something the fort has not got:'):format(name))
+        local short = {}
+        for _, m in ipairs(missing) do
+            short[#short + 1] = {text = {{text = 'no ' .. m, pen = COLOR_LIGHTRED}}}
+        end
+        self.subviews.list:setChoices(short)
         -- The one thing this panel CAN offer when the fort is short: hold the dwarf still
         -- while somebody goes and makes the missing thing.
         self.subviews.status:setText(delaying
