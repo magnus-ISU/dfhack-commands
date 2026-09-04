@@ -216,6 +216,7 @@ local BUILD = {
     P = 'F',    -- pedestal: display furniture
     A = 's',    -- altar: no quickfort code, a statue stands in
     B = 'f',    -- bookcase: no quickfort code, a cabinet stands in
+    S = '~s',   -- slab (memorial); fort/quickfort places every slab "engraved only"
 }
 local DIG = {i = 'i'}   -- everything else in a footprint is a plain dig
 

@@ -58,6 +58,13 @@ TWO DESIGNATIONS NEVER SHARE A SQUARE
     fort/quickfort status    running jobs, in the console
     fort/quickfort cancel    cancel every running job
 
+SLABS ARE PLACED ENGRAVED
+  A blank slab is a blank stone; an engraved one is the memorial that puts a ghost to
+  rest. DF hands the mason whichever slab is nearest, and quickfort does not know the
+  difference exists, so the first slab placed here turns on buildingplan's "engraved
+  only" setting for slabs. It is a per-building-type setting that lives with the fort,
+  so it is set once and left alone if you already have it on.
+
 BUILDINGS GO DOWN AS BUILDINGS
   A blueprint writes a 3x3 workshop as its code repeated across nine tiles, so
   applying build cells one at a time would ask DF for nine 1x1 workshops. Build
@@ -259,6 +266,11 @@ end
 -- designated": most often it means "already taken", and reading it the other way had this
 -- tool re-designating squares that were already queued and then declaring the work lost.
 local DESIGNATION_JOBS = {
+    -- SMOOTHING and ENGRAVING are different job types, and missing the smoothing pair here
+    -- meant every square DF was busy smoothing looked like a square whose designation had
+    -- gone missing -- which cancelled whole blueprints, 34 of 35 of them on smoothing
+    [df.job_type.SmoothWall] = 'detail',
+    [df.job_type.SmoothFloor] = 'detail',
     [df.job_type.Dig] = 'dig',
     [df.job_type.DigChannel] = 'dig',
     [df.job_type.CarveUpwardStaircase] = 'dig',
@@ -556,8 +568,10 @@ end
 
 local function warn(msg, pos)
     -- With a position it goes out as a ZOOM announcement, so the notification recentres
-    -- the map on the square it is about when you click it (or press the recentre key).
-    -- The text then says WHY, not where -- the coordinates are what the zoom is for.
+    -- the map on the square it is about when you click it (or press the recentre key), and
+    -- its text says WHY rather than spending the line on coordinates. The console copy
+    -- keeps the coordinates: that is the record you go back to afterwards, and without
+    -- them there is no way to tell which square failed.
     local text = 'fort/quickfort: ' .. msg
     local ok = false
     if pos then
@@ -565,7 +579,7 @@ local function warn(msg, pos)
                    text, COLOR_YELLOW, true)
     end
     if not ok then pcall(dfhack.gui.showAnnouncement, text, COLOR_YELLOW, true) end
-    print(text)
+    print(pos and ('%s [%d,%d,%d]'):format(text, pos.x, pos.y, pos.z) or text)
 end
 
 function start_job(entry, pos)
@@ -660,6 +674,25 @@ local function apply_cell(mode, text, pos)
     return ok
 end
 
+-- A SLAB is only worth placing if it is an engraved one: a blank slab is a blank stone,
+-- while an engraved one is the memorial that puts a ghost to rest. DF picks whichever slab
+-- is nearest unless told otherwise, and quickfort has no idea the distinction exists, so
+-- every slab this places is put down under buildingplan's "engraved only" setting. That
+-- setting is per building type and lives with the fort, so it is set once, when the first
+-- slab of a session is placed, and left alone if it is already on.
+local slab_special_set = false
+local function want_engraved_slabs()
+    if slab_special_set then return end
+    slab_special_set = true
+    local ok, buildingplan = pcall(require, 'plugins.buildingplan')
+    if not ok or not buildingplan or not buildingplan.setSpecial then return end
+    local got, specials = pcall(buildingplan.getSpecials, df.building_type.Slab, -1, -1)
+    if got and specials and specials.engraved then return end
+    pcall(buildingplan.setSpecial, df.building_type.Slab, -1, -1, 'engraved', true)
+end
+
+local SLAB_CODE = '~s'
+
 local function apply_region(region)
     -- rebuild the region as a grid relative to its top-left cell so it goes
     -- down as ONE stockpile / zone rather than a scatter of 1x1 ones
@@ -672,6 +705,7 @@ local function apply_region(region)
         local dy, dx = c.pos.y - miny, c.pos.x - minx
         data[0][dy] = data[0][dy] or {}
         data[0][dy][dx] = c.text
+        if c.text == SLAB_CODE then want_engraved_slabs() end
     end
     return pcall(quickfort.apply_blueprint,
         {mode = region.mode, data = data, pos = {x = minx, y = miny, z = z}})

@@ -3,7 +3,7 @@
 -- A stamp is a grid of rows of quickfort codes; names give the INTERIOR size.
 --   ' ' blank (not footprint)  '.' floor  d door  b bed  t table  c chair
 --   f cabinet  h chest  r weapon rack  a armor stand  s statue  x coffin
---   P pedestal  A altar  B bookcase  i stair  F farm plot  # built wall (surface)
+--   P pedestal  A altar  B bookcase  S slab  i stair  F farm plot  # built wall (surface)
 -- A stamp may be {floors = {ground, first, ...}} for a multi-z blueprint.
 --
 -- A stamp may declare `engrave_floor`, which engraves the floor square under every piece
@@ -48,6 +48,8 @@ local G = {
     seg13     = {'s.....s.....s', '.............', 's.....s.....s'},
     catacomb  = {'   d   ', 'x.....x', 'x.....x', 'x..s..x', 'x.....x', 'x.....x', 'x..s..x', 'x.....x', 'x.....x'},
     memorial  = {'  d  ', '.....', '.s.s.', '..x..', '.....'},
+    memhall   = {'   d   ', 'SSS.SSS', 'S.....S', 'S.....S', 'S.....S', 'S.....S', 'S.....S',
+                 'S.....S', 'S.....S', 'S.....S', 'S.....S', 'S.....S', 'SSSSSSS'},
     family    = {' d ', 'x.x', '...', 'x.x', '...'},
     coffinrow = {'x.....x.....x', '.............', 'x.....x.....x'},
     shrine5   = {'.....', '.x.x.', '..s..', '.x.x.', '.....'},
@@ -105,6 +107,10 @@ DISTRICTS = {
         }},
     ['catacombs']    = {margin = 0, maxLen = 12, stamps = {{name = 'catacomb 7x9', grid = G.catacomb, max = 1}}},
     ['memorials']    = {margin = 1, maxLen = 8, stamps = {{name = 'memorial 5x5', grid = G.memorial, max = 1, zone = 'T'}}},
+    -- a 7x13 hall needs frontage and depth to match: at the default 14/12 the packer can
+    -- fit it nowhere, refuses the road for having nothing along it, and plans nothing
+    ['memorial halls'] = {margin = 1, maxLen = 20, depth = 16,
+        stamps = {{name = 'memorial hall 7x13', grid = G.memhall, max = 1}}},
     ['family tombs'] = {margin = 0, maxLen = 12, stamps = {{name = 'family tomb 3x5', grid = G.family}}},
     ['forge shrines'] = {margin = 1, maxLen = 10, stamps = {{name = 'shrine of the forge 5x5', grid = G.forge, max = 1}}},
     ['sea shrines']   = {margin = 1, maxLen = 10, stamps = {{name = 'shrine of the sea 5x7', grid = G.sea, max = 1}}},
@@ -142,7 +148,8 @@ PRESETS = {
     ['noble quarters'] = {main = 3, side = 3, road = {ROW, GARDEN}, districts = {{name = 'noble'}},
                           second = {{name = 'noble', weight = 1}, {name = 'minor noble', weight = 2}}},
     ['tombs']          = {main = 3, side = 3, road = {COFFIN, SHRINE, ROW},
-                          districts = {{name = 'catacombs', weight = 2}, {name = 'memorials', weight = 1}, {name = 'family tombs', weight = 2}}},
+                          districts = {{name = 'catacombs', weight = 2}, {name = 'memorials', weight = 1},
+                                       {name = 'memorial halls', weight = 1}, {name = 'family tombs', weight = 2}}},
     ['temples']        = {main = 3, side = 3, road = {ROW, GARDEN, COFFIN},
                           districts = {{name = 'forge shrines', weight = 2}, {name = 'sea shrines', weight = 2}, {name = 'chapels of the dead', weight = 2}, {name = 'groves', weight = 1}, {name = 'temple complex', weight = 2}, {name = 'great temple', weight = 1}}},
     ['guildhalls']     = {main = 3, side = 3, road = {ROW},
