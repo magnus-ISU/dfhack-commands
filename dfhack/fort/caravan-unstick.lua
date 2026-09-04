@@ -22,8 +22,17 @@ ANY change -- a member moves, picks up a job, the member set changes, the state 
 resets the year-long clock to zero.
 
 THE FIX (and nothing more): stranded members are offloaded (marked as departed -- no death,
-no anger, tile occupancy scrubbed) and the spent caravan entry is deleted. That alone lets
-DF schedule the next natural visit. This script NEVER force-sends caravans or migrants.
+no anger, tile occupancy scrubbed) and the caravan entry is handed back to DF the way a
+normal departure does it: `check_cleanup` ("a merchant left the map") plus `communicate`
+("somebody lived to report home") are raised and the entry is LEFT IN PLACE. DF then closes
+it itself within a few hundred ticks, and because it went through DF's own finalize the
+merchants' report reaches their civ -- which is what makes the next year's caravan (and, for
+the home civ, the liaison report that drives migrant waves) get scheduled at all.
+
+Never erase the entry by hand: an erased entry is a caravan that never reported home, and
+that civ's schedule stays dead for good (seen live 2026-09-04: dwarves gone after year 101,
+elves after 102, humans after 104, `timed_events` empty for years). This script NEVER
+force-sends caravans or migrants.
 
 As a free extra, AtDepot caravans get the stock `caravan unload` pack-animal rejoin each
 check (idempotent, touches nothing healthy).
@@ -90,6 +99,8 @@ end
 local function looks_stuck(c)
     if c.trade_state ~= T.Leaving or c.time_remaining > 0 then return false end
     local members = caravan_members(c.entity)
+    -- already handed to DF's cleanup (by us or by a real departure): let it close
+    if c.flags.check_cleanup and #members == 0 then return false end
     for _, u in ipairs(members) do
         if not member_idle(u) then return false end   -- somebody is still doing something
     end
@@ -141,18 +152,20 @@ local function offload_member(u)
     end
 end
 
--- clear one stuck caravan entry (index into plotinfo.caravans). Deliberately does NOT
--- force any replacement events: with the entry gone, DF resumes its natural schedule.
+-- finalize one stuck caravan entry (index into plotinfo.caravans) the way DF does when the
+-- last merchant steps off the map. The entry is NOT erased: check_cleanup makes DF's own
+-- caravan bookkeeping close it, and communicate tells it the merchants got home to report --
+-- the step that schedules next year's visit. Deliberately does NOT insert any events.
 local function fix_stuck(idx)
     local cs = df.global.plotinfo.caravans
     local c = cs[idx]
     local entity_id = c.entity
     local members = caravan_members(entity_id)
     for _, u in ipairs(members) do offload_member(u) end
-    cs:erase(idx)
-    pcall(function() c:delete() end)
+    c.flags.check_cleanup = true
+    c.flags.communicate = true
     dfhack.gui.showAnnouncement(
-        ('A long-stranded %s caravan (%d member%s left behind) has been sent home; the next one can now be scheduled.')
+        ('A long-stranded %s caravan (%d member%s left behind) has been sent home; their report lets the next one be scheduled.')
             :format(civ_name(entity_id), #members, #members == 1 and '' or 's'),
         COLOR_LIGHTGREEN, true)
     return #members
@@ -268,8 +281,8 @@ local cmd = ({...})[1]
 if cmd == 'fix' then
     local before = #df.global.plotinfo.caravans
     do_check(true)
-    print(('caravan-unstick: scanned %d caravan entr%s, %d left after fixes')
-        :format(before, before == 1 and 'y' or 'ies', #df.global.plotinfo.caravans))
+    print(('caravan-unstick: scanned %d caravan entr%s; stuck ones handed to DF to close (takes a few hundred ticks)')
+        :format(before, before == 1 and 'y' or 'ies'))
 else
     print(('caravan-unstick: %s'):format(enabled and 'ENABLED (weekly; fixes only after a YEAR stuck)' or 'disabled'))
     local cs = df.global.plotinfo.caravans

@@ -33,7 +33,7 @@ Seeds a self-growing interior burrow on the first tile you dig at embark. **Arme
 
 ### **`fort/caravan-unstick`**
 A weekly watchdog that frees caravans stuck leaving — which otherwise quietly blocks future
-caravans *and* migrants. **Enabled by `magnus-scripts`.** Not yet confirmed to work reliably.
+caravans *and* migrants. **Enabled by `magnus-scripts`.** v3 (2026-09-04) hands stuck entries to DF's own cleanup instead of erasing them — erasing killed the civ's schedule permanently. The hand-off is verified live; whether the next-year caravan then follows is still being confirmed.
 
 ### **`fort/mandate-notification`**
 Shows noble mandates the moment they appear. **Run by `magnus-scripts` every session.** Unused
