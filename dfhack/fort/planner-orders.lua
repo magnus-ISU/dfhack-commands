@@ -161,6 +161,34 @@ local function mark_offered(flag)
     pcall(dfhack.persistent.saveSiteData, ONCE_KEY, d)
 end
 
+-- Asks the player has handed over for good. An ask like "cut gems" is not a one-off gap, it is
+-- a standing preference -- once you have said yes to cutting the surplus, saying it again every
+-- time the pile creeps over the line is nagging, not helping. Accepting such an ask records the
+-- decision here and the tool does the work itself from then on, silently.
+local AUTO_KEY = 'planner-orders/auto'
+local function auto_set()
+    local d = dfhack.persistent.getSiteData(AUTO_KEY, {})
+    return type(d) == 'table' and d or {}
+end
+local function is_auto(name) return auto_set()[name] == true end
+local function set_auto(name, on)
+    local d = auto_set()
+    d[name] = on and true or nil
+    pcall(dfhack.persistent.saveSiteData, AUTO_KEY, d)
+end
+local function clear_autos()
+    local d, n = auto_set(), 0
+    for _ in pairs(d) do n = n + 1 end
+    pcall(dfhack.persistent.saveSiteData, AUTO_KEY, {})
+    return n
+end
+local function auto_names()
+    local out = {}
+    for k in pairs(auto_set()) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+
 local dlg = require('gui.dialogs')
 local gui = require('gui')
 local widgets = require('gui.widgets')
@@ -1414,7 +1442,8 @@ local GLASS_WOOD_MIN = 50  -- pearlash chain starts at wood; only offer with a r
 local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
 local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
 local ROUGH_GEM_MIN = 10   -- start cutting once the rough GEM pile is bigger than this
-local CUT_GEM_BATCH = 10   -- jobs posted per click, so one ask cannot flood the jeweler
+-- ONE cut gem job at a time, ever. A jeweler with ten queued jobs is a jeweler doing nothing
+-- else, and there is no hurry: the next one is posted when this one is finished.
 local ADAM_KEEP = 3        -- adamantine: keep this many wafers, then cloth, then thread
 local ADAM_THRONE = 9      -- ...but hold this many WAFERS once the rest is stocked and there
                            -- are this many raw boulders spare: nine is a true throne
@@ -1769,39 +1798,45 @@ STANDING = {
             end
         end
         if total <= ROUGH_GEM_MIN then return {} end
-        local queued = jobs_queued(df.job_type.CutGems)
-        local want = total - ROUGH_GEM_MIN - queued
-        if want <= 0 then return {} end
-        if want > CUT_GEM_BATCH then want = CUT_GEM_BATCH end
+        -- One at a time, always: nothing is posted while a cut gem job is still outstanding.
+        if jobs_queued(df.job_type.CutGems) > 0 then return {} end
+
+        -- post ONE job, against the biggest pile of a single gem material
+        local function cut_one()
+            local shop = find_shop(FIXED_WS.CutGems)
+            if not shop then return missing_shops({'CutGems'}) end
+            local best, best_n
+            for idx, n in pairs(by_mat) do
+                if not best_n or n > best_n then best, best_n = idx, n end
+            end
+            if not best then return end
+            post_job(shop, {job_type = df.job_type.CutGems,
+                items = {{item_type = df.item_type.ROUGH, mat_type = 0,
+                          mat_index = best, quantity = 1}}})
+        end
+
+        -- Already answered. Cutting the surplus is a standing preference, not a fresh question
+        -- every time the pile creeps back over the line -- asking again each time was the
+        -- whole complaint. So do it, say nothing, and offer no gap.
+        if is_auto('Cut gems') then
+            cut_one()
+            return {}
+        end
+
         return {{name = 'Cut gems', shops = {'CutGems'},
             note = ('You have %d rough GEMS (DF counts %d "rough" items here -- the rest is raw\n'):format(
                     total, #df.global.world.items.other.ROUGH)
                 .. 'glass and raw adamantine, which is why a manager order gated on rough stone\n'
                 .. 'sits satisfied and cuts nothing). Cut gems are worth far more and are what a\n'
                 .. 'jeweler encrusts with.\n\n'
-                .. ('Creates: %d Cut Gem JOBS at the jeweler, one per surplus gem, each pinned to\n'):format(want)
-                .. ('a gem you actually have. No manager order, so nothing is left running on a\n')
-                .. ('condition that cannot tell a gem from a lump of glass. Always leaves %d uncut.'):format(ROUGH_GEM_MIN),
+                .. 'Say yes ONCE and this is handled from then on: a single Cut Gem job at the\n'
+                .. 'jeweler, pinned to a gem you actually have, posted again whenever that one is\n'
+                .. ('finished and the pile is still over %d. Never more than one job at a time, no\n'):format(ROUGH_GEM_MIN)
+                .. 'manager order left running on a condition that cannot tell a gem from a lump\n'
+                .. 'of glass, and no second ask. `planner-orders disable` hands it back.',
             build = function()
-                local shop = find_shop(FIXED_WS.CutGems)
-                if shop then
-                    -- spend the biggest piles first, one job per gem
-                    local mats = {}
-                    for idx, n in pairs(by_mat) do mats[#mats + 1] = {idx = idx, n = n} end
-                    table.sort(mats, function(a, b) return a.n > b.n end)
-                    local left = want
-                    for _, m in ipairs(mats) do
-                        for _ = 1, m.n do
-                            if left <= 0 then break end
-                            post_job(shop, {job_type = df.job_type.CutGems,
-                                items = {{item_type = df.item_type.ROUGH, mat_type = 0,
-                                          mat_index = m.idx, quantity = 1}}})
-                            left = left - 1
-                        end
-                        if left <= 0 then break end
-                    end
-                end
-                return missing_shops({'CutGems'})
+                set_auto('Cut gems')
+                return cut_one()
             end}}
     end,
     function()   -- rock nut oil: only once nuts have really piled up, since it EATS the seeds
@@ -2198,7 +2233,9 @@ STANDING_INFO = {
     -- counted by MATERIAL and judged by queued JOBS, matching the ask itself. Counting
     -- `items.other.ROUGH` here reported "19 rough gems" for a fort holding one, because
     -- raw glass and raw adamantine are ROUGH items too.
-    {name = 'Cut gems',               done  = function() return jobs_queued(df.job_type.CutGems) > 0 end,
+    {name = 'Cut gems',               done  = function()
+        -- managed counts as done: there is no gap to chase, the tool posts the jobs
+        return is_auto('Cut gems') or jobs_queued(df.job_type.CutGems) > 0 end,
                                       blocked = function()
         local n = 0
         for _, it in ipairs(df.global.world.items.other.ROUGH) do
@@ -2739,6 +2776,8 @@ if arg == 'list' then
         for _, g in ipairs(r.ignored) do n[#n + 1] = g.name end
         print('  ignored: ' .. table.concat(n, ', '))
     end
+    local managed = auto_names()
+    if #managed > 0 then print('  managed for you: ' .. table.concat(managed, ', ')) end
     if #r.unmakeable > 0 then print('  unmakeable: ' .. table.concat(r.unmakeable, ', ')) end
     if #r.missing > 0 then print('  workshops needed but NOT built: ' .. table.concat(r.missing, ', ')) end
     return
@@ -2756,9 +2795,10 @@ elseif arg == 'disable' then
     -- destructive thing worth a command of its own.
     if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end
     local n = clear_ignores()
+    local a = clear_autos()
     invalidate_scan()
-    print(('planner-orders: cleared %d ignored ask%s; all will be offered again.')
-        :format(n, n == 1 and '' or 's'))
+    print(('planner-orders: cleared %d ignored ask%s and %d managed one%s; all will be offered again.')
+        :format(n, n == 1 and '' or 's', a, a == 1 and '' or 's'))
     return
 elseif arg == 'ignore' or arg == 'unignore' then
     if not dfhack.world.isFortressMode() then qerror('planner-orders: load a fort first') end

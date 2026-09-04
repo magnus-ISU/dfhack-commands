@@ -165,7 +165,10 @@ been restored. Run it with no arguments for a walkthrough, or `help fort/planesw
 the full description. A fort restored into a larger embark than it came from is saved again
 at its original size and area, so it keeps travelling to embarks of its own size. `list`,
 `delete <name> --yes` (deletes only the snapshot folder), `spires` (re-arm the carried spires
-on a fort restored before that pass existed), `status`, and `cancel` round out the set.
+on a fort restored before that pass existed), `repair` (re-mints missing furniture parts,
+re-registers and refills the magma sea, rebuilds manager orders, and points deep layer stone
+back at a stone layer where an older load left it reading as soil), `status`, and `cancel`
+round out the set.
 
 ### **`fort/workshop-tools`**
 Puts a `+` on every queued workshop task that queues another one just like it, and sorts
@@ -180,7 +183,10 @@ stock" repeats. Only offers subtypes your civilization actually knows how to mak
 ### **`fort/planner-orders`**
 Warns of planned buildings nothing produces and offers the orders to make them. With a hospital
 up it also stocks the supplies one needs, traction benches included — the bench and its table,
-mechanism and chain each get their own ask.
+mechanism and chain each get their own ask. Some asks are standing preferences rather than
+one-off gaps: say yes to cutting the rough-gem surplus once and it is handled from then on, one
+Cut Gem job at a time, posted again whenever that one is finished and the pile is still over ten
+— no second ask, and `planner-orders disable` hands it back.
 
 ![fort/planner-orders demo](demos/fort-planner-orders.gif)
 
