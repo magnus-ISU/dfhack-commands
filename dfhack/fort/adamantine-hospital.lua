@@ -116,7 +116,16 @@ local function intercept(job, item)
     local what = dfhack.items.getDescription(item, 0)
     item.flags.forbid = true
     -- cancelling frees the claim, so the hospital re-issues the treatment and -- with this
-    -- item now forbidden -- reaches for ordinary cloth instead
+    -- item now forbidden -- reaches for ordinary cloth instead.
+    -- NEVER while a dwarf is on the job: removeJob on a unit's current job segfaults DF
+    -- (crashlog 2026-09-04 13:23, this exact call under this exact pcall). The doctor
+    -- already carrying the cloth gets to finish; the item stays forbidden for next time.
+    if dfhack.job.getWorker(job) then
+        dfhack.gui.showAnnouncement(
+            ('%s forbidden, but a doctor is already using it for %s -- this one goes through.')
+                :format(what, df.job_type[job.job_type]), COLOR_YELLOW, true)
+        return false
+    end
     local removed = pcall(dfhack.job.removeJob, job)
     load_state()
     state.blocked = state.blocked + 1
@@ -157,9 +166,8 @@ local function do_check()
             for _, ref in ipairs(job.items) do
                 local it = ref.item
                 if it and is_adamantine_fibre(it) then
-                    intercept(job, it)
-                    hits = hits + 1
-                    break                  -- this job is gone; on to the next link
+                    if intercept(job, it) then hits = hits + 1 end
+                    break                  -- this job is gone (or left to its doctor); next link
                 end
             end
         end
