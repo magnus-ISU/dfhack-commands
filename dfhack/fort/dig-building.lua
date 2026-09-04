@@ -401,6 +401,9 @@ local function arm_special(opt)
 end
 
 -- run the action for a picked entry: the stockpile tool for the special flag, else the build menu
+-- the keys navigate()/open_stockpile() feed to DF, which must never be swallowed
+local DRIVEN_KEYS = {D_BUILDING = true, D_STOCKPILES = true}
+
 local function activate(e)
     local opt = e[3]
     if opt and opt.stockpile then
@@ -712,7 +715,10 @@ function DigBuilding:onInput(keys)
         -- normally consumed above, but under a heavy frame the same press can arrive carrying
         -- only its BINDING and no `_STRING`, and then a name typed into the filter starts
         -- switching designation tools and opening panels.
-        if reqscript('internal/typed-keys').swallows(keys) then return true end
+        -- ...except the two this tool sends itself: navigate() opens the build menu
+        -- with D_BUILDING and the stockpile path uses D_STOCKPILES, and a
+        -- simulated key is fed through this same handler before it reaches DF.
+        if reqscript('internal/typed-keys').swallows(keys, DRIVEN_KEYS) then return true end
     end
 
     -- from here on it's mouse handling: yield when the cursor is over a DF hover element / another

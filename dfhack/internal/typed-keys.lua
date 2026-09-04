@@ -36,11 +36,32 @@ local function build()
     end
 end
 
--- does this key event carry something that would act on the map behind the box?
-function swallows(keys)
+-- Does this key event carry something that would act on the map behind the box?
+--
+-- `except` is for a tool that DRIVES DF with those same keys. `gui.simulateInput`
+-- goes through the overlay feed before it reaches DF, so a widget that swallows
+-- `D_BUILDING` swallows its own keystroke and never opens the build menu -- which
+-- is precisely how fort/dig-building stopped working at all. A tool that sends a
+-- key must name it here.
+-- What the last swallow ate, for when a tool stops responding and the question is
+-- whether this is why.
+last_swallowed = last_swallowed or nil
+
+function swallows(keys, except)
     if not SWALLOW then build() end
+    -- NEVER a mouse event. This guard exists for TYPED LETTERS reaching the map's
+    -- hotkeys, and a mouse button is not a typed letter -- but DF hangs bindings
+    -- off the mouse too (right-click carries the designation keys while a
+    -- designation tool is up), so a name-only test ate right-clicks and left the
+    -- player unable to back out of the tool at all.
     for k in pairs(keys) do
-        if SWALLOW[k] then return true end
+        if type(k) == 'string' and k:find('^_MOUSE') then return false end
+    end
+    for k in pairs(keys) do
+        if SWALLOW[k] and not (except and except[k]) then
+            last_swallowed = k
+            return true
+        end
     end
     return false
 end

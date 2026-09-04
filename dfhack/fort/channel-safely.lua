@@ -620,21 +620,28 @@ end
 -- nowhere to stand at all (nothing can be done for those -- they are reported).
 -- Can a miner get to this tile AT ALL right now? Nothing else in this tool asks
 -- that -- everything else asks whether digging it is SAFE -- and safe work that
--- cannot be started is still work that does not happen.
+-- cannot be started is still work that does not happen. Letting one out is worse
+-- than useless: a released tile stays out until it is dug, so tiles nobody can
+-- reach fill the working set and stop anything reachable from following them.
 --
--- A CHANNEL IS DUG FROM THE TILE ABOVE. That is not a detail, it is the whole
--- shape of the answer, and getting it wrong made this useless twice over: asking
--- only about the tile's own level said "unreachable" for all 504 tiles of a
--- channel drawn across buried rock -- while DF was meanwhile issuing jobs for
--- them, which this tool then took back, over and over. Measured on that fort: 1
--- tile reachable at its own level, 151 with fort floor directly above them.
+-- Two conditions, both measured on a 502-tile channel drawn across buried stone,
+-- where DF had issued not one job in several minutes:
 --
--- Both readings count. The tile above is the channelling stance; the tile's own
--- level matters once the excavation is open and a miner is working inside it.
+--   * NOT HIDDEN. 494 of those tiles were undiscovered rock. DF does not dig
+--     what the fort has not seen, and a tile can be under a perfectly good floor
+--     one level up and still be invisible.
+--   * REACHABLE AT ITS OWN LEVEL -- standable itself, or with somewhere to stand
+--     beside it. A floor directly ABOVE a wall does not help: you channel a tile
+--     by standing on it, and you cannot stand inside rock. 151 of those tiles had
+--     fort floor above them and none of them was ever dug.
+--
+-- Of 502 tiles that left exactly one workable, which is the honest answer: the
+-- excavation opens from the one corner a miner can get to, and each tile dug
+-- makes its neighbours reachable in turn.
 function workable(pos, group)
     if not group then return true end          -- no fort to judge against: allow
-    local above = {x = pos.x, y = pos.y, z = pos.z + 1}
-    if dfhack.maps.getWalkableGroup(above) == group then return true end
+    local d = designation_of(pos)
+    if d and d.hidden then return false end
     if dfhack.maps.getWalkableGroup(pos) == group then return true end
     return #standing_spots(pos, group) > 0
 end
