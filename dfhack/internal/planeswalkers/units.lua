@@ -473,6 +473,7 @@ local function spawn_unit(ctx, rec)
             -- livestock: the fort's own tame animal, at its training level
             pcall(function()
                 u.flags1.tame = true
+                u.civ_id = df.global.plotinfo.civ_id  -- makeown leaves an animal's civ unset
                 local lvl = rec.train and df.animal_training_level[rec.train]
                 if not lvl or lvl == df.animal_training_level.WildUntamed then
                     lvl = df.animal_training_level.Domesticated
