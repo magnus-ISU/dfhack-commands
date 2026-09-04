@@ -144,6 +144,7 @@ function pack_dsgn(d)
         | (d.water_stagnant and 1 or 0) << 8
         | (d.water_salt and 1 or 0) << 9
         | (d.flow_forbid and 1 or 0) << 10  -- the magma sea is STATIC; without this it runs off the map
+        | (d.water_table and 1 or 0) << 11  -- aquifer tile
 end
 
 function unpack_dsgn(bits)
@@ -157,6 +158,7 @@ function unpack_dsgn(bits)
         water_stagnant = (bits >> 8) & 1 == 1,
         water_salt = (bits >> 9) & 1 == 1,
         flow_forbid = (bits >> 10) & 1 == 1,
+        water_table = (bits >> 11) & 1 == 1,
     }
 end
 

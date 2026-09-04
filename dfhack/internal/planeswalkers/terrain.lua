@@ -316,10 +316,10 @@ function save_phases(ctx)
             ctx.tiles_f = io.open(ctx.dir .. '/tiles.bin', 'wb')
             ctx.grass_f = io.open(ctx.dir .. '/grass.bin', 'wb')
             -- header flag bit 0: tile records carry TF_TUBE; bit 1: designation
-            -- bits carry flow_forbid
+            -- bits carry flow_forbid; bit 2: they carry water_table (aquifer)
             ctx.tiles_f:write(string.pack(common.HEADER_FMT, 'PWT1',
                 o.wb, o.hb, map.z_count_block,
-                ctx.manifest.dims.surface, 3))
+                ctx.manifest.dims.surface, 7))
             job.block_cursor = 0
         end,
         total = function() return nb end,
@@ -706,6 +706,7 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
     local tube = block_is_tube(ctx, block)
     local off = 1
     local touched = false
+    local block_has_aquifer = false
     for x = 0, 15 do
         local ttcol, dscol = block.tiletype[x], block.designation[x]
         for y = 0, 15 do
@@ -745,6 +746,11 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
                 d.water_stagnant = bits.water_stagnant
                 d.water_salt = bits.water_salt
                 if ctx.src.flags & 2 == 2 then d.flow_forbid = bits.flow_forbid end
+                -- the aquifer is the source's, or none: the destination's own
+                -- aquifer bits under an imported fort would flood its rooms
+                if ctx.src.flags & 4 == 4 then d.water_table = bits.water_table
+                else d.water_table = false end
+                if d.water_table then block_has_aquifer = true end
                 if bits.liquid_type == 1 and bits.flow_size > 0 and z > (ctx.magma_zmax or -1) then
                     ctx.magma_zmax = z
                 end
@@ -777,6 +783,8 @@ local function load_block(ctx, data, src_bx, src_by, src_z)
         if not left then block.local_feature = -1 end
     end
     if touched then
+        block.flags.has_aquifer = block_has_aquifer
+        block.flags.check_aquifer = block_has_aquifer
         -- the destination's own grass sat on terrain that no longer exists; left
         -- in place it would regrow through the imported fort (and colour tiles
         -- the source never had grass on). The grass phase writes the source's
