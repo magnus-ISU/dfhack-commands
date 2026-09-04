@@ -101,6 +101,53 @@ local function is_shrub(x, y, z)
     return tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.SHRUB
 end
 
+-- ---- is there anything on it to pick? ----------------------------------------
+--
+-- A SHRUB-shaped tile is not the same as a plant with produce on it, and the difference is
+-- most of the map. This fort had 171 gather jobs posted: 169 of them on bilberry, blueberry
+-- and cranberry bushes, whose fruit ran from year-tick 120000 to 200000 and it was 248289 --
+-- the berries were months gone. The dwarves walk out, find nothing, and cancel.
+--
+-- The rule the raws give us:
+--   * a plant with NO growths is picked whole -- a dimple cup, a wild plump helmet -- and is
+--     always fair game;
+--   * a plant WITH growths only has produce while one is in season, and LEAVES and FLOWERS do
+--     not count: they are permanently "in season" (timing -1) and are not what a gather job
+--     collects, so counting them would make every bush look ripe all year.
+local plant_index, plant_index_tick
+
+local function plants_by_pos()
+    -- rebuilt at most once per tick: the vector is thousands long and this runs per tile
+    local now = df.global.world.frame_counter or 0
+    if plant_index and plant_index_tick == now then return plant_index end
+    plant_index, plant_index_tick = {}, now
+    for _, p in ipairs(df.global.world.plants.all) do
+        plant_index[('%d/%d/%d'):format(p.pos.x, p.pos.y, p.pos.z)] = p
+    end
+    return plant_index
+end
+
+local NOT_PRODUCE = {LEAVES = true, FLOWERS = true}
+
+local function has_produce(x, y, z)
+    local plant = plants_by_pos()[('%d/%d/%d'):format(x, y, z)]
+    if not plant then return false end                   -- shrub tile with no plant record
+    local dead = false
+    pcall(function() dead = plant.damage_flags.is_dead end)
+    if dead then return false end
+    local raw = df.global.world.raws.plants.all[plant.material]
+    if not raw then return false end
+    if #raw.growths == 0 then return true end            -- picked whole
+    local tick = df.global.cur_year_tick
+    for _, g in ipairs(raw.growths) do
+        if not NOT_PRODUCE[g.id] then
+            if g.timing_1 < 0 and g.timing_2 < 0 then return true end
+            if tick >= g.timing_1 and tick <= g.timing_2 then return true end
+        end
+    end
+    return false
+end
+
 -- Every tile that already has a plant-gathering job posted on it, whoever posted it.
 -- Walking the job list once per cycle is far cheaper than a per-tile search, and it is
 -- the only way to see DF's own zone jobs -- they are not attached to the zone building.
@@ -203,7 +250,7 @@ function do_cycle(only_zone)
                     local k = key(x, y, zone.z)
                     if posted < MAX_NEW_JOBS and not tiles[k] and not skip[k]
                         and dfhack.buildings.containsTile(zone, x, y)
-                        and is_shrub(x, y, zone.z) then
+                        and is_shrub(x, y, zone.z) and has_produce(x, y, zone.z) then
                         post_job(x, y, zone.z)
                         tiles[k] = true
                         posted = posted + 1
