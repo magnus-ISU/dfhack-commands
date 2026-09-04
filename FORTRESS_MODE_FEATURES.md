@@ -89,7 +89,9 @@ Drops the right zone onto furniture: a tomb on every coffin, a pasture on every 
 Carry a whole fort between worlds. `fort/planeswalkers save` snapshots the current fort —
 terrain (with veins, sand/soil, the grass cover — surface grasses and the
 cavern mosses, fungi and lichens alike — and, on a same-size embark, the whole column down
-through the magma sea and hell; the destination keeps its own demons), adamantine spires
+through the magma sea and hell, re-registered on the destination's magma layer with the
+layer's z band widened to the arriving sea and any magma pipe above it, so DF keeps rather
+than drains it; the destination keeps its own demons), adamantine spires
 carried as real spires with their contents — the demon wave waiting in each hollow, the
 divine treasures, the encased horrors and magma/water pockets, each with its trigger tiles
 and whether it already went off — while the destination's own spire contents under the fort
@@ -197,7 +199,10 @@ forbids every other candidate in the fort -- including ones mined, butchered or 
 dwarf walks -- so DF has one legal choice per row and takes it, instead of the nearest boulder.
 Requirements already hauled in are shown as claimed and cannot be changed; candidates are
 limited to what the dwarf can actually walk to; worn, part-used and forbidden items are shown,
-labelled, and never chosen by default. Everything it touches is put back.
+labelled, and never chosen by default. And when the fort is short of what the mood wants,
+`[delay work]` (Ctrl-D) buys the time to make it: the dwarf gets a burrow of nothing but their
+own workshop, so there is no item they can reach and the mood holds where it is until you lift
+it. Everything it touches is put back.
 
 ### **`fort/butcher-shop`**
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young

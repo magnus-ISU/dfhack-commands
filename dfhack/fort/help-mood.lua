@@ -50,9 +50,19 @@ confined to a burrow holding the item's tile AND the whole of the workshop they 
 wandering off to a nearer candidate that appears mid-walk. The moment they actually pick it
 up, the forbids come off and the burrow moves on to the next requirement.
 
+DELAYING. A mood does not wait for you. It claims a workshop, gathers what it can reach, and
+starts building with that -- so when the panel says the gods are testing you, the useful move
+is usually not a better forbid but more time. `delay work` (Ctrl-D) gives the dwarf a burrow
+of nothing but their own workshop: they can stand in it and do nothing else, no item is inside
+it, and the mood holds exactly where it is until you lift the delay -- by which time the
+smelter has run and the bar you needed exists. It uses the same burrow rather than a second
+one, because a dwarf assigned to two burrows may walk anywhere either covers, which would
+delay nothing at all.
+
 Everything it touches is put back: forbids are restored to what they were, and the temporary
 burrow (named `help-mood`) is emptied rather than deleted, so the same one is reused next time
-instead of littering the burrow list.
+instead of littering the burrow list. A delay comes off with it -- a dwarf left in a
+one-workshop burrow after the artifact is done would never leave it again.
 ]]
 
 local gui = require('gui')
@@ -693,6 +703,75 @@ function workshop_tiles(job)
     return tiles
 end
 
+-- ---------------------------------------------------------------------------
+-- delaying the work
+-- ---------------------------------------------------------------------------
+--
+-- A mood claims its workshop long before it has everything it wants, and once it has what it
+-- wants it starts building -- with whatever it managed to find. If the good bar is three
+-- levels down and the mood is about to settle for a copper one, the useful thing is not a
+-- better forbid, it is TIME.
+--
+-- So: a burrow holding the workshop and nothing else, with the moody dwarf assigned to it.
+-- They can stand in their shop and they can do nothing else. No item is inside the burrow, so
+-- no item can be fetched, and the mood waits where it is until the burrow comes off -- by
+-- which time the smelter has run and the bar exists.
+--
+-- It shares the one burrow with the helping side of this tool rather than adding a second:
+-- a dwarf assigned to two burrows may walk anywhere either of them covers, so a delay burrow
+-- next to a fetching burrow would delay nothing at all.
+
+delaying = delaying or false
+
+local function apply_delay(unit, job)
+    local shop = workshop_tiles(job)
+    if #shop == 0 then return false end
+    local b = get_burrow()
+    local ok = pcall(function()
+        dfhack.burrows.clearTiles(b)
+        for _, tile in ipairs(shop) do
+            dfhack.burrows.setAssignedTile(b, tile, true)
+        end
+        dfhack.burrows.clearUnits(b)
+        dfhack.burrows.setAssignedUnit(b, unit, true)
+    end)
+    return ok
+end
+
+local delay_tick
+
+-- Returns ok, why-not. Works with or without a helping session running: delaying is a thing
+-- you may want before you have decided anything at all.
+function set_delay(on)
+    if not on then
+        delaying = false
+        clear_burrow()          -- the helper puts its own back on the next tick if it is running
+        return true
+    end
+    local unit, job = find_mood()
+    if not unit or not job then return false, 'nobody is in a mood' end
+    -- Before a workshop is claimed the job has no position DF will admit to, and a burrow
+    -- built around that would pen the dwarf on a tile in the middle of nowhere.
+    if #workshop_tiles(job) == 0 then
+        return false, 'no workshop claimed yet -- wait for them to pick one'
+    end
+    if not apply_delay(unit, job) then return false, 'could not set the burrow' end
+    delaying = true
+    delay_tick()
+    return true
+end
+
+-- The workshop can change under a delay (a dwarf whose claim is cancelled claims another),
+-- and the mood can simply end, which must take the burrow off with it -- a dwarf left
+-- assigned to a one-workshop burrow after the artifact is done never leaves it again.
+delay_tick = function()
+    if not delaying then return end
+    local unit, job = find_mood()
+    if not unit or not job then set_delay(false); return end
+    if not state then apply_delay(unit, job) end   -- while helping, steer() does this
+    dfhack.timeout(50, 'frames', delay_tick)
+end
+
 local function set_forbidden(item, val)
     pcall(function() item.flags.forbid = val end)
 end
@@ -734,6 +813,7 @@ function stop()
         for _ in pairs(state.forbidden) do n = n + 1 end
     end
     release_forbids()
+    delaying = false
     clear_burrow()
     state = nil
     if hb_gen then hb_gen = hb_gen + 1 end
@@ -887,6 +967,11 @@ local function steer(unit, job)
 
     local pos = xyz2pos(dfhack.items.getPosition(item))
     local shop = workshop_tiles(job)
+    if delaying then
+        -- the forbids above still stand; the burrow is the workshop alone
+        apply_delay(unit, job)
+        return true
+    end
     if pos and pos.x >= 0 then
         local b = get_burrow()
         pcall(function()
@@ -1107,11 +1192,44 @@ function Planner:init()
             label = 'close',
             on_activate = function() self.parent_view:dismiss() end,
         },
+        -- its own row above the others: a delay is not part of the pick-and-build sequence,
+        -- it is the thing you reach for when that sequence needs longer than the mood allows
+        widgets.TextButton{
+            view_id = 'delay',
+            frame = {b = 2, l = 0, w = 22, h = 1},
+            label = 'delay work',
+            key = 'CUSTOM_CTRL_D',
+            on_activate = function() self:toggle_delay() end,
+        },
         widgets.Label{
             view_id = 'status', frame = {b = 0, l = 0}, text = '', text_pen = COLOR_GREY,
         },
     }
     self:refresh()
+end
+
+-- Hold the mood where it is: the dwarf gets a burrow of nothing but their own workshop, so
+-- there is no item they can reach and nothing they can start.
+function Planner:toggle_delay()
+    if delaying then
+        set_delay(false)
+        self.subviews.status:setText('Delay lifted: they may fetch again.')
+    else
+        local ok, why = set_delay(true)
+        if not ok then
+            self.subviews.status:setText('Cannot delay: ' .. (why or 'unknown'))
+        else
+            self.subviews.status:setText(
+                'Delayed: burrowed into their workshop, they can fetch nothing.')
+        end
+    end
+    self:relabel_delay()
+end
+
+function Planner:relabel_delay()
+    local b = self.subviews.delay
+    b.label.text_pen = delaying and COLOR_LIGHTGREEN or COLOR_GREY
+    b:setLabel(delaying and 'let them work' or 'delay work')
 end
 
 function Planner:satisfied()
@@ -1160,6 +1278,7 @@ end
 
 function Planner:refresh()
     self:reconcile()
+    self:relabel_delay()
     local name = dfhack.units.getReadableName(self.unit)
     if self:satisfied() then
         self.subviews.headline:setText({{
@@ -1176,7 +1295,11 @@ function Planner:refresh()
         self.subviews.headline:setText({{text = 'The gods are testing you', pen = COLOR_LIGHTRED}})
         self.subviews.omen:setText('')
         self.subviews.list:setChoices({})
-        self.subviews.status:setText('')
+        -- The one thing this panel CAN offer when the fort is short: hold the dwarf still
+        -- while somebody goes and makes the missing thing.
+        self.subviews.status:setText(delaying
+            and 'Delayed: burrowed into their workshop, they can fetch nothing.'
+            or 'They want something you have not got. Ctrl-D holds them until you have.')
         self.subviews.help.visible = false
         return
     end
