@@ -39,9 +39,10 @@ everything. (`fort/help-mood stop` is the same thing from the command line.)
 A requirement the dwarf has ALREADY hauled in is shown as claimed and cannot be changed --
 that decision is behind you, and DF will not let go of it.
 
-When the fort CANNOT meet the mood it says so and names the rows it cannot fill -- "no raw
-crystal glass" -- but still not what the artifact would have been. Which requirement is short is
-something you can act on in an afternoon at a glass furnace; what it would have become is not.
+When the fort CANNOT meet the mood this says so and no more. It does not name the missing
+requirement, deliberately: by the time a mood has struck the demand is already rolled, so an
+answer here arrives on the one day it cannot be used. `fort/moody-items-warning` is what
+answers that question, all the time, while there is still a season to act on it.
 
 WHAT IT DOES
 
@@ -1310,25 +1311,20 @@ function Planner:refresh()
             or 'What they will make is anyone\'s guess.')
         self.subviews.omen.text_pen = what and COLOR_YELLOW or COLOR_GREY
     else
-        -- AND WHAT IS MISSING. This used to say the headline and nothing else, on the
-        -- reasoning that knowing what a mood wants is the blessing and a fort that cannot
-        -- meet it has not earned that. That is a nice idea and it nearly cost a mood: "the
-        -- gods are testing you" does not tell you that one raw crystal glass, an hour's work
-        -- at a glass furnace, is the whole of the difference. The rows the fort cannot fill
-        -- are named, and nothing else is -- what the artifact will BE is still unearned.
-        local missing = {}
-        for _, r in ipairs(self.rows) do
-            if not r.claimed and #r.options == 0 then
-                missing[#missing + 1] = requirement_name(r.filter)
-            end
-        end
+        -- and NOTHING else. No row, no requirement name, no hint at which one is short:
+        -- the whole value of this panel is knowing what the mood wants, and a fort that
+        -- cannot meet it has not earned that. The dwarf goes mad or does not on their own.
+        --
+        -- THIS IS NOT THE PLACE TO LEARN WHAT YOU ARE SHORT OF. By the time a mood has
+        -- struck it is already too late -- the demand was rolled when it started. Naming the
+        -- gap here was tried and taken straight back out: it reads as help and it is not,
+        -- because the answer arrives on the one day it cannot be used.
+        -- `fort/moody-items-warning` is the tool for that question. It runs all the time,
+        -- names every mood material the fort has none of ("No raw crystal glass for a
+        -- mood"), and says it while there is still a season to do something about it.
         self.subviews.headline:setText({{text = 'The gods are testing you', pen = COLOR_LIGHTRED}})
-        self.subviews.omen:setText(('%s wants something the fort has not got:'):format(name))
-        local short = {}
-        for _, m in ipairs(missing) do
-            short[#short + 1] = {text = {{text = 'no ' .. m, pen = COLOR_LIGHTRED}}}
-        end
-        self.subviews.list:setChoices(short)
+        self.subviews.omen:setText('')
+        self.subviews.list:setChoices({})
         -- The one thing this panel CAN offer when the fort is short: hold the dwarf still
         -- while somebody goes and makes the missing thing.
         self.subviews.status:setText(delaying

@@ -154,10 +154,12 @@ local CATEGORIES = {
 }
 
 -- glass is asked for only in types this fort has produced (created_item_type history)
+-- "raw", the way DF names the item. "crystal glass" on its own reads like a window or a
+-- block; what a mood wants and what you have to go and make is RAW glass.
 local GLASS = {
-    {label = 'green glass',   mat = df.builtin_mats.GLASS_GREEN},
-    {label = 'clear glass',   mat = df.builtin_mats.GLASS_CLEAR},
-    {label = 'crystal glass', mat = df.builtin_mats.GLASS_CRYSTAL},
+    {label = 'raw green glass',   mat = df.builtin_mats.GLASS_GREEN},
+    {label = 'raw clear glass',   mat = df.builtin_mats.GLASS_CLEAR},
+    {label = 'raw crystal glass', mat = df.builtin_mats.GLASS_CRYSTAL},
 }
 
 -- Which glass types this fort is expected to keep in stock. Two sources, OR-ed, because
@@ -267,13 +269,17 @@ local function message()
     if not ok or not s then return end
 
     -- one list, one sentence: the remains/bones gap reads as just another thing a mood could
-    -- ask for and we haven't got. Naming them all only stays readable while there are a few,
-    -- so a long list collapses to a count and the panel shows the detail.
+    -- ask for and we haven't got.
+    --
+    -- ALWAYS NAMED, however many there are. A long list used to collapse to "5 mood materials
+    -- missing!" on the grounds that naming them stopped being readable -- and a fort nearly
+    -- lost a mood to that, because the one that mattered was raw crystal glass and the line
+    -- did not say so. A count tells you nothing you can act on; the names are the whole
+    -- point, and this is the only thing in the fort that says them out loud.
     local gone = {}
     for _, m in ipairs(s.missing) do gone[#gone + 1] = m end
     for _, m in ipairs(s.grim_missing) do gone[#gone + 1] = m end
     if #gone == 0 then return end
-    if #gone > 3 then return ('%d mood materials missing!'):format(#gone) end
     return ('No %s for a mood'):format(table.concat(gone, ', '))
 end
 
