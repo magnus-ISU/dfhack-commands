@@ -1016,18 +1016,51 @@ function strands_work(active, hyp, group)
         end
     end
 
-    -- flood in from the border: those are the tiles that reach the rest of the
-    -- fort, so a standing spot only counts if the flood got to it
+    -- Flood in from the ways OUT of this level, so a standing spot only counts if the
+    -- flood got to it. Two kinds of way out:
+    --
+    --   * the box border -- walk off the edge of what we are modelling and you are in
+    --     the rest of the fort;
+    --   * a ramp or a staircase -- you leave by going up or down.
+    --
+    -- The border alone was the whole of it, and that is only true of an excavation on
+    -- the level the fort walks about on. A gallery reached by a staircase has NOTHING
+    -- walkable anywhere on its own level's border: measured here, a 16x2 strip at z=122
+    -- whose 96 border tiles were solid rock in every direction. With no seed the flood
+    -- reaches nothing, every open designated tile looks stranded, and all 23 tiles were
+    -- refused for "no safe order" -- a shape that was perfectly safe and simply not on
+    -- the ground floor.
+    local exits = {[df.tiletype_shape.RAMP] = true, [df.tiletype_shape.RAMP_TOP] = true,
+                   [df.tiletype_shape.STAIR_UP] = true, [df.tiletype_shape.STAIR_DOWN] = true,
+                   [df.tiletype_shape.STAIR_UPDOWN] = true}
+    local codes_shape = {}
     local seen, stack, sp = {}, {}, 0
     for ix = 0, w - 1 do
         for iy = 0, h - 1 do
-            if (ix == 0 or iy == 0 or ix == w - 1 or iy == h - 1)
-                    and walk[ix * h + iy] then
-                local i = ix * h + iy
-                seen[i] = true; sp = sp + 1; stack[sp] = i
+            local i = ix * h + iy
+            if walk[i] then
+                local out = (ix == 0 or iy == 0 or ix == w - 1 or iy == h - 1)
+                if not out then
+                    local x, y = x0 + ix, y0 + iy
+                    local b = blocks[(x // 16) * 4096 + (y // 16)]
+                    if b then
+                        local tt = b.tiletype[x % 16][y % 16]
+                        local sh = codes_shape[tt]
+                        if sh == nil then
+                            sh = df.tiletype.attrs[tt].shape
+                            codes_shape[tt] = sh
+                        end
+                        out = exits[sh] or false
+                    end
+                end
+                if out then seen[i] = true; sp = sp + 1; stack[sp] = i end
             end
         end
     end
+    -- Still nothing to flood from? Then this test has no opinion, and an opinion is what
+    -- it would take to hold the work back. Saying "stranded" on no evidence is how the
+    -- tool ends up refusing an entire designation forever.
+    if sp == 0 then return false end
     while sp > 0 do
         local i = stack[sp]; sp = sp - 1
         local ix, iy = i // h, i % h
