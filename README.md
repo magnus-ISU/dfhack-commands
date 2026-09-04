@@ -54,8 +54,11 @@ the rock below, never through a corner — and if every other designated tile st
 to stand that connects out of the excavation. Tiles that are out get restricted traffic so
 nobody wanders onto them, and their old traffic setting is restored afterwards. A shape with no
 safe order, like a ring drawn around floor that is not itself designated, simply stays planned.
-Priority 1 designations are never touched, and `fort/channel-safely why <x> <y> <z>` explains
-any tile's verdict. Enabled by `magnus-scripts`.
+Only tiles a miner can actually get to are let out — a channel is dug from the tile above, so
+that is where it looks — which keeps a designation drawn across undug rock from filling the
+working set with tiles nobody can reach; when none of it can be reached yet, `status` says so
+rather than blaming the shape. Priority 1 designations are never touched, and
+`fort/channel-safely why <x> <y> <z>` explains any tile's verdict. Enabled by `magnus-scripts`.
 
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
 

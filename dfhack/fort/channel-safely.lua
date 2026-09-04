@@ -214,6 +214,37 @@ local MAX_CONCURRENT = 8
 local MARGIN = 8
 local MAX_AREA = 10000         -- a 100x100 excavation; measured at ~16ms
 
+-- A designation bigger than MAX_AREA used to end the story: `analyse` returned
+-- nil for the oversized box, `choose_release` saw no base to compare against
+-- and gave up, and every tile of a big channel sat held forever -- the tool
+-- looked enabled and did nothing. So an oversized set is judged through a
+-- WINDOW around the candidate instead of all at once. Support and stranding
+-- are local questions: what holds a tile up is its neighbours, and a flood that
+-- reaches the window's border has reached the rest of the fort. This is the
+-- same computation the small case does, just centred on the tile being weighed
+-- rather than on the whole excavation.
+local WINDOW = 20              -- a 41x41 box around the candidate
+
+-- Weighing one candidate costs two grid builds and a flood. Trying every tile
+-- of a thousand-tile designation, eight times over, every frame, is what took
+-- the fort to 8 FPS. A pass looks at this many and stops, resuming where it
+-- left off next time, so every tile still gets its turn -- just not all in one
+-- frame.
+local CANDIDATES_PER_PASS = 24
+
+-- and a pass does not start every frame either
+local PASS_INTERVAL_MS = 1000
+
+-- where the last pass stopped weighing candidates. Deliberately NOT in the
+-- persisted state: it is progress through one pass, not a decision about the
+-- fort, and writing it to the save every second would be noise.
+release_cursor = release_cursor or 0
+
+-- set when a pass found channel work but no part of it can be reached yet: a
+-- designation drawn across undug rock is waiting on the tunnel to it, not on
+-- this tool, and `status` should say which of the two it is
+unreachable_pass = unreachable_pass or false
+
 local SHAPE_OPEN, SHAPE_WALL, SHAPE_SUPPORT = 0, 1, 2
 
 -- tiletype -> shape code, built once.
@@ -587,6 +618,27 @@ end
 -- Returns two sets keyed like `doomed`: tiles that must be held because they
 -- are some other pending tile's last standing spot, and tiles that already have
 -- nowhere to stand at all (nothing can be done for those -- they are reported).
+-- Can a miner get to this tile AT ALL right now? Nothing else in this tool asks
+-- that -- everything else asks whether digging it is SAFE -- and safe work that
+-- cannot be started is still work that does not happen.
+--
+-- A CHANNEL IS DUG FROM THE TILE ABOVE. That is not a detail, it is the whole
+-- shape of the answer, and getting it wrong made this useless twice over: asking
+-- only about the tile's own level said "unreachable" for all 504 tiles of a
+-- channel drawn across buried rock -- while DF was meanwhile issuing jobs for
+-- them, which this tool then took back, over and over. Measured on that fort: 1
+-- tile reachable at its own level, 151 with fort floor directly above them.
+--
+-- Both readings count. The tile above is the channelling stance; the tile's own
+-- level matters once the excavation is open and a miner is working inside it.
+function workable(pos, group)
+    if not group then return true end          -- no fort to judge against: allow
+    local above = {x = pos.x, y = pos.y, z = pos.z + 1}
+    if dfhack.maps.getWalkableGroup(above) == group then return true end
+    if dfhack.maps.getWalkableGroup(pos) == group then return true end
+    return #standing_spots(pos, group) > 0
+end
+
 function access_holds(active)
     local group = fort_group()
     if not group then return {}, {} end
@@ -938,8 +990,26 @@ function strands_work(active, hyp, group)
         end
     end
 
+    -- A designated tile that is STILL SOLID ROCK cannot be stranded. There is no
+    -- floor under it to lose, and it needs no standing spot yet -- the excavation
+    -- opens its own way in as it is dug. Asking for one anyway is not a
+    -- conservative reading, it is a wrong one: a 504-tile channel drawn across
+    -- hidden stone has nothing walkable anywhere near it, so every tile failed
+    -- this test, every pass, and the whole designation sat held forever while the
+    -- test was re-run against all 504 of them on every frame.
+    local codes = shape_code_table()
+    local function solid(p)
+        local bk = (p.x // 16) * 4096 + (p.y // 16)
+        local b = blocks[bk]
+        if b == nil then
+            b = dfhack.maps.getTileBlock({x = p.x, y = p.y, z = p.z}) or false
+            blocks[bk] = b
+        end
+        return b and codes[b.tiletype[p.x % 16][p.y % 16]] == SHAPE_WALL
+    end
+
     for _, p in ipairs(active) do
-        if not hyp[key(p)] then
+        if not hyp[key(p)] and not solid(p) then
             local reachable = false
             for _, d in ipairs(NEIGHBOURS) do
                 local ix, iy = p.x + d.x - x0, p.y + d.y - y0
@@ -955,12 +1025,35 @@ function strands_work(active, hyp, group)
 end
 
 -- the one tile to let out next, or nil if nothing can be proven safe
+-- the active tiles near enough to a candidate to bear on it
+local function window_active(active, cand)
+    local sub = {}
+    for _, p in ipairs(active) do
+        if math.abs(p.x - cand.x) <= WINDOW and math.abs(p.y - cand.y) <= WINDOW then
+            sub[#sub + 1] = p
+        end
+    end
+    return sub
+end
+
 function choose_release(active, phantom, group)
     local _, base = analyse(active, phantom)
-    if not base then return nil end
-    local base_n = count(base)
+    -- nil means the excavation is bigger than one grid can hold: judge each
+    -- candidate through its own window instead of abandoning the whole thing
+    local windowed = base == nil
+    local base_n = base and count(base) or 0
 
-    -- farthest from the middle of the shape first
+    -- farthest from the middle of the shape first -- but REACHABLE tiles ahead of
+    -- unreachable ones.
+    --
+    -- Farthest-first is the order a dwarf would pick in an open excavation: start
+    -- at the far end and retreat toward the way in. It is the wrong order for a
+    -- designation drawn across solid rock, where the far end is buried and no
+    -- miner can get to it -- the tool let out eight tiles nobody could reach, DF
+    -- issued no job for any of them, and since a released tile stays out until it
+    -- is dug, the working set filled up with work that could never happen and the
+    -- excavation never started. In an open excavation every tile is reachable, so
+    -- this sorts on nothing and the old order stands.
     local cx, cy = 0, 0
     for _, p in ipairs(active) do cx, cy = cx + p.x, cy + p.y end
     cx, cy = cx / #active, cy / #active
@@ -968,6 +1061,20 @@ function choose_release(active, phantom, group)
     for _, p in ipairs(active) do
         if not phantom[key(p)] then order[#order + 1] = p end
     end
+    -- Unreachable tiles are not candidates at all. Letting one out does nothing --
+    -- DF issues no job for a tile no miner can get to -- and it is not free
+    -- either: a released tile stays out until it is dug, so eight of them fill
+    -- the working set and stop anything reachable from being released later.
+    local kept = {}
+    for _, p in ipairs(order) do
+        if workable(p, group) then kept[#kept + 1] = p end
+    end
+    order = kept
+    if #order == 0 then
+        unreachable_pass = true
+        return nil
+    end
+    unreachable_pass = false
     table.sort(order, function(a, b)
         local da = (a.x - cx) ^ 2 + (a.y - cy) ^ 2
         local db = (b.x - cx) ^ 2 + (b.y - cy) ^ 2
@@ -975,7 +1082,20 @@ function choose_release(active, phantom, group)
         return key(a) < key(b)
     end)
 
-    for _, cand in ipairs(order) do
+    -- Resume where the last pass stopped. The order is stable for a given
+    -- shape, so walking it a slice at a time still reaches every tile -- and a
+    -- tile that could not be released last pass is usually not the one that can
+    -- this pass either, so starting from the top every time is wasted work as
+    -- well as slow.
+    local start = release_cursor % math.max(#order, 1)
+    local looked = 0
+    for n = 1, #order do
+        local cand = order[((start + n - 1) % #order) + 1]
+        looked = looked + 1
+        if looked > CANDIDATES_PER_PASS then
+            release_cursor = start + n - 1
+            return nil
+        end
         -- Anything standing on the tile, or on the tile above it, comes down
         -- with the floor. This check existed, then was dropped in a rewrite and
         -- nothing called it for several versions -- restored, and now looking
@@ -1001,13 +1121,22 @@ function choose_release(active, phantom, group)
         for k in pairs(phantom) do hyp[k] = true end
         hyp[key(cand)] = true
         if beside_work then goto continue end
-        local _, hanging = analyse(active, hyp)
-        if hanging and count(hanging) <= base_n
-                and not strands_work(active, hyp, group) then
+        local sub, want = active, base_n
+        if windowed then
+            sub = window_active(active, cand)
+            local _, local_base = analyse(sub, phantom)
+            if not local_base then goto continue end   -- cannot judge it: leave it held
+            want = count(local_base)
+        end
+        local _, hanging = analyse(sub, hyp)
+        if hanging and count(hanging) <= want
+                and not strands_work(sub, hyp, group) then
+            release_cursor = start + looked
             return cand
         end
         ::continue::
     end
+    release_cursor = 0
     return nil
 end
 
@@ -1043,6 +1172,25 @@ local function apply(found, top)
 
     -- forget released tiles that are done with
     local out = outstanding(s)
+
+    -- And take back the ones that were let out but can never be worked: no job
+    -- came of them and no miner can reach them. Released tiles stay out until
+    -- they are dug, so without this the working set silently fills with tiles
+    -- nobody can touch and nothing else is ever released.
+    do
+        local jobs = inflight_channels()
+        local group = fort_group()
+        for k in pairs(out) do
+            if not jobs[k] then
+                local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+                local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+                if pos and not workable(pos, group) then
+                    out[k] = nil
+                    s.released[k] = nil
+                end
+            end
+        end
+    end
 
     -- Restrict everything currently out, from the `out` set rather than from
     -- the designation list: once DF turns a released tile into a job the tile
@@ -1290,7 +1438,17 @@ function tick()
             pending_reclaim = {}
         end
     end
-    pcall(pump)
+    -- A pass is not free -- it sweeps the map's blocks and then weighs
+    -- candidates against a rebuilt grid -- and this ticks on EVERY frame, so it
+    -- was doing all of that every frame. `next_pass_at` was declared for this
+    -- and never wired up; a big channel designation then held the fort at 8 FPS.
+    -- A pass already in progress (scan ~= nil) keeps stepping so it finishes
+    -- promptly; only STARTING a new one waits for the interval.
+    local now = dfhack.getTickCount()
+    if scan or now >= next_pass_at then
+        pcall(pump)
+        if not scan then next_pass_at = dfhack.getTickCount() + PASS_INTERVAL_MS end
+    end
 end
 
 OVERLAY_WIDGETS = {pump = ChannelPump}
@@ -1327,9 +1485,16 @@ function status()
             :format(reclaimed, reclaimed == 1 and '' or 's'))
     end
     if (last_pass_blocked or 0) > 0 then
-        print(('  %d designation%s cannot be dug in any order without dropping '
-            .. 'unsupported floor; they stay planned')
-            :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's'))
+        if unreachable_pass then
+            print(('  %d designation%s cannot be reached yet -- no miner can stand at '
+                .. 'or beside any of them; they stay planned until something is dug '
+                .. 'through to them')
+                :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's'))
+        else
+            print(('  %d designation%s cannot be dug in any order without dropping '
+                .. 'unsupported floor; they stay planned')
+                :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's'))
+        end
     end
     if hanging_cache.skipped then
         print(('  support check SKIPPED: the active level spans more than %d tiles')
