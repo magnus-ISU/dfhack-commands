@@ -454,6 +454,7 @@ local function do_load(name, ...)
         if ctx.spire_report then notify(ctx.spire_report) end
         if ctx.spire_contents_report then notify(ctx.spire_contents_report) end
         if ctx.magma_report then notify(ctx.magma_report) end
+        if ctx.geo_report then notify(ctx.geo_report) end
         local cx = anchor.off_x + mf.dims.bx * 8
         local cy = anchor.off_y + mf.dims.by * 8
         dfhack.gui.revealInDwarfmodeMap(xyz2pos(cx, cy, anchor.dest_surface), true)
@@ -538,6 +539,7 @@ local function do_repair()
         ctx.dest_deep_top = select(1, req('terrain').find_deep_top_z())
         table.insert(phases, req('terrain').magma_sea_phase(ctx, true))
     end
+    table.insert(phases, req('terrain').geolayer_repair_phase(ctx))
     if ctx.dir and dfhack.filesystem.exists(ctx.dir .. '/orders.json') then
         -- the building map is gone; workshop restrictions cannot be relinked here
         ctx.bld_map = {}
@@ -548,6 +550,7 @@ local function do_repair()
         notify(('repair: %d piece(s) of furniture got their missing component; %d manager order(s) rebuilt')
                :format(ctx.components_fixed or 0, ctx.orders_restored or 0), COLOR_LIGHTGREEN, true)
         if ctx.magma_report then notify(ctx.magma_report) end
+        if ctx.geo_report then notify(ctx.geo_report) end
     end)
 end
 

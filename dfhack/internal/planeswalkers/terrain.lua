@@ -1283,10 +1283,22 @@ end
 -- square, every layer under it with the region_tile_idx it registers blocks
 -- with (the value it compares against). The region_coords lookup is the
 -- fallback when the square lists no such layer.
+-- The embark's region details come as a list covering the 3x3 world tiles
+-- around the fort; entry 0 is a NEIGHBOUR's tile, so match on pos.
+local function site_region_details()
+    local map = df.global.world.map
+    local wx, wy = map.region_x // 16, map.region_y // 16
+    local list = df.global.world.world_data.midmap_data.region_details
+    for i = 0, #list - 1 do
+        if list[i].pos.x == wx and list[i].pos.y == wy then return list[i] end
+    end
+end
+
 local function layer_sq_from_region(gidx, bx, by)
     local ok, idx = pcall(function()
         local map = df.global.world.map
-        local rd = df.global.world.world_data.midmap_data.region_details[0]
+        local rd = site_region_details()
+        if not rd then return -1 end
         local vec = rd.features[map.region_x % 16 + bx * 16 // 48][map.region_y % 16 + by * 16 // 48]
         for i = 0, #vec - 1 do
             if vec[i].layer == gidx then return vec[i].region_tile_idx end
@@ -1495,16 +1507,51 @@ function magma_sea_phase(ctx, refill)
             if job.f then job.f:close() job.f = nil end
             -- the layers' z bands per embark square (16 entries for a 4x4
             -- embark, in square order x-major as DF lays them out)
+            -- Two copies of the band matter. The feature's min/max_map_z is
+            -- what the running game reads, but DF re-derives it from the
+            -- embark's region-details entries (region-relative z), so a band
+            -- widened only on the feature snaps back to the destination's
+            -- band and DF then removes every registered tile above it (the
+            -- source's magma pipe drained from the top, thousands of units
+            -- a minute, after every load and repair). Widen both.
             local function set_band(feat, key_min, key_max)
                 if not feat or not feat.init.feature then return end
                 local ft = feat.init.feature
-                local w = df.global.world.map.x_count // 48
-                for i = 0, #ft.min_map_z - 1 do
-                    local sx, sy = i // math.max(1, (#ft.min_map_z // math.max(1, w))), i % math.max(1, (#ft.min_map_z // math.max(1, w)))
-                    local sq = job.sq[sx .. ':' .. sy]
-                    if sq and sq[key_min] then
-                        ft.min_map_z[i] = math.min(ft.min_map_z[i], sq[key_min])
-                        ft.max_map_z[i] = math.max(ft.max_map_z[i], sq[key_max])
+                local map = df.global.world.map
+                local w = math.max(1, map.x_count // 48)
+                local n = #ft.min_map_z
+                local per = math.max(1, n // w)
+                for i = 0, n - 1 do
+                    -- DF's square order for this array is not documented:
+                    -- widen to the union of both candidate squares
+                    for _, sq in ipairs({job.sq[(i // per) .. ':' .. (i % per)],
+                                         job.sq[(i % per) .. ':' .. (i // per)]}) do
+                        if sq and sq[key_min] then
+                            ft.min_map_z[i] = math.min(ft.min_map_z[i], sq[key_min])
+                            ft.max_map_z[i] = math.max(ft.max_map_z[i], sq[key_max])
+                        end
+                    end
+                end
+                local rd = site_region_details()
+                local rz = map.region_z
+                -- the underground region's own per-world-tile range, which DF
+                -- seeds the region details from
+                local ur = df.global.world.world_data.underground_regions[feat.gidx]
+                local ui = ur and layer_sq_index(feat.gidx, map.region_x // 16, map.region_y // 16) or -1
+                for sqk, sq in pairs(job.sq) do
+                    if sq[key_min] and ui >= 0 then
+                        ur.region_min_z[ui] = math.min(ur.region_min_z[ui], sq[key_min] + rz)
+                        ur.region_max_z[ui] = math.max(ur.region_max_z[ui], sq[key_max] + rz)
+                    end
+                    if sq[key_min] and rd then
+                        local sx, sy = sqk:match('^(%d+):(%d+)$')
+                        local vec = rd.features[map.region_x % 16 + tonumber(sx)][map.region_y % 16 + tonumber(sy)]
+                        for i = 0, #vec - 1 do
+                            if vec[i].layer == feat.gidx then
+                                vec[i].min_z = math.min(vec[i].min_z, sq[key_min] + rz)
+                                vec[i].max_z = math.max(vec[i].max_z, sq[key_max] + rz)
+                            end
+                        end
                     end
                 end
             end
@@ -1514,6 +1561,123 @@ function magma_sea_phase(ctx, refill)
             ctx.magma_report = ('magma sea: %d tile(s) newly registered to the magma layer, %d made static%s')
                 :format(job.registered, job.statics, refill and (', %d tile(s) refilled'):format(job.refilled) or '')
             print('planeswalkers: ' .. ctx.magma_report)
+            return true
+        end,
+    }
+end
+
+-- ---- geology sanity: stone tiles pointing at soil slots ---------------------
+-- DF resolves every tile deeper than the geo biome's layer stack through the
+-- LAST layer slot. An older loader hijacked the last slots for source soils
+-- without redirecting the tiles that used them, so all deep layer stone read
+-- as soil and dug out as soil floors. Point every stone-shaped tile that
+-- references a SOIL-typed layer at the biome's deepest stone layer, and turn
+-- soil-shaped tiles the snapshot recorded as stone or mineral back to stone.
+local stone_twin_cache = {}
+local function stone_twin(tt)
+    local hit = stone_twin_cache[tt]
+    if hit ~= nil then return hit or nil end
+    local a = df.tiletype.attrs[tt]
+    local found = false
+    for i = 0, df.tiletype._last_item do
+        local b = df.tiletype.attrs[i]
+        if b.material == df.tiletype_material.STONE and b.shape == a.shape
+            and b.variant == a.variant and b.special == a.special and b.direction == a.direction then
+            found = i
+            break
+        end
+    end
+    stone_twin_cache[tt] = found
+    return found or nil
+end
+
+function geolayer_repair_phase(ctx)
+    return {
+        name = 'geology sanity',
+        init = function(job)
+            job.z = 0
+            job.fixed_gl, job.fixed_tt = 0, 0
+            job.deep = {}   -- geo_index -> deepest non-soil layer slot (or false)
+            job.geo_of = {} -- 'bx:by' -> geo_index
+            if ctx.dir and ctx.anchor and ctx.legend_tt then
+                job.f = io.open(ctx.dir .. '/tiles.bin', 'rb')
+                job.src = job.f and read_header(job.f)
+            end
+        end,
+        total = function(job) return df.global.world.map.z_count end,
+        pos = function(job) return job.z end,
+        step = function(job, deadline)
+            local map = df.global.world.map
+            local a = ctx.anchor
+            local SOIL = df.geo_layer_type.SOIL
+            local tm = df.tiletype_material
+            while job.z < map.z_count do
+                local z = job.z
+                for by = 0, map.y_count_block - 1 do
+                    for bx = 0, map.x_count_block - 1 do
+                        local block = dfhack.maps.getBlock(bx, by, z)
+                        local gkey = bx .. ':' .. by
+                        local gi = job.geo_of[gkey]
+                        if gi == nil then
+                            gi = block_geo_index(bx, by) or false
+                            job.geo_of[gkey] = gi
+                        end
+                        local geo = gi and df.world_geo_biome.find(gi)
+                        if block and geo then
+                            local deep = job.deep[gi]
+                            if deep == nil then
+                                deep = false
+                                for i = #geo.layers - 1, 0, -1 do
+                                    if geo.layers[i].type ~= SOIL then deep = i break end
+                                end
+                                job.deep[gi] = deep
+                            end
+                            local data
+                            if job.f and a then
+                                local sbx, sby, sz = bx - a.off_bx, by - a.off_by, z - a.off_z
+                                if sbx >= 0 and sby >= 0 and sz >= 0 and sbx < job.src.bx
+                                    and sby < job.src.by and sz < job.src.bz then
+                                    local i = (sz * job.src.by + sby) * job.src.bx + sbx
+                                    job.f:seek('set', common.HEADER_SIZE + i * common.BLOCK_SIZE)
+                                    data = job.f:read(common.BLOCK_SIZE)
+                                end
+                            end
+                            for x = 0, 15 do
+                                local dcol, tcol = block.designation[x], block.tiletype[x]
+                                for y = 0, 15 do
+                                    local tt = tcol[y]
+                                    local m = df.tiletype.attrs[tt].material
+                                    local d = dcol[y]
+                                    local layer = geo.layers[d.geolayer_index]
+                                    if (m == tm.STONE or m == tm.MINERAL) and deep
+                                        and layer and layer.type == SOIL then
+                                        d.geolayer_index = deep
+                                        job.fixed_gl = job.fixed_gl + 1
+                                    elseif m == tm.SOIL and data and deep then
+                                        local off = (x * 16 + y) * common.TILE_REC_SIZE + 1
+                                        local sidx = string.unpack(common.TILE_REC, data, off)
+                                        local name = ctx.legend_tt:get(sidx)
+                                        if name and (name:find('^Stone') or name:find('^Mineral')) then
+                                            local twin = stone_twin(tt)
+                                            if twin then
+                                                tcol[y] = twin
+                                                d.geolayer_index = deep
+                                                job.fixed_tt = job.fixed_tt + 1
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                job.z = z + 1
+                if dfhack.getTickCount() >= deadline then return false end
+            end
+            if job.f then job.f:close() job.f = nil end
+            ctx.geo_report = ('geology: %d stone tile(s) pointed back at the deepest stone layer, %d dug-as-soil tile(s) turned back to stone')
+                :format(job.fixed_gl, job.fixed_tt)
+            print('planeswalkers: ' .. ctx.geo_report)
             return true
         end,
     }
@@ -1739,6 +1903,7 @@ function load_phases(ctx)
     })
 
     table.insert(phases, magma_sea_phase(ctx, false))
+    table.insert(phases, geolayer_repair_phase(ctx))
 
     table.insert(phases, {
         name = 'grass/moss',
