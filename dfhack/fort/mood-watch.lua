@@ -149,7 +149,7 @@ function clear_reserve()
         local it = df.item.find(tonumber(id))
         if it and it.flags.forbid then it.flags.forbid = false; n = n + 1 end
     end
-    d.forbidden, d.reserved = {}, nil
+    d.forbidden, d.reserved, d.reserved_cooldown = {}, nil, nil
     save_watch(d)
     return n
 end
@@ -167,6 +167,10 @@ function reserve_metal(idx)
         end
     end
     d.reserved = idx
+    -- the cooldown at the moment of reserving. DF counts it DOWN, so a later value that is
+    -- HIGHER means a mood has fired since -- which is how a reserve that was never watched
+    -- (script reloaded, game saved and loaded) still knows it has been spent.
+    d.reserved_cooldown = df.global.plotinfo.mood_cooldown
     save_watch(d)
     reserve_watch()
     return n
@@ -187,27 +191,38 @@ reserve_gen = reserve_gen or 0
 -- metalworking mood -- so for any other craft it was never in the running.
 --
 -- So a mood starting lifts the reserve, putting every bar this forbade back.
+-- A RESERVE IS SPENT BY THE FIRST MOOD, whatever that mood turns out to want. It steers only
+-- the base material a metalworking mood rolls; once a mood has begun, the roll is made and
+-- every bar still forbidden is a bar the fort cannot use, for a craft that may not want metal
+-- at all. Leaving it up is worse than useless: the NEXT mood then finds only slade legal.
+--
+-- Two ways to know, because the first alone was not enough. This fort's reserve outlived a
+-- whole metalworking mood -- it took its slade, finished, and 1085 bars stayed forbidden --
+-- because the only thing that checked was the sweep heartbeat, and nothing was ticking it.
+--   * a mood is running right now, or
+--   * `mood_cooldown` is HIGHER than when the reserve was made: DF counts it down, so it only
+--     goes up when a mood fires. That catches the mood that came and went unwatched.
 function release_on_mood()
     local d = watch_state()
     if not d.reserved then return nil end
-    if not find_mood() then return nil end
+    local spent = find_mood() ~= nil
+    if not spent and d.reserved_cooldown then
+        spent = df.global.plotinfo.mood_cooldown > d.reserved_cooldown
+    end
+    if not spent then return nil end
     local name = select(2, reserved_metal())
     local n = clear_reserve()
+    dfhack.gui.showAnnouncement(
+        ('The %s reserve is spent -- a strange mood has had its pick, and the other metals are '
+         .. 'yours again (%d bar%s unforbidden).'):format(name or 'metal', n or 0,
+            (n or 0) == 1 and '' or 's'), COLOR_LIGHTGREEN, true)
     return name, n
 end
 
 function reserve_sweep()
     local d = watch_state()
     if not d.reserved then return 0 end
-    if find_mood() then                 -- a mood is under way: lift, don't keep forbidding
-        local name, n = release_on_mood()
-        if name then
-            dfhack.gui.showAnnouncement(
-                ('A strange mood has begun -- the %s reserve is lifted (%d bar%s unforbidden).')
-                    :format(name, n or 0, (n or 0) == 1 and '' or 's'), COLOR_LIGHTGREEN, true)
-        end
-        return 0
-    end
+    if release_on_mood() then return 0 end   -- spent: lifted, and nothing more to forbid
     local n = 0
     for _, it in ipairs(df.global.world.items.other.BAR) do
         if it:getMaterial() == 0 and it:getMaterialIndex() ~= d.reserved and usable(it)
@@ -253,6 +268,9 @@ function set_watch_hidden(on)
 end
 
 function watch_message()
+    -- the one place that is certain to be called: the notify panel resolves this live. The
+    -- sweep heartbeat can be left stopped by a script reload or a save/load, and was.
+    pcall(release_on_mood)
     local _, name = reserved_metal()
     -- a mood already under way has rolled its materials: the reserve is not steering it
     if name and not find_mood() then

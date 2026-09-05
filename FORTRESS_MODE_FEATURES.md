@@ -441,9 +441,12 @@ caught too (*"Ensuring slade is used for next mood"*). Only the bars it forbade 
 released again, so your own forbids are safe. `magnus-scripts` turns the notice back on, and `fort/mood-watch gui` reopens the dialog once the
 notice has been clicked away.
 
-A reserve is for the mood you have *not* had: once one actually begins its materials are already
-rolled, so the reserve is lifted automatically and every bar it forbade is put back — a clothier's
-mood can never use a bar, and the notice stops claiming to steer it.
+A reserve is **spent by the first mood**, whatever that mood turns out to want: once one begins its
+materials are already rolled, so the reserve lifts itself and every bar it forbade is put back — leaving
+it up would mean the *next* mood finds only that one metal legal. It also lifts for a mood that came and
+went unwatched, spotted by `mood_cooldown` having risen since the reserve was made, and the check runs
+from the notification itself rather than the sweep heartbeat, which a script reload or save/load can
+leave stopped.
 
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
@@ -468,6 +471,12 @@ Warns when a restricted work detail has nobody who can actually do it. Stays qui
 Alerts when a dwarf dies with no tomb, or when anything is haunting the fort — a ghost counts
 whether or not it was ever a citizen. Click for a death browser with cause, kills and a
 clickable family tree, and queue memorial slabs in bulk.
+
+### **`fort/no-sparring-spam`**
+Removes the sparring alert from the notification strip. Squads drilling refill that button
+constantly, so it sits there permanently and pushes the alerts you want to read — a failed
+job, a guest, a real fight — out of the way. Only the button goes: every sparring blow is
+still filed in the units' combat logs and reads back in full.
 
 ### **`fort/civ-alert-notification`**
 During a civilian alert, warns who's still outside the safe burrow; click to find them.
