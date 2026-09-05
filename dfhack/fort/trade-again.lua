@@ -28,12 +28,18 @@ Selection uses DFHack's own primitive -- `dfhack.items.markForTrade` -- so the s
 them up exactly as if you had clicked each row, and deselecting one on the screen removes the
 job again the normal way.
 
+THE WINDOW ITSELF opens at the FULL width of the interface rather than DFHack's fixed 86
+columns -- the item description is the column that gets truncated, and it is the one you read
+-- and at whatever height you last resized it to, which it records for you.
+
     enable trade-again      pre-select as the screen opens (persists with the fort)
     disable trade-again     stop
     trade-again             select them right now, without opening the screen
     trade-again radius N    how far from the depot counts (default 0)
     trade-again status      what is set, and what would be selected
 ]]
+
+local gui = require('gui')
 
 local GLOBAL_KEY = 'trade-again'
 
@@ -42,7 +48,7 @@ local GLOBAL_KEY = 'trade-again'
 state = state or nil
 
 local function default_state()
-    return {enabled = false, radius = 0}
+    return {enabled = false, radius = 0}   -- height: set by the window itself, see below
 end
 
 local function load_state()
@@ -153,6 +159,73 @@ function install_hook()
     return true
 end
 
+-- ---- the window's shape ----------------------------------------------------
+--
+-- The screen opens 86 columns wide whatever your screen is, which on a wide terminal wastes
+-- most of it -- the item descriptions are the long column and they are what gets truncated.
+-- So it opens the FULL width of the interface instead, and at whatever height you last left
+-- it: the window records its own height as you resize it, so the size you settle on is the
+-- size it comes back at. Width is not remembered on purpose -- full width is the point.
+--
+-- Both hooks are on the class, so an instance that is already open picks them up on its next
+-- layout (methods resolve through the class table at call time).
+
+local function full_width()
+    local ok, ir = pcall(gui.get_interface_rect)
+    if not ok or not ir then return nil end
+    local w = (ir.width or (ir.x2 - ir.x1 + 1))
+    if type(w) ~= 'number' or w < 40 then return nil end
+    return w
+end
+
+function install_window_hook()
+    local ok, mg = pcall(reqscript, 'internal/caravan/movegoods')
+    if not ok or type(mg) ~= 'table' or not mg.MoveGoods then return false end
+    local cls = mg.MoveGoods
+    if cls.trade_again_shaped then return true end
+
+    local orig_init = cls.init
+    cls.init = function(self, ...)
+        local r = orig_init and orig_init(self, ...) or nil
+        if load_state().enabled then
+            self.frame = self.frame or {}
+            self.frame.w = full_width() or self.frame.w
+            if type(state.height) == 'number' and state.height > 10 then
+                self.frame.h = state.height
+            end
+        end
+        return r
+    end
+
+    -- remember the height you resize it to. postUpdateLayout catches a resize; render catches
+    -- the window that is ALREADY open when this hook goes in, which is the one whose height
+    -- you actually want kept. Both are a number comparison and only write when it changes.
+    local function remember(self)
+        local h = self.frame and self.frame.h
+        if type(h) == 'number' and h > 10 and load_state().height ~= h then
+            state.height = h
+            save_state()
+        end
+    end
+
+    local orig_layout = cls.postUpdateLayout
+    cls.postUpdateLayout = function(self, ...)
+        remember(self)
+        if orig_layout then return orig_layout(self, ...) end
+    end
+
+    local orig_render = cls.render
+    if orig_render then
+        cls.render = function(self, ...)
+            remember(self)
+            return orig_render(self, ...)
+        end
+    end
+
+    cls.trade_again_shaped = true
+    return true
+end
+
 -- ---- enable/disable --------------------------------------------------------
 
 enabled = enabled or false
@@ -163,7 +236,7 @@ function set_enabled(on)
     enabled = on and true or false
     state.enabled = enabled
     save_state()
-    if enabled then install_hook() end
+    if enabled then install_hook(); install_window_hook() end
     return enabled
 end
 
@@ -172,7 +245,7 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
         state = nil
         load_state()
         enabled = state.enabled and true or false
-        if enabled then install_hook() end
+        if enabled then install_hook(); install_window_hook() end
     elseif sc == SC_MAP_UNLOADED then
         state = nil
     end
@@ -186,6 +259,7 @@ end
 
 if not dfhack.world.isFortressMode() then qerror('trade-again needs a loaded fort') end
 load_state()
+install_window_hook()
 
 if dfhack_flags and dfhack_flags.enable ~= nil then
     set_enabled(dfhack_flags.enable_state)
@@ -209,7 +283,9 @@ if cmd == 'radius' then
         :format(state.radius, state.radius, state.radius == 1 and '' or 's'))
 elseif cmd == 'status' then
     local items, depot = candidates()
-    print(('trade-again: %s, radius %d'):format(enabled and 'ENABLED' or 'disabled', state.radius or 0))
+    print(('trade-again: %s, radius %d, window %s wide x %s high'):format(
+        enabled and 'ENABLED' or 'disabled', state.radius or 0,
+        tostring(full_width() or '?'), tostring(state.height or 'DFHack default')))
     if not depot then
         print('  no finished trade depot in this fort')
     else
