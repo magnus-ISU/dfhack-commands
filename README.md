@@ -440,7 +440,11 @@ Warns of enemies inside the alert burrow; shift-click sends selected squads to a
 ### **`fort/trade-again`**
 DFHack's "Move goods to/from depot" screen opens with nothing selected, so every caravan starts with the
 same hunt through thousands of rows. This pre-selects the obvious ones as the screen opens: everything
-**your own fort made** (not `foreign` — selling last year's purchases back is rarely the intent) sitting at
+**your own fort made** (not `foreign` — selling last year's purchases back is rarely the intent), plus
+**loot**: foreign gear whose maker's race you are presently at war with and which has not traded here in ten
+years is siege plunder, not a purchase (`trade-again loot off` to stop that; DF records no "I looted this"
+bit, so this matches on `maker_race` against your civ's live war list, and your own civ's race never counts).
+Selected items must be sitting at
 **distance 0** from the depot, measured exactly the way the screen's own `dist` column measures it. Forbidden
 items, artifacts and ethically banned goods are left alone, and items already *in* the depot need no help
 since DFHack counts those as selected already. Selection goes through `dfhack.items.markForTrade`, so rows
