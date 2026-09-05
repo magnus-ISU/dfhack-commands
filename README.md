@@ -438,8 +438,11 @@ days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them wit
 clicking again opens the planner. A second notice appears when a mood could strike — read from
 DF's own `mood_cooldown`, population and excavated-tile counters rather than guessed — and
 clicking it explains how a mood picks its first material and offers to reserve one metal by
-forbidding every other metal bar in the fort (*"Ensuring slade is used for next mood"*). Only
-the bars it forbade are ever released again.
+forbidding every other metal bar in the fort (*"Ensuring slade is used for next mood"*) — and
+keeps forbidding them, so bars smelted or traded for after you set it are caught too. Only the
+bars it forbade are ever released again. The two notices are separate entries in
+`magnus-scripts`, since wanting one is no reason to want the other; turning the during-a-mood
+one off puts DFHack's own line back rather than leaving a gap.
 
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,

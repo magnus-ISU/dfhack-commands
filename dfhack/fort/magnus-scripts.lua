@@ -221,12 +221,18 @@ local COLUMNS = {
          enable = script('fort/empty-labor-notification'), disable = notify_off({'empty_labor'})},
         {key = 'moody-items-warning', label = 'moody-items-warning',
          enable = script('fort/moody-items-warning'), disable = notify_off({'moody_items'})},
-        -- help-mood's notifications: its own "a mood could strike" watcher, and its
-        -- replacement of the stock moody_status line with the game's own wording. Turning it
-        -- off restores DFHack's, which is why moody_status is in the restore list.
-        {key = 'help-mood-notify', label = 'help-mood notices',
-         enable = script('fort/help-mood', 'notify'),
-         disable = notify_off({'mood_watch'}, {'moody_status'})},
+        -- The two mood notices get a line each, because they answer different questions and
+        -- you may well want one without the other: this one watches for the NEXT mood and is
+        -- the one you turn off when you would rather be surprised.
+        {key = 'mood-watch', label = 'mood-watch',
+         enable = script('fort/help-mood', 'notify-watch'),
+         disable = notify_off({'mood_watch'})},
+        -- ...and this one replaces DFHack's during-a-mood line with the game's own wording.
+        -- Disabling it puts DFHack's back rather than leaving a gap, which is what the script
+        -- does when told; the config flag stays on so the stock line still shows.
+        {key = 'help-mood', label = 'help-mood',
+         enable = script('fort/help-mood', 'notify-status'),
+         disable = script('fort/help-mood', 'notify-status-off')},
         {key = 'civ-alert-notification', label = 'civ-alert-notification',
          enable = script('fort/civ-alert-notification'), disable = notify_off({'civ_alert_outside'})},
         {key = 'enemies-inside-notification', label = 'enemies-inside-notif.',

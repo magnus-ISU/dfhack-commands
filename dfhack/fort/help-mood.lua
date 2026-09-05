@@ -1764,7 +1764,42 @@ function reserve_metal(idx)
     end
     d.reserved = idx
     save_watch(d)
+    reserve_watch()
     return n
+end
+
+-- A RESERVE IS NOT A ONE-OFF SWEEP. Bars keep arriving -- a smelter finishes, a caravan
+-- unloads -- and every one of them is another metal the next mood can see. So while a metal
+-- is reserved this keeps running, forbidding what turns up, and it only ever touches bars it
+-- forbade itself: your own forbids are never released when the reserve is lifted.
+reserve_gen = reserve_gen or 0
+
+function reserve_sweep()
+    local d = watch_state()
+    if not d.reserved then return 0 end
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        if it:getMaterial() == 0 and it:getMaterialIndex() ~= d.reserved and usable(it)
+            and not it.flags.forbid then
+            it.flags.forbid = true
+            d.forbidden[tostring(it.id)] = true
+            n = n + 1
+        end
+    end
+    if n > 0 then save_watch(d) end
+    return n
+end
+
+function reserve_watch()
+    reserve_gen = reserve_gen + 1
+    local my_gen = reserve_gen
+    local function tick()
+        if my_gen ~= reserve_gen then return end
+        if not watch_state().reserved then return end       -- lifted: stop quietly
+        pcall(reserve_sweep)
+        dfhack.timeout(100, 'frames', tick)
+    end
+    tick()
 end
 
 function watch_hidden()
@@ -1936,21 +1971,50 @@ end
 local NOTIFY_MOOD = 'moody_status'
 local NOTIFY_WATCH = 'mood_watch'
 
-function register_notifications()
+-- The two notices are registered SEPARATELY. They answer different questions -- one is about
+-- the mood you have, the other about the mood you might get -- and there is no reason wanting
+-- one should mean wanting the other, so magnus-scripts gives them a line each.
+--
+-- DFHack's own moody_status is overwritten rather than added to, so its functions are kept
+-- here first: turning ours off has to give the stock line back, not leave a blank where a
+-- notification used to be.
+-- The stock functions are stashed ON THE NOTIFICATION ENTRY, not in a local. This file gets
+-- reloaded (every edit, every `notify` run) and a local would be lost, so the second
+-- registration would capture OUR OWN function as "the stock one" and turning it off would put
+-- our line back under a different name. The notify module's table outlives us; that is where
+-- it belongs.
+local function live_call(fn)
+    return function(...)
+        local ok, m = pcall(reqscript, 'fort/help-mood')
+        local f = (ok and m and m[fn]) or _ENV[fn]
+        return f(...)
+    end
+end
+
+function register_status()
     local ok, n = pcall(reqscript, 'internal/notify/notifications')
     if not ok then return end
-    local function live(fn)
-        return function(...)
-            local ok2, m = pcall(reqscript, 'fort/help-mood')
-            local f = (ok2 and m and m[fn]) or _ENV[fn]
-            return f(...)
-        end
-    end
     local e = n.NOTIFICATIONS_BY_NAME[NOTIFY_MOOD]
-    if e then
-        e.dwarf_fn = live('moody_message')
-        e.on_click = live('moody_click')
+    if not e then return end
+    if not e.magnus_stock_moody then
+        e.magnus_stock_moody = {dwarf_fn = e.dwarf_fn, on_click = e.on_click}
     end
+    e.dwarf_fn = live_call('moody_message')
+    e.on_click = live_call('moody_click')
+end
+
+function unregister_status()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok then return end
+    local e = n.NOTIFICATIONS_BY_NAME[NOTIFY_MOOD]
+    if not e or not e.magnus_stock_moody then return end
+    e.dwarf_fn, e.on_click = e.magnus_stock_moody.dwarf_fn, e.magnus_stock_moody.on_click
+    e.magnus_stock_moody = nil
+end
+
+function register_watch()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok then return end
     local w = n.NOTIFICATIONS_BY_NAME[NOTIFY_WATCH]
     if not w then
         w = {name = NOTIFY_WATCH, version = 1, default = true}
@@ -1958,11 +2022,18 @@ function register_notifications()
         n.NOTIFICATIONS_BY_NAME[NOTIFY_WATCH] = w
     end
     w.desc = 'Notifies when a strange mood could strike, and while a metal is reserved for one.'
-    w.dwarf_fn = live('watch_message')
-    w.on_click = live('watch_click')
+    w.dwarf_fn = live_call('watch_message')
+    w.on_click = live_call('watch_click')
     if n.config and n.config.data and not n.config.data[NOTIFY_WATCH] then
         n.config.data[NOTIFY_WATCH] = {enabled = true, version = 1}
     end
+    set_watch_hidden(false)          -- enabling it means you want to hear it again
+    if watch_state().reserved then reserve_watch() end
+end
+
+function register_notifications()
+    register_status()
+    register_watch()
 end
 
 -- A new mood is a new question, so the "could strike" notice comes back on its own.
@@ -1985,11 +2056,23 @@ if dfhack_flags and dfhack_flags.module then return end
 if not dfhack.world.isFortressMode() then qerror('fort/help-mood only works in fortress mode') end
 
 local arg = ({...})[1]
+-- registration only: magnus-scripts / dfhack.init call these, and they are also how the
+-- notifications are put back after this file is edited
 if arg == 'notify' then
-    -- registration only: magnus-scripts / dfhack.init call this, and it is also how the
-    -- notifications are put back after this file is edited
     register_notifications()
-    print('fort/help-mood: mood notifications registered.')
+    print('fort/help-mood: both mood notifications registered.')
+    return
+elseif arg == 'notify-status' then
+    register_status()
+    print('fort/help-mood: the during-a-mood notification is ours now.')
+    return
+elseif arg == 'notify-status-off' then
+    unregister_status()
+    print('fort/help-mood: DFHack\'s own moody_status line is back.')
+    return
+elseif arg == 'notify-watch' then
+    register_watch()
+    print('fort/help-mood: watching for the next mood.')
     return
 end
 if arg == 'stop' then
