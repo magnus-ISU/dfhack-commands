@@ -178,9 +178,36 @@ end
 -- forbade itself: your own forbids are never released when the reserve is lifted.
 reserve_gen = reserve_gen or 0
 
+-- THE RESERVE IS FOR THE MOOD YOU HAVE NOT HAD. Once one actually begins, its materials are
+-- already rolled: keeping the other metals forbidden can no longer steer anything, and it can
+-- only do harm -- a clothier's mood wants cloth, and every forbidden bar is just a bar the
+-- fort cannot use for anything else while the artifact is built. (Seen live: a Fey clothier
+-- mooding while "Ensuring slade is used for next mood" still had every non-slade bar locked
+-- down.) The reserve only ever steered the FIRST material anyway -- the base material of a
+-- metalworking mood -- so for any other craft it was never in the running.
+--
+-- So a mood starting lifts the reserve, putting every bar this forbade back.
+function release_on_mood()
+    local d = watch_state()
+    if not d.reserved then return nil end
+    if not find_mood() then return nil end
+    local name = select(2, reserved_metal())
+    local n = clear_reserve()
+    return name, n
+end
+
 function reserve_sweep()
     local d = watch_state()
     if not d.reserved then return 0 end
+    if find_mood() then                 -- a mood is under way: lift, don't keep forbidding
+        local name, n = release_on_mood()
+        if name then
+            dfhack.gui.showAnnouncement(
+                ('A strange mood has begun -- the %s reserve is lifted (%d bar%s unforbidden).')
+                    :format(name, n or 0, (n or 0) == 1 and '' or 's'), COLOR_LIGHTGREEN, true)
+        end
+        return 0
+    end
     local n = 0
     for _, it in ipairs(df.global.world.items.other.BAR) do
         if it:getMaterial() == 0 and it:getMaterialIndex() ~= d.reserved and usable(it)
@@ -227,7 +254,8 @@ end
 
 function watch_message()
     local _, name = reserved_metal()
-    if name then
+    -- a mood already under way has rolled its materials: the reserve is not steering it
+    if name and not find_mood() then
         return {{text = ('Ensuring %s is used for next mood'):format(name), pen = COLOR_LIGHTCYAN}}
     end
     if watch_hidden() then return nil end

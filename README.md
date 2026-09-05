@@ -450,6 +450,10 @@ caught too (*"Ensuring slade is used for next mood"*). Only the bars it forbade 
 released again, so your own forbids are safe. `magnus-scripts` turns the notice back on, and `fort/mood-watch gui` reopens the dialog once the
 notice has been clicked away.
 
+A reserve is for the mood you have *not* had: once one actually begins its materials are already
+rolled, so the reserve is lifted automatically and every bar it forbade is put back — a clothier's
+mood can never use a bar, and the notice stops claiming to steer it.
+
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
 plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and raw glass in
@@ -460,6 +464,10 @@ against the wiki, not from memory. Forbidden stock counts — a forbidden shell 
 warns at **fewer than three** rather than at none, since three is the most of one thing a mood
 asks for and one bar of the metal it settles on is the same dead end as none, found a day
 later: *"No shells; only 2 tanned leather for a mood"*.
+
+The shells line only appears when somebody in the fort actually prefers a shell material: shells are
+the one mood material chosen by preference rather than stock (a bone carver demands shells only if they
+like a type of shell, bones otherwise), so a fort with no shell-lover can never be asked for one.
 
 ### **`fort/empty-labor-notification`**
 Warns when a restricted work detail has nobody who can actually do it. Stays quiet while
