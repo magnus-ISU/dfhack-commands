@@ -290,27 +290,30 @@ MoodOdds.ATTRS{
     resizable = true,
 }
 
+-- The explanation, as lines rather than a paragraph to be wrapped. The window is then sized
+-- to the longest of them, which is the whole point: wrapping decided where to break these and
+-- made a mess of it -- "-- not", "the", "change" alone on their own lines -- and the wrapped
+-- block also grew past the fixed offset the numbers were pinned at and printed straight
+-- through them.
+local EXPLAIN = {
+    'A mood decides everything it will ask for at the instant it strikes -- not when the',
+    'dwarf claims a workshop. By then it is already too late to change their mind.',
+    '',
+    'The FIRST requirement is the base material, and it is chosen from what the fort has',
+    'AVAILABLE. Forbidden stock does not count as available, so forbidding every metal but',
+    'one is the way to steer a metalworker\'s mood -- that is what the button below does.',
+    '',
+    'This is the game\'s documented behaviour rather than something measurable from outside,',
+    'so treat it as a strong bet, not a guarantee. The guarantee is on the other side: once',
+    'a mood has struck, fort/help-mood can point any requirement at another material you',
+    'own, which does not care how the roll was made.',
+}
+
 function MoodOdds:init()
+    local odds_at = #EXPLAIN + 1
     self:addviews{
-        widgets.WrappedLabel{
-            frame = {t = 0, l = 0, r = 0},
-            text_to_wrap = table.concat({
-                'A mood decides everything it will ask for at the instant it strikes -- not',
-                'when the dwarf claims a workshop. By then it is already too late to change',
-                'their mind.',
-                '',
-                'The FIRST requirement is the base material, and it is chosen from what the',
-                'fort has AVAILABLE. Forbidden stock does not count as available, so forbidding',
-                'every metal but one is the way to steer a metalworker\'s mood -- that is what',
-                'the button below does.',
-                '',
-                'This is the game\'s documented behaviour rather than something measurable from',
-                'outside, so treat it as a strong bet, not a guarantee. The guarantee is on the',
-                'other side: once a mood has struck, fort/help-mood can point any requirement',
-                'at another material you own, which does not care how the roll was made.',
-            }, NEWLINE),
-        },
-        widgets.Label{view_id = 'odds', frame = {t = 16, l = 0}, text = ''},
+        widgets.Label{frame = {t = 0, l = 0}, text = table.concat(EXPLAIN, NEWLINE)},
+        widgets.Label{view_id = 'odds', frame = {t = odds_at, l = 0}, text = ''},
         widgets.TextButton{
             frame = {b = 2, l = 0, w = 26, h = 1},
             label = 'reserve a metal',
@@ -331,6 +334,16 @@ function MoodOdds:init()
         },
         widgets.Label{view_id = 'status', frame = {b = 0, l = 0}, text = '', text_pen = COLOR_GREY},
     }
+
+    -- wide enough that nothing wraps, tall enough for the lot: the explanation, the four
+    -- lines of numbers under it, the buttons and the frame
+    local widest = 0
+    for _, line in ipairs(EXPLAIN) do widest = math.max(widest, #line) end
+    local sw, sh = dfhack.screen.getWindowSize()
+    self.frame.w = math.min(sw - 4, math.max(60, widest + 4))
+    -- odds_at rows of text, four of numbers under it, then the buttons, the status line and
+    -- the frame. Measured: at +9 the buttons printed across the last line of the numbers.
+    self.frame.h = math.min(sh - 4, odds_at + 11)
     self:refresh()
 end
 
