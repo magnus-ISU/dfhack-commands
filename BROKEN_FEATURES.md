@@ -37,9 +37,12 @@ caravans *and* migrants. **Enabled by `magnus-scripts`.** v3 (2026-09-04) hands 
 them — erasing killed the civ's schedule permanently. v4 makes that a **checked invariant**: the entry
 list is captured around every pass and any entry that disappears inside one is reported by name as a
 bug, and `caravan-unstick` now prints the year each civ's last caravan got home, so a stopped schedule
-shows as a date. **Still unresolved (2026-09-05):** on the live fort no civ has sent a caravan since
-year 106 — a stopped schedule from before v3 that has not recovered on its own, and it is not yet known
-whether anything can restore it short of `force caravan`.
+shows as a date. v5 also settles a **civil war** on the same weekly pass: a civ at war with
+itself sends no caravans home and no migrants — the same silence from a different cause — and it is the one
+field DFHack's `fix/civil-war` clears (the war's history is left intact). **Live finding 2026-09-05:** the
+homeland drought on this fort was a civil war running since year 102 (*The Eviscerated Conflict*, its
+assaults on the capital led by dwarves held prisoner by the dark dwarves), not the erase bug; the two human
+civs' silence since 105 is still unexplained.
 
 ### **`fort/mandate-notification`**
 Shows noble mandates the moment they appear. **Run by `magnus-scripts` every session.** Unused

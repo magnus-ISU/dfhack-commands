@@ -37,6 +37,10 @@ force-sends caravans or migrants.
 As a free extra, AtDepot caravans get the stock `caravan unload` pack-animal rejoin each
 check (idempotent, touches nothing healthy).
 
+It also settles a CIVIL WAR on the same pass. A civ at war with itself sends your fort no
+caravans and no migrants -- the same silence, a different cause -- and it is one field, the
+one DFHack's `fix/civil-war` clears. The war's history is left intact.
+
 Usage:
     enable caravan-unstick        run the weekly watchdog
     disable caravan-unstick       stop it
@@ -171,6 +175,49 @@ local function fix_stuck(idx)
     return #members
 end
 
+-- ---- civil war: the other silent killer --------------------------------------
+--
+-- A fort whose own civ is at war with ITSELF gets no caravans from home and no standard
+-- migration -- the same symptom this watchdog exists for, from a completely different cause,
+-- and just as invisible: nothing announces it and nothing in the fort shows it. It is a
+-- single field (`relation` on the civ's diplomacy entry for itself), and DFHack's own
+-- `fix/civil-war` clears exactly that, so the check is worth having on the same weekly pass.
+--
+-- The historical war collection is deliberately NOT touched -- it is the legends record of
+-- what happened, DF's own fix leaves it, and `relation` is what the live checks read.
+local function civil_war_check()
+    local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not civ then return false end
+    local fixed = false
+    local ok = pcall(function()
+        for _, s in ipairs(civ.relations.diplomacy.state) do
+            if s.group_id == civ.id and s.relation > 0 then
+                s.relation = 0
+                fixed = true
+            end
+        end
+    end)
+    if ok and fixed then
+        dfhack.gui.showAnnouncement(
+            ('%s was at war with itself -- that is now settled. Caravans from home and migrant '
+             .. 'waves can resume.'):format(civ_name(civ.id)), COLOR_LIGHTGREEN, true)
+    end
+    return ok and fixed
+end
+
+-- is the fort's own civ at war with itself right now?
+local function in_civil_war()
+    local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not civ then return false end
+    local at_war = false
+    pcall(function()
+        for _, s in ipairs(civ.relations.diplomacy.state) do
+            if s.group_id == civ.id and s.relation > 0 then at_war = true end
+        end
+    end)
+    return at_war
+end
+
 -- ---- the watchdog pass -------------------------------------------------------
 
 -- THE INVARIANT: this tool never removes a caravan entry. Removing one is how a civ's trade
@@ -193,6 +240,7 @@ end
 local function do_check(now)
     if not dfhack.world.isFortressMode() then return end
     load_state()
+    civil_war_check()
     local before = caravan_ids()
     local cs = df.global.plotinfo.caravans
     local seen = {}
@@ -332,6 +380,10 @@ else
             civ_name(c.entity), df.caravan_state.T_trade_state[c.trade_state],
             c.time_remaining, #caravan_members(c.entity),
             #caravan_members(c.entity) == 1 and '' or 's', extra))
+    end
+    if in_civil_war() then
+        print('  YOUR CIV IS AT WAR WITH ITSELF -- no caravans from home, no migrant waves.')
+        print('  The next weekly pass settles it (or run `fix/civil-war` now).')
     end
     -- WHEN EACH CIV LAST GOT HOME. A caravan reports to its civ when it finalizes, and that
     -- report is what schedules the next visit -- so the last finalize year is the honest
