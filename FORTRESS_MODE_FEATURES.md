@@ -234,10 +234,7 @@ dwarf walks -- so DF has one legal choice per row and takes it, instead of the n
 It never changes what the mood *asks for* — the requirement is the mood's own, and the panel
 only helps you satisfy it. Requirements already hauled in are shown as claimed; candidates are
 limited to what the dwarf can actually walk to; worn, part-used and forbidden items are shown,
-labelled, and never chosen by default. Pieces of other workshops — the blocks one was built from, the goods
-sitting in one — are hidden while anything else of that kind exists loose, and shown as `IS WORKSHOP` when
-they are all the fort has left (DF leaves `in_building` clear on those, so only the building holder gives
-them away). And when the fort is short of what the mood wants,
+labelled, and never chosen by default. And when the fort is short of what the mood wants,
 `[delay work]` (Ctrl-D) buys the time to make it: the dwarf gets a burrow of nothing but their
 own workshop, so there is no item they can reach and the mood holds where it is until you lift
 it. Everything it touches is put back.
