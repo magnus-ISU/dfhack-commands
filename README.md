@@ -289,6 +289,14 @@ The mood line names the craft the mood claimed — "Gautier, Clothier, is taken 
 since that is what decides the base material and whether the fort can supply it at all; DF fixes it on
 `unit.job.mood_skill` when the mood begins, so it is known before a workshop is claimed.
 
+The status line quotes the dwarf the way DF does — a fey or fell dwarf *screams, "I must have rock
+blocks!"*, a secretive one *sketches pictures of* it, a possessed one *mutters, "It needs …"*, a macabre
+one *broods, "Yes. I need …"*.
+
+Items the dwarf cannot walk to are listed last and marked `UNREACHABLE`, and the picker refuses to take
+one — hiding them made the panel claim the fort had nothing when it held twenty-five blocks across a
+chasm. Where an item was made is ignored: a foreign block builds like any other.
+
 ### **`fort/butcher-shop`**
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).

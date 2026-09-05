@@ -371,18 +371,39 @@ local function unit_group(unit)
     return walk_group(xyz2pos(dfhack.units.getPosition(unit)))
 end
 
-local function reachable(item, group)
+-- A WALKABLE GROUP OF 0 IS NOT "UNKNOWN". It means the item's own tile is one nobody can
+-- stand on -- an item resting on top of a constructed pillar or wall, most often -- and
+-- treating that as reachable is how this fort's mood stalled: the one obsidian block left
+-- legal sat on a ConstructedPillar at 31,32,17, group 0, while every other rock block in the
+-- fort was forbidden to steer the choice onto it. The dwarf could never fetch it, and the
+-- panel had no idea. So a zero group falls through to canWalkBetween, which answers the
+-- question properly; only a genuinely unanswerable check is allowed the benefit of the doubt.
+local function reachable(item, group, from)
     if not group then return true end          -- unknown: do not hide things over a guess
     local g
     pcall(function() g = item.walkable_id end)
+    local ipos
     if g == nil or g == 0 then
-        g = walk_group(xyz2pos(dfhack.items.getPosition(item)))
+        ipos = xyz2pos(dfhack.items.getPosition(item))
+        g = walk_group(ipos)
     end
-    return g == nil or g == 0 or g == group
+    if g ~= nil and g ~= 0 then return g == group end
+    if not from then return true end
+    ipos = ipos or xyz2pos(dfhack.items.getPosition(item))
+    local ok, can = pcall(dfhack.maps.canWalkBetween, from, ipos)
+    return not ok or can                        -- unanswerable -> keep offering it
 end
+
+-- SHOWN, AT THE BOTTOM, AND NOT SELECTABLE. An item the dwarf cannot walk to is not a choice,
+-- but hiding it makes the panel lie about what the fort holds -- "nothing in the fort fits
+-- this" when there are twenty-five obsidian blocks, all of them across a chasm, reads as a
+-- bug in the tool. So unreachable items stay in the list, sorted last, labelled, and refused
+-- if you try to take one.
+
 
 local function all_candidates(job, unit)
     local group = unit_group(unit)
+    local from = unit and xyz2pos(dfhack.units.getPosition(unit)) or nil
     local lists = {}
     local filters = job.job_items.elements
     for idx in ipairs(filters) do lists[idx] = {} end
@@ -396,16 +417,24 @@ local function all_candidates(job, unit)
     local alts = {}
     for idx in ipairs(filters) do alts[idx] = {} end
     for _, item in ipairs(df.global.world.items.other.IN_PLAY) do
-        if usable(item) and reachable(item, group) then
+        if usable(item) then
+            local ok_reach = reachable(item, group, from)
             local snap
+            local function snap_of()
+                if not snap then
+                    snap = snapshot(item)
+                    snap.unreachable = not ok_reach or nil
+                end
+                return snap
+            end
             for idx, ji in ipairs(filters) do
                 if filter_matches(ji, item) then
-                    snap = snap or snapshot(item)
+                    snap = snap_of()
                     local l = lists[idx]
                     l[#l + 1] = snap
                 elseif (ji.mat_type >= 0 or ji.mat_index >= 0)
                         and filter_matches(ji, item, true) then
-                    snap = snap or snapshot(item)
+                    snap = snap_of()
                     local a = alts[idx]
                     a[#a + 1] = snap
                 end
@@ -606,7 +635,10 @@ local function item_name(item, snap)
     pcall(function() wear = item.wear end)
     if wear > 0 then tags[#tags + 1] = 'worn' end
     if snap and snap.part_used then tags[#tags + 1] = 'part-used' end
-    if snap and snap.foreign then tags[#tags + 1] = 'foreign' end
+    -- where an item was MADE is not a fact about whether it suits a mood: a foreign log burns
+    -- and a foreign block builds exactly like one of ours, and the distinction only ever
+    -- pushed perfectly good stock down the list. Not tagged, not sorted on, not avoided.
+    if snap and snap.unreachable then tags[#tags + 1] = 'UNREACHABLE' end
     if snap and snap.retarget then
         tags[#tags + 1] = ('CHANGES THE REQUIREMENT TO %s'):format(snap.mat_name or 'this material')
     end
@@ -1231,7 +1263,7 @@ function Picker:init()
     for _, snap in ipairs(self.options or {}) do
         local key = ('%s%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
             snap.worn and 'w' or '', snap.part_used and 'p' or '',
-            snap.foreign and 'f' or '', snap.retarget and 'R' or '')
+            snap.unreachable and 'u' or '', snap.retarget and 'R' or '')
         local row = seen[key]
         if row then
             row.count = row.count + 1
@@ -1241,6 +1273,13 @@ function Picker:init()
             order[#order + 1] = row
         end
     end
+
+    -- unreachable kinds go last, whatever they are worth
+    table.sort(order, function(a, b)
+        local au, bu = a.snap.unreachable and 1 or 0, b.snap.unreachable and 1 or 0
+        if au ~= bu then return au < bu end
+        return false                            -- otherwise keep the incoming order
+    end)
 
     local choices = {}
     for _, row in ipairs(order) do
@@ -1266,6 +1305,12 @@ function Picker:init()
             frame = {t = 2, l = 0, r = 0, b = 0},
             choices = choices,
             on_submit = function(_, ch)
+                if ch.snap and ch.snap.unreachable then
+                    -- shown so the panel tells the truth about the fort's stock; taking one
+                    -- would just stall the mood on an item nobody can walk to
+                    dfhack.printerr('help-mood: that item is unreachable -- the dwarf cannot fetch it')
+                    return
+                end
                 if ch.snap then self.on_pick(ch.snap) end
                 self.parent_view:dismiss()
             end,
@@ -1314,7 +1359,7 @@ function Planner:init()
             -- the best CLEAN one: not forbidden, not worn, not part-used, not spoken for
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.busy and not snap.foreign
+                    and not snap.part_used and not snap.busy and not snap.unreachable
                     and not snap.retarget then
                     pick = snap
                     break
@@ -1322,7 +1367,9 @@ function Planner:init()
             end
             for _, snap in ipairs(r.options) do
                 if pick then break end
-                if not taken[snap.id] and not snap.retarget then pick = snap end
+                if not taken[snap.id] and not snap.retarget and not snap.unreachable then
+                    pick = snap
+                end
             end
             if pick then
                 taken[pick.id] = true
@@ -1440,7 +1487,7 @@ function Planner:reconcile()
             local pick
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.foreign and not snap.retarget
+                    and not snap.part_used and not snap.unreachable and not snap.retarget
                     and df.item.find(snap.id) then
                     pick = snap
                     break
@@ -1632,24 +1679,33 @@ view = view or nil
 
 local WATCH_KEY = 'help-mood/watch'
 
+-- `demand` is how the DWARF asks for it, in DF's own words -- a fey dwarf screams for a thing,
+-- a secretive one draws it, a possessed one mutters at the half-made artifact. Taken from the
+-- wiki's Strange mood page; the possessed line names the artifact, which does not exist yet
+-- when the demand is made, so "It" stands in for it.
 local MOOD = {
     [df.mood_type.Fey]       = {begun = 'is taken by a fey mood!',
-                                working = 'works furiously!',      verb = 'wants'},
+                                working = 'works furiously!',
+                                demand = 'screams, "I must have %s!"'},
     [df.mood_type.Secretive] = {begun = 'withdraws from society...',
-                                working = 'works secretly...',     verb = 'has sketched'},
+                                working = 'works secretly...',
+                                demand = 'sketches pictures of %s.'},
     [df.mood_type.Possessed] = {begun = 'has been possessed!',
-                                working = 'keeps muttering...',    verb = 'demands'},
+                                working = 'keeps muttering...',
+                                demand = 'mutters, "It needs %s..."'},
     [df.mood_type.Macabre]   = {begun = 'begins to stalk and brood...',
-                                working = 'works, darkly brooding...', verb = 'broods over'},
+                                working = 'works, darkly brooding...',
+                                demand = 'broods, "Yes. I need %s."'},
     [df.mood_type.Fell]      = {begun = 'looses a roaring laughter, fell and terrible!',
-                                working = 'works with menacing fury!', verb = 'demands'},
+                                working = 'works with menacing fury!',
+                                demand = 'screams, "I must have %s!"'},
 }
 
 -- A secretive dwarf SKETCHES what they want rather than saying it; that is the game's own
 -- distinction and it is the nicest thing about these messages, so it is kept.
 local function mood_words(unit)
     return MOOD[unit.mood] or {begun = 'is in a strange mood', working = 'works...',
-                               verb = 'wants'}
+                               demand = 'wants %s'}
 end
 
 -- THE CRAFT THE MOOD CLAIMED, which is the whole question a mood raises: it decides the base
@@ -1740,11 +1796,11 @@ function moody_message()
     -- stuck: name the thing, and once it has gone on long enough, say how long
     local want = wanted_now(job) or 'something'
     local days = stall_days(unit, job)
+    local said = ('%s %s'):format(name, words.demand:format(want))
     if days >= 7 then
-        return {{text = ('%s %s %s for %d days'):format(name, words.verb, want, days),
-                 pen = COLOR_LIGHTRED}}
+        return {{text = ('%s (%d days)'):format(said, days), pen = COLOR_LIGHTRED}}
     end
-    return {{text = ('%s %s %s'):format(name, words.verb, want), pen = COLOR_YELLOW}}
+    return {{text = said, pen = COLOR_YELLOW}}
 end
 
 -- First click follows them, second click opens the planner: the two things you want in that
