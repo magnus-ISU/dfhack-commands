@@ -131,6 +131,40 @@ end
 local function bone(item) return matflag(item, 'BONE') end
 local function shell(item) return matflag(item, 'SHELL') end
 
+-- ---- who could actually ask for a shell? -------------------------------------
+--
+-- Shells are the one mood material gated on a PREFERENCE rather than on stock. DFHack's
+-- strangemood plugin (which reimplements DF's own selection) picks the bone carver's base
+-- material as bones, and shells only for a dwarf who likes a type of shell -- the wiki says
+-- the same: "Bone carvers will demand shells if they like a type of shell; if not, they will
+-- demand bones." Unlike raw glass (`have_glass[]`) and metal bars (`getCreatedMetalBars()`),
+-- there is NO "has the fort ever had one" check, so a shell-lover can demand a shell this
+-- fort has never owned -- and a fort with nobody who likes one can never be asked at all.
+--
+-- So the shells line only appears when somebody here likes a shell. Shells are not in the
+-- decoration list either (logs, bars, cut gems, blocks, rough gems, boulders, bones, leather,
+-- cloth, raw glass), so a bone-carving mood is the only way one is ever demanded.
+local LIKE_MATERIAL = df.unitpref_type.LikeMaterial
+
+local function likes_a_shell(u)
+    local soul = u.status.current_soul
+    if not soul then return false end
+    for _, p in ipairs(soul.preferences) do
+        if p.type == LIKE_MATERIAL and p.matindex >= 0 then
+            local mi = dfhack.matinfo.decode(p.mattype, p.matindex)
+            if mi and mi.material and mi.material.flags.SHELL then return true end
+        end
+    end
+    return false
+end
+
+local function anyone_likes_a_shell()
+    for _, u in ipairs(df.global.world.units.active) do
+        if dfhack.units.isCitizen(u) and likes_a_shell(u) then return true end
+    end
+    return false
+end
+
 -- ---- the categories ----------------------------------------------------------
 
 local function vec(name)
@@ -161,7 +195,7 @@ local CATEGORIES = {
     {label = 'silk cloth',      vec = 'CLOTH',       test = cloth_of('SILK')},
     {label = 'yarn cloth',      vec = 'CLOTH',       test = cloth_of('YARN')},
     {label = 'bones',           vec = 'CORPSEPIECE', test = bone},
-    {label = 'shells',          vec = 'CORPSEPIECE', test = shell},
+    {label = 'shells',          vec = 'CORPSEPIECE', test = shell, gate = anyone_likes_a_shell},
 }
 
 -- glass is asked for only in types this fort has produced (created_item_type history)
@@ -247,7 +281,10 @@ local function survey()
         elseif n < MOOD_WANTS then low[#low + 1] = {label = label, n = n} end
     end
     for _, c in ipairs(CATEGORIES) do
-        note(c.label, count(c.vec, c.test))
+        -- a gated category is only surveyed when this fort could be asked for it at all
+        if not c.gate or c.gate() then
+            note(c.label, count(c.vec, c.test))
+        end
     end
 
     local made = produced_glass()
