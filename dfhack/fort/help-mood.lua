@@ -313,6 +313,14 @@ local function snapshot(item)
         local mi = dfhack.matinfo.decode(item)
         matname = mi and mi:toString() or nil
     end)
+    -- PART OF A WORKSHOP. `flags.in_building` does NOT catch these: the blocks and bars a
+    -- workshop was built from, and the goods sitting in one, come back with the flag clear and
+    -- only a building holder to show for it (19 of this fort's 145 adamantine blocks, and 32
+    -- of its 33 horse leathers). Taking one means pulling a workshop apart, so they are hidden
+    -- while anything else of the same kind exists, and labelled when they are the only thing
+    -- left -- see all_candidates and item_name.
+    local in_shop = false
+    pcall(function() in_shop = dfhack.items.getHolderBuilding(item) ~= nil end)
     return {
         id = item.id,
         mat_type = item:getMaterial(),
@@ -320,6 +328,7 @@ local function snapshot(item)
         mat_name = matname,
         value = item_value(item),
         forbidden = is_forbidden(item),
+        in_workshop = in_shop or nil,
         worn = wear > 0,
         busy = injob,
         foreign = alien,
@@ -416,6 +425,20 @@ local function all_candidates(job, unit)
             end
         end
     end
+    -- drop the workshop pieces of any kind that also exists loose; keep them when that kind
+    -- has nothing else, so the row still shows what the fort actually holds
+    for idx, list in pairs(lists) do
+        local free = {}
+        for _, snap in ipairs(list) do
+            if not snap.in_workshop then free[snap.key] = true end
+        end
+        local kept = {}
+        for _, snap in ipairs(list) do
+            if not snap.in_workshop or not free[snap.key] then kept[#kept + 1] = snap end
+        end
+        lists[idx] = kept
+    end
+
     for idx, list in pairs(lists) do
         lists[idx] = mark_part_used(list)
         list = lists[idx]
@@ -602,6 +625,7 @@ local function item_name(item, snap)
     -- and a foreign block builds exactly like one of ours, and the distinction only ever
     -- pushed perfectly good stock down the list. Not tagged, not sorted on, not avoided.
     if snap and snap.unreachable then tags[#tags + 1] = 'UNREACHABLE' end
+    if snap and snap.in_workshop then tags[#tags + 1] = 'IS WORKSHOP' end
     if snap and snap.busy then tags[#tags + 1] = 'in another job' end
     if #tags > 0 then n = ('%s (%s)'):format(n, table.concat(tags, ', ')) end
     return n
@@ -1221,9 +1245,9 @@ function Picker:init()
     -- you take is a real decision, and one this tool will not make quietly.
     local seen, order = {}, {}
     for _, snap in ipairs(self.options or {}) do
-        local key = ('%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
+        local key = ('%s%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
             snap.worn and 'w' or '', snap.part_used and 'p' or '',
-            snap.unreachable and 'u' or '')
+            snap.unreachable and 'u' or '', snap.in_workshop and 'B' or '')
         local row = seen[key]
         if row then
             row.count = row.count + 1
@@ -1234,10 +1258,16 @@ function Picker:init()
         end
     end
 
-    -- unreachable kinds go last, whatever they are worth
+    -- unreachable kinds go last, and workshop pieces just above them: both are things you
+    -- can take but would rather not
+    local function rank(snap)
+        if snap.unreachable then return 2 end
+        if snap.in_workshop then return 1 end
+        return 0
+    end
     table.sort(order, function(a, b)
-        local au, bu = a.snap.unreachable and 1 or 0, b.snap.unreachable and 1 or 0
-        if au ~= bu then return au < bu end
+        local ra, rb = rank(a.snap), rank(b.snap)
+        if ra ~= rb then return ra < rb end
         return false                            -- otherwise keep the incoming order
     end)
 
@@ -1319,7 +1349,8 @@ function Planner:init()
             -- the best CLEAN one: not forbidden, not worn, not part-used, not spoken for
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.busy and not snap.unreachable then
+                    and not snap.part_used and not snap.busy and not snap.unreachable
+                    and not snap.in_workshop then
                     pick = snap
                     break
                 end
@@ -1444,7 +1475,7 @@ function Planner:reconcile()
             local pick
             for _, snap in ipairs(r.options) do
                 if not taken[snap.id] and not snap.forbidden and not snap.worn
-                    and not snap.part_used and not snap.unreachable
+                    and not snap.part_used and not snap.unreachable and not snap.in_workshop
                     and df.item.find(snap.id) then
                     pick = snap
                     break
