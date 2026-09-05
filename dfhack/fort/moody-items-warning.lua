@@ -65,6 +65,7 @@ local dlg = require('gui.dialogs')
 
 -- the notify panel asks often; a fort's item vectors are cheap but not free
 local CACHE_MS = 10000
+local MOOD_WANTS = 3      -- the most of one thing a mood asks for; below this is a near miss
 local cache, cache_at = nil, 0
 
 -- ---- item tests --------------------------------------------------------------
@@ -75,40 +76,14 @@ local function flag(item, name)
     return ok and v or false
 end
 
--- FORBIDDEN COUNTS ONLY WHEN WE ARE THE ONES WHO FORBADE IT.
+-- FORBIDDEN IS NOT MISSING. A forbidden shell is one you have; you would unforbid it, not go
+-- hunting for another. Counting it as absent also set this tool against the rest of the repo,
+-- since fort/help-mood forbids every candidate it reserves for a mood in progress -- the
+-- better that did its job, the louder this insisted the fort was empty.
 --
--- Two kinds of forbidden item look identical to a flag test and mean opposite things. The
--- five raw clear glass in a stockpile that fort/help-mood is holding for a mood in progress
--- are stock you have -- warning that the fort has none of them is this tool fighting that one.
--- Ten forbidden cave swallow remains lying on cavern floors, nine of them in walkable groups
--- no citizen can reach, are not stock at all; they are junk the fort has never touched, and
--- counting them as "we have remains" is how a macabre mood finds nothing.
---
--- So the test is not "is it forbidden" but "did WE forbid it": the ids fort/help-mood and
--- fort/mood-watch write down as theirs to give back. Everything else forbidden is somebody
--- else's decision and stays uncounted.
-local RESERVED_KEYS = {'help-mood', 'help-mood/watch'}
-local reserved_ids, reserved_at = nil, nil
-
-local function reserved_by_us()
-    local now = dfhack.getTickCount()
-    if reserved_ids and reserved_at and now - reserved_at < CACHE_MS then return reserved_ids end
-    reserved_ids, reserved_at = {}, now
-    for _, key in ipairs(RESERVED_KEYS) do
-        local ok, d = pcall(dfhack.persistent.getSiteData, key, {})
-        if ok and type(d) == 'table' and type(d.forbidden) == 'table' then
-            -- help-mood stores a list of ids, mood-watch a set keyed by id: take both
-            for k, v in pairs(d.forbidden) do
-                local id = tonumber(v) or tonumber(k)
-                if id then reserved_ids[id] = true end
-            end
-        end
-    end
-    return reserved_ids
-end
-
+-- The rest of the list stays: dumped, rotting, on fire, somebody else's, a trader's or
+-- already an artifact are all things you genuinely cannot spend.
 local function usable(item)
-    if flag(item, 'forbid') and not reserved_by_us()[item.id] then return false end
     return not (flag(item, 'dump') or flag(item, 'garbage_collect')
         or flag(item, 'hostile') or flag(item, 'trader') or flag(item, 'rotten')
         or flag(item, 'artifact') or flag(item, 'owned') or flag(item, 'on_fire'))
@@ -262,37 +237,41 @@ local function survey()
     local now = dfhack.getTickCount()
     if cache and now - cache_at < CACHE_MS then return cache end
 
-    local have, missing = {}, {}
+    local have, missing, low = {}, {}, {}
+    -- A mood asks for up to three of a thing. Having ONE bar of the metal it settles on is
+    -- the same dead end as having none, found a day later, so the warning starts at the
+    -- number a mood can actually demand rather than at zero.
+    local function note(label, n)
+        have[#have + 1] = {label = label, n = n}
+        if n == 0 then missing[#missing + 1] = label
+        elseif n < MOOD_WANTS then low[#low + 1] = {label = label, n = n} end
+    end
     for _, c in ipairs(CATEGORIES) do
-        local n = count(c.vec, c.test)
-        have[#have + 1] = {label = c.label, n = n}
-        if n == 0 then missing[#missing + 1] = c.label end
+        note(c.label, count(c.vec, c.test))
     end
 
     local made = produced_glass()
     for _, g in ipairs(GLASS) do
         local n = count('ROUGH', glass_of(g.mat))
         if n > 0 then remember_glass(g.mat) end     -- seen it: expect it from now on
-        if made[g.mat] or n > 0 then
-            have[#have + 1] = {label = g.label, n = n}
-            if n == 0 then missing[#missing + 1] = g.label end
-        end
+        if made[g.mat] or n > 0 then note(g.label, n) end
     end
 
     -- the fell/macabre section, only while somebody is miserable enough to have one
     local stressed = stressed_citizens()
-    local grim, grim_missing = {}, {}
+    local grim, grim_missing, grim_low = {}, {}, {}
     if #stressed > 0 then
-        local remains = count('REMAINS')
-        local bones = count('CORPSEPIECE', bone)
-        grim[#grim + 1] = {label = 'remains', n = remains}
-        grim[#grim + 1] = {label = 'bones', n = bones}
-        if remains == 0 then grim_missing[#grim_missing + 1] = 'remains' end
-        if bones == 0 then grim_missing[#grim_missing + 1] = 'bones' end
+        for label, n in pairs{remains = count('REMAINS'), bones = count('CORPSEPIECE', bone)} do
+            grim[#grim + 1] = {label = label, n = n}
+            if n == 0 then grim_missing[#grim_missing + 1] = label
+            elseif n < MOOD_WANTS then grim_low[#grim_low + 1] = {label = label, n = n} end
+        end
+        table.sort(grim, function(a, b) return a.label < b.label end)
+        table.sort(grim_missing)
     end
 
-    cache = {have = have, missing = missing, stressed = #stressed,
-             grim = grim, grim_missing = grim_missing}
+    cache = {have = have, missing = missing, low = low, stressed = #stressed,
+             grim = grim, grim_missing = grim_missing, grim_low = grim_low}
     cache_at = now
     return cache
 end
@@ -315,27 +294,50 @@ function message()   -- module-level: the notification resolves it live, see reg
     local gone = {}
     for _, m in ipairs(s.missing) do gone[#gone + 1] = m end
     for _, m in ipairs(s.grim_missing) do gone[#gone + 1] = m end
-    if #gone == 0 then return end
-    return ('No %s for a mood'):format(table.concat(gone, ', '))
+
+    -- "one shell" is not a supply, it is a near miss, and it reads as a different kind of
+    -- problem: nothing to go and find, just not enough of it yet. So the two are separate
+    -- clauses rather than one list, and the count is named -- "2 bones" tells you how far off
+    -- you are in a way "low on bones" never does.
+    local short = {}
+    for _, m in ipairs(s.low or {}) do
+        short[#short + 1] = ('%d %s'):format(m.n, m.label)
+    end
+    for _, m in ipairs(s.grim_low or {}) do
+        short[#short + 1] = ('%d %s'):format(m.n, m.label)
+    end
+
+    if #gone == 0 and #short == 0 then return end
+    local parts = {}
+    if #gone > 0 then parts[#parts + 1] = ('No %s'):format(table.concat(gone, ', ')) end
+    if #short > 0 then parts[#parts + 1] = ('only %s'):format(table.concat(short, ', ')) end
+    return ('%s for a mood'):format(table.concat(parts, '; '))
 end
 
 function show_dialog()   -- module-level: the notification resolves it live, see register()
     local s = survey()
-    local lines = {'What a strange mood can demand, and what you have:', ''}
-    for _, h in ipairs(s.have) do
-        lines[#lines + 1] = ('  %-16s %s'):format(h.label, h.n > 0 and ('%d'):format(h.n) or 'NONE')
+    -- the count alone does not say whether it is enough, so the row says which it is
+    local function row(h)
+        local mark = ''
+        if h.n == 0 then mark = 'NONE'
+        elseif h.n < MOOD_WANTS then mark = ('%d  -- short, a mood can ask for %d')
+            :format(h.n, MOOD_WANTS)
+        else mark = ('%d'):format(h.n) end
+        return ('  %-16s %s'):format(h.label, mark)
     end
+    local lines = {('What a strange mood can demand, and what you have. A mood asks for up to')
+        :format(), ('%d of a thing, so anything under that is counted short:'):format(MOOD_WANTS), ''}
+    for _, h in ipairs(s.have) do lines[#lines + 1] = row(h) end
     if #s.grim > 0 then
         lines[#lines + 1] = ''
-        lines[#lines + 1] = ('%d stressed dwarf%s -- a macabre mood is possible:'):format(
-            s.stressed, s.stressed == 1 and '' or 'ves')
-        for _, h in ipairs(s.grim) do
-            lines[#lines + 1] = ('  %-16s %s'):format(h.label, h.n > 0 and ('%d'):format(h.n) or 'NONE')
-        end
+        lines[#lines + 1] = ('%d stressed %s -- a macabre mood is possible:'):format(
+            s.stressed, s.stressed == 1 and 'dwarf' or 'dwarves')
+        for _, h in ipairs(s.grim) do lines[#lines + 1] = row(h) end
     end
-    if #s.missing == 0 and #s.grim_missing == 0 then
+    if #s.missing == 0 and #s.grim_missing == 0 and #(s.low or {}) == 0
+        and #(s.grim_low or {}) == 0 then
         lines[#lines + 1] = ''
-        lines[#lines + 1] = 'Nothing missing: any mood can be supplied.'
+        lines[#lines + 1] = 'Nothing short: any mood can be supplied.'
     end
     dlg.showMessage('Mood materials', table.concat(lines, NEWLINE), COLOR_WHITE)
 end

@@ -412,9 +412,10 @@ plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and
 any type you have produced. A mood asks the moment it starts, so a gap found afterwards is a
 berserk dwarf. With stressed dwarves in the fort it also checks remains and bones, which a
 macabre mood wants. The list is taken from DFHack's `strangemood` plugin and cross-checked
-against the wiki, not from memory. Forbidden stock counts only when one of these tools forbade it:
-what `fort/help-mood` is holding for a mood in progress is still stock you have, while a
-forbidden cave swallow's remains lying on a cavern floor is not.
+against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have. It
+warns at **fewer than three** rather than at none, since three is the most of one thing a mood
+asks for and one bar of the metal it settles on is the same dead end as none, found a day
+later: *"No shells; only 2 tanned leather for a mood"*.
 
 ### **`fort/empty-labor-notification`**
 Warns when a restricted work detail has nobody who can actually do it. Stays quiet while
