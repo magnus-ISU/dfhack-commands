@@ -19,6 +19,11 @@ to hand the file to FMOD, and from then on it is an ordinary song that
 exactly that -- see `ssaudio.play_native`. Nothing here is a simulation of the game's music;
 it IS the game's music, with your file in it.
 
+ASKING FOR A SONG DOES NOT INTERRUPT ONE. DF's `startbackgroundmusic` plays immediately only
+when nothing is playing; otherwise it puts your request in `queued_song` and the scheduler gets
+to it when it likes. That is what "dwarfify plays no sound" was -- the call worked, the music
+did not change. The plugin stops the current song first, so a play is a play.
+
 WHAT THIS CANNOT DO. DF's scheduler still owns the playlist. It fades and replaces songs on
 its own timetable, so a track started here plays until the game decides otherwise -- enabling
 the rotation below just starts another of yours whenever it notices the game has moved on.

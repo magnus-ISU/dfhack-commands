@@ -172,10 +172,14 @@ static bool is_playing(color_ostream &out) {
 using set_song_fn = bool (*)(void *, std::string &, int, bool);
 using start_bg_fn = void (*)(void *, int);
 using stop_song_fn = void (*)(void *);
+using is_playing_fn = bool (*)(void *);
+using song_vol_fn = void (*)(void *, float);
 
 static set_song_fn g_set_song = nullptr;
 static start_bg_fn g_start_bg = nullptr;
 static stop_song_fn g_stop_song = nullptr;
+static is_playing_fn g_song_playing = nullptr;
+static song_vol_fn g_song_volume = nullptr;
 static bool g_native_resolved = false;
 
 static void resolve_native() {
@@ -189,6 +193,10 @@ static void resolve_native() {
         "_ZN12musicsoundst8set_songERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEib");
     g_start_bg = (start_bg_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst20startbackgroundmusicEi");
     g_stop_song = (stop_song_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst9stop_songEv");
+    // For answering "is it actually coming out?" -- the struct's own `song` field says what
+    // was ASKED for, which is not the same question.
+    g_song_playing = (is_playing_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst14song_is_playingEv");
+    g_song_volume = (song_vol_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst15set_song_volumeEf");
 }
 
 static bool native_available(color_ostream &out) {
@@ -209,9 +217,24 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
     int32_t id = ms->next_song_id++;
     if (!g_set_song(ms, path, id, loops)) {
         out.printerr("%s", ("ssaudio: DF's engine would not load " + path + "\n").c_str());
+        // (printerr does take a format; print, oddly, does not -- see native-status)
         ms->next_song_id--;                 // give the id back; nothing was registered
         return -1;
     }
+    // STOP FIRST. DF's own startbackgroundmusic only plays immediately when nothing is
+    // playing -- read it in g_src/music_and_sound.cpp:
+    //
+    //     bool is_playing = internal->is_song_playing();
+    //     if (new_song != song || !is_playing) {
+    //         if (!is_playing) { ... start_song(new_song); }
+    //         else { queued_song = new_song; }        // just queued
+    //     }
+    //
+    // so asking for a track while the game is mid-song does not interrupt it: the request
+    // goes into queued_song and the scheduler gets to it whenever it likes, or drops it. That
+    // is exactly what "joke/dwarfify plays no sound" was -- the call worked and the music did
+    // not change. Stopping first leaves nothing playing, and then the start is immediate.
+    g_stop_song(ms);
     g_start_bg(ms, id);
     return id;
 }
@@ -220,7 +243,23 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
 static void play_native_id(color_ostream &out, int32_t id) {
     if (!native_available(out))
         return;
+    g_stop_song(df::global::musicsound);       // see play_native: otherwise it only queues
     g_start_bg(df::global::musicsound, id);
+}
+
+// Is DF's engine actually playing a song right now?
+static bool native_playing(color_ostream &out) {
+    resolve_native();
+    if (!g_song_playing || !df::global::musicsound)
+        return false;
+    return g_song_playing(df::global::musicsound);
+}
+
+// The engine's own song volume, 0..1, on top of the media sliders.
+static void native_volume(color_ostream &out, float vol) {
+    resolve_native();
+    if (g_song_volume && df::global::musicsound)
+        g_song_volume(df::global::musicsound, vol);
 }
 
 static void stop_native(color_ostream &out) {
@@ -245,9 +284,11 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
     }
     if (params[0] == "native" && params.size() >= 2) {
         int32_t id = play_native(out, params[1], params.size() >= 3 && params[2] == "loop");
-        if (id >= 0)
-            out.print("ssaudio: playing %s through DF's engine as song %d\n",
-                      params[1].c_str(), id);
+        if (id >= 0) {
+            std::string msg = "ssaudio: playing " + params[1]
+                + " through DF's engine as song " + std::to_string(id) + "\n";
+            out << msg;
+        }
         return CR_OK;
     }
     if (params[0] == "native-id" && params.size() >= 2) {
@@ -255,6 +296,23 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
         // module is not registered in the running state until DF restarts -- is still fully
         // usable from a script through run_command
         play_native_id(out, std::stoi(params[1]));
+        return CR_OK;
+    }
+    if (params[0] == "native-status") {
+        // BUILT AS A STRING, not passed as printf arguments. color_ostream::print does not
+        // expand a format here -- the client gets the literal "%s" -- which is why the first
+        // version of this reported "engine %s, song_is_playing=%s".
+        std::string msg = std::string("ssaudio: engine ")
+            + (native_available(out) ? "reachable" : "unreachable")
+            + ", song_is_playing=" + (native_playing(out) ? "yes" : "no")
+            + ", song=" + std::to_string(df::global::musicsound
+                                         ? df::global::musicsound->song : -1)
+            + "\n";
+        out << msg;
+        return CR_OK;
+    }
+    if (params[0] == "native-volume" && params.size() >= 2) {
+        native_volume(out, std::stof(params[1]));
         return CR_OK;
     }
     if (params[0] == "native-stop") {
@@ -299,5 +357,7 @@ DFHACK_PLUGIN_LUA_FUNCTIONS {
     DFHACK_LUA_FUNCTION(play_native_id),
     DFHACK_LUA_FUNCTION(stop_native),
     DFHACK_LUA_FUNCTION(native_available),
+    DFHACK_LUA_FUNCTION(native_playing),
+    DFHACK_LUA_FUNCTION(native_volume),
     DFHACK_LUA_END
 };
