@@ -530,6 +530,11 @@ end
 -- that from the map. `last_selection` is that remembered set of squad ids (captured in the
 -- close-guard below). The live on-screen selection still wins if there is one.
 local last_selection = nil   -- captured by the overlay close-guard (defined later in this chunk)
+-- ...and the INDIVIDUAL members you were leaving with, when a squad was expanded with members
+-- highlighted: {squad_id = id, hfids = {occupant, ...}}. Without this the map-map notifications
+-- fell back to last_selection -- whole squads, and the squads screen opens with everything
+-- selected, so shift-clicking an enemy sent the ENTIRE MILITARY after two gibberlings.
+local last_indiv = nil
 
 local function effective_selected_squad_ids()
     local ui = squads_ui()
@@ -539,6 +544,24 @@ local function effective_selected_squad_ids()
     end
     if #ids > 0 then return ids end
     return last_selection or {}
+end
+
+-- The squad_positions to command individually: the live member selection if a squad is
+-- expanded with members highlighted, else the one remembered from the squads screen. Empty
+-- when the selection is whole-squad (the caller then falls back to squad orders).
+local function effective_positions()
+    local ui = squads_ui()
+    if has_indiv_selection(ui) then return selected_positions(ui) end
+    if not last_indiv or #last_indiv.hfids == 0 then return {} end
+    local sq = df.squad.find(last_indiv.squad_id)
+    if not sq then return {} end
+    local want = {}
+    for _, hfid in ipairs(last_indiv.hfids) do want[hfid] = true end
+    local out = {}
+    for p = 0, #sq.positions - 1 do
+        if want[sq.positions[p].occupant] then out[#out + 1] = sq.positions[p] end
+    end
+    return out
 end
 
 -- order every selected squad (live selection, else the one remembered from the squads screen)
@@ -560,6 +583,16 @@ end
 -- the caller consumes the shift-click), false when none are (caller falls through to zoom).
 -- Lives on dfhack.internal so it survives across map loads; absent if the overlay isn't loaded.
 function dfhack.internal.dwarf_rts_group_kill(ids)
+    -- INDIVIDUALS FIRST, exactly as a map click or a box drag does it: with members
+    -- highlighted the order belongs on their own squad_position slots, and the squads they
+    -- happen to belong to must NOT be commanded as a whole.
+    local positions = effective_positions()
+    if #positions > 0 then
+        if ids and #ids > 0 then
+            for _, p in ipairs(positions) do pos_kill(p, ids, false) end
+        end
+        return true
+    end
     if #effective_selected_squad_ids() == 0 then return false end
     if ids and #ids > 0 then order_selected_kill_group(ids) end
     return true
@@ -1131,6 +1164,13 @@ function DwarfRtsClickMove:overlay_onupdate()
             last_selection = {}
             for i = 0, #sq.squad_selected - 1 do
                 if sq.squad_selected[i] then last_selection[#last_selection + 1] = sq.squad_id[i] end
+            end
+            -- and the highlighted members, which take priority over the squads above
+            last_indiv = nil
+            if has_indiv_selection(sq) then
+                local hfids = {}
+                for i = 0, #sq.squad_hfid_selected - 1 do hfids[#hfids + 1] = sq.squad_hfid_selected[i] end
+                last_indiv = {squad_id = sq.squad_id[sq.viewing_squad_index], hfids = hfids}
             end
             sq.open = true
             for i = 0, #sq.squad_selected - 1 do sq.squad_selected[i] = false end
