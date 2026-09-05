@@ -78,7 +78,9 @@ stripped, but its sound code lives in `libg_src_lib.so` and is linked dynamicall
 `musicsoundst` API is exported; DF also ships `g_src/music_and_sound.cpp`, which shows how the
 game adds custom music itself — take an id from `next_song_id++`, `set_song(file, id, loops)`,
 then `startbackgroundmusic(id)`. That is the path this uses, so a track added here is the same
-kind of thing as a track added by a mod. `scan` a folder or `add` files; the playlist is a
-plain list in `dfhack-config/dwarfify-tracks.txt`, so you can edit it by hand. Enabling it
+kind of thing as a track added by a mod. Your tracks live in one folder — `dfhack-config/music/`, where
+`joke/super-saiyan`'s theme is installed too — so `joke/dwarfify play ultra` plays the joke's
+music as ordinary music. The game's own 121 songs are pickable by name as well (`play strange
+moods`), read from the `enum Song` in the `g_src` header DF ships. Enabling it
 starts another of your tracks whenever the game moves on from the last one — DF's scheduler
 still owns the playlist, and this does not fight it.

@@ -208,7 +208,7 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
     auto *ms = df::global::musicsound;
     int32_t id = ms->next_song_id++;
     if (!g_set_song(ms, path, id, loops)) {
-        out.printerr("ssaudio: DF's engine would not load %s\n", path.c_str());
+        out.printerr("%s", ("ssaudio: DF's engine would not load " + path + "\n").c_str());
         ms->next_song_id--;                 // give the id back; nothing was registered
         return -1;
     }
@@ -248,6 +248,13 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
         if (id >= 0)
             out.print("ssaudio: playing %s through DF's engine as song %d\n",
                       params[1].c_str(), id);
+        return CR_OK;
+    }
+    if (params[0] == "native-id" && params.size() >= 2) {
+        // the other half of the Lua API as a command, so a hot-loaded plugin -- whose Lua
+        // module is not registered in the running state until DF restarts -- is still fully
+        // usable from a script through run_command
+        play_native_id(out, std::stoi(params[1]));
         return CR_OK;
     }
     if (params[0] == "native-stop") {

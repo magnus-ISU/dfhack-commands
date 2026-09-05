@@ -46,7 +46,8 @@ call and no way out to a shell -- os.execute and io.popen are both nil -- so a p
 only way to play an arbitrary file. Without it everything else still happens and the theme is
 simply silent; the status line says so.
 
-The track is read from `dfhack-config/scripts/data/`, beside the other data files.
+The track is read from `dfhack-config/music/` -- the folder joke/dwarfify scans -- falling
+back to `dfhack-config/scripts/data/` where it used to live.
 
 PAUSING IS THE FIRST THING IT DOES, so anything that has to happen afterwards cannot be
 driven by frame timers or game ticks -- a paused fort advances neither. The theme is handed
@@ -56,7 +57,13 @@ to the ssaudio plugin, which plays on its own thread and is unaffected.
 local GLOBAL_KEY = 'super-saiyan'
 local CHECK_FRAMES = 5             -- trances are rare; no need to look every frame
 
-local THEME = dfhack.getDFPath() .. '/dfhack-config/scripts/data/ultra_instinct_theme.mp3'
+-- ONE PLACE FOR MUSIC. joke/dwarfify made dfhack-config/music/ the folder every tool's tracks
+-- live in, so this looks there first and keeps its old home as a fallback for installs that
+-- have not moved the file.
+local MUSIC_DIR = dfhack.getDFPath() .. '/dfhack-config/music/'
+local OLD_HOME = dfhack.getDFPath() .. '/dfhack-config/scripts/data/'
+local THEME = (dfhack.filesystem.exists(MUSIC_DIR .. 'ultra_instinct_theme.mp3')
+    and MUSIC_DIR or OLD_HOME) .. 'ultra_instinct_theme.mp3'
 
 -- ---- the sound ---------------------------------------------------------------
 
