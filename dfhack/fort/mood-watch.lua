@@ -207,7 +207,16 @@ function reserve_watch()
 end
 
 function watch_hidden()
-    return watch_state().hidden == true
+    local d = watch_state()
+    return d.hidden == true or d.never == true
+end
+
+-- `hidden` lasts until the next mood; `never` lasts until something re-enables the script.
+-- Two refusals, two flags: a fort that said "not this time" should be asked again.
+function set_watch_never(on)
+    local d = watch_state()
+    d.never = on and true or nil
+    save_watch(d)
 end
 
 function set_watch_hidden(on)
@@ -289,85 +298,78 @@ end
 
 MoodOdds = defclass(MoodOdds, widgets.Window)
 MoodOdds.ATTRS{
-    frame_title = 'A strange mood',
+    frame_title = 'fort/mood-watch gui',
     frame = {w = 76, h = 28},
     resizable = true,
 }
 
--- The explanation, as lines rather than a paragraph to be wrapped. The window is then sized
--- to the longest of them, which is the whole point: wrapping decided where to break these and
--- made a mess of it -- "-- not", "the", "change" alone on their own lines -- and the wrapped
--- block also grew past the fixed offset the numbers were pinned at and printed straight
--- through them.
+-- The dwarves' own words. Written as lines rather than a paragraph to be wrapped, and the
+-- window is sized to the longest of them: wrapping decided where to break these and made a
+-- mess of it, and the wrapped block also grew past the row the status line was pinned at and
+-- printed straight through it.
 local EXPLAIN = {
-    'A mood decides everything it will ask for at the instant it strikes -- not when the',
-    'dwarf claims a workshop. By then it is already too late to change their mind.',
+    'Our fortress has grown to attract the attention of the gods. Surely they will',
+    'soon bless us with artifacts of indestructible quality and peerless power.',
     '',
-    'The FIRST requirement is the base material, and it is chosen from what the fort has',
-    'AVAILABLE. Forbidden stock does not count as available, so forbidding every metal but',
-    'one is the way to steer a metalworker\'s mood -- that is what the button below does.',
+    'Typically, the gods will choose an item pleasing to the lucky artisan; but we',
+    'can influence it by ignoring our industry now and showing them only our',
+    'preferred items.',
     '',
-    'This is the game\'s documented behaviour rather than something measurable from outside,',
-    'so treat it as a strong bet, not a guarantee. The guarantee is on the other side: once',
-    'a mood has struck, fort/help-mood can point any requirement at another material you',
-    'own, which does not care how the roll was made.',
+    'Of course, all dwarves love adamantium... we must dig deeper, and we can',
+    'abandon our dreams of platinum warhammers...',
 }
 
 function MoodOdds:init()
-    local odds_at = #EXPLAIN + 1
     self:addviews{
         widgets.Label{frame = {t = 0, l = 0}, text = table.concat(EXPLAIN, NEWLINE)},
-        widgets.Label{view_id = 'odds', frame = {t = odds_at, l = 0}, text = ''},
+        -- Wide enough for the key prefix DFHack draws into the label ("Ctrl+m: "): sized to
+        -- the words alone, every one of these read "[Ctrl+m: reserve a ]".
         widgets.TextButton{
-            frame = {b = 2, l = 0, w = 26, h = 1},
-            label = 'reserve a metal',
+            frame = {b = 1, l = 0, w = 26, h = 1},
+            label = 'Reserve a metal',
             key = 'CUSTOM_CTRL_M',
             on_activate = function()
                 MetalPickerScreen{on_change = function() self:refresh() end}:show()
             end,
         },
+        -- Two ways of saying no, because they are different answers. "Not this time" is about
+        -- this mood; the notice is back for the next one. "Don't ever" is about the notice.
         widgets.TextButton{
-            view_id = 'hide',
-            frame = {b = 2, l = 28, w = 30, h = 1},
-            label = 'stop telling me',
+            frame = {b = 1, l = 28, w = 38, h = 1},
+            label = 'Don\'t ever show this again',
             key = 'CUSTOM_CTRL_H',
             on_activate = function()
-                set_watch_hidden(not watch_hidden())
-                self:refresh()
+                set_watch_never(true)
+                self.parent_view:dismiss()
             end,
         },
-        widgets.Label{view_id = 'status', frame = {b = 0, l = 0}, text = '', text_pen = COLOR_GREY},
+        widgets.TextButton{
+            frame = {b = 1, l = 68, w = 24, h = 1},
+            label = 'Not this time',
+            key = 'CUSTOM_CTRL_N',
+            on_activate = function()
+                set_watch_hidden(true)
+                self.parent_view:dismiss()
+            end,
+        },
+        -- what is reserved, under the buttons: it is the result of pressing one, so it reads
+        -- as the answer rather than as part of the question
+        widgets.Label{view_id = 'odds', frame = {b = 0, l = 0}, text = ''},
     }
 
-    -- wide enough that nothing wraps, tall enough for the lot: the explanation, the four
-    -- lines of numbers under it, the buttons and the frame
-    local widest = 0
+    local widest = 92
     for _, line in ipairs(EXPLAIN) do widest = math.max(widest, #line) end
     local sw, sh = dfhack.screen.getWindowSize()
-    self.frame.w = math.min(sw - 4, math.max(60, widest + 4))
-    -- odds_at rows of text, four of numbers under it, then the buttons, the status line and
-    -- the frame. Measured: at +9 the buttons printed across the last line of the numbers.
-    self.frame.h = math.min(sh - 4, odds_at + 11)
+    self.frame.w = math.min(sw - 4, widest + 4)
+    self.frame.h = math.min(sh - 4, #EXPLAIN + 7)   -- +1 so the buttons sit off the prose
     self:refresh()
 end
 
 function MoodOdds:refresh()
-    local o = mood_odds()
     local _, name = reserved_metal()
-    self.subviews.odds:setText({
-        {text = ('Population %d (needs %d)   '):format(o.pop, MOOD_POP_MIN),
-         pen = o.pop_ok and COLOR_GREEN or COLOR_LIGHTRED},
-        {text = ('Tiles dug %d'):format(o.dug)},
-        NEWLINE,
-        {text = ('DF\'s own mood cooldown: %d'):format(o.cooldown),
-         pen = o.cooldown == 0 and COLOR_GREEN or COLOR_GREY},
-        {text = o.cooldown == 0 and '  -- a mood may strike at any time' or '  -- not yet'},
-        NEWLINE, NEWLINE,
-        {text = name and ('Reserved: %s. Every other metal bar is forbidden.'):format(name)
-                      or 'No metal reserved.',
-         pen = name and COLOR_LIGHTCYAN or COLOR_GREY},
-    })
-    self.subviews.hide:setLabel(watch_hidden() and 'tell me again' or 'stop telling me')
+    self.subviews.odds:setText(name
+        and {{text = ('We are showing them only our %s.'):format(name), pen = COLOR_LIGHTCYAN}}
+        or {{text = 'We are showing them everything we have.', pen = COLOR_GREY}})
 end
 
 MoodOddsScreen = defclass(MoodOddsScreen, gui.ZScreenModal)
@@ -377,7 +379,6 @@ function MoodOddsScreen:init() self:addviews{MoodOdds{}} end
 -- Clicking the "could strike" notification dismisses it until the next mood AND opens this,
 -- which is the only way it is ever useful: the notice is a prompt to decide something.
 function watch_click()
-    if not reserved_metal() then set_watch_hidden(true) end
     MoodOddsScreen{}:show()
 end
 
@@ -409,7 +410,7 @@ function watch_tick()
     local in_mood = find_mood() ~= nil
     if in_mood and not d.was_in_mood then
         d.was_in_mood = true
-        d.hidden = nil
+        d.hidden = nil               -- `never` is left alone: it meant never
         save_watch(d)
     elseif not in_mood and d.was_in_mood then
         d.was_in_mood = nil
@@ -446,6 +447,7 @@ function register_watch()
         n.config.data[NOTIFY_WATCH] = {enabled = true, version = 1}
     end
     set_watch_hidden(false)          -- asking for it back means you want to hear it
+    set_watch_never(false)
     if watch_state().reserved then reserve_watch() end
     watch_heartbeat()
 end

@@ -441,12 +441,12 @@ puts DFHack's own line back rather than leaving a gap.
 ### **`fort/mood-watch`**
 The mood you have *not* had yet. *"A strange mood could strike"* — from DF's own
 `mood_cooldown`, population and excavated-tile counters rather than a guess about three
-months. Clicking dismisses it until the next mood and opens a dialog explaining how a mood
-picks its first material, with a button to reserve one metal — forbidding every other metal
+months. Clicking opens a dialog in the fort's own voice — *"Our fortress has grown to attract the
+attention of the gods..."* — with three answers: **Reserve a metal**, **Not this time** (back
+for the next mood) and **Don't ever show this again**. Reserving one metal means — forbidding every other metal
 bar in the fort, and *continuing* to forbid them, so bars smelted or traded for afterwards are
 caught too (*"Ensuring slade is used for next mood"*). Only the bars it forbade are ever
-released again, so your own forbids are safe. The other button stops the notice for good;
-`magnus-scripts` turns it back on, and `fort/mood-watch gui` reopens the dialog once the
+released again, so your own forbids are safe. `magnus-scripts` turns the notice back on, and `fort/mood-watch gui` reopens the dialog once the
 notice has been clicked away.
 
 ### **`fort/moody-items-warning`**
