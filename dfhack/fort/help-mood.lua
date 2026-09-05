@@ -1221,7 +1221,7 @@ function Picker:init()
     -- you take is a real decision, and one this tool will not make quietly.
     local seen, order = {}, {}
     for _, snap in ipairs(self.options or {}) do
-        local key = ('%s%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
+        local key = ('%s%s%s%s%s'):format(snap.key, snap.forbidden and '!' or '',
             snap.worn and 'w' or '', snap.part_used and 'p' or '',
             snap.unreachable and 'u' or '')
         local row = seen[key]
