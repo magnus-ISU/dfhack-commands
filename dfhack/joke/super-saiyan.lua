@@ -6,7 +6,9 @@ super-saiyan
 
 A martial trance is the best thing a dwarf can do and DF tells you about it in a line of grey
 text you will miss. This gives the moment its due: the instant a citizen enters a martial
-trance the game PAUSES, the view snaps to them, and the Ultra Instinct theme plays in full.
+trance the game PAUSES, the CAMERA FOLLOWS THEM, and the Ultra Instinct theme plays in full.
+The camera is held for as long as the theme runs and handed back when it stops -- to whoever
+it was following before, if anyone.
 
 There WAS a cursor blinking on the dwarf's tile for three seconds. It drew in the wrong
 place: it assumed the map viewport's top-left cell is screen (0,0), so `pos - window` is the
@@ -117,12 +119,22 @@ local function is_trancing(unit)
     return unit.counters.soldier_mood == df.soldier_mood_type.MartialTrance
 end
 
+-- Whoever the camera was following before we grabbed it, so `stop` can hand it back rather
+-- than leaving it wherever the trance left it.
+followed_before = followed_before or nil
+
 local function celebrate(unit)
     df.global.pause_state = true
     local pos = xyz2pos(dfhack.units.getPosition(unit))
     if pos and pos.x >= 0 then
         dfhack.gui.revealInDwarfmodeMap(pos, true, true)
     end
+    -- AND FOLLOW THEM. Centring once puts the camera where they were; a trance is a fight,
+    -- and the whole point is watching it. DF's own follow does the work from here.
+    if followed_before == nil then
+        followed_before = df.global.plotinfo.follow_unit
+    end
+    df.global.plotinfo.follow_unit = unit.id
     local sound = play_theme()
     load_state()
     state.trances = state.trances + 1
@@ -137,6 +149,13 @@ end
 
 -- unit ids seen trancing on the last pass, so one trance fires once rather than every scan
 seen = seen or {}
+
+-- The camera is held for as long as the theme runs and handed back when it stops -- which is
+-- the same test everything else here uses, so it works whether the theme ended on its own,
+-- was cut short, or the file was swapped for one of a different length.
+local function release_when_quiet()
+    if followed_before ~= nil and not theme_playing() then release_camera() end
+end
 
 local function scan()
     if not dfhack.world.isFortressMode() then return end
@@ -153,6 +172,7 @@ local function scan()
         end
     end
     seen = now
+    release_when_quiet()
 end
 
 -- ---- service loop ------------------------------------------------------------
@@ -179,6 +199,15 @@ local function start()
         dfhack.timeout(1, 'frames', heartbeat)
     end
     heartbeat()
+end
+
+-- Give the camera back, but only if it is still on the dwarf we put it on: if you have taken
+-- the view somewhere else in the meantime, that is where you want it.
+function release_camera()
+    if followed_before == nil then return end
+    local was = followed_before
+    followed_before = nil
+    df.global.plotinfo.follow_unit = was
 end
 
 local function stop()
@@ -229,6 +258,7 @@ if cmd == 'stop' then
         return
     end
     plug.stop()
+    release_camera()
     print('super-saiyan: stopped')
     return
 end

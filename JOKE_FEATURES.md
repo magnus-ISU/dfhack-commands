@@ -27,9 +27,11 @@ anime music at somebody.
 ## Tools
 
 ### **`joke/super-saiyan`**
-The instant a citizen enters a martial trance, the game pauses, the view snaps to them, and
-the Ultra Instinct theme plays in full. A martial trance is the best thing a dwarf can do and
-DF announces it in a line of grey text you will miss.
+The instant a citizen enters a martial trance, the game pauses, **the camera follows them**,
+and the Ultra Instinct theme plays in full — a trance is a fight, and centring once would only
+show you where it started. The camera is held for as long as the theme runs and handed back
+afterwards to whoever it was following before. A martial trance is the best thing a dwarf can
+do and DF announces it in a line of grey text you will miss.
 
 ![joke/super-saiyan demo](demos/joke-super-saiyan.gif)
 
