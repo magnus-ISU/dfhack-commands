@@ -690,6 +690,42 @@ local function civ_can_make(item_type, subtype)
     return ok
 end
 
+-- What that profession makes, when the dwarf's own preferences do not narrow it to one thing.
+-- The mood's skill is chosen when the mood strikes, so the KIND of artifact is knowable long
+-- before the specific item is -- "anyone's guess" was throwing that away and saying nothing.
+local CATEGORY = {}
+local function skill_category(skill_name, phrase)
+    local skill = df.job_skill[skill_name]
+    if skill ~= nil then CATEGORY[skill] = phrase end
+end
+
+skill_category('FORGE_WEAPON',   'a weapon or a trap component')
+skill_category('FORGE_ARMOR',    'armor')
+skill_category('FORGE_FURNITURE','metal furniture')
+skill_category('METALCRAFT',     'a metal craft')
+skill_category('CARPENTRY',      'wooden furniture')
+skill_category('MASONRY',        'stone furniture')
+skill_category('STONECRAFT',     'a stone craft')
+skill_category('WOODCRAFT',      'a wooden craft')
+skill_category('BONECARVE',      'a bone craft or bone armor')
+skill_category('LEATHERWORK',    'leather goods')
+skill_category('CLOTHESMAKING',  'clothing')
+skill_category('WEAVING',        'cloth')
+skill_category('GLASSMAKER',     'something of glass')
+skill_category('CUTGEM',         'a cut gem')
+skill_category('ENCRUSTGEM',     'an encrusted item')
+skill_category('MECHANICS',      'a mechanism')
+skill_category('EXTRACT_STRAND', 'adamantine cloth')
+
+-- nil when the mood has not settled on a profession yet, which is the only time it really is
+-- anyone's guess
+function prediction_category(unit)
+    if not unit or not df.unit:is_instance(unit) then return nil end
+    local skill = unit.job.mood_skill
+    if not skill or skill < 0 then return nil end
+    return CATEGORY[skill]
+end
+
 function prediction(unit)
     if not unit or not df.unit:is_instance(unit) then return nil end
     local skill = unit.job.mood_skill
@@ -1394,10 +1430,19 @@ function Planner:refresh()
         self.subviews.headline:setText({{
             text = ('The gods have blessed %s'):format(name), pen = COLOR_LIGHTGREEN}})
         local what = prediction(self.unit)
-        self.subviews.omen:setText(what
-            and ('%s announces they will create a %s!'):format(name, what)
-            or 'What they will make is anyone\'s guess.')
-        self.subviews.omen.text_pen = what and COLOR_YELLOW or COLOR_GREY
+        local kind = not what and prediction_category(self.unit) or nil
+        local omen
+        if what then
+            omen = ('%s announces they will create a %s!'):format(name, what)
+        elseif kind then
+            -- the profession is settled even when the item is not, so say that much
+            omen = ('%s will make %s.'):format(name, kind)
+        else
+            omen = 'What they will make is anyone\'s guess.'
+        end
+        self.subviews.omen:setText(omen)
+        self.subviews.omen.text_pen = what and COLOR_YELLOW
+            or (kind and COLOR_YELLOW or COLOR_GREY)
     else
         -- and NOTHING else. No row, no requirement name, no hint at which one is short:
         -- the whole value of this panel is knowing what the mood wants, and a fort that
