@@ -511,6 +511,12 @@ Alerts when a dwarf dies with no tomb, or when anything is haunting the fort —
 whether or not it was ever a citizen. Click for a death browser with cause, kills and a
 clickable family tree, and queue memorial slabs in bulk.
 
+### **`fort/no-sparring-spam`**
+Removes the sparring alert from the notification strip. Squads drilling refill that button
+constantly, so it sits there permanently and pushes the alerts you want to read — a failed
+job, a guest, a real fight — out of the way. Only the button goes: every sparring blow is
+still filed in the units' combat logs and reads back in full.
+
 ### **`fort/civ-alert-notification`**
 During a civilian alert, warns who's still outside the safe burrow; click to find them.
 

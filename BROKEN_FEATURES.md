@@ -37,9 +37,11 @@ caravans *and* migrants. **Enabled by `magnus-scripts`.** v3 (2026-09-04) hands 
 them — erasing killed the civ's schedule permanently. v4 makes that a **checked invariant**: the entry
 list is captured around every pass and any entry that disappears inside one is reported by name as a
 bug, and `caravan-unstick` now prints the year each civ's last caravan got home, so a stopped schedule
-shows as a date. v5 also settles a **civil war** on the same weekly pass: a civ at war with
-itself sends no caravans home and no migrants — the same silence from a different cause — and it is the one
-field DFHack's `fix/civil-war` clears (the war's history is left intact). **Live finding 2026-09-05:** the
+shows as a date. v5 also takes the fort **out of a civil war** on the same weekly pass, once
+that war is a year old (its age read from DF's own history collection, so a long-running one is acted on at
+once): a civ at war with itself sends no caravans home and no migrants — the same silence from a different
+cause — and it is the one field DFHack's `fix/civil-war` clears. The year of patience is there because a
+civil war can end on its own; the war itself and its history are left alone. **Live finding 2026-09-05:** the
 homeland drought on this fort was a civil war running since year 102 (*The Eviscerated Conflict*, its
 assaults on the capital led by dwarves held prisoner by the dark dwarves), not the erase bug; the two human
 civs' silence since 105 is still unexplained.

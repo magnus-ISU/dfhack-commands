@@ -37,9 +37,10 @@ force-sends caravans or migrants.
 As a free extra, AtDepot caravans get the stock `caravan unload` pack-animal rejoin each
 check (idempotent, touches nothing healthy).
 
-It also settles a CIVIL WAR on the same pass. A civ at war with itself sends your fort no
-caravans and no migrants -- the same silence, a different cause -- and it is one field, the
-one DFHack's `fix/civil-war` clears. The war's history is left intact.
+It also takes the fort OUT OF A CIVIL WAR on the same pass, once that war is a year old. A civ
+at war with itself sends your fort no caravans and no migrants -- the same silence, a different
+cause -- and it is one field, the one DFHack's `fix/civil-war` clears. The year of patience is
+there because a civil war can end on its own; the war itself, and its history, are left alone.
 
 Usage:
     enable caravan-unstick        run the weekly watchdog
@@ -181,41 +182,79 @@ end
 -- migration -- the same symptom this watchdog exists for, from a completely different cause,
 -- and just as invisible: nothing announces it and nothing in the fort shows it. It is a
 -- single field (`relation` on the civ's diplomacy entry for itself), and DFHack's own
--- `fix/civil-war` clears exactly that, so the check is worth having on the same weekly pass.
+-- `fix/civil-war` clears exactly that.
 --
--- The historical war collection is deliberately NOT touched -- it is the legends record of
--- what happened, DF's own fix leaves it, and `relation` is what the live checks read.
-local function civil_war_check()
-    local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
-    if not civ then return false end
-    local fixed = false
-    local ok = pcall(function()
+-- A YEAR OF IT FIRST, the same patience the stuck-caravan path is given. A civil war can end
+-- on its own -- a diplomat carries a peace treaty -- and stepping in on the week it starts
+-- takes that away. The war's AGE is read from its own history collection where DF records it
+-- (`war_event_collection` -> `start_year`), so a war that has already run for years is acted
+-- on at once rather than waiting another year for this tool's own clock; when that cannot be
+-- read, the clock starts when this watchdog first sees it.
+--
+-- What is cleared is the FORT's side of it: your civ stops counting itself an enemy, so trade
+-- and migration can resume. The war itself, and its history, are left exactly as they are.
+local function self_war_entry(civ)
+    local hit
+    pcall(function()
         for _, s in ipairs(civ.relations.diplomacy.state) do
-            if s.group_id == civ.id and s.relation > 0 then
-                s.relation = 0
-                fixed = true
-            end
+            if s.group_id == civ.id and s.relation > 0 then hit = s end
         end
     end)
-    if ok and fixed then
-        dfhack.gui.showAnnouncement(
-            ('%s was at war with itself -- that is now settled. Caravans from home and migrant '
-             .. 'waves can resume.'):format(civ_name(civ.id)), COLOR_LIGHTGREEN, true)
-    end
-    return ok and fixed
+    return hit
 end
 
 -- is the fort's own civ at war with itself right now?
 local function in_civil_war()
     local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
-    if not civ then return false end
-    local at_war = false
-    pcall(function()
-        for _, s in ipairs(civ.relations.diplomacy.state) do
-            if s.group_id == civ.id and s.relation > 0 then at_war = true end
+    return civ and self_war_entry(civ) ~= nil or false
+end
+
+-- how many years the civil war has been running, by DF's own record; nil if unreadable
+local function civil_war_years(entry)
+    if not entry or entry.war_event_collection < 0 then return nil end
+    for _, c in ipairs(df.global.world.history.event_collections.all) do
+        if c.id == entry.war_event_collection then
+            if c.start_year and c.start_year >= 0 then
+                return df.global.cur_year - c.start_year
+            end
+            return nil
         end
-    end)
-    return at_war
+    end
+    return nil
+end
+
+-- `now` forces it immediately, the same manual override the caravan path takes
+local function civil_war_check(now)
+    local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not civ then return false end
+    local entry = self_war_entry(civ)
+    if not entry then
+        if state.civil_since then state.civil_since = nil; save_state() end
+        return false
+    end
+
+    if not now then
+        local years = civil_war_years(entry)
+        if years then
+            if years < 1 then return false end          -- DF's own record: not a year old yet
+        else
+            -- no readable start: fall back to how long WE have seen it
+            if not state.civil_since then
+                state.civil_since = abs_tick()
+                save_state()
+                return false
+            end
+            if math.abs(abs_tick() - state.civil_since) < STUCK_GRACE then return false end
+        end
+    end
+
+    entry.relation = 0
+    state.civil_since = nil
+    save_state()
+    dfhack.gui.showAnnouncement(
+        "Your homeland is fighting a civil war -- but you've stayed out of it. Migrants and "
+        .. "trade may resume... but hopefully peace can come soon.", COLOR_LIGHTGREEN, true)
+    return true
 end
 
 -- ---- the watchdog pass -------------------------------------------------------
@@ -240,7 +279,7 @@ end
 local function do_check(now)
     if not dfhack.world.isFortressMode() then return end
     load_state()
-    civil_war_check()
+    civil_war_check(now)
     local before = caravan_ids()
     local cs = df.global.plotinfo.caravans
     local seen = {}
@@ -383,7 +422,7 @@ else
     end
     if in_civil_war() then
         print('  YOUR CIV IS AT WAR WITH ITSELF -- no caravans from home, no migrant waves.')
-        print('  The next weekly pass settles it (or run `fix/civil-war` now).')
+        print('  The fort steps out of it once the war is a year old (`caravan-unstick fix` now).')
     end
     -- WHEN EACH CIV LAST GOT HOME. A caravan reports to its civ when it finalizes, and that
     -- report is what schedules the next visit -- so the last finalize year is the honest
