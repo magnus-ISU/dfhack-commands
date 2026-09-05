@@ -33,7 +33,13 @@ Seeds a self-growing interior burrow on the first tile you dig at embark. **Arme
 
 ### **`fort/caravan-unstick`**
 A weekly watchdog that frees caravans stuck leaving — which otherwise quietly blocks future
-caravans *and* migrants. **Enabled by `magnus-scripts`.** v3 (2026-09-04) hands stuck entries to DF's own cleanup instead of erasing them — erasing killed the civ's schedule permanently. The hand-off is verified live; whether the next-year caravan then follows is still being confirmed.
+caravans *and* migrants. **Enabled by `magnus-scripts`.** v3 (2026-09-04) hands stuck entries to DF's own cleanup instead of erasing
+them — erasing killed the civ's schedule permanently. v4 makes that a **checked invariant**: the entry
+list is captured around every pass and any entry that disappears inside one is reported by name as a
+bug, and `caravan-unstick` now prints the year each civ's last caravan got home, so a stopped schedule
+shows as a date. **Still unresolved (2026-09-05):** on the live fort no civ has sent a caravan since
+year 106 — a stopped schedule from before v3 that has not recovered on its own, and it is not yet known
+whether anything can restore it short of `force caravan`.
 
 ### **`fort/mandate-notification`**
 Shows noble mandates the moment they appear. **Run by `magnus-scripts` every session.** Unused
