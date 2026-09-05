@@ -28,9 +28,9 @@ Selection uses DFHack's own primitive -- `dfhack.items.markForTrade` -- so the s
 them up exactly as if you had clicked each row, and deselecting one on the screen removes the
 job again the normal way.
 
-THE WINDOW ITSELF opens at the FULL width of the interface rather than DFHack's fixed 86
-columns -- the item description is the column that gets truncated, and it is the one you read
--- and at whatever height you last resized it to, which it records for you.
+THE WINDOW ITSELF opens at the FULL height of the interface rather than DFHack's fixed 46
+rows -- on a tall screen that is a lot of list you were paging through for nothing -- and at
+whatever width you last resized it to, which it records for you.
 
     enable trade-again      pre-select as the screen opens (persists with the fort)
     disable trade-again     stop
@@ -48,7 +48,7 @@ local GLOBAL_KEY = 'trade-again'
 state = state or nil
 
 local function default_state()
-    return {enabled = false, radius = 0}   -- height: set by the window itself, see below
+    return {enabled = false, radius = 0}   -- width: recorded by the window itself, see below
 end
 
 local function load_state()
@@ -161,21 +161,21 @@ end
 
 -- ---- the window's shape ----------------------------------------------------
 --
--- The screen opens 86 columns wide whatever your screen is, which on a wide terminal wastes
--- most of it -- the item descriptions are the long column and they are what gets truncated.
--- So it opens the FULL width of the interface instead, and at whatever height you last left
--- it: the window records its own height as you resize it, so the size you settle on is the
--- size it comes back at. Width is not remembered on purpose -- full width is the point.
+-- The screen opens 46 rows tall whatever your screen is, so on a tall terminal you page
+-- through a list that had room to show itself. So it opens at the FULL height of the
+-- interface instead, and at whatever width you last left it: the window records its own width
+-- as you resize it, so the shape you settle on is the shape it comes back at. Height is not
+-- remembered on purpose -- full height is the point.
 --
 -- Both hooks are on the class, so an instance that is already open picks them up on its next
 -- layout (methods resolve through the class table at call time).
 
-local function full_width()
+local function full_height()
     local ok, ir = pcall(gui.get_interface_rect)
     if not ok or not ir then return nil end
-    local w = (ir.width or (ir.x2 - ir.x1 + 1))
-    if type(w) ~= 'number' or w < 40 then return nil end
-    return w
+    local h = (ir.height or (ir.y2 - ir.y1 + 1))
+    if type(h) ~= 'number' or h < 20 then return nil end
+    return h
 end
 
 function install_window_hook()
@@ -189,21 +189,21 @@ function install_window_hook()
         local r = orig_init and orig_init(self, ...) or nil
         if load_state().enabled then
             self.frame = self.frame or {}
-            self.frame.w = full_width() or self.frame.w
-            if type(state.height) == 'number' and state.height > 10 then
-                self.frame.h = state.height
+            self.frame.h = full_height() or self.frame.h
+            if type(state.width) == 'number' and state.width > 40 then
+                self.frame.w = state.width
             end
         end
         return r
     end
 
-    -- remember the height you resize it to. postUpdateLayout catches a resize; render catches
-    -- the window that is ALREADY open when this hook goes in, which is the one whose height
+    -- remember the width you resize it to. postUpdateLayout catches a resize; render catches
+    -- the window that is ALREADY open when this hook goes in, which is the one whose width
     -- you actually want kept. Both are a number comparison and only write when it changes.
     local function remember(self)
-        local h = self.frame and self.frame.h
-        if type(h) == 'number' and h > 10 and load_state().height ~= h then
-            state.height = h
+        local w = self.frame and self.frame.w
+        if type(w) == 'number' and w > 40 and load_state().width ~= w then
+            state.width = w
             save_state()
         end
     end
@@ -285,7 +285,7 @@ elseif cmd == 'status' then
     local items, depot = candidates()
     print(('trade-again: %s, radius %d, window %s wide x %s high'):format(
         enabled and 'ENABLED' or 'disabled', state.radius or 0,
-        tostring(full_width() or '?'), tostring(state.height or 'DFHack default')))
+        tostring(state.width or 'DFHack default'), tostring(full_height() or '?')))
     if not depot then
         print('  no finished trade depot in this fort')
     else

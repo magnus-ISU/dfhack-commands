@@ -449,10 +449,10 @@ come up ticked exactly as if you had clicked them and deselecting one removes th
 without opening the screen; `trade-again status` says what would be picked. Hooks
 `MoveGoodsModal:init` so the selection is made just before the screen reads its pending set.
 
-It also **opens the window at the full width of the interface** instead of DFHack's fixed 86 columns — the
-item description is the column that gets truncated and it is the one you read — and at **whatever height
-you last resized it to**, which the window records for itself. Both are class hooks, so a window already
-open picks them up on its next render.
+It also **opens the window at the full height of the interface** instead of DFHack's fixed 46 rows — on a
+tall screen that is a lot of list you were paging through for nothing — and at **whatever width you last
+resized it to**, which the window records for itself. Both are class hooks, so a window already open picks
+them up on its next render.
 
 ### **`fort/trader-notification`**
 Counts down how many days the trader is ready; click to jump to the depot.
