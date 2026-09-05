@@ -236,7 +236,9 @@ only helps you satisfy it. Requirements already hauled in are shown as claimed; 
 limited to what the dwarf can actually walk to and to what the fort can actually give — an item that belongs
 to a building is never offered, since `flags.in_building` is clear on workshop contents and unforbidding one
 does nothing (the forbid was never what stopped it); worn, part-used and forbidden items are shown,
-labelled, and never chosen by default. And when the fort is short of what the mood wants,
+labelled, and never chosen by default, and a block that was built into a wall or pillar says `BUILT INTO A
+WALL` rather than a bare "unreachable" — it is still an item at that tile and still in your stocks, which
+makes it look eminently walkable. And when the fort is short of what the mood wants,
 `[delay work]` (Ctrl-D) buys the time to make it: the dwarf gets a burrow of nothing but their
 own workshop, so there is no item they can reach and the mood holds where it is until you lift
 it. Everything it touches is put back.
@@ -508,6 +510,16 @@ world-wide data. Also works from the console — `embark/assistant help`.
 
 ### **`fort/civilian-militia`**
 Packs office-holder civilian squads into ready and reserve squads on command.
+
+### **`fort/invulnerable-adamantine-doors`**
+Promotes the masterwork adamantine furniture you have already built into real artifacts, which no
+building destroyer can break (cheat). A troll walks through an adamantine door exactly as it walks
+through a wooden one, since material never enters into it, but artifact furniture can never be
+damaged or destroyed. Doors, hatches, floodgates, grates and bars first, and the other single-item
+furniture with them. It never changes what anything is made of and never touches ordinary work: a
+granite door stays granite, and an adamantine door of merely good quality stays a door. Each
+promotion mints a real artifact record with a name from DF's own generator, and `undo` takes every
+one of them back. `enable` catches new ones as they are built. Not run by `magnus-scripts`.
 
 ### **`fort/cheatmine`**
 Instantly finishes all designated digging and any planned staircases (cheat).

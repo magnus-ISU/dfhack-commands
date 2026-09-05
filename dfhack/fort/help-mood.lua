@@ -315,6 +315,18 @@ end
 -- identical things just as well, and a name is fetched only for the few hundred rows that
 -- actually get drawn -- through `df.item.find`, so a dead id yields nil instead of a
 -- dangling pointer.
+-- is the item's tile a CONSTRUCTION -- a wall, a pillar, a floor someone built? Then the item
+-- is the thing it was built from, kept at that tile so deconstruction can give it back.
+local function entombed(item)
+    local v = false
+    pcall(function()
+        local p = xyz2pos(dfhack.items.getPosition(item))
+        local tt = dfhack.maps.getTileType(p)
+        v = tt and df.tiletype.attrs[tt].material == df.tiletype_material.CONSTRUCTION or false
+    end)
+    return v
+end
+
 local function snapshot(item)
     local q, dq, dim, wear, injob, alien = 0, 0, 0, 0, false, false
     pcall(function() q = item:getQuality() end)
@@ -335,6 +347,7 @@ local function snapshot(item)
         mat_name = matname,
         value = item_value(item),
         forbidden = is_forbidden(item),
+        entombed = entombed(item) or nil,
         worn = wear > 0,
         busy = injob,
         foreign = alien,
@@ -616,7 +629,13 @@ local function item_name(item, snap)
     -- where an item was MADE is not a fact about whether it suits a mood: a foreign log burns
     -- and a foreign block builds exactly like one of ours, and the distinction only ever
     -- pushed perfectly good stock down the list. Not tagged, not sorted on, not avoided.
-    if snap and snap.unreachable then tags[#tags + 1] = 'UNREACHABLE' end
+    if snap and snap.unreachable then
+        -- WHY it cannot be reached matters, because the commonest reason looks absurd on
+        -- screen: a block that was BUILT INTO a wall or pillar is still an item at that tile
+        -- and still listed in stocks, so it reads as "right there, obviously walkable". It is
+        -- inside the wall. Deconstructing is the only way to it.
+        tags[#tags + 1] = snap.entombed and 'BUILT INTO A WALL' or 'UNREACHABLE'
+    end
     if snap and snap.busy then tags[#tags + 1] = 'in another job' end
     if #tags > 0 then n = ('%s (%s)'):format(n, table.concat(tags, ', ')) end
     return n
