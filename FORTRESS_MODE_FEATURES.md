@@ -395,6 +395,18 @@ Names the agitated animals by species instead of a bare count; shift-click attac
 ### **`fort/enemies-inside-notification`**
 Warns of enemies inside the alert burrow; shift-click sends selected squads to attack.
 
+### **`fort/trade-again`**
+DFHack's "Move goods to/from depot" screen opens with nothing selected, so every caravan starts with the
+same hunt through thousands of rows. This pre-selects the obvious ones as the screen opens: everything
+**your own fort made** (not `foreign` — selling last year's purchases back is rarely the intent) sitting at
+**distance 0** from the depot, measured exactly the way the screen's own `dist` column measures it. Forbidden
+items, artifacts and ethically banned goods are left alone, and items already *in* the depot need no help
+since DFHack counts those as selected already. Selection goes through `dfhack.items.markForTrade`, so rows
+come up ticked exactly as if you had clicked them and deselecting one removes the job normally.
+`trade-again radius N` widens the catchment (persists with the fort); `trade-again` selects them now
+without opening the screen; `trade-again status` says what would be picked. Hooks
+`MoveGoodsModal:init` so the selection is made just before the screen reads its pending set.
+
 ### **`fort/trader-notification`**
 Counts down how many days the trader is ready; click to jump to the depot.
 
