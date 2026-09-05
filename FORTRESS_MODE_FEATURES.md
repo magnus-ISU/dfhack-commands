@@ -385,6 +385,19 @@ Warns of enemies inside the alert burrow; shift-click sends selected squads to a
 ### **`fort/trader-notification`**
 Counts down how many days the trader is ready; click to jump to the depot.
 
+### **`fort/help-mood` notices**
+Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
+game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,
+*"...keeps muttering..."* — the right line for the mood type, and the dwarf's first name
+rather than "moody dwarf". When they are stuck it names what they are short of the way DF
+would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
+days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
+clicking again opens the planner. A second notice appears when a mood could strike — read from
+DF's own `mood_cooldown`, population and excavated-tile counters rather than guessed — and
+clicking it explains how a mood picks its first material and offers to reserve one metal by
+forbidding every other metal bar in the fort (*"Ensuring slade is used for next mood"*). Only
+the bars it forbade are ever released again.
+
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
 plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and raw glass in

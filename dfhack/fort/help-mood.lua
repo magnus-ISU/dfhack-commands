@@ -1121,6 +1121,7 @@ local function heartbeat()
         end
         state.job_id = job.id
         if not steer(unit, job) then stop() return end
+        pcall(watch_tick)
         dfhack.timeout(10, 'frames', tick)
     end
     tick()
@@ -1541,6 +1542,437 @@ function PlannerScreen:onDismiss() view = nil end
 view = view or nil
 
 -- ---------------------------------------------------------------------------
+-- the notifications
+-- ---------------------------------------------------------------------------
+--
+-- DFHack's own `moody_status` says "moody dwarf is claiming a workshop" and, when the dwarf
+-- is stuck, "moody dwarf can't find needed item!" -- which is true and tells you nothing you
+-- can act on. WHICH dwarf, WHAT they want, and HOW LONG they have wanted it are the three
+-- things you need, and the game itself says all three in its own words. So this replaces it
+-- with the game's words.
+--
+-- The mood lines are DF's, taken from this fort's own announcement log where it had them
+-- ("... withdraws from society...", "... has been possessed!") and from the wiki's Strange
+-- mood page for the three this fort has never seen.
+
+local WATCH_KEY = 'help-mood/watch'
+
+local MOOD = {
+    [df.mood_type.Fey]       = {begun = 'is taken by a fey mood!',
+                                working = 'works furiously!',      verb = 'wants'},
+    [df.mood_type.Secretive] = {begun = 'withdraws from society...',
+                                working = 'works secretly...',     verb = 'has sketched'},
+    [df.mood_type.Possessed] = {begun = 'has been possessed!',
+                                working = 'keeps muttering...',    verb = 'demands'},
+    [df.mood_type.Macabre]   = {begun = 'begins to stalk and brood...',
+                                working = 'works, darkly brooding...', verb = 'broods over'},
+    [df.mood_type.Fell]      = {begun = 'looses a roaring laughter, fell and terrible!',
+                                working = 'works with menacing fury!', verb = 'demands'},
+}
+
+-- A secretive dwarf SKETCHES what they want rather than saying it; that is the game's own
+-- distinction and it is the nicest thing about these messages, so it is kept.
+local function mood_words(unit)
+    return MOOD[unit.mood] or {begun = 'is in a strange mood', working = 'works...',
+                               verb = 'wants'}
+end
+
+local function first_name(unit)
+    local n = ''
+    pcall(function() n = unit.name.first_name or '' end)
+    if n == '' then return dfhack.units.getReadableName(unit) end
+    return dfhack.upperCp437(n:sub(1, 1)) .. n:sub(2)
+end
+
+local function watch_state()
+    local d = dfhack.persistent.getSiteData(WATCH_KEY, {})
+    if type(d) ~= 'table' then d = {} end
+    d.forbidden = type(d.forbidden) == 'table' and d.forbidden or {}
+    return d
+end
+
+local function save_watch(d)
+    pcall(dfhack.persistent.saveSiteData, WATCH_KEY, d)
+end
+
+local function now_tick()
+    return df.global.cur_year * 403200 + df.global.cur_year_tick
+end
+
+-- How long they have been waiting on the CURRENT item. Kept with the fort rather than in
+-- memory: a mood outlives a save, and "for 7 days" is a lie if the clock restarted at load.
+local function stall_days(unit, job)
+    local d = watch_state()
+    local hauled = #job.items
+    if d.stall_unit ~= unit.id or d.stall_hauled ~= hauled then
+        d.stall_unit, d.stall_hauled, d.stall_since = unit.id, hauled, now_tick()
+        save_watch(d)
+        return 0
+    end
+    return math.floor((now_tick() - (d.stall_since or now_tick())) / 1200)
+end
+
+-- what the dwarf is short of, in DF's own item words
+local function wanted_now(job)
+    local idx, ji = current_step(job, {})
+    if not ji then return nil end
+    return requirement_name(ji)
+end
+
+function moody_message()
+    local unit, job = find_mood()
+    if not unit or not job then return nil end
+    local name, words = first_name(unit), mood_words(unit)
+    local live = unit.job.current_job or job
+    local bld = dfhack.job.getHolder(live)
+
+    if not bld then
+        -- before a workshop is claimed there is nothing to report but the mood itself, which
+        -- is exactly what the game announces at that moment
+        return ('%s %s'):format(name, words.begun)
+    end
+    if live.flags.working then
+        return ('%s %s'):format(name, words.working)
+    end
+    if live.flags.fetching or live.flags.bringing then
+        return ('%s is gathering items'):format(name)
+    end
+
+    -- stuck: name the thing, and once it has gone on long enough, say how long
+    local want = wanted_now(job) or 'something'
+    local days = stall_days(unit, job)
+    if days >= 7 then
+        return {{text = ('%s %s %s for %d days'):format(name, words.verb, want, days),
+                 pen = COLOR_LIGHTRED}}
+    end
+    return {{text = ('%s %s %s'):format(name, words.verb, want), pen = COLOR_YELLOW}}
+end
+
+-- First click follows them, second click opens the planner: the two things you want in that
+-- order, and the second is only useful once you have seen where they are.
+function moody_click()
+    local unit, job = find_mood()
+    if not unit or not job then return end
+    if df.global.plotinfo.follow_unit == unit.id then
+        view = view or PlannerScreen{unit = unit, job = job}:show()
+        return
+    end
+    dfhack.gui.revealInDwarfmodeMap(xyz2pos(dfhack.units.getPosition(unit)), true)
+    df.global.plotinfo.follow_unit = unit.id
+end
+
+-- ---------------------------------------------------------------------------
+-- "a mood could strike"
+-- ---------------------------------------------------------------------------
+--
+-- DF keeps its own counter for this -- `plotinfo.mood_cooldown` -- so there is no need to
+-- guess at "three months since the last one": when it reaches zero a mood may be rolled.
+-- Population and excavated tiles are DF's other two conditions and are read from
+-- `plotinfo.tasks`, which counts them for its own purposes.
+
+local MOOD_POP_MIN = 20
+
+function mood_odds()
+    local citizens = #dfhack.units.getCitizens(true)
+    return {
+        cooldown = df.global.plotinfo.mood_cooldown,
+        pop = citizens,
+        pop_ok = citizens >= MOOD_POP_MIN,
+        dug = df.global.plotinfo.tasks.excavated_tiles,
+        in_mood = (find_mood() ~= nil),
+    }
+end
+
+function mood_possible()
+    local o = mood_odds()
+    return o.pop_ok and o.cooldown == 0 and not o.in_mood
+end
+
+-- ---------------------------------------------------------------------------
+-- reserving a metal for the next mood
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS WORKS, AND WHAT IS NOT CERTAIN ABOUT IT. A mood decides its materials the instant
+-- it begins -- measured here: the job's item filters existed while the workshop was still
+-- unclaimed -- and the wiki's Strange mood page says the choice is made from what is
+-- AVAILABLE: "Metalworkers will demand adamantine wafers or divine metals if any are
+-- available (unforbidden)", and "You can selectively forbid types of material through the
+-- stocks screen so that only the material you want them to use is available."
+--
+-- Against that: DFHack's own strangemood plugin, which reimplements the selection, scans
+-- `items.other[ANY_GOES_IN_CHEST]` for bars and checks only the item type, the material and
+-- the DEEP_SPECIAL inorganic flag -- no forbid check at all. One of the two is wrong, and
+-- this fort's evidence favours the wiki: the mood in progress rolled ADAMANTINE, which the
+-- plugin's rule would have excluded outright (adamantine is DEEP_SPECIAL) and which the
+-- wiki's rule predicts exactly, because nine unforbidden adamantine bars were sitting there.
+--
+-- So: this forbids the other metals, and it is honest about being a bet. The certain way to
+-- get the artifact you want is the picker's material swap, which rewrites the requirement
+-- after the roll and does not care how the roll was made.
+
+local function metal_bars()
+    local counts = {}
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        if it:getMaterial() == 0 and usable(it) then
+            local idx = it:getMaterialIndex()
+            counts[idx] = (counts[idx] or 0) + 1
+        end
+    end
+    local out = {}
+    for idx, n in pairs(counts) do
+        local mi = dfhack.matinfo.decode(0, idx)
+        out[#out + 1] = {index = idx, count = n, name = mi and mi:toString() or ('#' .. idx)}
+    end
+    table.sort(out, function(a, b) return a.name < b.name end)
+    return out
+end
+
+function reserved_metal()
+    local d = watch_state()
+    if not d.reserved then return nil end
+    local mi = dfhack.matinfo.decode(0, d.reserved)
+    return d.reserved, mi and mi:toString() or ('#' .. d.reserved)
+end
+
+function clear_reserve()
+    local d = watch_state()
+    local n = 0
+    for id in pairs(d.forbidden or {}) do
+        local it = df.item.find(tonumber(id))
+        if it and it.flags.forbid then it.flags.forbid = false; n = n + 1 end
+    end
+    d.forbidden, d.reserved = {}, nil
+    save_watch(d)
+    return n
+end
+
+function reserve_metal(idx)
+    clear_reserve()
+    local d = watch_state()
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        if it:getMaterial() == 0 and it:getMaterialIndex() ~= idx and usable(it)
+            and not it.flags.forbid then
+            it.flags.forbid = true
+            d.forbidden[tostring(it.id)] = true
+            n = n + 1
+        end
+    end
+    d.reserved = idx
+    save_watch(d)
+    return n
+end
+
+function watch_hidden()
+    return watch_state().hidden == true
+end
+
+function set_watch_hidden(on)
+    local d = watch_state()
+    d.hidden = on and true or nil
+    save_watch(d)
+end
+
+function watch_message()
+    local _, name = reserved_metal()
+    if name then
+        return {{text = ('Ensuring %s is used for next mood'):format(name), pen = COLOR_LIGHTCYAN}}
+    end
+    if watch_hidden() then return nil end
+    if not mood_possible() then return nil end
+    return {{text = 'A strange mood could strike', pen = COLOR_LIGHTMAGENTA}}
+end
+
+-- ---------------------------------------------------------------------------
+-- the dialogs
+-- ---------------------------------------------------------------------------
+
+MetalPicker = defclass(MetalPicker, widgets.Window)
+MetalPicker.ATTRS{
+    frame_title = 'Reserve a metal',
+    frame = {w = 56, h = 24},
+    resizable = true,
+    on_change = DEFAULT_NIL,
+}
+
+function MetalPicker:init()
+    local reserved = reserved_metal()
+    local choices = {}
+    choices[#choices + 1] = {text = {{text = '  (none -- leave every metal available)',
+                                     pen = reserved and COLOR_GREY or COLOR_LIGHTGREEN}},
+                             index = false}
+    for _, m in ipairs(metal_bars()) do
+        local on = reserved == m.index
+        choices[#choices + 1] = {
+            index = m.index,
+            text = {{text = ('  %s%-22s %4d bar%s'):format(on and '* ' or '  ', m.name, m.count,
+                                                           m.count == 1 and '' or 's'),
+                     pen = on and COLOR_LIGHTGREEN or nil}},
+        }
+    end
+    self:addviews{
+        widgets.Label{frame = {t = 0, l = 0}, text_pen = COLOR_GREY,
+            text = 'Forbids every other metal bar, so the next mood has only this one to see.'},
+        widgets.List{
+            frame = {t = 2, l = 0, r = 0, b = 3},
+            choices = choices,
+            on_submit = function(_, ch)
+                if ch.index == false then
+                    local n = clear_reserve()
+                    self.subviews.status:setText(('Released %d bar%s.'):format(n, n == 1 and '' or 's'))
+                else
+                    local n = reserve_metal(ch.index)
+                    local _, name = reserved_metal()
+                    self.subviews.status:setText(
+                        ('Forbade %d other bar%s; %s is what is left.'):format(
+                            n, n == 1 and '' or 's', name or '?'))
+                end
+                if self.on_change then self.on_change() end
+                self:updateLayout()
+            end,
+        },
+        widgets.Label{view_id = 'status', frame = {b = 1, l = 0}, text = '', text_pen = COLOR_GREY},
+        widgets.Label{frame = {b = 0, l = 0}, text_pen = COLOR_GREY,
+            text = 'Your own forbids are left alone; only what this set is undone. Esc closes.'},
+    }
+end
+
+MetalPickerScreen = defclass(MetalPickerScreen, gui.ZScreenModal)
+MetalPickerScreen.ATTRS{focus_path = 'help-mood/metal', force_pause = false,
+                        on_change = DEFAULT_NIL}
+function MetalPickerScreen:init()
+    self:addviews{MetalPicker{on_change = self.on_change}}
+end
+
+MoodOdds = defclass(MoodOdds, widgets.Window)
+MoodOdds.ATTRS{
+    frame_title = 'A strange mood',
+    frame = {w = 76, h = 28},
+    resizable = true,
+}
+
+function MoodOdds:init()
+    self:addviews{
+        widgets.WrappedLabel{
+            frame = {t = 0, l = 0, r = 0},
+            text_to_wrap = table.concat({
+                'A mood decides everything it will ask for at the instant it strikes -- not',
+                'when the dwarf claims a workshop. By then it is already too late to change',
+                'their mind.',
+                '',
+                'The FIRST requirement is the base material, and it is chosen from what the',
+                'fort has AVAILABLE. Forbidden stock does not count as available, so forbidding',
+                'every metal but one is the way to steer a metalworker\'s mood -- that is what',
+                'the button below does.',
+                '',
+                'This is the game\'s documented behaviour rather than something measurable from',
+                'outside, so treat it as a strong bet, not a guarantee. The guarantee is on the',
+                'other side: once a mood has struck, fort/help-mood can point any requirement',
+                'at another material you own, which does not care how the roll was made.',
+            }, NEWLINE),
+        },
+        widgets.Label{view_id = 'odds', frame = {t = 16, l = 0}, text = ''},
+        widgets.TextButton{
+            frame = {b = 2, l = 0, w = 26, h = 1},
+            label = 'reserve a metal',
+            key = 'CUSTOM_CTRL_M',
+            on_activate = function()
+                MetalPickerScreen{on_change = function() self:refresh() end}:show()
+            end,
+        },
+        widgets.TextButton{
+            view_id = 'hide',
+            frame = {b = 2, l = 28, w = 30, h = 1},
+            label = 'stop telling me',
+            key = 'CUSTOM_CTRL_H',
+            on_activate = function()
+                set_watch_hidden(not watch_hidden())
+                self:refresh()
+            end,
+        },
+        widgets.Label{view_id = 'status', frame = {b = 0, l = 0}, text = '', text_pen = COLOR_GREY},
+    }
+    self:refresh()
+end
+
+function MoodOdds:refresh()
+    local o = mood_odds()
+    local _, name = reserved_metal()
+    self.subviews.odds:setText({
+        {text = ('Population %d (needs %d)   '):format(o.pop, MOOD_POP_MIN),
+         pen = o.pop_ok and COLOR_GREEN or COLOR_LIGHTRED},
+        {text = ('Tiles dug %d'):format(o.dug)},
+        NEWLINE,
+        {text = ('DF\'s own mood cooldown: %d'):format(o.cooldown),
+         pen = o.cooldown == 0 and COLOR_GREEN or COLOR_GREY},
+        {text = o.cooldown == 0 and '  -- a mood may strike at any time' or '  -- not yet'},
+        NEWLINE, NEWLINE,
+        {text = name and ('Reserved: %s. Every other metal bar is forbidden.'):format(name)
+                      or 'No metal reserved.',
+         pen = name and COLOR_LIGHTCYAN or COLOR_GREY},
+    })
+    self.subviews.hide:setLabel(watch_hidden() and 'tell me again' or 'stop telling me')
+end
+
+MoodOddsScreen = defclass(MoodOddsScreen, gui.ZScreenModal)
+MoodOddsScreen.ATTRS{focus_path = 'help-mood/odds', force_pause = false}
+function MoodOddsScreen:init() self:addviews{MoodOdds{}} end
+
+-- Clicking the "could strike" notification dismisses it until the next mood AND opens this,
+-- which is the only way it is ever useful: the notice is a prompt to decide something.
+function watch_click()
+    if not reserved_metal() then set_watch_hidden(true) end
+    MoodOddsScreen{}:show()
+end
+
+-- ---------------------------------------------------------------------------
+-- registration
+-- ---------------------------------------------------------------------------
+
+local NOTIFY_MOOD = 'moody_status'
+local NOTIFY_WATCH = 'mood_watch'
+
+function register_notifications()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok then return end
+    local function live(fn)
+        return function(...)
+            local ok2, m = pcall(reqscript, 'fort/help-mood')
+            local f = (ok2 and m and m[fn]) or _ENV[fn]
+            return f(...)
+        end
+    end
+    local e = n.NOTIFICATIONS_BY_NAME[NOTIFY_MOOD]
+    if e then
+        e.dwarf_fn = live('moody_message')
+        e.on_click = live('moody_click')
+    end
+    local w = n.NOTIFICATIONS_BY_NAME[NOTIFY_WATCH]
+    if not w then
+        w = {name = NOTIFY_WATCH, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, w)
+        n.NOTIFICATIONS_BY_NAME[NOTIFY_WATCH] = w
+    end
+    w.desc = 'Notifies when a strange mood could strike, and while a metal is reserved for one.'
+    w.dwarf_fn = live('watch_message')
+    w.on_click = live('watch_click')
+    if n.config and n.config.data and not n.config.data[NOTIFY_WATCH] then
+        n.config.data[NOTIFY_WATCH] = {enabled = true, version = 1}
+    end
+end
+
+-- A new mood is a new question, so the "could strike" notice comes back on its own.
+function watch_tick()
+    local d = watch_state()
+    local in_mood = find_mood() ~= nil
+    if in_mood and not d.was_in_mood then
+        d.was_in_mood = true; d.hidden = nil; save_watch(d)
+    elseif not in_mood and d.was_in_mood then
+        d.was_in_mood = nil; save_watch(d)
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- command line
 -- ---------------------------------------------------------------------------
 
@@ -1549,6 +1981,13 @@ if dfhack_flags and dfhack_flags.module then return end
 if not dfhack.world.isFortressMode() then qerror('fort/help-mood only works in fortress mode') end
 
 local arg = ({...})[1]
+if arg == 'notify' then
+    -- registration only: magnus-scripts / dfhack.init call this, and it is also how the
+    -- notifications are put back after this file is edited
+    register_notifications()
+    print('fort/help-mood: mood notifications registered.')
+    return
+end
 if arg == 'stop' then
     local n = stop()
     print(('fort/help-mood: released; burrow emptied, %d leftover forbid%s cleared.')

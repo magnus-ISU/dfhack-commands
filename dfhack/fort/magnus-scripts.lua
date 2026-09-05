@@ -221,6 +221,12 @@ local COLUMNS = {
          enable = script('fort/empty-labor-notification'), disable = notify_off({'empty_labor'})},
         {key = 'moody-items-warning', label = 'moody-items-warning',
          enable = script('fort/moody-items-warning'), disable = notify_off({'moody_items'})},
+        -- help-mood's notifications: its own "a mood could strike" watcher, and its
+        -- replacement of the stock moody_status line with the game's own wording. Turning it
+        -- off restores DFHack's, which is why moody_status is in the restore list.
+        {key = 'help-mood-notify', label = 'help-mood notices',
+         enable = script('fort/help-mood', 'notify'),
+         disable = notify_off({'mood_watch'}, {'moody_status'})},
         {key = 'civ-alert-notification', label = 'civ-alert-notification',
          enable = script('fort/civ-alert-notification'), disable = notify_off({'civ_alert_outside'})},
         {key = 'enemies-inside-notification', label = 'enemies-inside-notif.',
