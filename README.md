@@ -285,6 +285,10 @@ labelled, and never chosen by default. And when the fort is short of what the mo
 own workshop, so there is no item they can reach and the mood holds where it is until you lift
 it. Everything it touches is put back.
 
+The mood line names the craft the mood claimed — "Gautier, Clothier, is taken by a fey mood!" —
+since that is what decides the base material and whether the fort can supply it at all; DF fixes it on
+`unit.job.mood_skill` when the mood begins, so it is known before a workshop is claimed.
+
 ### **`fort/butcher-shop`**
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).

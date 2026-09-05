@@ -1652,6 +1652,26 @@ local function mood_words(unit)
                                verb = 'wants'}
 end
 
+-- THE CRAFT THE MOOD CLAIMED, which is the whole question a mood raises: it decides the base
+-- material, whether the fort can supply it at all, and what the artifact will be. DF picks it
+-- when the mood begins and keeps it on `unit.job.mood_skill`, so it is known from the first
+-- announcement -- long before a workshop is claimed. The noun form ("Clothier", "Armorsmith")
+-- is the one that reads as a person rather than an activity.
+local function mood_skill_name(unit)
+    local ok, skill = pcall(function() return unit.job.mood_skill end)
+    if not ok or not skill or skill < 0 then return nil end
+    local attrs = df.job_skill.attrs[skill]
+    local noun = attrs and attrs.caption_noun
+    if noun and noun ~= '' then return noun end
+    return df.job_skill[skill]
+end
+
+-- "Gautier, Clothier, is taken by a fey mood!"
+local function named(unit, name)
+    local craft = mood_skill_name(unit)
+    return craft and ('%s, %s,'):format(name, craft) or name
+end
+
 local function first_name(unit)
     local n = ''
     pcall(function() n = unit.name.first_name or '' end)
@@ -1704,7 +1724,7 @@ function moody_message()
     if not bld then
         -- before a workshop is claimed there is nothing to report but the mood itself, which
         -- is exactly what the game announces at that moment
-        return ('%s %s'):format(name, words.begun)
+        return ('%s %s'):format(named(unit, name), words.begun)
     end
     if live.flags.working then
         return ('%s %s'):format(name, words.working)
@@ -1713,7 +1733,7 @@ function moody_message()
         -- The mood's own line stays the constant, the way DF keeps saying it, and the count
         -- is what changes: "Thakut withdraws from society... Claimed 3 items."
         local got = #job.items
-        return ('%s %s Claimed %d item%s.'):format(name, words.begun, got,
+        return ('%s %s Claimed %d item%s.'):format(named(unit, name), words.begun, got,
                                                    got == 1 and '' or 's')
     end
 
