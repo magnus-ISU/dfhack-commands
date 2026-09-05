@@ -435,14 +435,18 @@ rather than "moody dwarf". While they are fetching it keeps the mood's own line 
 *"Thåkut withdraws from society... Claimed 3 items."* When they are stuck it names what they
 are short of the way DF would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
 days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
-clicking again opens the planner. A second notice appears when a mood could strike — read from
-DF's own `mood_cooldown`, population and excavated-tile counters rather than guessed — and
-clicking it explains how a mood picks its first material and offers to reserve one metal by
-forbidding every other metal bar in the fort (*"Ensuring slade is used for next mood"*) — and
-keeps forbidding them, so bars smelted or traded for after you set it are caught too. Only the
-bars it forbade are ever released again. The two notices are separate entries in
-`magnus-scripts`, since wanting one is no reason to want the other; turning the during-a-mood
-one off puts DFHack's own line back rather than leaving a gap.
+clicking again opens the planner. Turning it off in `magnus-scripts`
+puts DFHack's own line back rather than leaving a gap.
+
+### **`fort/mood-watch`**
+The mood you have *not* had yet. *"A strange mood could strike"* — from DF's own
+`mood_cooldown`, population and excavated-tile counters rather than a guess about three
+months. Clicking dismisses it until the next mood and opens a dialog explaining how a mood
+picks its first material, with a button to reserve one metal — forbidding every other metal
+bar in the fort, and *continuing* to forbid them, so bars smelted or traded for afterwards are
+caught too (*"Ensuring slade is used for next mood"*). Only the bars it forbade are ever
+released again, so your own forbids are safe. The other button stops the notice for good;
+`magnus-scripts` turns it back on.
 
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,

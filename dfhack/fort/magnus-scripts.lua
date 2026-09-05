@@ -225,8 +225,8 @@ local COLUMNS = {
         -- you may well want one without the other: this one watches for the NEXT mood and is
         -- the one you turn off when you would rather be surprised.
         {key = 'mood-watch', label = 'mood-watch',
-         enable = script('fort/help-mood', 'notify-watch'),
-         disable = notify_off({'mood_watch'})},
+         enable = script('fort/mood-watch'),
+         disable = script('fort/mood-watch', 'off')},
         -- ...and this one replaces DFHack's during-a-mood line with the game's own wording.
         -- Disabling it puts DFHack's back rather than leaving a gap, which is what the script
         -- does when told; the config flag stays on so the stock line still shows.
