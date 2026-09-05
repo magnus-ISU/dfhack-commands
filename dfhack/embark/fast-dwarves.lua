@@ -664,7 +664,7 @@ busy = busy or false
 AutoEmbark = defclass(AutoEmbark, overlay.OverlayWidget)
 AutoEmbark.ATTRS{
     desc = 'On a new fortress, pick a dwarven civ and a good spot and click Embark.',
-    default_enabled = true,
+    default_enabled = false,
     viewscreens = 'choose_start_site',
     frame = {w = 1, h = 1},
     overlay_onupdate_max_freq_seconds = 0,
