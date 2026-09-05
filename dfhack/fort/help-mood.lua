@@ -457,12 +457,43 @@ local function needed(ji)
 end
 
 -- what the dwarf has already hauled in for requirement `idx`
-local function claimed_items(job, idx)
+-- WHAT IS ALREADY IN, PER REQUIREMENT -- and NOT from `ref.job_item_idx`, which does not mean
+-- what it looks like.
+--
+-- A mood hauls what it likes and DF files each item against the FIRST filter it matches,
+-- regardless of how many that filter asked for. Measured mid-mood: a job with two `wood`
+-- requirements of one each had three logs on it, all three filed under index 3, while index 5
+-- sat empty. Reading those indices straight says "requirement 5 still needs wood", so this
+-- tool reserved a fourth log, opened it, and waited for a dwarf who already had everything he
+-- wanted -- which is what "he can't find the wood" was, and why reserved items kept vanishing
+-- into the mood itself and looking stolen.
+--
+-- So the hauled items are dealt out the way DF deals them: each to the first requirement it
+-- matches that still has room. Cached per (job, item count) because it runs from the sweep.
+local deal_cache = {job = nil, n = -1, out = nil}
+
+local function deal_claimed(job)
+    if deal_cache.job == job.id and deal_cache.n == #job.items then return deal_cache.out end
+    local filters = job.job_items.elements
     local out = {}
+    for idx in ipairs(filters) do out[idx] = {} end
     for _, ref in ipairs(job.items) do
-        if ref.job_item_idx == idx and ref.item then out[#out + 1] = ref.item end
+        local item = ref.item
+        if item then
+            for idx, ji in ipairs(filters) do
+                if #out[idx] < needed(ji) and filter_matches(ji, item) then
+                    out[idx][#out[idx] + 1] = item
+                    break
+                end
+            end
+        end
     end
+    deal_cache = {job = job.id, n = #job.items, out = out}
     return out
+end
+
+local function claimed_items(job, idx)
+    return deal_claimed(job)[idx] or {}
 end
 
 -- the row is done when it has as many as it wants
