@@ -37,10 +37,11 @@ force-sends caravans or migrants.
 As a free extra, AtDepot caravans get the stock `caravan unload` pack-animal rejoin each
 check (idempotent, touches nothing healthy).
 
-It also takes the fort OUT OF A CIVIL WAR on the same pass, once that war is a year old. A civ
-at war with itself sends your fort no caravans and no migrants -- the same silence, a different
-cause -- and it is one field, the one DFHack's `fix/civil-war` clears. The year of patience is
-there because a civil war can end on its own; the war itself, and its history, are left alone.
+It also takes the fort OUT OF A CIVIL WAR on the same pass, once that war is 18 months old. A
+civ at war with itself sends your fort no caravans and no migrants -- the same silence, a
+different cause -- and it is one field, the one DFHack's `fix/civil-war` clears. The wait is
+there so the fort actually feels the homeland's trouble, and because a civil war can end on its
+own; the war itself, and its history, are left alone.
 
 Usage:
     enable caravan-unstick        run the weekly watchdog
@@ -53,8 +54,10 @@ Usage:
 local GLOBAL_KEY = 'caravan-unstick'
 local DAY = 1200
 local YEAR = 403200
+local MONTH = YEAR // 12             -- 28 days, 33600 ticks
 local CHECK_DAYS = 7                 -- watchdog cadence
 local STUCK_GRACE = YEAR             -- must look stuck continuously this long before acting
+local CIVIL_GRACE = 18 * MONTH       -- ...and a civil war is endured this long first
 
 -- ---- persisted state (per site) ---------------------------------------------
 state = state or nil
@@ -184,11 +187,13 @@ end
 -- single field (`relation` on the civ's diplomacy entry for itself), and DFHack's own
 -- `fix/civil-war` clears exactly that.
 --
--- A YEAR OF IT FIRST, the same patience the stuck-caravan path is given. A civil war can end
--- on its own -- a diplomat carries a peace treaty -- and stepping in on the week it starts
--- takes that away. The war's AGE is read from its own history collection where DF records it
--- (`war_event_collection` -> `start_year`), so a war that has already run for years is acted
--- on at once rather than waiting another year for this tool's own clock; when that cannot be
+-- EIGHTEEN MONTHS OF IT FIRST. A civil war can end on its own -- a diplomat carries a peace
+-- treaty -- and stepping in on the week it starts takes that away. Longer than that, though,
+-- the point is that the fort SHOULD feel it: a season and a half of no caravans from home and
+-- no migrants is the homeland's trouble reaching you, which is the story playing out. Then the
+-- fort steps out of it. The war's AGE is read from its own history collection where DF records
+-- it (`war_event_collection` -> `start_year`/`start_seconds`), so one that has already run for
+-- years is acted on at once rather than waiting on this tool's own clock; when that cannot be
 -- read, the clock starts when this watchdog first sees it.
 --
 -- What is cleared is the FORT's side of it: your civ stops counting itself an enemy, so trade
@@ -209,13 +214,14 @@ local function in_civil_war()
     return civ and self_war_entry(civ) ~= nil or false
 end
 
--- how many years the civil war has been running, by DF's own record; nil if unreadable
-local function civil_war_years(entry)
+-- how long the civil war has been running, in ticks, by DF's own record; nil if unreadable
+local function civil_war_age(entry)
     if not entry or entry.war_event_collection < 0 then return nil end
     for _, c in ipairs(df.global.world.history.event_collections.all) do
         if c.id == entry.war_event_collection then
             if c.start_year and c.start_year >= 0 then
-                return df.global.cur_year - c.start_year
+                local began = c.start_year * YEAR + math.max(0, c.start_seconds or 0)
+                return abs_tick() - began
             end
             return nil
         end
@@ -234,9 +240,9 @@ local function civil_war_check(now)
     end
 
     if not now then
-        local years = civil_war_years(entry)
-        if years then
-            if years < 1 then return false end          -- DF's own record: not a year old yet
+        local age = civil_war_age(entry)
+        if age then
+            if age < CIVIL_GRACE then return false end  -- DF's own record: not old enough yet
         else
             -- no readable start: fall back to how long WE have seen it
             if not state.civil_since then
@@ -244,7 +250,7 @@ local function civil_war_check(now)
                 save_state()
                 return false
             end
-            if math.abs(abs_tick() - state.civil_since) < STUCK_GRACE then return false end
+            if math.abs(abs_tick() - state.civil_since) < CIVIL_GRACE then return false end
         end
     end
 
@@ -422,7 +428,7 @@ else
     end
     if in_civil_war() then
         print('  YOUR CIV IS AT WAR WITH ITSELF -- no caravans from home, no migrant waves.')
-        print('  The fort steps out of it once the war is a year old (`caravan-unstick fix` now).')
+        print('  The fort steps out of it once the war is 18 months old (`caravan-unstick fix` now).')
     end
     -- WHEN EACH CIV LAST GOT HOME. A caravan reports to its civ when it finalizes, and that
     -- report is what schedules the next visit -- so the last finalize year is the honest
