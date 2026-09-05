@@ -51,8 +51,10 @@ suggestion to stock up on friends.
       stockpile, so nothing is claimed here about it.
 
 Only items you could actually spend count: dumped, rotting, burning, hostile-owned and trade
-goods are skipped, as is anything already an artifact. FORBIDDEN ones DO count -- a forbidden
-shell is one you have, and this warning is about going and getting some.
+goods are skipped, as is anything already an artifact. Forbidden ones are skipped too UNLESS
+one of this repo's own tools forbade them -- what fort/help-mood is holding for a mood in
+progress is still stock you have, while a forbidden cave swallow's remains lying in a cavern
+is not.
 
 Run once per DFHack session to register (or add `fort/moody-items-warning` to
 dfhack-config/init/dfhack.init).
@@ -73,15 +75,40 @@ local function flag(item, name)
     return ok and v or false
 end
 
--- FORBIDDEN IS NOT MISSING. This warning exists to say "go and get some before a mood asks",
--- and a forbidden shell is one you already have -- you would unforbid it, not go hunting.
--- Counting it as absent also made the warning fight the fort's own tools: fort/help-mood
--- forbids every candidate it is reserving for a mood in progress, which had this announcing
--- that the fort had no raw clear glass while five pieces of it sat in a stockpile, spoken for.
+-- FORBIDDEN COUNTS ONLY WHEN WE ARE THE ONES WHO FORBADE IT.
 --
--- The rest of the list stays: dumped, rotting, on fire, somebody else's, a trader's, or
--- already an artifact are all items you genuinely cannot spend.
+-- Two kinds of forbidden item look identical to a flag test and mean opposite things. The
+-- five raw clear glass in a stockpile that fort/help-mood is holding for a mood in progress
+-- are stock you have -- warning that the fort has none of them is this tool fighting that one.
+-- Ten forbidden cave swallow remains lying on cavern floors, nine of them in walkable groups
+-- no citizen can reach, are not stock at all; they are junk the fort has never touched, and
+-- counting them as "we have remains" is how a macabre mood finds nothing.
+--
+-- So the test is not "is it forbidden" but "did WE forbid it": the ids fort/help-mood and
+-- fort/mood-watch write down as theirs to give back. Everything else forbidden is somebody
+-- else's decision and stays uncounted.
+local RESERVED_KEYS = {'help-mood', 'help-mood/watch'}
+local reserved_ids, reserved_at = nil, nil
+
+local function reserved_by_us()
+    local now = dfhack.getTickCount()
+    if reserved_ids and reserved_at and now - reserved_at < CACHE_MS then return reserved_ids end
+    reserved_ids, reserved_at = {}, now
+    for _, key in ipairs(RESERVED_KEYS) do
+        local ok, d = pcall(dfhack.persistent.getSiteData, key, {})
+        if ok and type(d) == 'table' and type(d.forbidden) == 'table' then
+            -- help-mood stores a list of ids, mood-watch a set keyed by id: take both
+            for k, v in pairs(d.forbidden) do
+                local id = tonumber(v) or tonumber(k)
+                if id then reserved_ids[id] = true end
+            end
+        end
+    end
+    return reserved_ids
+end
+
 local function usable(item)
+    if flag(item, 'forbid') and not reserved_by_us()[item.id] then return false end
     return not (flag(item, 'dump') or flag(item, 'garbage_collect')
         or flag(item, 'hostile') or flag(item, 'trader') or flag(item, 'rotten')
         or flag(item, 'artifact') or flag(item, 'owned') or flag(item, 'on_fire'))
