@@ -141,7 +141,7 @@ Usage::
                                           or a fort that already has buildings
     fort/planeswalkers delete <name> --yes  delete a snapshot
     fort/planeswalkers spires             re-arm the carried spires on a restored fort
-    fort/planeswalkers repair             give furniture missing its component item one
+    fort/planeswalkers repair             refill a drained magma sea from the snapshot
     fort/planeswalkers status             job progress / restored-from marker
     fort/planeswalkers cancel             abort the running job
     fort/planeswalkers step               pump the job once by hand (debug)
@@ -531,26 +531,22 @@ local function do_repair()
             ctx.anchor.off_x, ctx.anchor.off_y = ctx.anchor.off_bx * 16, ctx.anchor.off_by * 16
         end
     end
-    local phases = {req('buildings').repair_components_phase(ctx)}
-    if ctx.dir then
-        -- a sea that drained for lack of registration comes back from the snapshot
-        local legends = common.read_json(ctx.dir .. '/legend.json') or {}
-        ctx.legend_tt = common.Legend.new(legends.tiletypes)
-        ctx.dest_deep_top = select(1, req('terrain').find_deep_top_z())
-        table.insert(phases, req('terrain').magma_sea_phase(ctx, true))
+    -- REPAIR IS THE MAGMA SEA, AND NOTHING ELSE. It used to also re-mint missing furniture
+    -- components, rebuild manager orders and repoint geolayers -- one-off recoveries for
+    -- loads that predated their fixes, long since done, and every one of them a full pass
+    -- over the fort for a job nobody asked for. Refilling a drained magma sea is the only
+    -- thing here that is still worth a command.
+    if not ctx.dir then
+        qerror('repair: this fort has no planeswalkers snapshot to refill the magma sea from')
     end
-    table.insert(phases, req('terrain').geolayer_repair_phase(ctx))
-    if ctx.dir and dfhack.filesystem.exists(ctx.dir .. '/orders.json') then
-        -- the building map is gone; workshop restrictions cannot be relinked here
-        ctx.bld_map = {}
-        table.insert(phases, req('orders').repair_phase(ctx))
-    end
+    -- a sea that drained for lack of registration comes back from the snapshot
+    local legends = common.read_json(ctx.dir .. '/legend.json') or {}
+    ctx.legend_tt = common.Legend.new(legends.tiletypes)
+    ctx.dest_deep_top = select(1, req('terrain').find_deep_top_z())
+    local phases = {req('terrain').magma_sea_phase(ctx, true)}
     common.start_job('repair', phases, ctx, function()
         common.print_skips(ctx)
-        notify(('repair: %d piece(s) of furniture got their missing component; %d manager order(s) rebuilt')
-               :format(ctx.components_fixed or 0, ctx.orders_restored or 0), COLOR_LIGHTGREEN, true)
-        if ctx.magma_report then notify(ctx.magma_report) end
-        if ctx.geo_report then notify(ctx.geo_report) end
+        notify(ctx.magma_report or 'repair: magma sea pass finished', COLOR_LIGHTGREEN, true)
     end)
 end
 
@@ -651,9 +647,8 @@ All commands:
   fort/planeswalkers spires              re-arm the carried adamantine spires
                                          on a fort restored here (disarms this
                                          world's own spires under the fort)
-  fort/planeswalkers repair              give furniture that lost its component
-                                         item (pedestals drawing wrong) one, and
-                                         rebuild the manager orders from the snapshot
+  fort/planeswalkers repair              refill a magma sea that drained after the
+                                         restore, from the snapshot
   fort/planeswalkers status              job progress / restored-from marker
   fort/planeswalkers cancel              abort the running save or load
   fort/planeswalkers step                pump the job once by hand (debug)

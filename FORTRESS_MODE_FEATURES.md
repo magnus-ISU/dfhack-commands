@@ -126,10 +126,9 @@ been restored. Run it with no arguments for a walkthrough, or `help fort/planesw
 the full description. A fort restored into a larger embark than it came from is saved again
 at its original size and area, so it keeps travelling to embarks of its own size. `list`,
 `delete <name> --yes` (deletes only the snapshot folder), `spires` (re-arm the carried spires
-on a fort restored before that pass existed), `repair` (re-mints missing furniture parts,
-re-registers and refills the magma sea, rebuilds manager orders, and points deep layer stone
-back at a stone layer where an older load left it reading as soil), `status`, and `cancel`
-round out the set.
+on a fort restored before that pass existed), `repair` (re-registers and refills a magma
+sea that drained after the restore — the one recovery still worth a command), `status`, and
+`cancel` round out the set.
 
 ### **`fort/forge-bars`**
 The forge's "Add new task" list names every metal it could work as "iron (opens menu)",
