@@ -174,12 +174,16 @@ using start_bg_fn = void (*)(void *, int);
 using stop_song_fn = void (*)(void *);
 using is_playing_fn = bool (*)(void *);
 using song_vol_fn = void (*)(void *, float);
+using stop_card_fn = void (*)(void *);
+using card_playing_fn = bool (*)(void *);
 
 static set_song_fn g_set_song = nullptr;
 static start_bg_fn g_start_bg = nullptr;
 static stop_song_fn g_stop_song = nullptr;
 static is_playing_fn g_song_playing = nullptr;
 static song_vol_fn g_song_volume = nullptr;
+static stop_card_fn g_stop_card = nullptr;
+static card_playing_fn g_card_playing = nullptr;
 static bool g_native_resolved = false;
 
 static void resolve_native() {
@@ -197,6 +201,10 @@ static void resolve_native() {
     // was ASKED for, which is not the same question.
     g_song_playing = (is_playing_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst14song_is_playingEv");
     g_song_volume = (song_vol_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst15set_song_volumeEf");
+    // CARDS are the short pieces DF's fortress music is actually made of; a song does not
+    // play while one is going, so a request that ignores them is a request that does nothing.
+    g_stop_card = (stop_card_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst9stop_cardEv");
+    g_card_playing = (card_playing_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst15card_is_playingEv");
 }
 
 static bool native_available(color_ostream &out) {
@@ -216,8 +224,10 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
     auto *ms = df::global::musicsound;
     int32_t id = ms->next_song_id++;
     if (!g_set_song(ms, path, id, loops)) {
-        out.printerr("%s", ("ssaudio: DF's engine would not load " + path + "\n").c_str());
-        // (printerr does take a format; print, oddly, does not -- see native-status)
+        // fmt, not printf: color_ostream::print/printerr take a CONSTEVAL format string with
+        // {} placeholders. "%s" compiles and prints itself, which is how this reported
+        // "ssaudio: DF's engine would not load %s" for a while.
+        out.printerr("ssaudio: DF's engine would not load {}\n", path);
         ms->next_song_id--;                 // give the id back; nothing was registered
         return -1;
     }
@@ -234,6 +244,7 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
     // goes into queued_song and the scheduler gets to it whenever it likes, or drops it. That
     // is exactly what "joke/dwarfify plays no sound" was -- the call worked and the music did
     // not change. Stopping first leaves nothing playing, and then the start is immediate.
+    if (g_stop_card) g_stop_card(ms);
     g_stop_song(ms);
     g_start_bg(ms, id);
     return id;
@@ -243,6 +254,7 @@ static int32_t play_native(color_ostream &out, std::string path, bool loops = fa
 static void play_native_id(color_ostream &out, int32_t id) {
     if (!native_available(out))
         return;
+    if (g_stop_card) g_stop_card(df::global::musicsound);
     g_stop_song(df::global::musicsound);       // see play_native: otherwise it only queues
     g_start_bg(df::global::musicsound, id);
 }
@@ -287,7 +299,7 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
         if (id >= 0) {
             std::string msg = "ssaudio: playing " + params[1]
                 + " through DF's engine as song " + std::to_string(id) + "\n";
-            out << msg;
+            out.print("{}", msg);
         }
         return CR_OK;
     }
@@ -305,10 +317,13 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
         std::string msg = std::string("ssaudio: engine ")
             + (native_available(out) ? "reachable" : "unreachable")
             + ", song_is_playing=" + (native_playing(out) ? "yes" : "no")
+            + ", card_is_playing="
+            + ((g_card_playing && df::global::musicsound
+                && g_card_playing(df::global::musicsound)) ? "yes" : "no")
             + ", song=" + std::to_string(df::global::musicsound
                                          ? df::global::musicsound->song : -1)
             + "\n";
-        out << msg;
+        out.print("{}", msg);
         return CR_OK;
     }
     if (params[0] == "native-volume" && params.size() >= 2) {
@@ -345,7 +360,13 @@ DFhackCExport command_result plugin_init(color_ostream &out, std::vector<PluginC
 
 DFhackCExport command_result plugin_shutdown(color_ostream &out) {
     halt();
-    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    // AND NOTHING ELSE. This used to SDL_QuitSubSystem(SDL_INIT_AUDIO), which is the tidy
+    // thing to do with a subsystem you brought up and the wrong thing to do inside somebody
+    // else's process: the refcount is shared with DF, and unloading this plugin took the
+    // game's audio down with it. After a few reload cycles during development the game's own
+    // music stopped -- its scheduler went on starting songs, total_plays climbed, and the
+    // engine reported song_is_playing=no for every one of them. Our own device is closed by
+    // halt(); the subsystem stays up, which costs nothing.
     return CR_OK;
 }
 
