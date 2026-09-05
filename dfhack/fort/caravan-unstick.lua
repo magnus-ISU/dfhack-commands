@@ -173,11 +173,27 @@ end
 
 -- ---- the watchdog pass -------------------------------------------------------
 
+-- THE INVARIANT: this tool never removes a caravan entry. Removing one is how a civ's trade
+-- schedule dies for good -- an entry that vanishes is a caravan that never reported home, and
+-- DF then has nothing to schedule the next visit from (for the home civ that also ends the
+-- liaison report, and with it migration). v2 of this script did exactly that and cost this
+-- fort years of dwarven caravans. Every fix now hands the entry to DF's own cleanup and
+-- leaves it in place, so the count can only go DOWN when DF itself closes one.
+--
+-- That is not a comment anybody has to trust: the count is checked around every pass, and if
+-- an entry ever disappears within one of ours the script says so, loudly, naming the civ.
+local function caravan_ids()
+    local out = {}
+    for _, c in ipairs(df.global.plotinfo.caravans) do out[#out + 1] = c.entity end
+    return out
+end
+
 -- one scan. With `now` true, anything CURRENTLY stuck-looking is fixed immediately
 -- (manual override -- the automatic path demands a year of continuous stuckness).
 local function do_check(now)
     if not dfhack.world.isFortressMode() then return end
     load_state()
+    local before = caravan_ids()
     local cs = df.global.plotinfo.caravans
     local seen = {}
     for i = #cs - 1, 0, -1 do
@@ -209,6 +225,19 @@ local function do_check(now)
         if not seen[key] then state.sig[key] = nil end
     end
     save_state()
+
+    -- the invariant, checked: DF closes entries on its own schedule, but never inside one of
+    -- our passes. An entry gone here means something in this file removed it.
+    local after = {}
+    for _, id in ipairs(caravan_ids()) do after[id] = true end
+    for _, id in ipairs(before) do
+        if not after[id] then
+            dfhack.printerr(('caravan-unstick: BUG -- the %s caravan entry disappeared during a '
+                .. 'check. Entries must only ever be closed by DF itself; removing one ends '
+                .. 'that civ\'s trade schedule permanently. Please report this.')
+                :format(civ_name(id)))
+        end
+    end
 end
 
 -- ---- service loop (frame-gap-safe bounce via set_enabled) --------------------
@@ -303,6 +332,31 @@ else
             civ_name(c.entity), df.caravan_state.T_trade_state[c.trade_state],
             c.time_remaining, #caravan_members(c.entity),
             #caravan_members(c.entity) == 1 and '' or 's', extra))
+    end
+    -- WHEN EACH CIV LAST GOT HOME. A caravan reports to its civ when it finalizes, and that
+    -- report is what schedules the next visit -- so the last finalize year is the honest
+    -- health check on a trade partner, and a civ that stopped years ago shows up here rather
+    -- than being noticed as an absence nobody can date.
+    local ev = df.global.world.history.events
+    local site = df.global.plotinfo.site_id
+    local last = {}
+    for i = #ev - 1, math.max(0, #ev - 20000), -1 do
+        local e = ev[i]
+        if df.history_event_type[e:getType()] == 'MERCHANT' and e.site == site then
+            local src = e.source
+            if not last[src] or e.year > last[src] then last[src] = e.year end
+        end
+    end
+    local rows = {}
+    for civ_id, year in pairs(last) do rows[#rows + 1] = {id = civ_id, year = year} end
+    table.sort(rows, function(a, b) return a.year > b.year end)
+    if #rows > 0 then
+        print('  last caravan home, by civ (this is what schedules the next one):')
+        for _, r in ipairs(rows) do
+            local ago = df.global.cur_year - r.year
+            print(('    %-34s year %d%s'):format(civ_name(r.id), r.year,
+                ago >= 3 and (' -- %d years ago'):format(ago) or ''))
+        end
     end
     if not enabled then print('  `enable caravan-unstick` to watch automatically; `caravan-unstick fix` to fix now.') end
 end
