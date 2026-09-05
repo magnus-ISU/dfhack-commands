@@ -275,7 +275,9 @@ forbids every other candidate in the fort -- including ones mined, butchered or 
 dwarf walks -- so DF has one legal choice per row and takes it, instead of the nearest boulder.
 It never changes what the mood *asks for* — the requirement is the mood's own, and the panel
 only helps you satisfy it. Requirements already hauled in are shown as claimed; candidates are
-limited to what the dwarf can actually walk to; worn, part-used and forbidden items are shown,
+limited to what the dwarf can actually walk to and to what the fort can actually give — an item that belongs
+to a building is never offered, since `flags.in_building` is clear on workshop contents and unforbidding one
+does nothing (the forbid was never what stopped it); worn, part-used and forbidden items are shown,
 labelled, and never chosen by default. And when the fort is short of what the mood wants,
 `[delay work]` (Ctrl-D) buys the time to make it: the dwarf gets a burrow of nothing but their
 own workshop, so there is no item they can reach and the mood holds where it is until you lift

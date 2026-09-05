@@ -144,8 +144,23 @@ local function usable(item)
     -- of them sat unforbidden in this fort while every one of the other 3169 boulders was
     -- locked down, which is the whole game: DF only needs ONE legal alternative to ruin the
     -- artifact. It is offered last rather than not at all -- see the picker's ordering.
-    return not (f.dump or f.hostile or f.artifact or f.owned or f.garbage_collect
-        or f.removed or f.in_building or f.encased or f.trader)
+    if f.dump or f.hostile or f.artifact or f.owned or f.garbage_collect
+        or f.removed or f.in_building or f.encased or f.trader then
+        return false
+    end
+    -- ANYTHING THAT BELONGS TO A BUILDING IS NOT THE FORT'S TO GIVE, and `flags.in_building`
+    -- does not say so: a block sitting in a workshop comes back with that flag CLEAR and only
+    -- a building-holder ref to show for it. Offering one is worse than useless -- it looks
+    -- like the answer, unforbidding it changes nothing because the forbid was never what
+    -- stopped it, and every rival candidate gets forbidden to steer the mood at something it
+    -- will not take. (Measured live: 19 of the 145 blocks and 32 of the 33 leathers offered
+    -- for one mood were workshop contents; the one obsidian block unforbidden by hand sat in
+    -- a workshop at 75,101,11 and was never collected.)
+    local held = false
+    pcall(function()
+        held = dfhack.items.getGeneralRef(item, df.general_ref_type.BUILDING_HOLDER) ~= nil
+    end)
+    return not held
 end
 
 local function is_forbidden(item)
