@@ -50,8 +50,9 @@ suggestion to stock up on friends.
     * a FELL mood wants a fresh corpse and gets it by murdering someone. Nothing you can
       stockpile, so nothing is claimed here about it.
 
-Only loose, usable items count: forbidden, dumped, rotting, hostile-owned and trade goods are
-all skipped, as is anything already an artifact.
+Only items you could actually spend count: dumped, rotting, burning, hostile-owned and trade
+goods are skipped, as is anything already an artifact. FORBIDDEN ones DO count -- a forbidden
+shell is one you have, and this warning is about going and getting some.
 
 Run once per DFHack session to register (or add `fort/moody-items-warning` to
 dfhack-config/init/dfhack.init).
@@ -72,8 +73,16 @@ local function flag(item, name)
     return ok and v or false
 end
 
+-- FORBIDDEN IS NOT MISSING. This warning exists to say "go and get some before a mood asks",
+-- and a forbidden shell is one you already have -- you would unforbid it, not go hunting.
+-- Counting it as absent also made the warning fight the fort's own tools: fort/help-mood
+-- forbids every candidate it is reserving for a mood in progress, which had this announcing
+-- that the fort had no raw clear glass while five pieces of it sat in a stockpile, spoken for.
+--
+-- The rest of the list stays: dumped, rotting, on fire, somebody else's, a trader's, or
+-- already an artifact are all items you genuinely cannot spend.
 local function usable(item)
-    return not (flag(item, 'forbid') or flag(item, 'dump') or flag(item, 'garbage_collect')
+    return not (flag(item, 'dump') or flag(item, 'garbage_collect')
         or flag(item, 'hostile') or flag(item, 'trader') or flag(item, 'rotten')
         or flag(item, 'artifact') or flag(item, 'owned') or flag(item, 'on_fire'))
 end
