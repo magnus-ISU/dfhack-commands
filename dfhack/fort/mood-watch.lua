@@ -26,7 +26,10 @@ For the mood you already HAVE, see `fort/help-mood`: it plans the artifact, rese
 and can point a requirement at a different material after the roll -- which is the certain way
 to choose what gets made.
 
-    fort/mood-watch      register the notification (magnus-scripts does this)
+    fort/mood-watch      register the notification (magnus-scripts does this), and start
+                         telling you again if you had told it to stop
+    fort/mood-watch gui  open the dialog straight away -- the way back in once the notice
+                         has been clicked away
     fort/mood-watch off  release a reserve and stop watching
 ]]
 
@@ -35,6 +38,7 @@ local widgets = require('gui.widgets')
 
 -- captured at the top of the chunk: `...` is only available in the main chunk's own scope
 local ARGV_OFF = (({...})[1] == 'off')
+local ARGV_GUI = (({...})[1] == 'gui')
 
 local WATCH_KEY = 'help-mood/watch'
 
@@ -377,6 +381,12 @@ function watch_click()
     MoodOddsScreen{}:show()
 end
 
+-- ...and the same dialog without the dismissal, for `fort/mood-watch gui`: asking for it back
+-- is not the same gesture as clicking the notice away.
+function watch_click_no_hide()
+    MoodOddsScreen{}:show()
+end
+
 
 -- ---------------------------------------------------------------------------
 -- registration
@@ -443,6 +453,11 @@ end
 if dfhack_flags and dfhack_flags.module then return end
 if not dfhack.world.isFortressMode() then qerror('fort/mood-watch needs a fort') end
 
+if ARGV_GUI then
+    -- the notice hides itself when you click it, so this is the door back in
+    watch_click_no_hide()
+    return
+end
 if ARGV_OFF then
     local n = clear_reserve()
     set_watch_hidden(true)
@@ -454,3 +469,4 @@ end
 
 register_watch()
 print('fort/mood-watch: watching for the next strange mood.')
+print('`fort/mood-watch gui` opens the dialog again after you click the notice away.')

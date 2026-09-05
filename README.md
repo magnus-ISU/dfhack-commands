@@ -446,7 +446,8 @@ picks its first material, with a button to reserve one metal — forbidding ever
 bar in the fort, and *continuing* to forbid them, so bars smelted or traded for afterwards are
 caught too (*"Ensuring slade is used for next mood"*). Only the bars it forbade are ever
 released again, so your own forbids are safe. The other button stops the notice for good;
-`magnus-scripts` turns it back on.
+`magnus-scripts` turns it back on, and `fort/mood-watch gui` reopens the dialog once the
+notice has been clicked away.
 
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
