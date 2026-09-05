@@ -67,6 +67,8 @@ build tool.
 Drag to place a whole grid of a building at once while planning, tiled by its footprint so
 copies sit edge-to-edge.
 
+A building DF places over a hole rather than on a floor — a well, which goes on open space or a ramp top — is placed by the same drag: the tile the mouse goes down on is one DF has already accepted, so its shape is what the rest of the grid is measured against.
+
 ### **`fort/stockpile-place`**
 Drag to create a stockpile, expand a selected one, or erase tiles from any pile.
 

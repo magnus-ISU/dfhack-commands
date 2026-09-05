@@ -257,15 +257,31 @@ local OK_SHAPES = utils.invert{
     df.tiletype_shape.SHRUB,
 }
 
-local function tile_ok(pos, need_inside)
+-- NOT EVERY BUILDING STANDS ON A FLOOR. A well is built over the hole its bucket drops
+-- through -- open space or a ramp top -- and neither shape is in OK_SHAPES, so the floor
+-- list alone rejected the very tile DF had just accepted: the click was swallowed, the
+-- preview painted the cell red, and the release placed nothing. A dead left-click on a
+-- perfectly legal well tile.
+--
+-- DF has already judged the tile the mouse went down on: `engaged()` refuses to start a
+-- drag while DF is showing a placement error there. So the anchor's shape is authoritative
+-- for this building, whatever it is, and the rest of the grid accepts that shape too --
+-- which keeps a dragged row of wells working without letting workshops onto open space.
+local function shape_of(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    return tt and df.tiletype.attrs[tt].shape or nil
+end
+
+local function tile_ok(pos, need_inside, anchor_shape)
     local flags, occ = dfhack.maps.getTileFlags(pos)
     if not flags or flags.hidden or occ.building ~= df.tile_building_occ.None then return false end
     if flags.flow_size > 1 or (flags.liquid_type == df.tile_liquid.Magma and flags.flow_size > 0) then
         return false
     end
     if need_inside and flags.outside then return false end
-    local tt = dfhack.maps.getTileType(pos)
-    return (tt and OK_SHAPES[df.tiletype.attrs[tt].shape]) and true or false
+    local shape = shape_of(pos)
+    if not shape then return false end
+    return (OK_SHAPES[shape] or shape == anchor_shape) and true or false
 end
 
 -- is every tile of the footprint cell at corner (cx, cy) placeable? memoized per drag, so the
@@ -277,7 +293,9 @@ local function cell_ok(cap, cx, cy)
     local ok = true
     for ty = cy, cy + cap.fh - 1 do
         for tx = cx, cx + cap.fw - 1 do
-            if not tile_ok(xyz2pos(tx, ty, cap.anchor.z), cap.need_inside) then ok = false; break end
+            if not tile_ok(xyz2pos(tx, ty, cap.anchor.z), cap.need_inside, cap.anchor_shape) then
+                ok = false; break
+            end
         end
         if not ok then break end
     end
@@ -361,6 +379,8 @@ function PlanTile:overlay_onupdate()
         local dx, dy = corner_offset(fw, fh)
         self.cap = {
             anchor = copyall(pos), fw = fw, fh = fh,
+            -- the shape DF just accepted for this building (see tile_ok)
+            anchor_shape = shape_of(pos),
             need_inside = INSIDE_ONLY[uibs.building_type] or false, vcache = {},
             type = uibs.building_type, subtype = uibs.building_subtype,
             custom = uibs.custom_type, direction = uibs.direction,
