@@ -1635,7 +1635,11 @@ function moody_message()
         return ('%s %s'):format(name, words.working)
     end
     if live.flags.fetching or live.flags.bringing then
-        return ('%s is gathering items'):format(name)
+        -- The mood's own line stays the constant, the way DF keeps saying it, and the count
+        -- is what changes: "Thakut withdraws from society... Claimed 3 items."
+        local got = #job.items
+        return ('%s %s Claimed %d item%s.'):format(name, words.begun, got,
+                                                   got == 1 and '' or 's')
     end
 
     -- stuck: name the thing, and once it has gone on long enough, say how long

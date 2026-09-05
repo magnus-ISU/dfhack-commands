@@ -389,8 +389,9 @@ Counts down how many days the trader is ready; click to jump to the depot.
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
 game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,
 *"...keeps muttering..."* — the right line for the mood type, and the dwarf's first name
-rather than "moody dwarf". When they are stuck it names what they are short of the way DF
-would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
+rather than "moody dwarf". While they are fetching it keeps the mood's own line and counts what has arrived —
+*"Thåkut withdraws from society... Claimed 3 items."* When they are stuck it names what they
+are short of the way DF would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
 days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
 clicking again opens the planner. A second notice appears when a mood could strike — read from
 DF's own `mood_cooldown`, population and excavated-tile counters rather than guessed — and
