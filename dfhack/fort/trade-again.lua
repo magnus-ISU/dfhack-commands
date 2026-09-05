@@ -12,7 +12,10 @@ own fort made that is sitting AT the depot already.
 WHAT IT PICKS, and why each condition is there:
 
   * NOT FOREIGN -- an item with `flags.foreign` was bought from a caravan, and selling last
-    year's purchases back to this year's merchants is almost never what you meant.
+    year's purchases back to this year's merchants is almost never what you meant. EXCEPT
+    loot: foreign gear made by a race whose civs are all at war with you is siege plunder, not
+    a purchase, and that is exactly what you want to sell. See `hostile_races` below for how
+    close a guess that is.
   * DISTANCE 0 from the depot -- the distance the screen's own `dist` column shows, computed
     the same way (`max(|dx|,|dy|) + |dz|` from the depot centre). Zero means no dwarf has to
     walk anywhere. `fort/trade-again radius N` widens that if you want the surrounding tiles
@@ -36,6 +39,7 @@ whatever width you last resized it to, which it records for you.
     disable trade-again     stop
     trade-again             select them right now, without opening the screen
     trade-again radius N    how far from the depot counts (default 0)
+    trade-again loot on|off include gear made by civs you are AT WAR with (default on)
     trade-again status      what is set, and what would be selected
 ]]
 
@@ -48,7 +52,8 @@ local GLOBAL_KEY = 'trade-again'
 state = state or nil
 
 local function default_state()
-    return {enabled = false, radius = 0}   -- width: recorded by the window itself, see below
+    -- width: recorded by the window itself, see below
+    return {enabled = false, radius = 0, loot = true}
 end
 
 local function load_state()
@@ -96,12 +101,79 @@ local function banned_scan()
     end
 end
 
-local function eligible(item, depot, radius, is_banned)
+-- ---- loot from the people you are actually fighting -------------------------
+--
+-- `flags.foreign` only says "another civ made this", which is one word for two very different
+-- things: goods you bought, and gear you stripped off a siege. DF keeps no "I looted this"
+-- bit, so the closest honest proxy is the MAKER'S RACE (`item.maker_race`, recorded on
+-- foreign goods) matched against the civs you are at war with right now -- `relation == 1`
+-- with a live `war_event_collection` in your civ's own diplomacy table.
+--
+-- TWO DELIBERATE NARROWINGS, both to stop bought goods being swept in:
+--   * your own civ's race never counts. Your civ appears in its own war list here (this fort
+--     has been in a CIVIL WAR since year 102), and dwarf-made foreign goods are mostly
+--     migrants' gear.
+--   * a race that has TRADED here within the last ten years never counts, war or no war. That
+--     is the only thing that actually puts bought goods in your stock, and it is read from the
+--     fort's own MERCHANT history rather than guessed. (Requiring instead that every civ of a
+--     race be at war -- the first thing tried -- excluded everyone: with dozens of civs per
+--     race there is always a peaceful one somewhere in the world.)
+--
+-- It is a race-level guess and it says so; there is no item-level truth to read.
+local hostile_cache, hostile_cache_at = nil, 0
+
+function hostile_races()
+    local now = dfhack.getTickCount()
+    if hostile_cache and now - hostile_cache_at < 10000 then return hostile_cache end
+    local out = {}
+    local civ = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not civ then return out end
+    local at_war = {}
+    local ok = pcall(function()
+        for _, s in ipairs(civ.relations.diplomacy.state) do
+            local other = df.historical_entity.find(s.group_id)
+            if other and other.race >= 0 and s.group_id ~= civ.id then
+                if s.relation == 1 and s.war_event_collection >= 0 then
+                    at_war[other.race] = true
+                end
+            end
+        end
+    end)
+    if not ok then return out end
+    -- races whose caravans have actually come here lately: their goods are purchases
+    local traded, site = {}, df.global.plotinfo.site_id
+    local ev = df.global.world.history.events
+    local cutoff = df.global.cur_year - 10
+    for i = #ev - 1, math.max(0, #ev - 20000), -1 do
+        local e = ev[i]
+        local okv = pcall(function()
+            if df.history_event_type[e:getType()] == 'MERCHANT' and e.site == site and e.year >= cutoff then
+                local src = df.historical_entity.find(e.source)
+                if src and src.race >= 0 then traded[src.race] = true end
+            end
+        end)
+    end
+    for race in pairs(at_war) do
+        if race ~= civ.race and not traded[race] then out[race] = true end
+    end
+    hostile_cache, hostile_cache_at = out, now
+    return out
+end
+
+local function is_loot(item, hostile)
+    local mr = -1
+    pcall(function() mr = item.maker_race end)
+    return mr >= 0 and hostile[mr] or false
+end
+
+local function eligible(item, depot, radius, is_banned, hostile)
     local f = item.flags
-    if f.foreign or f.forbid or f.artifact or f.garbage_collect or f.removed
+    if f.forbid or f.artifact or f.garbage_collect or f.removed
         or f.hostile or f.owned or f.trader or f.in_job then
         return false
     end
+    -- foreign goods are skipped unless they are loot off a civ you are at war with
+    if f.foreign and not (hostile and is_loot(item, hostile)) then return false end
     if f.in_building then return false end        -- already at the depot: already selected
     if item.flags.dump then return false end
     if is_banned and is_banned(item) then return false end
@@ -116,9 +188,10 @@ function candidates()
     if not depot then return {}, nil end
     local radius = load_state().radius or 0
     local is_banned = banned_scan()
+    local hostile = state.loot and hostile_races() or nil
     local out = {}
     for _, item in ipairs(df.global.world.items.other.IN_PLAY) do
-        if eligible(item, depot, radius, is_banned) then out[#out + 1] = item end
+        if eligible(item, depot, radius, is_banned, hostile) then out[#out + 1] = item end
     end
     return out, depot
 end
@@ -178,21 +251,35 @@ local function full_height()
     return h
 end
 
+-- Re-installable on purpose. The class object outlives a script reload, so a plain "already
+-- hooked" flag freezes whatever version happened to land first -- which is how a width hook
+-- kept running after it had been rewritten to do height. The originals are stashed on the
+-- class and the wrappers rebuilt whenever this file's HOOK_VERSION moves.
+local HOOK_VERSION = 2
+
 function install_window_hook()
     local ok, mg = pcall(reqscript, 'internal/caravan/movegoods')
     if not ok or type(mg) ~= 'table' or not mg.MoveGoods then return false end
     local cls = mg.MoveGoods
-    if cls.trade_again_shaped then return true end
+    if cls.trade_again_hook_version == HOOK_VERSION then return true end
 
-    local orig_init = cls.init
+    -- first time through, keep the untouched methods; afterwards rewrap those, never a wrapper
+    if not cls.trade_again_orig then
+        cls.trade_again_orig = {init = cls.init, layout = cls.postUpdateLayout, render = cls.render}
+    end
+    local orig = cls.trade_again_orig
+
+    -- ATTRS.frame is SHARED with every instance's self.frame -- writing a field on it edits
+    -- the class default for the rest of the session (this is how DFHack's own 86 became 192).
+    -- So the frame is copied before anything is set on it.
     cls.init = function(self, ...)
-        local r = orig_init and orig_init(self, ...) or nil
+        local r = orig.init and orig.init(self, ...) or nil
         if load_state().enabled then
-            self.frame = self.frame or {}
-            self.frame.h = full_height() or self.frame.h
-            if type(state.width) == 'number' and state.width > 40 then
-                self.frame.w = state.width
-            end
+            local f = {}
+            for k, v in pairs(self.frame or {}) do f[k] = v end
+            f.h = full_height() or f.h
+            if type(state.width) == 'number' and state.width > 40 then f.w = state.width end
+            self.frame = f
         end
         return r
     end
@@ -208,21 +295,19 @@ function install_window_hook()
         end
     end
 
-    local orig_layout = cls.postUpdateLayout
     cls.postUpdateLayout = function(self, ...)
         remember(self)
-        if orig_layout then return orig_layout(self, ...) end
+        if orig.layout then return orig.layout(self, ...) end
     end
 
-    local orig_render = cls.render
-    if orig_render then
+    if orig.render then
         cls.render = function(self, ...)
             remember(self)
-            return orig_render(self, ...)
+            return orig.render(self, ...)
         end
     end
 
-    cls.trade_again_shaped = true
+    cls.trade_again_hook_version = HOOK_VERSION
     return true
 end
 
@@ -281,10 +366,24 @@ if cmd == 'radius' then
     save_state()
     print(('trade-again: radius %d -- items up to %d tile%s from the depot centre')
         :format(state.radius, state.radius, state.radius == 1 and '' or 's'))
+elseif cmd == 'loot' then
+    local on = args[2]
+    if on ~= 'on' and on ~= 'off' then qerror('loot: say `on` or `off`') end
+    state.loot = (on == 'on')
+    save_state()
+    local hostile = state.loot and hostile_races() or {}
+    local names = {}
+    for race in pairs(hostile) do
+        local r = df.creature_raw.find(race)
+        names[#names + 1] = r and r.creature_id or ('race ' .. race)
+    end
+    table.sort(names)
+    print(('trade-again: loot %s%s'):format(on,
+        state.loot and (' -- gear made by ' .. (#names > 0 and table.concat(names, ', ') or 'nobody: you are at war with no one')) or ''))
 elseif cmd == 'status' then
     local items, depot = candidates()
-    print(('trade-again: %s, radius %d, window %s wide x %s high'):format(
-        enabled and 'ENABLED' or 'disabled', state.radius or 0,
+    print(('trade-again: %s, radius %d, loot %s, window %s wide x %s high'):format(
+        enabled and 'ENABLED' or 'disabled', state.radius or 0, state.loot and 'on' or 'off',
         tostring(state.width or 'DFHack default'), tostring(full_height() or '?')))
     if not depot then
         print('  no finished trade depot in this fort')
