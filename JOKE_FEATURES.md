@@ -69,3 +69,16 @@ Hauling is always allowed — forbidding a crown mid-carry drops it where it sta
 destination that matters is the trade depot. Only citizens are policed: a merchant's stock and
 a visiting lord's hat are not the fort's property. The forbid is a sync rather than a ratchet,
 so a crown nobody unqualified is holding is released again.
+
+### **`joke/dwarfify`**
+Adds your own tracks to the game's music, played by **DF itself** rather than beside it. The
+music slider moves them, muting the game mutes them, and they do not play on top of whatever
+DF had already started — because they go through FMOD as ordinary songs. `dwarfort` is
+stripped, but its sound code lives in `libg_src_lib.so` and is linked dynamically, so the
+`musicsoundst` API is exported; DF also ships `g_src/music_and_sound.cpp`, which shows how the
+game adds custom music itself — take an id from `next_song_id++`, `set_song(file, id, loops)`,
+then `startbackgroundmusic(id)`. That is the path this uses, so a track added here is the same
+kind of thing as a track added by a mod. `scan` a folder or `add` files; the playlist is a
+plain list in `dfhack-config/dwarfify-tracks.txt`, so you can edit it by hand. Enabling it
+starts another of your tracks whenever the game moves on from the last one — DF's scheduler
+still owns the playlist, and this does not fight it.

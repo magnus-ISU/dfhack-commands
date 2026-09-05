@@ -27,6 +27,10 @@
 #include "PluginManager.h"
 
 #include <SDL.h>
+#include <dlfcn.h>
+
+#include "df/musicsoundst.h"
+#include "df/global_objects.h"
 
 #include <atomic>
 #include <cmath>
@@ -139,6 +143,92 @@ static bool is_playing(color_ostream &out) {
     return g_dev != 0 && SDL_GetQueuedAudioSize(g_dev) > 0;
 }
 
+// ---------------------------------------------------------------------------
+// PLAYING THROUGH DF'S OWN ENGINE
+// ---------------------------------------------------------------------------
+//
+// Everything above is our own SDL device, which works but is deaf to the game: DF's music
+// slider does not touch it, and it plays over whatever DF is playing. DF's engine can do the
+// job properly -- it is FMOD, it owns the mixer, and it applies the media volumes itself.
+//
+// It is reachable, and it took reading the game to find out. `dwarfort` is stripped, but its
+// sound engine is not IN dwarfort: it lives in libg_src_lib.so and is linked dynamically, so
+// the whole `musicsoundst` API is there as exported (mangled) symbols --
+//
+//     musicsoundst::set_song(std::string&, int slot, bool loops)
+//     musicsoundst::startbackgroundmusic(int slot)
+//     musicsoundst::stop_song()
+//
+// -- and DF ships g_src/music_and_sound.cpp, which shows exactly how it uses them itself:
+// `set_custom_song` takes an id from `next_song_id++`, calls `set_song(file, id, loops)` to
+// hand the file to FMOD, and from then on the track is an ordinary song that
+// `startbackgroundmusic(id)` plays. That is the path this follows, with the same id
+// allocation, so a track added here is the same kind of thing as a track added by a mod.
+//
+// df-structures does not declare these methods, so there is no DFHack binding for them; they
+// are plain non-virtual member functions, so dlsym plus a call with `this` in front is the
+// whole of the trick.
+
+using set_song_fn = bool (*)(void *, std::string &, int, bool);
+using start_bg_fn = void (*)(void *, int);
+using stop_song_fn = void (*)(void *);
+
+static set_song_fn g_set_song = nullptr;
+static start_bg_fn g_start_bg = nullptr;
+static stop_song_fn g_stop_song = nullptr;
+static bool g_native_resolved = false;
+
+static void resolve_native() {
+    if (g_native_resolved)
+        return;
+    g_native_resolved = true;
+    // RTLD_DEFAULT: libg_src_lib.so is already loaded -- DF is running out of it -- so this is
+    // a lookup in the process, not a dlopen. Nothing new is mapped and nothing can go missing
+    // halfway through a game.
+    g_set_song = (set_song_fn) dlsym(RTLD_DEFAULT,
+        "_ZN12musicsoundst8set_songERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEib");
+    g_start_bg = (start_bg_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst20startbackgroundmusicEi");
+    g_stop_song = (stop_song_fn) dlsym(RTLD_DEFAULT, "_ZN12musicsoundst9stop_songEv");
+}
+
+static bool native_available(color_ostream &out) {
+    resolve_native();
+    return g_set_song && g_start_bg && g_stop_song && df::global::musicsound;
+}
+
+// Hand a file to DF's engine and play it as a song. Returns the song id, or -1.
+//
+// The id comes from `next_song_id`, incremented, which is what DF's own set_custom_song does:
+// ids below SONGNUM are the game's own tracks and must not be trodden on.
+static int32_t play_native(color_ostream &out, std::string path, bool loops = false) {
+    if (!native_available(out)) {
+        out.printerr("ssaudio: DF's sound engine is not reachable in this process\n");
+        return -1;
+    }
+    auto *ms = df::global::musicsound;
+    int32_t id = ms->next_song_id++;
+    if (!g_set_song(ms, path, id, loops)) {
+        out.printerr("ssaudio: DF's engine would not load %s\n", path.c_str());
+        ms->next_song_id--;                 // give the id back; nothing was registered
+        return -1;
+    }
+    g_start_bg(ms, id);
+    return id;
+}
+
+// Play a song id that is already loaded -- one this returned earlier, or one of DF's own.
+static void play_native_id(color_ostream &out, int32_t id) {
+    if (!native_available(out))
+        return;
+    g_start_bg(df::global::musicsound, id);
+}
+
+static void stop_native(color_ostream &out) {
+    if (!native_available(out))
+        return;
+    g_stop_song(df::global::musicsound);
+}
+
 // A command as well as the Lua functions, so playback can be exercised straight from the
 // console -- `dfhack-run ssaudio play <file>` -- without a script in the way. Worth having:
 // a hot-loaded plugin does not get its Lua module registered in the running Lua state, so
@@ -151,6 +241,18 @@ static command_result do_command(color_ostream &out, std::vector<std::string> &p
     if (params[0] == "stop") {
         stop(out);
         out.print("ssaudio: stopped\n");
+        return CR_OK;
+    }
+    if (params[0] == "native" && params.size() >= 2) {
+        int32_t id = play_native(out, params[1], params.size() >= 3 && params[2] == "loop");
+        if (id >= 0)
+            out.print("ssaudio: playing %s through DF's engine as song %d\n",
+                      params[1].c_str(), id);
+        return CR_OK;
+    }
+    if (params[0] == "native-stop") {
+        stop_native(out);
+        out.print("ssaudio: told DF's engine to stop\n");
         return CR_OK;
     }
     if (params[0] == "play" && params.size() >= 2) {
@@ -186,5 +288,9 @@ DFHACK_PLUGIN_LUA_FUNCTIONS {
     DFHACK_LUA_FUNCTION(play),
     DFHACK_LUA_FUNCTION(stop),
     DFHACK_LUA_FUNCTION(is_playing),
+    DFHACK_LUA_FUNCTION(play_native),
+    DFHACK_LUA_FUNCTION(play_native_id),
+    DFHACK_LUA_FUNCTION(stop_native),
+    DFHACK_LUA_FUNCTION(native_available),
     DFHACK_LUA_END
 };
