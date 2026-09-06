@@ -175,7 +175,7 @@ sea that drained after the restore — the one recovery still worth a command), 
 
 **Taking a party instead of a fort.** `fort/planeswalkers gui` asks the question first: the whole fort, or
 these travellers? A party snapshot is a handful of chosen dwarves and what they carry — skills, attributes,
-personality, **preferences**, appearance, labors, relationships and every worn, wielded or carried item,
+personality, **preferences**, **body size**, appearance, labors, relationships and every worn, wielded or carried item,
 containers with their contents. Nothing about the destination map is touched: the travellers arrive in the
 fort you are already playing, beside a citizen picked at random (a different one each load), and everything
 else there survives. Extra loose items can be named on top of their gear — the anvil in the stockpile, the
@@ -638,6 +638,11 @@ Forces attack events the stock `force` can't, like real forgotten-beast cavern a
 
 ### **`fort/destroy-forbidden`**
 Destroys loose forbidden items lying on the ground.
+
+`onscreen` narrows it to the map viewport exactly as rendered — one z-level, the one you are looking
+at, between its corners — which makes it a pointing device: forbid what you want gone, look at it, run it.
+`artifacts` includes artifacts, which are excluded by default because they are unrecoverable and usually
+forbidden precisely to keep them safe.
 
 ### **`fort/clear-flows`**
 Clears miasma and other flow clouds — a quick FPS fix.

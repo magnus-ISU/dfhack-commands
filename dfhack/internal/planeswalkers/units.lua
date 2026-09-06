@@ -288,6 +288,16 @@ local function save_unit(ctx, u)
         local a = u.body.physical_attrs[i]
         rec.phys[i + 1] = {a.value, a.max_value}
     end
+    -- HOW BIG SHE ACTUALLY IS. Body size is not derived from the raws at the moment you look
+    -- at it: a creature grows past its caste's base, and an adventurer who has been through a
+    -- world or two can be twice the size of the dwarf the raws describe. dfhack.units.create
+    -- builds a unit at the DESTINATION caste's size, so without this a 101 dm3 traveller
+    -- arrived as a 55 dm3 one -- the raws' idea of a dwarf, not the dwarf who set out.
+    pcall(function()
+        local si = u.body.size_info
+        rec.size = {si.size_base, si.size_cur, si.area_base, si.area_cur,
+                    si.length_base, si.length_cur}
+    end)
     -- appearance (same-version worlds: array layouts match per race/caste)
     local ap = u.appearance
     local function arr(v)
@@ -452,6 +462,14 @@ end
 -- returns the preference records this world had no token for, so the caller can carry them
 local function write_body(u, rec)
     local carried_prefs
+    if rec.size then
+        pcall(function()
+            local si = u.body.size_info
+            si.size_base, si.size_cur = rec.size[1], rec.size[2]
+            si.area_base, si.area_cur = rec.size[3], rec.size[4]
+            si.length_base, si.length_cur = rec.size[5], rec.size[6]
+        end)
+    end
     if rec.phys then
         for i = 0, math.min(#u.body.physical_attrs, #rec.phys) - 1 do
             u.body.physical_attrs[i].value = rec.phys[i + 1][1]
