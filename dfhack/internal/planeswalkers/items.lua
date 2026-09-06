@@ -172,7 +172,11 @@ function save_phases(ctx)
         step = function(job, deadline)
             local vec = df.global.world.items.other.IN_PLAY
             while job.cursor < #vec do
-                local ok, rec = pcall(save_one, ctx, vec[job.cursor])
+                local it = vec[job.cursor]
+                local ok, rec = true, nil
+                if not ctx.select or ctx.select.items[it.id] then
+                    ok, rec = pcall(save_one, ctx, it)
+                end
                 if ok and rec then table.insert(job.items.list, rec)
                 elseif not ok then common.add_skip(ctx, 'item-save-error', tostring(rec)) end
                 job.cursor = job.cursor + 1

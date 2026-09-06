@@ -220,7 +220,39 @@ local function require_fort()
     end
 end
 
-local function do_save(name)
+-- ---- taking a party rather than a fort ------------------------------------
+--
+-- A PARTY SNAPSHOT is the same machinery pointed at a handful of rows: chosen units, their
+-- gear, and nothing else -- no terrain, no buildings, no stockpiles, no plants. It exists
+-- because "walk into the next world with these seven dwarves and what they carry" is a
+-- different wish from "move my fortress", and rebuilding a map you did not ask for is both
+-- slow and destructive to the fort you arrive in.
+--
+-- The gear is not a separate choice. Whatever a chosen unit is wearing, wielding or carrying
+-- comes with them, containers and contents included -- a backpack arrives with what is in it.
+-- Extra items can be named on top of that.
+local function party_selection(unit_ids, item_ids)
+    local sel = {units = {}, items = {}}
+    for _, id in ipairs(unit_ids or {}) do sel.units[tonumber(id)] = true end
+    for _, id in ipairs(item_ids or {}) do sel.items[tonumber(id)] = true end
+
+    -- everything the chosen units have on them, following containers down
+    local function take(item)
+        if not item or sel.items[item.id] then return end
+        sel.items[item.id] = true
+        local ok, contents = pcall(dfhack.items.getContainedItems, item)
+        if ok then for _, c in ipairs(contents) do take(c) end end
+    end
+    for id in pairs(sel.units) do
+        local u = df.unit.find(id)
+        if u then
+            for _, inv in ipairs(u.inventory) do take(inv.item) end
+        end
+    end
+    return sel
+end
+
+local function do_save(name, select)
     require_fort()
     name = name or (fort_name() .. '-' .. os.date('%Y%m%d-%H%M'))
     if not common.valid_name(name) then
@@ -259,9 +291,12 @@ local function do_save(name)
         legend_mat = common.Legend.new(),
         legend_plant = common.Legend.new(),
         skips = {},
+        select = select,
+        party = select and true or nil,
         manifest = {
             v = 1,
             format_version = common.FORMAT_VERSION,
+            mode = select and 'party' or 'fort',
             name = name,
             world = common.u(dfhack.translation.translateName(df.global.world.world_data.name)),
             fort = fort_name(),
@@ -281,15 +316,23 @@ local function do_save(name)
         end,
     }
 
-    local phases = terrain.save_phases(ctx)
-    for _, p in ipairs(req('spires').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('plants').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('orders').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('squads').save_phases(ctx)) do table.insert(phases, p) end
-    for _, p in ipairs(req('burrows').save_phases(ctx)) do table.insert(phases, p) end
+    local phases
+    if select then
+        -- units first so the histfig pass sees them; items carry the gear
+        phases = {}
+        for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
+    else
+        phases = terrain.save_phases(ctx)
+        for _, p in ipairs(req('spires').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('plants').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('buildings').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('orders').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('items').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('units').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('squads').save_phases(ctx)) do table.insert(phases, p) end
+        for _, p in ipairs(req('burrows').save_phases(ctx)) do table.insert(phases, p) end
+    end
     common.start_job('save ' .. name, phases, ctx, function()
         common.write_json(ctx.dir .. '/legend.json',
             {v = 1, tiletypes = ctx.legend_tt.list, mats = ctx.legend_mat.list,
@@ -345,6 +388,42 @@ local function do_load(name, ...)
         qerror(('planeswalkers: snapshot format v%s, this build reads v%d')
             :format(tostring(mf.format_version), common.FORMAT_VERSION))
     end
+    -- A PARTY LOAD IS ITS OWN PATH, and a much shorter one: no terrain, no buildings, no
+    -- anchor arithmetic. The travellers arrive in the fort you are already playing, beside a
+    -- citizen chosen at random, carrying what they carried. Everything the fort path does to
+    -- the map -- clearing buildings, repainting tiles, re-registering features -- would be
+    -- destruction nobody asked for here.
+    if mf.mode == 'party' then
+        if not (mf.complete and mf.complete.units) then
+            qerror('planeswalkers: party snapshot is incomplete (the save was aborted); refusing')
+        end
+        local ctx = {name = name, dir = dir, skips = {}, party = true,
+                     src_year = mf.src_year, manifest = mf,
+                     anchor = {off_x = 0, off_y = 0, off_z = 0}}
+        local legends = common.read_json(dir .. '/legend.json') or {}
+        ctx.legend_tt = common.Legend.new(legends.tiletypes)
+        ctx.legend_mat = common.Legend.new(legends.mats)
+        local phases = {}
+        for _, p in ipairs(req('units').load_phases(ctx)) do table.insert(phases, p) end
+        table.insert(phases, req('extras').owners_phase(ctx))
+        for _, p in ipairs(req('items').load_phases(ctx)) do table.insert(phases, p) end
+        notify(('%d traveller(s) arriving from "%s" of world "%s"')
+               :format((mf.counts and mf.counts.units) or 0, name, mf.world or '?'))
+        common.start_job('load ' .. name, phases, ctx, function()
+            common.print_skips(ctx)
+            local who = {}
+            for _, u in pairs(ctx.unit_map or {}) do
+                who[#who + 1] = dfhack.units.getReadableName(u)
+                if #who >= 6 then break end
+            end
+            notify(('%d traveller(s) have arrived%s'):format(
+                       #who > 0 and #who or ((mf.counts and mf.counts.units) or 0),
+                       #who > 0 and (': ' .. table.concat(who, ', ')) or ''),
+                   COLOR_LIGHTGREEN, true)
+        end)
+        return
+    end
+
     if not (mf.complete and mf.complete.terrain and mf.complete.constructions) then
         qerror('planeswalkers: snapshot is incomplete (the save was aborted); refusing')
     end
@@ -658,8 +737,45 @@ Run `help fort/planeswalkers` for the full description.
 
 local function do_help() print(HELP) end
 
+-- `gui`: ask what comes along, then save it. The screen is the only place the choice is
+-- made; `party` below is the same thing for a keyboard, and `save` with no selection is the
+-- whole fort exactly as before.
+local function do_gui()
+    require_fort()
+    req('gui').show(function(sel)
+        if sel then
+            do_save(nil, party_selection(sel.units, sel.items))
+        else
+            do_save(nil)
+        end
+    end)
+end
+
+-- fort/planeswalkers party [name] <unit id> [unit id...]
+local function do_party(name, ...)
+    require_fort()
+    local ids = {...}
+    if name and name:match('^%d+$') then           -- no name given, straight into ids
+        table.insert(ids, 1, name)
+        name = nil
+    end
+    if #ids == 0 then
+        local u = dfhack.gui.getSelectedUnit(true)
+        if not u then
+            qerror('party: name the unit ids to take, or select a dwarf first')
+        end
+        ids = {u.id}
+    end
+    local sel = party_selection(ids, nil)
+    local n = 0
+    for _ in pairs(sel.items) do n = n + 1 end
+    print(('planeswalkers: taking %d traveller(s) and %d carried item(s)'):format(#ids, n))
+    do_save(name, sel)
+end
+
 local ACTIONS = {
     save = do_save, load = do_load, list = print_list, delete = do_delete,
+    gui = do_gui, party = do_party,
     status = do_status, cancel = do_cancel, step = do_step, spike = do_spike,
     spires = do_spires, repair = do_repair,
     help = do_help, ['--help'] = do_help, ['-h'] = do_help,

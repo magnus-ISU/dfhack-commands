@@ -130,6 +130,19 @@ on a fort restored before that pass existed), `repair` (re-registers and refills
 sea that drained after the restore — the one recovery still worth a command), `status`, and
 `cancel` round out the set.
 
+
+**Taking a party instead of a fort.** `fort/planeswalkers gui` asks the question first: the whole fort, or
+these travellers? A party snapshot is a handful of chosen dwarves and what they carry — skills, attributes,
+personality, **preferences**, appearance, labors, relationships and every worn, wielded or carried item,
+containers with their contents. Nothing about the destination map is touched: the travellers arrive in the
+fort you are already playing, beside a citizen picked at random (a different one each load), and everything
+else there survives. Extra loose items can be named on top of their gear — the anvil in the stockpile, the
+artifact on its pedestal — while gear itself is never a question, since it always comes. Preferences are
+written as raw tokens (`INORGANIC:STEEL`, `PLANT:PINEAPPLE:DRINK`) and looked up again on arrival, so a
+material the next world has never heard of is dropped rather than pointed at whatever now sits at that
+index; poetry, music and dance forms are skipped entirely, being works this world composed. `fort/planeswalkers
+party [name] <unit id...>` does the same from the keyboard, defaulting to the selected dwarf.
+
 ### **`fort/forge-bars`**
 The forge's "Add new task" list names every metal it could work as "iron (opens menu)",
 whether you own a bar of it or not. This overlay paints the count over that tail on every row —
@@ -486,6 +499,29 @@ job, a guest, a real fight — out of the way. It waits for the bout to end firs
 goes only after three seconds with no new sparring report, so a squad still trading blows is
 never interrupted and DF is not left rebuilding a button that keeps vanishing. Only the button
 goes: every sparring blow is still filed in the units' combat logs and reads back in full.
+
+### **`fort/combat-log`**
+Newest first in the combat log, and a step button on it. A unit's report log — a soldier's
+Sparring category, say — is listed oldest-first by DF, so the blow that just landed is a thousand
+lines down. This reverses both that list and the report picker beside it, by **entry** rather than
+by line, so a report that wraps over three lines keeps its lines in order. It also replaces the
+footer with *"DFHack: most recent at the top. [Step one tick]"*, and both the button and the `.`
+key advance the world one tick. That takes a trick: the screen itself stops the world, so nothing
+moves while it is open no matter what the pause state says, which is why DF's own `.` does nothing
+there. The step closes the log, lets exactly one frame pass, then re-pauses and restores the view —
+same unit, same category, same scroll.
+
+### **`fort/guild-agreement-dates`**
+Puts the deadline on the map view's agreement notice. DF shows the job, the petitioner and a
+date, but that date is when the agreement was **made**, and the year you have to build the
+temple or guildhall is never spelled out. This adds the count and the month number:
+*"Build temple, 321 days"* over *"8th Galena (6), 109"*. The notice is found by reading the
+screen, so the annotation follows it wherever DF puts it, and there is nothing to draw while the
+squads panel is up, since DF hides the notice there. Long names are shortened to fit the corner
+rather than running off the edge, so a guildhall reads *"Guildhall, 321 days"* and a grand
+guildhall *"Grand hall, 321 days"*. Turning this on in `magnus-scripts` turns DFHack's own
+*"N petitions outstanding"* line off, since this says the same thing and three things more;
+turning it off puts that line back.
 
 ### **`fort/missing-noble-warning`**
 Warns when nobody holds a post the fort actually suffers without: *"Assign a manager, broker,

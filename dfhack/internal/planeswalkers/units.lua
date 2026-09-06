@@ -211,6 +211,54 @@ local function save_unit(ctx, u)
         for _, v in ipairs(soul.personality.values) do
             table.insert(rec.values, {t = df.value_type[v.type], s = v.strength})
         end
+        -- PREFERENCES, the thing that makes a dwarf recognisably themselves -- and the thing
+        -- a strange mood reads to decide what it demands. Every id in one is world-local
+        -- (material indices, creature ids, itemdef subtypes), so each is written as the raw
+        -- TOKEN it stands for and looked up again on arrival; anything the destination has no
+        -- word for is dropped rather than pointed at whatever now sits at that index.
+        -- The id fields on a preference are a UNION: only the ones its type uses mean
+        -- anything, and the rest hold whatever was last there. Saving them all produced
+        -- rows like "LikeColor of a loon man, a lettuce and a plant growth" -- so each type
+        -- writes only its own fields, and the poetry/music/dance forms are skipped entirely
+        -- because a form id is a work of art this world composed and the next one has not.
+        local PREF_FIELDS = {
+            LikeMaterial = {'mat'}, LikeFood = {'mat', 'item'}, LikeItem = {'item', 'mat'},
+            LikeCreature = {'creature'}, HateCreature = {'creature'},
+            LikePlant = {'plant'}, LikeTree = {'plant'},
+            LikeColor = {'color'}, LikeShape = {'shape'},
+        }
+        rec.prefs = {}
+        for _, pr in ipairs(soul.preferences) do
+            local tname = df.unitpref_type[pr.type]
+            local want = tname and PREF_FIELDS[tname]
+            if want then
+                local out = {t = tname, seed = pr.prefstring_seed}
+                for _, field in ipairs(want) do
+                    if field == 'mat' and (pr.mattype >= 0 or pr.matindex >= 0) then
+                        local mi = dfhack.matinfo.decode(pr.mattype, pr.matindex)
+                        out.mat = mi and mi:getToken() or nil
+                        out.mat_state = pr.mat_state
+                    elseif field == 'creature' and pr.creature_id >= 0 then
+                        local cr = df.creature_raw.find(pr.creature_id)
+                        out.creature = cr and cr.creature_id or nil
+                    elseif field == 'item' and pr.item_type >= 0 then
+                        out.item = df.item_type[pr.item_type]
+                        out.subtype = pr.item_subtype
+                    elseif field == 'plant' and pr.plant_id >= 0 then
+                        local pl = df.plant_raw.find(pr.plant_id)
+                        out.plant = pl and pl.id or nil
+                    elseif field == 'color' and pr.color_id >= 0 then
+                        out.color = pr.color_id
+                    elseif field == 'shape' and pr.shape_id >= 0 then
+                        out.shape = pr.shape_id
+                    end
+                end
+                if out.mat or out.creature or out.item or out.plant
+                    or out.color or out.shape then
+                    table.insert(rec.prefs, out)
+                end
+            end
+        end
     end
     rec.phys = {}
     for i = 0, #u.body.physical_attrs - 1 do
@@ -298,7 +346,8 @@ function save_phases(ctx)
             while job.cursor < #vec do
                 local u = vec[job.cursor]
                 job.cursor = job.cursor + 1
-                if not dfhack.units.isDead(u) then
+                if not dfhack.units.isDead(u)
+                    and (not ctx.select or ctx.select.units[u.id]) then
                     local ok, rec = pcall(save_unit, ctx, u)
                     if ok and rec then table.insert(job.out.list, rec)
                     elseif not ok then
@@ -392,6 +441,51 @@ local function write_body(u, rec)
                 soul.mental_attrs[i].max_value = rec.mental[i + 1][2]
             end
         end
+        if rec.prefs then
+            soul.preferences:resize(0)
+            for _, pr in ipairs(rec.prefs) do
+                local t = df.unitpref_type[pr.t]
+                local ok = t ~= nil
+                local mattype, matindex = -1, -1
+                if ok and pr.mat then
+                    local mi = dfhack.matinfo.find(pr.mat)
+                    if mi then mattype, matindex = mi.type, mi.index else ok = false end
+                end
+                local creature = -1
+                if ok and pr.creature then
+                    for i, cr in ipairs(df.global.world.raws.creatures.all) do
+                        if cr.creature_id == pr.creature then creature = i break end
+                    end
+                    if creature < 0 then ok = false end
+                end
+                local plant = -1
+                if ok and pr.plant then
+                    for i, pl in ipairs(df.global.world.raws.plants.all) do
+                        if pl.id == pr.plant then plant = i break end
+                    end
+                    if plant < 0 then ok = false end
+                end
+                if ok then
+                    local n = #soul.preferences
+                    soul.preferences:insert('#', {new = true})
+                    local p = soul.preferences[n]
+                    p.type = t
+                    p.item_type = pr.item and df.item_type[pr.item] or -1
+                    p.item_subtype = pr.subtype or -1
+                    p.creature_id = creature
+                    p.color_id = pr.color or -1
+                    p.shape_id = pr.shape or -1
+                    p.plant_id = plant
+                    p.poetic_form_id, p.musical_form_id, p.dance_form_id = -1, -1, -1
+                    p.mattype, p.matindex = mattype, matindex
+                    p.mat_state = pr.mat_state or 0
+                    p.prefstring_seed = pr.seed or 0
+                else
+                    common.add_skip(ctx, 'preference-not-in-this-world',
+                                    pr.mat or pr.creature or pr.plant or pr.item or '?')
+                end
+            end
+        end
         if rec.traits then
             for i = 0, math.min(#soul.personality.traits, #rec.traits) - 1 do
                 soul.personality.traits[i] = rec.traits[i + 1]
@@ -427,6 +521,7 @@ local function write_body(u, rec)
 end
 
 local function safe_spawn_pos(ctx, rec)
+    if ctx.party then return ctx.spawn_anchor end   -- see the units load phase
     local a = ctx.anchor
     local x = rec.x + a.off_x
     local y = rec.y + a.off_y
@@ -535,7 +630,13 @@ function load_phases(ctx)
             job.cursor = 1
             ctx.unit_map, ctx.hf_map = {}, {}
             df.global.pause_state = true
-            local anchor = dfhack.units.getCitizens(true)[1]
+            -- A PARTY ARRIVES WHERE THE FORT IS, not where it left. Its saved coordinates
+            -- belong to another world's map and mean nothing here, so everyone lands beside
+            -- a citizen picked at random -- a different one each load, so a party is not
+            -- forever stacked on whoever happens to be first in the list.
+            local citizens = dfhack.units.getCitizens(true)
+            local anchor = citizens[1]
+            if #citizens > 0 then anchor = citizens[math.random(#citizens)] end
             ctx.spawn_anchor = anchor and xyz2pos(anchor.pos.x, anchor.pos.y, anchor.pos.z)
         end,
         total = function(job) return #job.units.list end,
