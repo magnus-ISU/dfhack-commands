@@ -154,6 +154,20 @@ function clear_reserve()
     return n
 end
 
+-- A mood asks for up to three bars of its base metal. Reserving one you hold fewer of than
+-- that steers the roll at something that cannot satisfy it even if the steer works -- this
+-- fort reserved SLADE while owning exactly one slade bar, and the mood that came wanted two.
+-- Reported, not refused: it is your fort, and one bar may be exactly the artifact you want.
+local MOOD_WANTS = 3
+
+function reserve_shortfall(idx)
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        if it:getMaterial() == 0 and it:getMaterialIndex() == idx and usable(it) then n = n + 1 end
+    end
+    return n < MOOD_WANTS and n or nil
+end
+
 function reserve_metal(idx)
     clear_reserve()
     local d = watch_state()
@@ -267,10 +281,23 @@ function set_watch_hidden(on)
     save_watch(d)
 end
 
+local last_sweep = 0
+
 function watch_message()
     -- the one place that is certain to be called: the notify panel resolves this live. The
     -- sweep heartbeat can be left stopped by a script reload or a save/load, and was.
     pcall(release_on_mood)
+    -- ...and the SWEEP has the same problem, with worse consequences. A reserve only steers
+    -- anything while every other metal stays forbidden, and bars keep arriving -- a smelter
+    -- finishing, a caravan unloading. With the heartbeat stopped, 24 of this fort's 45 iron
+    -- bars sat unforbidden under a slade reserve, and the next mood duly asked for iron.
+    if watch_state().reserved then
+        local now = dfhack.getTickCount()
+        if now - last_sweep > 2000 then
+            last_sweep = now
+            pcall(reserve_sweep)
+        end
+    end
     local _, name = reserved_metal()
     -- a mood already under way has rolled its materials: the reserve is not steering it
     if name and not find_mood() then
@@ -321,9 +348,14 @@ function MetalPicker:init()
                 else
                     local n = reserve_metal(ch.index)
                     local _, name = reserved_metal()
-                    self.subviews.status:setText(
-                        ('Forbade %d other bar%s; %s is what is left.'):format(
-                            n, n == 1 and '' or 's', name or '?'))
+                    local short = reserve_shortfall(ch.index)
+                    local txt = ('Forbade %d other bar%s; %s is what is left.'):format(
+                        n, n == 1 and '' or 's', name or '?')
+                    if short then
+                        txt = txt .. ('  WARNING: only %d bar%s of it -- a mood asks for up to 3.')
+                            :format(short, short == 1 and '' or 's')
+                    end
+                    self.subviews.status:setText(txt)
                 end
                 if self.on_change then self.on_change() end
                 self:updateLayout()

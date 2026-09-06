@@ -448,6 +448,12 @@ went unwatched, spotted by `mood_cooldown` having risen since the reserve was ma
 from the notification itself rather than the sweep heartbeat, which a script reload or save/load can
 leave stopped.
 
+The sweep that keeps other metals forbidden runs from the notification as well as its heartbeat — a
+reserve only steers anything while every rival bar stays forbidden, and bars keep arriving; with the
+heartbeat stopped, 24 of one fort's 45 iron bars sat free under a slade reserve and the next mood duly
+asked for iron. Reserving a metal you hold fewer than three bars of now warns, since a mood asks for up
+to three.
+
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,
 plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and raw glass in
