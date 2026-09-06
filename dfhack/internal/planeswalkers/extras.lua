@@ -130,9 +130,47 @@ local function resolve_kill_race(ctx, rec)
     return nil
 end
 
+-- ---- what this world has no word for ----------------------------------------
+--
+-- A DROW KILL DOES NOT EXIST IN A VANILLA WORLD. Take a dwarf to one and every kill whose
+-- species this world has never heard of has nowhere to go: `killed_race` is an index into
+-- THIS world's creature list, and there is no index for a creature that is not in it. The old
+-- behaviour dropped them with a skip, and the next save read the kill list back out of the
+-- game -- so a round trip through an unmodded world quietly erased half a career.
+--
+-- So what cannot be applied is CARRIED instead: kept beside the fort, keyed by the unit it
+-- belongs to, and folded back into that unit's record the next time they are saved. Go to a
+-- vanilla world and come home and the drow are still on the list, because the list that
+-- travelled was never only what the game could show.
+local CARRY_KEY = 'planeswalkers/carry'
+
+function carry_load()
+    local d = dfhack.persistent.getSiteData(CARRY_KEY, {})
+    return type(d) == 'table' and d or {}
+end
+
+function carry_save(d)
+    pcall(dfhack.persistent.saveSiteData, CARRY_KEY, d)
+end
+
+-- everything held for a unit, as {kills = {...}, prefs = {...}}
+function carry_for(unit_id)
+    return carry_load()[tostring(unit_id)]
+end
+
+function carry_put(unit_id, what, recs)
+    if not recs or #recs == 0 then return end
+    local d = carry_load()
+    local key = tostring(unit_id)
+    d[key] = d[key] or {}
+    d[key][what] = recs
+    carry_save(d)
+end
+
 function kills_in(ctx, hf, recs)
-    if not recs or #recs == 0 then return 0 end
+    if not recs or #recs == 0 then return 0, nil end
     local n = 0
+    local orphans = {}
     local ok, err = pcall(function()
         if not hf.info then hf.info = df.historical_figure_info:new() end
         if not hf.info.kills then hf.info.kills = df.historical_kills:new() end
@@ -151,12 +189,14 @@ function kills_in(ctx, hf, recs)
                 k.killed_count:insert('#', rec.n or 1)
                 n = n + 1
             else
-                common.add_skip(ctx, 'kill-species-missing-in-world', rec.r)
+                -- not lost: carried, and written back into the next save
+                table.insert(orphans, rec)
+                common.add_skip(ctx, 'kill-species-carried-not-in-this-world', rec.r)
             end
         end
     end)
     if not ok then common.add_skip(ctx, 'kills-restore-failed', tostring(err)) end
-    return n
+    return n, (#orphans > 0 and orphans or nil)
 end
 
 -- ---- noble positions ----------------------------------------------------------

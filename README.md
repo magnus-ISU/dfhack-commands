@@ -185,6 +185,15 @@ material the next world has never heard of is dropped rather than pointed at wha
 index; poetry, music and dance forms are skipped entirely, being works this world composed. `fort/planeswalkers
 party [name] <unit id...>` does the same from the keyboard, defaulting to the selected dwarf.
 
+**A round trip through a world that has never heard of your mods.** `killed_race` is an index into the
+*current* world's creature list, so a dwarf who walks into a vanilla world loses every drow, orc and succubus
+kill the moment she arrives — and the next save would read her kill list back out of the game and write down
+only what was left. Anything a destination cannot represent is now **carried** instead: kept beside the fort
+against the historical figure who earned it, and folded back into her record the next time she is saved, so
+she comes home with her career intact. Preferences that name a material the world lacks are carried the same
+way, against the unit. Verified on a 136-row kill list: 52 modded rows (415 kills) survive the round trip and
+merge back without duplicating the 84 the game still holds.
+
 ### **`fort/forge-bars`**
 The forge's "Add new task" list names every metal it could work as "iron (opens menu)",
 whether you own a bar of it or not. This overlay paints the count over that tail on every row —

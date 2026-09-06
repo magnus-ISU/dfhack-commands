@@ -120,8 +120,25 @@ local function save_hf(ctx, hf, stub)
                                          s = l.link_strength})
             end
         end
-        -- what this figure has killed, by species
-        rec.kills = reqscript('internal/planeswalkers/extras').kills_out(hf)
+        -- what this figure has killed, by species -- plus anything an earlier world could
+        -- not hold. A dwarf who walks through a vanilla world loses her drow and orc kills
+        -- from the game's own list the moment she arrives there, because killed_race is an
+        -- index into THAT world's creature list; they are kept beside the fort instead, and
+        -- this is where they rejoin the record she travels on with.
+        local extras = reqscript('internal/planeswalkers/extras')
+        rec.kills = extras.kills_out(hf)
+        local carried = extras.carry_for('h' .. hf.id)
+        if carried and carried.kills and #carried.kills > 0 then
+            rec.kills = rec.kills or {}
+            local seen = {}
+            for _, k in ipairs(rec.kills) do
+                seen[('%s:%s:%s'):format(k.r, tostring(k.c), tostring(k.u))] = true
+            end
+            for _, k in ipairs(carried.kills) do
+                local key = ('%s:%s:%s'):format(k.r, tostring(k.c), tostring(k.u))
+                if not seen[key] then table.insert(rec.kills, k); seen[key] = true end
+            end
+        end
         -- necromancer / curse signature (bound to dest world's secrets in M5)
         local okc, curse = pcall(function() return hf.info.curse end)
         if okc and curse and #curse.active_interactions > 0 then
@@ -189,6 +206,12 @@ local function save_unit(ctx, u)
         labors[#labors + 1] = u.status.labors[i] and '1' or '0'
     end
     rec.labors = table.concat(labors)
+    -- preferences this world had no token for, kept against the unit and folded back here
+    local carried = reqscript('internal/planeswalkers/extras').carry_for('u' .. u.id)
+    if carried and carried.prefs and #carried.prefs > 0 then
+        rec.prefs = rec.prefs or {}
+        for _, pr in ipairs(carried.prefs) do table.insert(rec.prefs, pr) end
+    end
     local soul = u.status.current_soul
     if soul then
         rec.skills = {}
@@ -426,7 +449,9 @@ local function write_skills(u, hf, skills)
     end
 end
 
+-- returns the preference records this world had no token for, so the caller can carry them
 local function write_body(u, rec)
+    local carried_prefs
     if rec.phys then
         for i = 0, math.min(#u.body.physical_attrs, #rec.phys) - 1 do
             u.body.physical_attrs[i].value = rec.phys[i + 1][1]
@@ -443,6 +468,7 @@ local function write_body(u, rec)
         end
         if rec.prefs then
             soul.preferences:resize(0)
+            carried_prefs = nil
             for _, pr in ipairs(rec.prefs) do
                 local t = df.unitpref_type[pr.t]
                 local ok = t ~= nil
@@ -481,7 +507,9 @@ local function write_body(u, rec)
                     p.mat_state = pr.mat_state or 0
                     p.prefstring_seed = pr.seed or 0
                 else
-                    common.add_skip(ctx, 'preference-not-in-this-world',
+                    carried_prefs = carried_prefs or {}
+                    table.insert(carried_prefs, pr)
+                    common.add_skip(ctx, 'preference-carried-not-in-this-world',
                                     pr.mat or pr.creature or pr.plant or pr.item or '?')
                 end
             end
@@ -518,6 +546,7 @@ local function write_body(u, rec)
             warr(genes.colors, rec.app.gc)
         end
     end
+    return carried_prefs
 end
 
 local function safe_spawn_pos(ctx, rec)
@@ -601,7 +630,10 @@ local function spawn_unit(ctx, rec)
         hf.sex = rec.sex or hf.sex
     end
     write_skills(u, hf or nil, rec.skills)
-    write_body(u, rec)
+    local carried_prefs = write_body(u, rec)
+    if carried_prefs then
+        reqscript('internal/planeswalkers/extras').carry_put('u' .. u.id, 'prefs', carried_prefs)
+    end
     if rec.adv then
         -- re-mark as a (retired) adventurer so DF's unretire list picks the
         -- unit up again. Only ADVENTURER is restored: ACTIVE_ADVENTURER means
@@ -715,7 +747,13 @@ function load_phases(ctx)
                     end
                 end
                 if hf and rec.kills then
-                    reqscript('internal/planeswalkers/extras').kills_in(ctx, hf, rec.kills)
+                    local extras = reqscript('internal/planeswalkers/extras')
+                    local _, orphans = extras.kills_in(ctx, hf, rec.kills)
+                    -- kills of species this world has never heard of are kept beside the
+                    -- fort, against the HISTORICAL FIGURE that earned them -- that is where
+                    -- the kill list lives and where the next save reads it from -- and folded
+                    -- back in then. See extras.carry_put.
+                    if orphans then extras.carry_put('h' .. hf.id, 'kills', orphans) end
                 end
                 if dfhack.getTickCount() >= deadline then return false end
             end
