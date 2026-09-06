@@ -475,8 +475,21 @@ clickable family tree, and queue memorial slabs in bulk.
 ### **`fort/no-sparring-spam`**
 Removes the sparring alert from the notification strip. Squads drilling refill that button
 constantly, so it sits there permanently and pushes the alerts you want to read — a failed
-job, a guest, a real fight — out of the way. Only the button goes: every sparring blow is
-still filed in the units' combat logs and reads back in full.
+job, a guest, a real fight — out of the way. It waits for the bout to end first: the button
+goes only after three seconds with no new sparring report, so a squad still trading blows is
+never interrupted and DF is not left rebuilding a button that keeps vanishing. Only the button
+goes: every sparring blow is still filed in the units' combat logs and reads back in full.
+
+### **`fort/missing-noble-warning`**
+Warns when nobody holds a post the fort actually suffers without: *"Assign a manager, broker,
+bookkeeper."* One or two are named, three are listed, and past that it gives the count instead,
+*"Assign 4 noble positions."* Clicking opens Nobles and administrators, where you assign them. It
+looks for the **job, not the title** — each post is found by the responsibility the entity raws
+give it, so a modded civilisation run by a quartermaster and a war-leader is covered exactly as
+well as a dwarven one, and the warning uses whatever that civilisation calls the post. A role
+counts as covered when any position carrying its responsibility is held, which is what stops a
+fort with a mayor being nagged about its expedition leader. Posts nothing depends on — hammerer,
+dungeon master, champion — are never mentioned.
 
 ### **`fort/civ-alert-notification`**
 During a civilian alert, warns who's still outside the safe burrow; click to find them.
@@ -511,15 +524,28 @@ world-wide data. Also works from the console — `embark/assistant help`.
 ### **`fort/civilian-militia`**
 Packs office-holder civilian squads into ready and reserve squads on command.
 
-### **`fort/invulnerable-adamantine-doors`**
-Promotes the masterwork adamantine furniture you have already built into real artifacts, which no
-building destroyer can break (cheat). A troll walks through an adamantine door exactly as it walks
-through a wooden one, since material never enters into it, but artifact furniture can never be
-damaged or destroyed. Doors, hatches, floodgates, grates and bars first, and the other single-item
-furniture with them. It never changes what anything is made of and never touches ordinary work: a
-granite door stays granite, and an adamantine door of merely good quality stays a door. Each
-promotion mints a real artifact record with a name from DF's own generator, and `undo` takes every
-one of them back. `enable` catches new ones as they are built. Not run by `magnus-scripts`.
+### **`fort/no-monster-slayers`**
+Two buttons under the work-detail list, touching at their brackets: **[Auto][Remove Monster
+Slayers]**, with Auto on the left and green while it is on. A monster slayer turns up because
+you have a tavern, takes a slayer's post at one of your locations and settles in; the button
+takes that post away, deleting the location from it and then removing the post from the unit and
+from the world. Clearing the location alone is not enough, since the post is listed on the unit
+as well, and a slayer keeps it until both let go. With **[Auto]** off the button asks first: a window
+lists every monster slayer with their two best fighting skills, and clicking a name takes that
+one post and leaves the rest. With it on the button takes them all, since you have already said
+so. **[Auto]** is on by default, because a slayer can simply be offered another post. The pair sits at the foot of the work-detail panel, its
+right-hand bracket in the same column as "Add new work detail", so it follows the panel wherever
+the interface puts it.
+
+### **`fort/inviolable-masterworks`**
+Turns the masterwork adamantine doors, hatch covers and floodgates you have already built into
+real artifacts, which no building destroyer can break. A troll walks through an adamantine door
+exactly as it walks through a wooden one, since material never enters into it, but artifact
+furniture can never be damaged or destroyed. A sweep runs once a season, on by default. It never
+changes what anything is made of and never touches ordinary work: a granite door stays granite,
+an adamantine door of merely good quality stays a door, and a masterwork lying in a stockpile is
+left for you to place. Each promotion mints a real artifact record with a name from DF's own
+generator, and `undo` takes every one of them back.
 
 ### **`fort/cheatmine`**
 Instantly finishes all designated digging and any planned staircases (cheat).

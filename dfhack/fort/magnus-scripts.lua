@@ -233,6 +233,23 @@ local COLUMNS = {
         {key = 'help-mood', label = 'help-mood',
          enable = script('fort/help-mood', 'notify-status'),
          disable = script('fort/help-mood', 'notify-status-off')},
+        {key = 'no-monster-slayers', label = 'no-monster-slayers',
+         enable = function()
+            dfhack.run_command('enable', 'fort/no-monster-slayers')      -- Auto on by default
+            dfhack.run_command('overlay', 'enable', 'fort/no-monster-slayers.buttons')
+         end,
+         disable = function()
+            dfhack.run_command('disable', 'fort/no-monster-slayers')
+            dfhack.run_command('overlay', 'disable', 'fort/no-monster-slayers.buttons')
+         end},
+        {key = 'inviolable-masterworks', label = 'inviolable-masterworks',
+         enable = cmd('enable', 'fort/inviolable-masterworks'),
+         disable = cmd('disable', 'fort/inviolable-masterworks')},
+        {key = 'no-sparring-spam', label = 'no-sparring-spam',
+         enable = cmd('enable', 'fort/no-sparring-spam'),
+         disable = cmd('disable', 'fort/no-sparring-spam')},
+        {key = 'missing-noble-warning', label = 'missing-noble-warning',
+         enable = script('fort/missing-noble-warning'), disable = notify_off({'missing_nobles'})},
         {key = 'civ-alert-notification', label = 'civ-alert-notification',
          enable = script('fort/civ-alert-notification'), disable = notify_off({'civ_alert_outside'})},
         {key = 'enemies-inside-notification', label = 'enemies-inside-notif.',

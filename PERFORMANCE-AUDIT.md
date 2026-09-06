@@ -48,9 +48,20 @@ Migrant renamer; heartbeat scanned `units.active` every `SCAN_FRAMES = 100` fram
 migrants arrive only in occasional waves. **Fix:** interval bumped to **500 frames** (~once per
 game-day). The heavy history-events scan was already gated to when unnamed migrants exist.
 
-### 5. `no-sparring-spam.lua` — DELETED
-Ran a `units.active` scan every 10 ticks (the most frequent tick in the pack) and didn't work
-reliably. Removed the script, its deployed copy, and its `magnus-scripts` load lines.
+### 5. `no-sparring-spam.lua` — DELETED, then REWRITTEN
+The original ran a `units.active` scan every 10 ticks (the most frequent tick in the pack), to find
+reports filed under `unit_report_type.Sparring`, and didn't work reliably. It was deleted outright.
+
+The script now back under that name does a different job with none of that cost: it drops the
+sparring *alert button* rather than the reports. `world.status.announcement_alert` holds one entry
+per live button and each names its own category, so a sparring button is just
+`type == df.announcement_alert_type.SPARRING`. The pass walks that vector — a handful of entries —
+so the 10-tick cadence is affordable here. It skips entirely while the alert panel is open.
+
+It also waits out the bout: the button is only removed once three seconds have passed with no new
+sparring report, since clearing mid-flurry just makes DF rebuild it. That check is bounded the same
+way — the button names the units in the bout, and their own Sparring report counts are summed, so it
+reads a handful of units the button already points at and never the unit list.
 
 ## Why these were written that way (and the trap)
 
