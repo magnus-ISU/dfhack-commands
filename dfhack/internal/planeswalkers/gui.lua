@@ -212,7 +212,10 @@ function SaveWindow:refresh()
                  pen = COLOR_GREEN}}
     end
     self.subviews.summary:setText(text)
-    self.subviews.list:updateLayout()
+    -- NO updateLayout HERE. refresh() runs from init(), before the window has been given a
+    -- parent rect, and laying out against a rect that does not exist yet is what killed the
+    -- screen on open ("attempt to index a nil value (local 'parent_rect')"). setChoices does
+    -- the work that actually matters; the frame is computed when the screen shows itself.
 end
 
 function SaveWindow:do_save()
