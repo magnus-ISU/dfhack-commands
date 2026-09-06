@@ -248,8 +248,10 @@ since that is what decides the base material and whether the fort can supply it 
 `unit.job.mood_skill` when the mood begins, so it is known before a workshop is claimed.
 
 The status line quotes the dwarf the way DF does — a fey or fell dwarf *screams, "I must have rock
-blocks!"*, a secretive one *sketches pictures of* it, a possessed one *mutters, "It needs …"*, a macabre
-one *broods, "Yes. I need …"*.
+blocks!"*, a secretive one *sketches pictures of* it, a possessed one names the artifact and trails off the
+way DF does, *mutters, "The Flighty Shrine requires bars... metal..."*, a macabre one *broods, "Yes. I need
+…"*. A dwarf never says the specific material: where the mood wants iron bars he asks for *bars... metal…*,
+and only a requirement that is already generic ("rock blocks") is spoken as it reads.
 
 Items the dwarf cannot walk to are listed last and marked `UNREACHABLE`, and the picker refuses to take
 one — hiding them made the panel claim the fort had nothing when it held twenty-five blocks across a
@@ -451,8 +453,7 @@ leave stopped.
 The sweep that keeps other metals forbidden runs from the notification as well as its heartbeat — a
 reserve only steers anything while every rival bar stays forbidden, and bars keep arriving; with the
 heartbeat stopped, 24 of one fort's 45 iron bars sat free under a slade reserve and the next mood duly
-asked for iron. Reserving a metal you hold fewer than three bars of now warns, since a mood asks for up
-to three.
+asked for iron.
 
 ### **`fort/moody-items-warning`**
 Warns when the fort has none of a material a strange mood might demand — stone, logs, leather,

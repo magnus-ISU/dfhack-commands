@@ -1665,7 +1665,7 @@ local MOOD = {
                                 demand = 'sketches pictures of %s.'},
     [df.mood_type.Possessed] = {begun = 'has been possessed!',
                                 working = 'keeps muttering...',
-                                demand = 'mutters, "It needs %s..."'},
+                                demand = 'mutters, "%s requires %s"'},
     [df.mood_type.Macabre]   = {begun = 'begins to stalk and brood...',
                                 working = 'works, darkly brooding...',
                                 demand = 'broods, "Yes. I need %s."'},
@@ -1743,6 +1743,72 @@ local function wanted_now(job)
     return requirement_name(ji)
 end
 
+-- ---- what the dwarf actually SAYS ------------------------------------------
+--
+-- A dwarf does not name the material. DF's own line for a possessed smith wanting two iron
+-- bars is `<artifact> requires bars... metal...` -- the class, trailed off, never "iron". Our
+-- line said "It needs iron bar...", which was wrong three times over: the artifact has a name
+-- and DF uses it, the material is generalised in speech, and the noun is plural.
+--
+-- Where the requirement itself is already generic -- "rock blocks", "plant cloth" -- that IS
+-- how it is spoken, so those are left as the requirement names them.
+
+local SPOKEN_NOUN = {}
+local function spoken_noun(name, word)
+    local t = df.item_type[name]
+    if t ~= nil then SPOKEN_NOUN[t] = word end
+end
+spoken_noun('BAR', 'bars')
+spoken_noun('BLOCKS', 'blocks')
+spoken_noun('WOOD', 'logs')
+spoken_noun('BOULDER', 'stones')
+spoken_noun('ROUGH', 'gems')
+spoken_noun('SMALLGEM', 'gems')
+spoken_noun('SKIN_TANNED', 'leather')
+spoken_noun('CLOTH', 'cloth')
+spoken_noun('THREAD', 'thread')
+spoken_noun('REMAINS', 'remains')
+spoken_noun('CORPSEPIECE', 'bones')
+spoken_noun('SHELL', 'shells')
+
+-- the CLASS of a specific material, in the words a dwarf uses
+local function spoken_class(ji)
+    if ji.mat_type == 0 and ji.mat_index >= 0 then
+        local mi = dfhack.matinfo.decode(ji.mat_type, ji.mat_index)
+        local mat = mi and mi.material
+        if mat then
+            local metal = false
+            pcall(function() metal = mat.flags.IS_METAL end)
+            return metal and 'metal' or 'rock'
+        end
+        return 'metal'
+    end
+    if ji.mat_type == df.builtin_mats.GLASS_GREEN or ji.mat_type == df.builtin_mats.GLASS_CLEAR
+        or ji.mat_type == df.builtin_mats.GLASS_CRYSTAL then
+        return 'glass'
+    end
+    return nil          -- generic requirement: spoken as the requirement reads
+end
+
+local function spoken_demand(job)
+    local _, ji = current_step(job, {})
+    if not ji then return nil end
+    local class = spoken_class(ji)
+    local noun = SPOKEN_NOUN[ji.item_type]
+    if class and noun then return ('%s... %s...'):format(noun, class) end
+    if class then return ('%s...'):format(class) end
+    return requirement_name(ji)
+end
+
+-- the name DF gave the artifact the moment the mood took hold. Possessed dwarves say it; the
+-- others do not have one to say.
+local function artifact_name(unit)
+    local n
+    pcall(function() n = dfhack.translation.translateName(unit.status.artifact_name, true) end)
+    if n and n ~= '' then return n end
+    return nil
+end
+
 function moody_message()
     local unit, job = find_mood()
     if not unit or not job then return nil end
@@ -1769,7 +1835,14 @@ function moody_message()
     -- stuck: name the thing, and once it has gone on long enough, say how long
     local want = wanted_now(job) or 'something'
     local days = stall_days(unit, job)
-    local said = ('%s %s'):format(name, words.demand:format(want))
+    local spoken = spoken_demand(job) or want
+    local said
+    if unit.mood == df.mood_type.Possessed then
+        -- DF names the artifact in this one: "The Flighty Shrine requires bars... metal..."
+        said = ('%s %s'):format(name, words.demand:format(artifact_name(unit) or 'It', spoken))
+    else
+        said = ('%s %s'):format(name, words.demand:format(spoken))
+    end
     if days >= 7 then
         return {{text = ('%s (%d days)'):format(said, days), pen = COLOR_LIGHTRED}}
     end

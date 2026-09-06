@@ -154,20 +154,6 @@ function clear_reserve()
     return n
 end
 
--- A mood asks for up to three bars of its base metal. Reserving one you hold fewer of than
--- that steers the roll at something that cannot satisfy it even if the steer works -- this
--- fort reserved SLADE while owning exactly one slade bar, and the mood that came wanted two.
--- Reported, not refused: it is your fort, and one bar may be exactly the artifact you want.
-local MOOD_WANTS = 3
-
-function reserve_shortfall(idx)
-    local n = 0
-    for _, it in ipairs(df.global.world.items.other.BAR) do
-        if it:getMaterial() == 0 and it:getMaterialIndex() == idx and usable(it) then n = n + 1 end
-    end
-    return n < MOOD_WANTS and n or nil
-end
-
 function reserve_metal(idx)
     clear_reserve()
     local d = watch_state()
@@ -348,14 +334,9 @@ function MetalPicker:init()
                 else
                     local n = reserve_metal(ch.index)
                     local _, name = reserved_metal()
-                    local short = reserve_shortfall(ch.index)
-                    local txt = ('Forbade %d other bar%s; %s is what is left.'):format(
-                        n, n == 1 and '' or 's', name or '?')
-                    if short then
-                        txt = txt .. ('  WARNING: only %d bar%s of it -- a mood asks for up to 3.')
-                            :format(short, short == 1 and '' or 's')
-                    end
-                    self.subviews.status:setText(txt)
+                    self.subviews.status:setText(
+                        ('Forbade %d other bar%s; %s is what is left.'):format(
+                            n, n == 1 and '' or 's', name or '?'))
                 end
                 if self.on_change then self.on_change() end
                 self:updateLayout()
