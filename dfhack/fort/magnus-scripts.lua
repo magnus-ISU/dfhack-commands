@@ -248,6 +248,39 @@ local COLUMNS = {
         {key = 'no-sparring-spam', label = 'no-sparring-spam',
          enable = cmd('enable', 'fort/no-sparring-spam'),
          disable = cmd('disable', 'fort/no-sparring-spam')},
+        -- This supersedes DFHack's own "N petitions outstanding" line: that one says a petition
+        -- exists, this one says which building, for whom, and how long is left. So turning the
+        -- row on turns the stock line OFF, and turning the row off puts it back rather than
+        -- leaving the fort with no petition notice at all.
+        -- The overlay draws the line and handles clicks; the `.` KEY needs a keybinding, because
+        -- DF consumes that key on this screen before any overlay sees it (a fed period does
+        -- nothing, a fed click on the button steps fine). The binding is scoped to the log's
+        -- focus, so `.` keeps its normal meaning everywhere else.
+        {key = 'combat-log', label = 'combat-log',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/combat-log.log')
+            dfhack.run_command('keybinding', 'add', '.@dwarfmode/AnnouncementAlert',
+                               'fort/combat-log step')
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/combat-log.log')
+            dfhack.run_command('keybinding', 'clear', '.@dwarfmode/AnnouncementAlert')
+         end},
+        {key = 'guild-agreement-dates', label = 'guild-agreement-dates',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/guild-agreement-dates.notice')
+            notify_cfg(function(data)
+                data.petitions_agreed = data.petitions_agreed or {}
+                data.petitions_agreed.enabled = false
+            end)
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/guild-agreement-dates.notice')
+            notify_cfg(function(data)
+                data.petitions_agreed = data.petitions_agreed or {}
+                data.petitions_agreed.enabled = true
+            end)
+         end},
         {key = 'missing-noble-warning', label = 'missing-noble-warning',
          enable = script('fort/missing-noble-warning'), disable = notify_off({'missing_nobles'})},
         {key = 'civ-alert-notification', label = 'civ-alert-notification',

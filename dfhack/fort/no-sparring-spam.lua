@@ -11,10 +11,14 @@ actually want to read (a job failure, a guest, a real fight).
 
 This removes the sparring alert button, but not the instant it appears: it waits for the
 bout to finish. Every pass asks whether sparring is still going on, and the button is only
-taken away once THREE SECONDS have passed with no new sparring report. Squads drill in
-flurries, and clearing mid-flurry just means DF rebuilds the button a moment later; three
-seconds is long enough to sit out the gaps between blows, so it is one removal per bout
+taken away once THREE SECONDS of RUNNING FORT have passed with no new sparring report. Squads
+drill in flurries, and clearing mid-flurry just means DF rebuilds the button a moment later;
+three seconds is long enough to sit out the gaps between blows, so it is one removal per bout
 instead of a button that flickers while they train.
+
+The clock only turns while the world does. A paused fort files no sparring reports, so counting
+wall-clock time there meant the button was always taken away while you sat reading -- the combat
+log, say -- which is the one moment you might want it.
 
 Nothing else about sparring changes: the reports themselves stay in the combat logs, so a
 unit's Sparring report category still reads back in full -- only the alert button is dropped.
@@ -29,8 +33,9 @@ walked `units.active` every 10 ticks looking for reports filed under
 "Is sparring still going on" is answered from the button itself, at the same cost. The alert
 names the units involved, and each of those units keeps a count of its own Sparring reports,
 so the pass reads a handful of units the button already points at -- never the unit list --
-and a new blow anywhere in the bout moves that total. The clock is real time rather than
-frames, so a fort running slowly still gets its full three seconds.
+and a new blow anywhere in the bout moves that total. The clock is real time, but only the parts of it
+where the fort was actually running, so a slow fort still gets its full three seconds and a
+paused one never runs the window down at all.
 
 Removing a button means: erase its entry from `world.status.announcement_alert` and free it,
 drop every report id it carried from the sorted `world.status.alert_button_announcement_id`
@@ -105,26 +110,40 @@ local function sparring_activity()
 end
 
 -- the quiet window, kept across heartbeat ticks (the script's environment survives reloads)
-watch = watch or {count = nil, since = nil}
+watch = watch or {count = nil, quiet_ms = 0, last_ms = nil, last_frame = nil}
 
--- Is the bout over? True once the activity total has stood still for QUIET_MS. Anything that
--- moves the total restarts the clock, so a squad still trading blows -- or pausing between
--- them -- is never interrupted.
+-- Is the bout over? True once the activity total has stood still for QUIET_MS of RUNNING game
+-- time. Anything that moves the total restarts the clock.
+--
+-- THE CLOCK ONLY TURNS WHILE THE WORLD DOES. Wall-clock time was wrong: with the game paused --
+-- reading the combat log, say -- no new sparring report can possibly arrive, so the window
+-- always expired and the button was taken away under the player while they were looking at it.
+-- Elapsed real time is only counted for a pass where the frame counter has moved since the last
+-- one, which is exactly "three seconds of unpaused fort".
 local function sparring_is_quiet()
     local count = sparring_activity()
-    if not count then                    -- button gone: forget the window
-        watch.count, watch.since = nil, nil
-        return false
-    end
     local now = dfhack.getTickCount()
-    if watch.count ~= count then         -- a new sparring report: still going on
-        watch.count, watch.since = count, now
+    local frame = df.global.world.frame_counter or 0
+    if not count then                    -- button gone: forget the window
+        watch.count, watch.quiet_ms, watch.last_ms, watch.last_frame = nil, 0, now, frame
         return false
     end
-    -- getTickCount can jump backwards across a reload; treat that as a fresh start rather
-    -- than as a very long quiet period
-    if not watch.since or now < watch.since then watch.since = now return false end
-    return (now - watch.since) >= QUIET_MS
+    if watch.count ~= count then         -- a new sparring report: still going on
+        watch.count, watch.quiet_ms = count, 0
+        watch.last_ms, watch.last_frame = now, frame
+        return false
+    end
+    -- getTickCount can jump backwards across a reload; treat that as a fresh start rather than
+    -- as a very long quiet period
+    if not watch.last_ms or now < watch.last_ms then
+        watch.last_ms, watch.last_frame = now, frame
+        return false
+    end
+    if frame ~= watch.last_frame then    -- the world moved: this interval counts
+        watch.quiet_ms = watch.quiet_ms + (now - watch.last_ms)
+    end
+    watch.last_ms, watch.last_frame = now, frame
+    return watch.quiet_ms >= QUIET_MS
 end
 
 -- One pass: drop every sparring alert button. Returns how many were removed.
@@ -153,7 +172,7 @@ function clear_sparring_alerts()
         -- creates resets it to 0. Do the same rather than leave a width sized for a button
         -- that is gone.
         mi.hover_announcement_alert_button_width = 0
-        watch.count, watch.since = nil, nil
+        watch.count, watch.quiet_ms = nil, 0
     end
     return removed
 end

@@ -887,6 +887,58 @@ end
 -- repeat always force-produces at least one unit you may not need. Instead we self-manage:
 -- run_cycle decides what is still owed and calls this to create or re-size exactly that
 -- many units; drop_order removes a key once it's covered.
+-- ---- keeping a mood's worth of material back -------------------------------
+--
+-- A strange mood claims ONE stack of the material it demands, and if the fort has none the dwarf
+-- goes berserk. Gear orders are the fort's biggest consumer of exactly those materials, so every
+-- order this service creates carries a condition that stops it while the input is nearly gone:
+-- it will not touch the last THREE of whatever it is made from. Three rather than one because a
+-- mood can want more than a single stack, and because the count includes stacks already claimed
+-- by a job.
+--
+-- The input is the material the order consumes, not the gear it produces: bars for a metal
+-- piece, tanned hides for leather, logs for wood, bones for bone. Bone lives on butchery refuse
+-- (CORPSEPIECE), so it is matched by the material-class flag rather than by an item type alone.
+local MOOD_RESERVE = 3
+local RESERVE_INPUT = {
+    leather = {item_type = df.item_type.SKIN_TANNED},
+    wood    = {item_type = df.item_type.WOOD},
+    bone    = {item_type = df.item_type.CORPSEPIECE, flags2 = 'bone'},
+}
+
+-- the reserve condition for a gear recipe, or nil when the input is not one we can count
+local function reserve_spec(r)
+    if is_matclass(r.mat_type, r.mat_index) then
+        local cls = MATCLASS[r.mat_index]
+        return cls and RESERVE_INPUT[cls.order]
+    end
+    if r.mat_type == 0 and r.mat_index and r.mat_index >= 0 then
+        return {item_type = df.item_type.BAR, mat_type = 0, mat_index = r.mat_index}
+    end
+end
+
+-- does this order already carry its reserve condition?
+local function has_reserve(o, spec)
+    for _, c in ipairs(o.item_conditions) do
+        if c.item_type == spec.item_type and c.compare_type == df.logic_condition_type.GreaterThan then
+            return true
+        end
+    end
+    return false
+end
+
+local function add_reserve(o, r)
+    local spec = reserve_spec(r)
+    if not spec or has_reserve(o, spec) then return end
+    o.item_conditions:insert('#', {new = df.manager_order_condition_item,
+        compare_type = df.logic_condition_type.GreaterThan, compare_val = MOOD_RESERVE,
+        item_type = spec.item_type, item_subtype = -1,
+        mat_type = spec.mat_type or -1, mat_index = spec.mat_index or -1})
+    if spec.flags2 then
+        o.item_conditions[#o.item_conditions - 1].flags2[spec.flags2] = true
+    end
+end
+
 local function queue_one(key, r, n)
     n = n or 1
     if dry_run then
@@ -919,6 +971,7 @@ local function queue_one(key, r, n)
         o.frequency = df.workquota_frequency_type.OneTime  -- one batch, no DF auto-repeat
         o.amount_total, o.amount_left = n, n
         o.status.validated, o.status.active = true, true
+        add_reserve(o, r)
         mo.all:insert(0, o)
         state.orders[key] = o.id
     else
@@ -927,6 +980,7 @@ local function queue_one(key, r, n)
         -- never keeps hogging a metal's bar budget away from other gear.
         o.amount_total, o.amount_left = n, n
         o.status.active = true
+        add_reserve(o, r)          -- orders made before this rule existed pick it up here
     end
 end
 

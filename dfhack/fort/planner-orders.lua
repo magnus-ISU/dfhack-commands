@@ -1156,6 +1156,13 @@ local function create_order(gap, choice)
     return {}
 end
 
+-- The soap/plaster chain links (MakeAsh / MakeLye / RENDER_FAT) and the conditions each one
+-- needs. Declared here and filled in further down, where C/EMPTY exist, so create_reaction can
+-- reach it: without the conditions those prerequisites are queued bare, and a bare MakeLye order
+-- posts a lye job every day whether or not there is ash to make it from. That was 55 "Make lye:
+-- Needs ash." cancellations on this fort, the single largest source of the spam.
+local CHAIN_LINK
+
 -- reaction gap (soap/plaster): a repeating order for the chosen reaction, held at a target by
 -- its own conditions, plus the option's prerequisites (`also`: job_types like MakeAsh/MakeLye,
 -- or reaction codes like RENDER_FAT), each queued once if not already present as a one-time
@@ -1183,9 +1190,16 @@ local function create_reaction(gap, opt)
     elseif opt.standing then
         -- soap: a STANDING order matching the hand-made one -- a batch of 30 whenever soap
         -- bars run under 10. flags2.soap counts soap of ANY material, not just the builtin.
+        -- The soap shortfall alone is not enough to run: soap is made FROM LYE, and a soap
+        -- order that cannot see lye posts a job a day that dies as "Needs lye-containing item"
+        -- (45 of those on this fort). flags1.lye_bearing counts anything holding lye -- the
+        -- bucket, not the lye -- which is what the job actually reaches for.
+        local lye_on_hand = C('GreaterThan', 0)
+        lye_on_hand.flags1 = {'lye_bearing'}
         add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
             amount = gap.amount, frequency = df.workquota_frequency_type.Daily,
-            conds = {C('LessThan', opt.standing.cap, df.item_type.BAR, nil, nil, nil, {'soap'})}}
+            conds = {C('LessThan', opt.standing.cap, df.item_type.BAR, nil, nil, nil, {'soap'}),
+                     lye_on_hand}}
     else
         add_order{job_type = df.job_type.CustomReaction, reaction_name = opt.reaction,
                   amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
@@ -1193,14 +1207,23 @@ local function create_reaction(gap, opt)
     note_ws(opt.reaction)
     -- its prerequisites
     for _, name in ipairs(opt.also or {}) do
+        local link = CHAIN_LINK[name]
         local jt = df.job_type[name]
         if jt then                                      -- a job_type (MakeAsh / MakeLye)
             if not has_order(jt, -1) then
-                add_order{job_type = jt, amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+                -- with the chain's own conditions: make ash only while there is wood and ash is
+                -- short, make lye only while there is ash AND an empty bucket to put it in
+                add_order{job_type = jt, amount = (link and link.amount) or gap.amount,
+                    frequency = link and df.workquota_frequency_type.Daily
+                                     or df.workquota_frequency_type.OneTime,
+                    conds = link and link.conds or nil}
             end
         elseif not reaction_ordered(name) then          -- a reaction code (RENDER_FAT)
             add_order{job_type = df.job_type.CustomReaction, reaction_name = name,
-                      amount = gap.amount, frequency = df.workquota_frequency_type.OneTime}
+                amount = (link and link.amount) or gap.amount,
+                frequency = link and df.workquota_frequency_type.Daily
+                                 or df.workquota_frequency_type.OneTime,
+                conds = link and link.conds or nil}
         end
         note_ws(name)
     end
@@ -1380,8 +1403,22 @@ end
 local ASH_MAT, LYE_MAT = 9, 11
 local POTASH_MAT, PEARLASH_MAT = 8, 10
 local GLASS_CLEAR_MAT = 4        -- builtin material id for clear glass
+-- The leather-bag rule, for when a bag order is made from hides rather than cloth: a batch of
+-- FIVE, and never while the fort holds fewer than eight tanned hides. Leather is what a mood
+-- most often demands and the slowest input to replace, so it gets a deeper reserve than the
+-- three below. No order here makes leather bags today -- the fort's one is hand-made -- so this
+-- is the shape any future one takes, kept next to the reserve it belongs with.
+local LEATHER_BAG_BATCH, LEATHER_RESERVE = 5, 7   -- "more than 7" == at least 8
+
+-- How much of an input every order leaves alone. A strange mood claims one stack of whatever it
+-- demands and the dwarf goes berserk if the fort has none, so no order made here spends the last
+-- few of anything it consumes. Three rather than one, because a mood can want more than a stack
+-- and because the count includes stacks another job has already claimed. fort/military-uniforms
+-- keeps the same reserve on the gear it forges.
+local MOOD_RESERVE = 3
+
 local function EMPTY(c) c.empty = true; return c end   -- count only EMPTY items
-local CHAIN_LINK = {
+CHAIN_LINK = {
     MakeAsh = {job = 'MakeAsh', amount = 3, conds = {
         C('LessThan', 3, df.item_type.BAR, ASH_MAT),         -- keep 3 ash bars
         C('GreaterThan', 1, df.item_type.WOOD),              -- while wood is available
@@ -1682,11 +1719,13 @@ STANDING = {
                             F1(C('GreaterThan', 0, df.item_type.PLANT), 'unrotten')}}
                 end
                 if need_bags then
+                    -- the cloth is gated at MOOD_RESERVE, not at zero: a bag order that eats the
+                    -- last of the cloth leaves a moody weaver with nothing to claim
                     add_order{job_type = df.job_type.ConstructBag,
                         mat_type = pt.type, mat_index = pt.index, amount = 5, frequency = Daily,
                         conds = {
                             EMPTY(C('LessThan', MILL_BAG_TARGET, df.item_type.BAG)),
-                            C('GreaterThan', 0, df.item_type.CLOTH, pt.type, pt.index)}}
+                            C('GreaterThan', MOOD_RESERVE, df.item_type.CLOTH, pt.type, pt.index)}}
                 end
                 return missing_shops(shops)
             end}}
@@ -1882,7 +1921,8 @@ STANDING = {
                 if need_paste then
                     add_order{reaction_name = 'MILL_SEEDS_NUTS_TO_PASTE',
                         job_type = df.job_type.CustomReaction, amount = 1, frequency = Daily,
-                        conds = {C('GreaterThan', ROCK_NUT_MIN, df.item_type.SEEDS, seed.type, seed.index)}}
+                        conds = {F1(C('GreaterThan', ROCK_NUT_MIN, df.item_type.SEEDS, seed.type, seed.index),
+                                    'unrotten')}}
                 end
                 if need_press then
                     add_order{reaction_name = 'PRESS_OIL',
@@ -1947,11 +1987,13 @@ STANDING = {
                         frequency = Daily, conds = conds}
                 end
                 if need_bags then
+                    -- the cloth is gated at MOOD_RESERVE, not at zero: a bag order that eats the
+                    -- last of the cloth leaves a moody weaver with nothing to claim
                     add_order{job_type = df.job_type.ConstructBag,
                         mat_type = pt.type, mat_index = pt.index, amount = 5, frequency = Daily,
                         conds = {
                             EMPTY(C('LessThan', MILL_BAG_TARGET, df.item_type.BAG)),
-                            C('GreaterThan', 0, df.item_type.CLOTH, pt.type, pt.index)}}
+                            C('GreaterThan', MOOD_RESERVE, df.item_type.CLOTH, pt.type, pt.index)}}
                 end
                 return missing_shops(shops)
             end}}
@@ -2054,27 +2096,32 @@ STANDING = {
         if have_iron_ore and not reaction_ordered('PIG_IRON_MAKING') then
             out[#out + 1] = {name = 'Pig iron', shops = {'PIG_IRON_MAKING'},
                 note = ('Makes pig iron (needs iron + flux + fuel) while you have at least 1 iron bar\n'
-                    .. 'and under %d pig iron bars. Only the iron is gated, so it starts as soon as you\n'
-                    .. 'can make one -- flux/fuel are left to the workshop.'):format(PIG_IRON_CAP),
+                    .. 'and under %d pig iron bars. Iron AND flux are gated, so it only runs when the\n'
+                    .. 'job can actually be taken; fuel is left to the workshop.'):format(PIG_IRON_CAP),
                 build = function()
                     local iron, pig = inorg_idx('IRON'), inorg_idx('PIG_IRON')
+                    -- flux is gated too: leaving it to the workshop meant a pig iron job every
+                    -- day with no flux boulder to take ("Needs flux boulders", 20 times here).
+                    -- FLUX is a reaction class, so this counts every flux stone at once.
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'PIG_IRON_MAKING',
                         amount = 5, frequency = Daily, conds = {
-                            C('AtLeast', 1, BAR, 0, iron), C('LessThan', PIG_IRON_CAP, BAR, 0, pig)}}
+                            C('AtLeast', 1, BAR, 0, iron), C('LessThan', PIG_IRON_CAP, BAR, 0, pig),
+                            C('AtLeast', 1, BOULDER, nil, nil, 'FLUX')}}
                     return missing_shops({'PIG_IRON_MAKING'})
                 end}
         end
         if have_iron_ore and not reaction_ordered('STEEL_MAKING') then
             out[#out + 1] = {name = 'Steel', shops = {'STEEL_MAKING'},
                 note = ('Makes steel (needs iron + pig iron + flux + fuel) while you have at least 1 of\n'
-                    .. 'each metal and under %d steel bars. Only the metals are gated, so it starts as\n'
-                    .. 'soon as you can make one -- flux/fuel are left to the workshop.'):format(METAL_CAP),
+                    .. 'each metal and under %d steel bars. The metals AND flux are gated, so it only\n'
+                    .. 'runs when the job can actually be taken; fuel is left to the workshop.'):format(METAL_CAP),
                 build = function()
                     local iron, pig, steel = inorg_idx('IRON'), inorg_idx('PIG_IRON'), inorg_idx('STEEL')
                     add_order{job_type = df.job_type.CustomReaction, reaction_name = 'STEEL_MAKING',
                         amount = 5, frequency = Daily, conds = {
                             C('AtLeast', 1, BAR, 0, iron), C('AtLeast', 1, BAR, 0, pig),
-                            C('LessThan', METAL_CAP, BAR, 0, steel)}}
+                            C('LessThan', METAL_CAP, BAR, 0, steel),
+                            C('AtLeast', 1, BOULDER, nil, nil, 'FLUX')}}
                     return missing_shops({'STEEL_MAKING'})
                 end}
         end
@@ -2093,8 +2140,15 @@ STANDING = {
                 -- hog every shop, which gets it backwards: melting is what you do to a pile
                 -- of goblin junk after a siege, and a pile is exactly when you want every
                 -- smelter you own on it. DF's default (0) is no limit.
+                -- "anything to melt" is the melt_designated material-class flag, counted over
+                -- every item type. The older spelling of this -- GreaterThan 0 of item_type NONE
+                -- -- is not read as "something is marked", it is simply always true, so the order
+                -- kept posting jobs into an empty melt queue ("Needs melt-designated item", 11
+                -- times on this fort).
+                local marked = C('GreaterThan', 0)
+                marked.flags2 = {'melt_designated'}
                 add_order{job_type = df.job_type.MeltMetalObject, amount = 30, frequency = Daily,
-                    conds = {C('GreaterThan', 0, df.item_type.NONE)}}
+                    conds = {marked}}
                 return missing_shops({'MeltMetalObject'})
             end}}
     end,

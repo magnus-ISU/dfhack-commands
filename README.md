@@ -551,17 +551,6 @@ goes only after three seconds with no new sparring report, so a squad still trad
 never interrupted and DF is not left rebuilding a button that keeps vanishing. Only the button
 goes: every sparring blow is still filed in the units' combat logs and reads back in full.
 
-### **`fort/combat-log`**
-Newest first in the combat log, and a step button on it. A unit's report log — a soldier's
-Sparring category, say — is listed oldest-first by DF, so the blow that just landed is a thousand
-lines down. This reverses both that list and the report picker beside it, by **entry** rather than
-by line, so a report that wraps over three lines keeps its lines in order. It also replaces the
-footer with *"DFHack: most recent at the top. [Step one tick]"*, and both the button and the `.`
-key advance the world one tick. That takes a trick: the screen itself stops the world, so nothing
-moves while it is open no matter what the pause state says, which is why DF's own `.` does nothing
-there. The step closes the log, lets exactly one frame pass, then re-pauses and restores the view —
-same unit, same category, same scroll.
-
 ### **`fort/guild-agreement-dates`**
 Puts the deadline on the map view's agreement notice. DF shows the job, the petitioner and a
 date, but that date is when the agreement was **made**, and the year you have to build the

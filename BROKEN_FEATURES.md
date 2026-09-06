@@ -47,6 +47,20 @@ homeland drought on this fort was a civil war running since year 102 (*The Evisc
 assaults on the capital led by dwarves held prisoner by the dark dwarves), not the erase bug; the two human
 civs' silence since 105 is still unexplained.
 
+### **`fort/combat-log`**
+Newest-first ordering in the combat log works, and so does the `.` key: it advances the world by
+exactly one tick from a screen that otherwise stops time altogether (the panel is closed for one
+frame and put straight back). **What does not work is the point of it** — the log does not gain
+the tick's new lines. DF rebuilds a unit's report log only inside its own open-the-log handler,
+which no field assignment triggers, so the entries stay as of the last time you opened the log.
+Feeding DF the click on the unit's row in the report picker DOES trigger the rebuild, and a
+version of this did exactly that, but landing that click needs the row to be drawn where the
+scrape looks: it retried up to twenty times a step, made the screen laggy, and a second `.`
+arriving mid-flight left an empty panel. That machinery is gone; the step is now the plain,
+stable version and the list is a tick stale until you reopen it. The likely fix is to drive DF's
+own picker selection instead of hunting for the row on screen. **Enabled by `magnus-scripts`**,
+which also binds `.` on that screen.
+
 ### **`fort/mandate-notification`**
 Shows noble mandates the moment they appear. **Run by `magnus-scripts` every session.** Unused
 in practice and likely to be **removed** rather than repaired.
