@@ -34,6 +34,16 @@ local gui = require('gui')
 local widgets = require('gui.widgets')
 local overlay = require('plugins.overlay')
 
+-- The "Add new task" job list is a PAGE OF ITS OWN on this panel, and the [Butcher] button has no
+-- business on it: it belongs beside "Add new task" on the task list, not among the job choices you
+-- get after clicking it.
+--
+-- The test is the label itself. `main_interface.building.button` looks like the obvious signal --
+-- DF fills it with the job choices while the list is up -- but on this build it is NOT cleared
+-- when the list closes: it still read three entries with the whole building sheet shut and the
+-- Work Orders screen open, which would have left the button hidden for the rest of the session.
+-- "Add new task" is drawn on the task list and not on the job list, so its presence is the page.
+
 local PINK = COLOR_LIGHTMAGENTA
 
 -- ---------------------------------------------------------------------------
@@ -287,9 +297,21 @@ local function add_task_button_pos()
         local c = table.concat(chars):find(ADD_TASK, 1, true)
         if c then
             local col = 40 + c - 1                    -- 0-based screen col of "Add new task"
-            return col + #ADD_TASK + 2, y             -- button col (2-space gap) and same row
+            return col + #ADD_TASK + 2, y, col        -- button col (2-space gap), row, label col
         end
     end
+end
+
+-- Is the label still drawn at (col, row)? A dozen tile reads, cheap enough for every frame, where
+-- the full scan above is a whole-screen sweep and is not.
+local function label_still_at(col, row)
+    if not col then return false end
+    for i = 0, #ADD_TASK - 1 do
+        local ok, pen = pcall(dfhack.screen.readTile, col + i, row)
+        local ch = (ok and pen and pen.ch) or 0
+        if ch ~= ADD_TASK:byte(i + 1) then return false end
+    end
+    return true
 end
 
 ButcherOverlay = defclass(ButcherOverlay, overlay.OverlayWidget)
@@ -300,7 +322,11 @@ ButcherOverlay.ATTRS{
     viewscreens = 'dwarfmode/ViewSheets/BUILDING/Workshop/Butchers',
     frame = {w = 9, h = 1},
     overlay_onupdate_max_freq_seconds = 0,            -- checked every frame, but only re-scrapes on change
-    version = 2,
+    -- 4: the button is hidden while the "Add new task" job list is open. Bumping this is also what
+    -- makes a running game pick the change up: `overlay reload` keeps an existing widget INSTANCE,
+    -- so an edited class is only rebuilt when its version changes. default_enabled keeps it on
+    -- through the config reset a bump causes.
+    version = 4,
 }
 
 function ButcherOverlay:open()
@@ -309,10 +335,16 @@ end
 
 function ButcherOverlay:init()
     self:addviews{
-        widgets.HotkeyLabel{
-            frame = {t = 0, l = 0, w = 9},
-            label = '[Butcher]',
-            on_activate = function() self:open() end,
+        widgets.Panel{
+            frame = {t = 0, l = 0, w = 9, h = 1},
+            visible = function() return self.on_task_list == true end,
+            subviews = {
+                widgets.HotkeyLabel{
+                    frame = {t = 0, l = 0, w = 9},
+                    label = '[Butcher]',
+                    on_activate = function() self:open() end,
+                },
+            },
         },
     }
 end
@@ -320,8 +352,9 @@ end
 -- snap the button next to "Add new task" (frame is relative to the interface rect, so convert the
 -- screen coords by the interface origin). Returns false if the text isn't on screen yet.
 function ButcherOverlay:reposition()
-    local col, row = add_task_button_pos()
+    local col, row, label_col = add_task_button_pos()
     if not col then return false end
+    self.label_col, self.label_row = label_col, row
     local ir = gui.get_interface_rect()
     self.frame = {w = self.frame.w, h = self.frame.h, l = col - ir.x1, t = row - ir.y1}
     self:updateLayout(gui.ViewRect{rect = ir})
@@ -333,14 +366,30 @@ end
 -- (heavier) screen scrape + reposition happens only when that signature changes.
 function ButcherOverlay:overlay_onupdate()
     local bld = cur_butcher_shop()
-    if not bld then self.sig = nil; return end
+    if not bld then self.sig = nil; self.on_task_list = false; return end
+    -- Cheap every frame: is "Add new task" still where it was? That answers both questions at
+    -- once -- whether this is the task list at all, and whether the button is still in the right
+    -- place. The full-screen scan runs only when that probe fails, and then at most five times a
+    -- second, so opening the job list costs one sweep rather than one per frame.
+    if label_still_at(self.label_col, self.label_row) then
+        self.on_task_list = true
+    else
+        self.on_task_list = false
+        local now = dfhack.getTickCount()
+        if not self.scan_ms or now < self.scan_ms or now - self.scan_ms >= 200 then
+            self.scan_ms = now
+            if self:reposition() then self.on_task_list = true end
+        end
+    end
+    -- the "Add new task" button slides down as tasks are added, so re-snap on a task count change
     local sig = ('%d:%d'):format(bld.id, #bld.jobs)
-    if sig ~= self.sig then
-        if self:reposition() then self.sig = sig end   -- commit only once the text is actually drawn
+    if self.on_task_list and sig ~= self.sig then
+        if self:reposition() then self.sig = sig end
     end
 end
 
 function ButcherOverlay:onInput(keys)
+    if not self.on_task_list then return ButcherOverlay.super.onInput(self, keys) end
     if keys.CUSTOM_CTRL_B then self:open(); return true end
     return ButcherOverlay.super.onInput(self, keys)
 end

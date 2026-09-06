@@ -182,8 +182,11 @@ The attack screens show a combat summary under each name — every
 
 ### **`smooth-movement`** 
 Smooth camera panning in adventure mode, and smooth movement for
-  creatures and the player in adventure mode. (A C++ plugin rather than a script — install it
-  with `make install`.)
+  creatures and the player in adventure mode. This is notliad's plugin, tracked at upstream v0.5,
+  with every flag on: creatures and vehicles glide between tiles, sprites face the way they walk,
+  hauled boulders, bars and wood show an icon while they are carried, movement uses the linear
+  tween, and the work-in-progress free camera is opted in. (A C++ plugin rather than a script —
+  install it with `make install`.)
 
 ![smooth-movement demo](demos/adv-smooth-camera.gif)
 

@@ -100,7 +100,7 @@ entity scaffolding).
 |---|---|---|
 | `plugins/ssaudio/minimp3.h`, `minimp3_ex.h` | lieff/minimp3 | **CC0 1.0** (public domain dedication) |
 | SDL2 (linked, not vendored; a Windows import lib comes from DFHack's `depends/`) | libsdl.org | **zlib** |
-| `other-authors/df-smooth-movement` (git submodule) | <https://github.com/anmej/df-smooth-movement> | **MIT**, © 2026 notliad |
+| `other-authors/df-smooth-movement` (git submodule) | <https://github.com/notliad/df-smooth-movement> | **MIT**, © 2026 notliad |
 | DFHack (build dependency, not vendored) | DFHack project | **zlib** |
 
 ## 6. Maintenance

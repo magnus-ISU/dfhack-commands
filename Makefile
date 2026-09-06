@@ -38,9 +38,11 @@
 #
 # Re-run after every DFHack update (plugins are ABI-specific to a DFHack version).
 
-# Where the smooth-movement prebuilt releases come from. Tracks anmej's fork (branch main),
-# which the other-authors/df-smooth-movement submodule also points at.
-REPO           ?= anmej/df-smooth-movement
+# Where the smooth-movement prebuilt releases come from. Tracks notliad's upstream (branch main),
+# which the other-authors/df-smooth-movement submodule also points at. This repo followed anmej's
+# fork while upstream's release deadlocked DF on fort load; upstream v0.5 dropped the render-thread
+# rendezvous that caused it, so there is nothing left to carry a fork for.
+REPO           ?= notliad/df-smooth-movement
 # This repo's own GitHub releases carry the prebuilt ssaudio binaries (tags: ssaudio-v*),
 # built by .github/workflows/ssaudio-release.yml for both linux and windows.
 SSAUDIO_REPO   ?= magnus-ISU/dfhack-commands
@@ -548,24 +550,16 @@ fetch-plugin:
 	esac
 	got="$$tmp/x/hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"
 	if [ ! -f "$$got" ]; then echo "Archive did not contain hack/plugins/$(FETCH_PLUGIN)$(PLUGEXT)"; exit 1; fi
-	# smooth-movement: upstream's prebuilt DEADLOCKS DF. plugin_enable waits for the render
-	# thread, but every `enable smooth-movement` from a script (onMapLoad.init ->
-	# fort/magnus-scripts apply) runs on the simulation thread, which is holding the frame the
-	# render thread is waiting to start -- DF wedges on the way into a fort, threads in
-	# futex_wait, no error anywhere. The submodule carries the fix (a core-suspended inline
-	# path); until it is upstream and released, a fetched asset that lacks it must not land on
-	# top of a locally built one. The fix is the only thing in the plugin that calls
-	# Core::isSuspended, so the symbol is the marker.
-	# `nm | grep -q` would lie here: grep -q exits on the first match, nm dies of SIGPIPE, and
-	# under `set -o pipefail` a FOUND symbol reports failure. Match on a captured string instead.
-	if [ "$(FETCH_PLUGIN)" = "smooth-movement" ] && command -v nm >/dev/null 2>&1; then
-	  fixsym="_ZN6DFHack4Core11isSuspendedEv"
-	  newsyms="$$(nm -D --undefined-only "$$got" 2>/dev/null || true)"
-	  case "$$newsyms" in
-	    *"$$fixsym"*) ;;
-	    *) build_from_source "REFUSING $(FETCH_REPO)'s smooth-movement asset: it lacks the core-suspended deadlock fix and will hang DF on fort load." ;;
-	  esac
-	fi
+	# smooth-movement once needed a guard here. Upstream's prebuilt used to DEADLOCK DF: a
+	# transaction waited for the render thread while holding DFHack's core suspension, and every
+	# `enable smooth-movement` from a script (onMapLoad.init -> fort/magnus-scripts apply) runs on
+	# the simulation thread, which is holding the frame the render thread is waiting to start -- DF
+	# wedged on the way into a fort, threads in futex_wait, no error anywhere. This repo tracked a
+	# fork carrying the fix, and refused any asset whose symbol table lacked Core::isSuspended.
+	# Upstream v0.5 has no render-thread rendezvous at all -- no transaction mutex, no waiting, and
+	# plugin_enable is a plain interpose hook -- so the hazard is gone by construction and the
+	# symbol check would now reject every upstream build. If a future release brings the rendezvous
+	# back, put the check back with it.
 	# Publish the binary by ATOMIC RENAME, never by extracting/cp'ing onto the live path: if DF
 	# has the old .so mapped, overwriting its inode in place crashes the game (hit twice; same
 	# rule as `make build`). The staging copy lives in PLUGDIR so the rename stays same-fs.

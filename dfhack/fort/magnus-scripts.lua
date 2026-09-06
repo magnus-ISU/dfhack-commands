@@ -466,17 +466,17 @@ local COLUMNS = {
     {id = 'vanilla', title = 'vanilla dfhack', mode = 'mixed', items = {
         {key = 'hide-tutorials', label = 'hide-tutorials', mode = 'any',
          enable = cmd('enable', 'hide-tutorials'), disable = cmd('disable', 'hide-tutorials')},
-        -- 3rd-party C++ plugin (notliad; vendored + built by `make build`). Fort mode
-        -- opts into the free camera, adventure mode into the world-tile slide.
+        -- 3rd-party C++ plugin (notliad's upstream, v0.5; vendored as a submodule, prebuilt by
+        -- `make install-plugin` or compiled by `make build`). Every flag is turned on: `all on`
+        -- covers sprite flipping, linear movement and hauled-item icons, and the free camera is
+        -- opted into separately because upstream leaves it out of `all` while it is WIP.
+        -- (The old `slide` line went with the fork: no build ever shipped that command.)
         {key = 'smooth-movement', label = 'smooth-movement', mode = 'any',
          enable = function()
             pcall(dfhack.run_command, 'load', 'smooth-movement')
             dfhack.run_command('enable', 'smooth-movement')
-            if dfhack.world.isAdventureMode() then
-                dfhack.run_command('smooth-movement', 'slide', 'on')
-            else
-                dfhack.run_command('smooth-movement', 'camera', 'on')
-            end
+            dfhack.run_command('smooth-movement', 'all', 'on')
+            dfhack.run_command('smooth-movement', 'camera', 'on')
          end,
          disable = cmd('disable', 'smooth-movement')},
         -- fort/autobutcher REPLACES the stock plugin: one adult limit per species

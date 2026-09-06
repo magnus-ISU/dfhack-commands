@@ -75,7 +75,7 @@ cp -r content-mods/high-adventure/ha-illithids "<DF>/mods/"
 world**; an existing save has its raws baked in.
 
 **Plugins.** `make install-plugin` fetches prebuilt binaries for
-[smooth-movement](https://github.com/anmej/df-smooth-movement) and `ssaudio` and drops them
+[smooth-movement](https://github.com/notliad/df-smooth-movement) and `ssaudio` and drops them
 into DFHack's plugin folder. To build from source instead, `make build` (clones the DFHack
 source tree into `build/` on first run). Never overwrite a plugin binary while DF is
 running — it crashes the game. Restart DF after installing one.
