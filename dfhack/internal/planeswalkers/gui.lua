@@ -24,7 +24,9 @@ local common = reqscript('internal/planeswalkers/common')
 -- what there is to choose from
 -- ---------------------------------------------------------------------------
 
-local function citizens()
+-- module-level so they can be exercised without opening the screen: a list builder that
+-- throws takes the whole window with it, which is exactly what happened first time out
+function citizens()
     local out = {}
     for _, u in ipairs(dfhack.units.getCitizens(true)) do
         out[#out + 1] = {
@@ -40,14 +42,18 @@ end
 -- Items nobody is carrying. A traveller's own gear comes with them automatically, so listing
 -- it here would be asking a question whose answer is already yes -- and it is most of the
 -- fort's item list, which would bury the things you might actually want to name.
-local function loose_items()
+function loose_items()
     local out = {}
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
         local f = it.flags
         if not (f.garbage_collect or f.removed or f.in_inventory or f.hostile or f.trader) then
+            -- getValue is a MODULE function, not a method: `item:getValue()` exists on some
+            -- item classes and not others (item_shieldst has none), so calling it that way
+            -- died on the first shield in the fort.
             local ok, desc = pcall(dfhack.items.getReadableDescription, it)
+            local okv, value = pcall(dfhack.items.getValue, it)
             if ok and desc then
-                out[#out + 1] = {id = it.id, name = desc, value = it:getValue()}
+                out[#out + 1] = {id = it.id, name = desc, value = okv and value or 0}
             end
         end
     end
@@ -72,7 +78,9 @@ SaveWindow.ATTRS{
 
 function SaveWindow:init()
     self.chosen_units, self.chosen_items = {}, {}
-    self.units, self.items = citizens(), loose_items()
+    -- the item list costs a fifth of a second to build (33k readable descriptions on this
+    -- fort) and most of the time you only came to pick dwarves, so it waits until asked for
+    self.units, self.items = citizens(), nil
 
     self:addviews{
         widgets.CycleHotkeyLabel{
@@ -137,6 +145,7 @@ end
 
 function SaveWindow:rows()
     local which = self.subviews.tab:getOptionValue()
+    if which ~= 'units' and not self.items then self.items = loose_items() end
     return which == 'units' and self.units or self.items,
            which == 'units' and self.chosen_units or self.chosen_items
 end
