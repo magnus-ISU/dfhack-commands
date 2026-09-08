@@ -23,9 +23,15 @@ Mouse helpers for DF's designation and construction tools (overlay "right-click-
   * ALL gestures route through map_pos_if_clear(): the strict dfhack.gui.getMousePos() is nil
     over any UI (toolbar/panel/menu/notification), so a click on ANY UI element does the normal
     thing instead of designating -- plus we stand off DF hover elements and other DFHack overlays.
-  * RIGHT-DRAG a box REMOVES everything designated in it (dig/chop/gather designations,
-    smoothing/engraving/fortification designations + their queued jobs, and in-progress
-    buildings). While dragging, a red-X preview marks the tiles that will be erased. A
+  * RIGHT-DRAG a box REMOVES everything designated in it, and any in-progress buildings.
+    The removal is DF'S OWN ERASER, driven for one click: the tool is switched to ERASE, the
+    box is handed over through DF's corner state and a synthetic second-corner click, and
+    everything is put back. So it erases exactly what the eraser erases -- dig, chop, gather,
+    smoothing, engraving, track, fortification -- including the queued job a designation has
+    already become, which DF knows how to take back and we do not. Planned smoothing
+    (`fort/planned-smoothing`) is told about the box too, since its tiles are undug rock that
+    DF's eraser cannot see. Erasing needs a designation tool to be up; in building placement
+    a right-click still cancels the building under it. While dragging, a red-X preview marks the tiles that will be erased. A
     LEFT-press during a right-drag CANCELS the erase (and does not designate).
   * RIGHT single-click cancels whatever is designated under the cursor (a dig designation, a
     tree/plant marked for chop/gather, or an in-progress construction/building); a right
@@ -144,71 +150,49 @@ for _, name in ipairs({
     'ERASE',
 }) do ACTIVE_DESIG[MD[name]] = true end
 
-local DIG_JOB = {}
+-- Everything DF's eraser can take off a tile, as JOB types. READ ONLY: this is
+-- only ever asked "is there anything here to erase?", so that a right-click on a
+-- bare tile still passes through to the game as its normal "leave the tool".
+-- It has to include the jobs, not just the designations, because DF CLEARS the
+-- tile's designation the moment it posts the job -- after that the job is the
+-- only evidence the tile was ever designated.
+local ERASABLE_JOB = {}
 for _, name in ipairs({'Dig', 'CarveUpwardStaircase', 'CarveDownwardStaircase',
-    'CarveUpDownStaircase', 'CarveRamp', 'DigChannel'}) do DIG_JOB[df.job_type[name]] = true end
-local CHOP_JOB = {[df.job_type.FellTree] = true}
-local GATHER_JOB = {[df.job_type.GatherPlants] = true}
--- smoothing, engraving and fortification-carving jobs (all driven by the same
--- designation.smooth flag: smooth on rough stone, engrave/fortify on smooth stone)
-local SMOOTH_JOB = {}
-for _, name in ipairs({'DetailWall', 'DetailFloor', 'CarveFortification'}) do
-    SMOOTH_JOB[df.job_type[name]] = true
+    'CarveUpDownStaircase', 'CarveRamp', 'DigChannel', 'FellTree', 'GatherPlants',
+    'SmoothWall', 'SmoothFloor', 'DetailWall', 'DetailFloor', 'CarveFortification',
+    'CarveTrack'}) do
+    ERASABLE_JOB[df.job_type[name]] = true
 end
 
-local function remove_jobs_at(pos, typeset)
-    local removed = false
+local function job_at(pos)
     local link = df.global.world.jobs.list.next
     while link do
-        local job, nxt = link.item, link.next
-        if job and typeset[job.job_type]
+        local job = link.item
+        if job and ERASABLE_JOB[job.job_type]
             and job.pos.x == pos.x and job.pos.y == pos.y and job.pos.z == pos.z then
-            dfhack.job.removeJob(job)
-            removed = true
+            return true
         end
-        link = nxt
-    end
-    return removed
-end
-
-local function cancel_dig(pos)
-    local blk = dfhack.maps.getTileBlock(pos)
-    if not blk then return false end
-    local lx, ly = pos.x % 16, pos.y % 16
-    local des = blk.designation[lx][ly]
-    local had = des.dig ~= DV.No
-    if had then
-        des.dig = DV.No
-        blk.occupancy[lx][ly].dig_marked = false
-        blk.flags.designated = true
-    end
-    if remove_jobs_at(pos, DIG_JOB) then had = true end
-    return had
-end
-
--- un-designate smoothing / engraving / fortification-carving on the tile (all three
--- live in designation.smooth), and remove any already-queued detailing job there
-local function cancel_smooth(pos)
-    local blk = dfhack.maps.getTileBlock(pos)
-    if not blk then return false end
-    local des = blk.designation[pos.x % 16][pos.y % 16]
-    local had = des.smooth ~= 0
-    if had then
-        des.smooth = 0
-        blk.flags.designated = true
-    end
-    if remove_jobs_at(pos, SMOOTH_JOB) then had = true end
-    return had
-end
-
--- un-mark a tree/plant designated for chop/gather
-local function cancel_plant(pos)
-    local plant = dfhack.maps.getPlantAtTile(pos)
-    if plant and dfhack.designations.isPlantMarked(plant) and dfhack.designations.canUnmarkPlant(plant) then
-        dfhack.designations.unmarkPlant(plant)
-        return true
+        link = link.next
     end
     return false
+end
+
+-- carve_track_* read back as either a boolean or a 0/1, depending on how it was
+-- last written; `false ~= 0` is true in lua, so both have to be spelled out
+local function set(v) return v and v ~= 0 end
+
+local function something_to_erase(pos)
+    local blk = dfhack.maps.getTileBlock(pos)
+    if blk then
+        local lx, ly = pos.x % 16, pos.y % 16
+        local des, occ = blk.designation[lx][ly], blk.occupancy[lx][ly]
+        if des.dig ~= DV.No or des.smooth ~= 0 then return true end
+        if set(occ.carve_track_north) or set(occ.carve_track_east)
+            or set(occ.carve_track_south) or set(occ.carve_track_west) then return true end
+    end
+    local plant = dfhack.maps.getPlantAtTile(pos)
+    if plant and dfhack.designations.isPlantMarked(plant) then return true end
+    return job_at(pos)
 end
 
 local function under_construction(bld)
@@ -228,15 +212,8 @@ local function cancel_building(pos)
     return false
 end
 
-local function cancel_at(pos)
-    local did = cancel_dig(pos)
-    if cancel_smooth(pos) then did = true end
-    if remove_jobs_at(pos, CHOP_JOB) then did = true end
-    if remove_jobs_at(pos, GATHER_JOB) then did = true end
-    if cancel_plant(pos) then did = true end
-    if cancel_building(pos) then did = true end
-    return did
-end
+-- (the erase itself is a widget method: it works by driving DF's own eraser,
+-- which needs the widget's passthrough click -- see RightClickCancel:erase)
 
 local function in_cancel_mode()
     local mi = df.global.game.main_interface
@@ -275,9 +252,7 @@ local function removal_tool_for_box(a, b)
     return nil   -- mixed, or contains diggable rock -> normal dig
 end
 
-local function cancel_box(a, b)
-    for_box(a, b, function(x, y, z) cancel_at({x = x, y = y, z = z}) end)
-end
+
 
 -- current dig-designation value at pos (No if the block isn't loaded)
 local function dig_val(pos)
@@ -323,6 +298,70 @@ function RightClickCancel:passthrough(key)
     self.pass = true
     gui.simulateInput(dfhack.gui.getDFViewscreen(true), key)
     self.pass = false
+end
+
+-- ERASE THROUGH DF'S OWN ERASER, never by hand.
+--
+-- This used to clear `designation.dig` / `designation.smooth` itself and then
+-- hunt the job list for whatever the tile had already become. Two things were
+-- wrong with that. It could not keep up -- the job types are per action, and the
+-- smoothing pair was simply missing, so a smoothing designation lost its flag
+-- and got smoothed anyway by the job nobody had removed. And taking a job away
+-- from the dwarf holding it frees a struct DF is still pointing at, which is a
+-- SIGSEGV this fort has seen.
+--
+-- DF's eraser already does all of it, correctly, for every designation type
+-- there is. So the tool is switched to ERASE for exactly one click, DF is handed
+-- the box through its own corner-1 state (`selection_rect`) plus a synthetic
+-- corner-2 click at the cursor, and everything is put back. The same trick the
+-- Dig auto-remove above uses, and the game does the work.
+function RightClickCancel:erase(a, b)
+    local mi = df.global.game.main_interface
+    -- Only from a designation tool. In BUILDING_PLACEMENT the designation tool
+    -- is NONE and switching it mid-placement would yank the UI out from under
+    -- the player; in-progress buildings are cancelled by cancel_building either
+    -- way, which is what a right-click means in that mode.
+    if not ACTIVE_DESIG[mi.main_designation_selected] then return false end
+    local sr = df.global.selection_rect
+    local tool, rects = mi.main_designation_selected, mi.main_designation_doing_rectangles
+    local sx, sy, sz = sr.start_x, sr.start_y, sr.start_z
+    mi.main_designation_selected = MD.ERASE
+    mi.main_designation_doing_rectangles = true
+    sr.start_x, sr.start_y, sr.start_z = a.x, a.y, a.z
+    self:passthrough('_MOUSE_L')   -- corner 2, at the cursor: DF erases the box
+    mi.main_designation_selected = tool
+    mi.main_designation_doing_rectangles = rects
+    sr.start_x, sr.start_y, sr.start_z = sx, sy, sz
+
+    self:told_planned_smoothing(MD.ERASE, a, b)
+    return true
+end
+
+-- A planned smoothing tile is undug rock with nothing designated on it, so DF
+-- cannot see one and neither can its eraser. The tool that owns them hooks the
+-- player's own clicks on the designation screens -- but a drag completed here
+-- finishes with a SYNTHETIC click, which goes straight to the viewscreen and
+-- past every overlay, so it has to be told by hand.
+function RightClickCancel:told_planned_smoothing(tool, a, b)
+    if tool ~= MD.SMOOTH and tool ~= MD.ERASE then return end
+    local ok, ps = pcall(reqscript, 'fort/planned-smoothing')
+    if not ok or not ps then return end
+    local fn = tool == MD.SMOOTH and ps.plan_box or ps.forget_box
+    if fn then pcall(fn, a.x, a.y, a.z, b.x, b.y, b.z) end
+end
+
+function RightClickCancel:cancel_at(pos)
+    local did = false
+    if something_to_erase(pos) then did = self:erase(pos, pos) end
+    if cancel_building(pos) then did = true end
+    return did
+end
+
+function RightClickCancel:cancel_box(a, b)
+    -- one erase for the whole box -- DF's eraser takes a rectangle, so there is
+    -- no reason to walk it a tile at a time
+    self:erase(a, b)
+    for_box(a, b, function(x, y, z) cancel_building({x = x, y = y, z = z}) end)
 end
 
 local function same(a, b) return a.x == b.x and a.y == b.y and a.z == b.z end
@@ -401,11 +440,11 @@ function RightClickCancel:overlay_onupdate()
                         -- #4: right-click on a just-added tile -> forward (exit the tool)
                         self.last_add = nil
                         self:passthrough('_MOUSE_R')
-                    elseif not cancel_at(rel) then
+                    elseif not self:cancel_at(rel) then
                         self:passthrough('_MOUSE_R')
                     end
                 else
-                    cancel_box(self.rpress, rel)
+                    self:cancel_box(self.rpress, rel)
                 end
             end
         end

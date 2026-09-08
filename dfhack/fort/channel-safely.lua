@@ -50,6 +50,11 @@ HOW IT WORKS
   around floor that is not itself designated has no safe order and will sit
   suspended: designate the floor inside it, or dig those tiles by hand.
 
+  Smoothing beside a channel goes first. A tile waits while it or any of the
+  eight around it is still designated for smoothing or engraving, or has a
+  detailing job outstanding -- cutting the floor away first only sends the
+  detailer to a hole and gets the job cancelled.
+
 PRIORITY 1 IS THE ESCAPE HATCH
   A designation at priority 1 is never touched. That is the way to say "dig this
   now, I know what I am doing".
@@ -147,7 +152,21 @@ end
 
 -- Dig priority lives in a per-block event holding a 16x16 array, not in the tile
 -- record. A block with no such event is at DF's default.
+--
+-- Most blocks have no such event, and finding that out costs a block fetch plus
+-- a walk of its event list -- which was being paid once per DESIGNATED TILE, up
+-- to 256 times over for the same block, twice in every pass. So the negative
+-- answer is remembered for the length of a pass. Only the negative: a block
+-- that HAS the event is re-read, because the priorities inside it are the thing
+-- the player changes to use the escape hatch, and that has to take effect on
+-- the next pass rather than whenever the memo happens to be dropped. Nothing
+-- here holds a df pointer across frames -- only a block key and a boolean.
+local prio_none = {}
+local function forget_priorities() prio_none = {} end
+
 local function priority_of(pos)
+    local bk = (pos.x // 16) .. ',' .. (pos.y // 16) .. ',' .. pos.z
+    if prio_none[bk] then return DEFAULT_PRIORITY end
     local block, bx, by = tile_parts(pos)
     if not block then return DEFAULT_PRIORITY end
     for _, ev in ipairs(block.block_events) do
@@ -158,6 +177,7 @@ local function priority_of(pos)
             return DEFAULT_PRIORITY
         end
     end
+    prio_none[bk] = true
     return DEFAULT_PRIORITY
 end
 
@@ -244,6 +264,7 @@ release_cursor = release_cursor or 0
 -- designation drawn across undug rock is waiting on the tunnel to it, not on
 -- this tool, and `status` should say which of the two it is
 unreachable_pass = unreachable_pass or false
+waiting_on_detail = waiting_on_detail or 0
 
 local SHAPE_OPEN, SHAPE_WALL, SHAPE_SUPPORT = 0, 1, 2
 
@@ -974,8 +995,8 @@ end
 
 -- Tiles let out but not yet dug: still designated, or gone from the map into a
 -- job somebody is carrying. Until this is empty, nothing else is released.
-function outstanding(s)
-    local jobs = inflight_channels()
+function outstanding(s, jobs)
+    jobs = jobs or inflight_channels()
     local out = {}
     for k in pairs(s.released or {}) do
         local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
@@ -989,6 +1010,32 @@ end
 -- Would digging `hyp` (a set of holes-to-be) leave any designated tile with
 -- nowhere to stand that reaches the outside? Walkability comes from DF's own
 -- groups, read straight out of the blocks, with the pretend holes knocked out.
+-- A tile with a fort RAMP directly under it is reachable, even though DF gives
+-- it no walkability group of its own. That is what a channelled tile becomes --
+-- ramp below, ramp top above -- and coming up that ramp is how the miners have
+-- been reaching the next wall all along. `workable` has known this about a
+-- tile's NEIGHBOURS for a while; the stranding test never knew it about the
+-- tiles it floods over, so a level that had already been channelled out read as
+-- solid impassable nothing: measured at z=210, every surrounding tile a RAMP_TOP
+-- in walkable group 0, with the fort's own ramps sitting under them one level
+-- down in group 6473.
+local function over_fort_ramp(pos, block, bx, by, group, cache)
+    local codes = shape_code_table()
+    if not block or codes[block.tiletype[bx][by]] == SHAPE_WALL then return false end
+    local bk = (pos.x // 16) * 4096 + (pos.y // 16)
+    local ub = cache[bk]
+    if ub == nil then
+        ub = dfhack.maps.getTileBlock({x = pos.x, y = pos.y, z = pos.z - 1}) or false
+        cache[bk] = ub
+    end
+    if not ub then return false end
+    local ux, uy = pos.x % 16, pos.y % 16
+    if df.tiletype.attrs[ub.tiletype[ux][uy]].shape ~= df.tiletype_shape.RAMP then
+        return false
+    end
+    return in_groups(ub.walkable[ux][uy], group)
+end
+
 function strands_work(active, hyp, group)
     if not group or not next(group) then return false end
     local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
@@ -1000,7 +1047,7 @@ function strands_work(active, hyp, group)
     local w, h, z = x1 - x0 + 1, y1 - y0 + 1, active[1].z
     if w * h > MAX_AREA then return false end
 
-    local walk, blocks = {}, {}
+    local walk, blocks, below = {}, {}, {}
     for ix = 0, w - 1 do
         for iy = 0, h - 1 do
             local x, y = x0 + ix, y0 + iy
@@ -1011,6 +1058,11 @@ function strands_work(active, hyp, group)
                 blocks[bk] = b
             end
             local ok = b and in_groups(b.walkable[x % 16][y % 16], group)
+            -- only asked of tiles the fort cannot already walk, so the extra
+            -- lookup is paid on the holes and nowhere else
+            if not ok and b then
+                ok = over_fort_ramp({x = x, y = y, z = z}, b, x % 16, y % 16, group, below)
+            end
             if ok and hyp[key({x = x, y = y, z = z})] then ok = false end
             walk[ix * h + iy] = ok and true or false
         end
@@ -1095,12 +1147,22 @@ function strands_work(active, hyp, group)
 
     for _, p in ipairs(active) do
         if not hyp[key(p)] and not solid(p) then
-            local reachable = false
-            for _, d in ipairs(NEIGHBOURS) do
-                local ix, iy = p.x + d.x - x0, p.y + d.y - y0
-                if ix >= 0 and iy >= 0 and ix < w and iy < h and seen[ix * h + iy] then
-                    reachable = true
-                    break
+            -- ITS OWN CELL COUNTS. The test only ever asked whether a NEIGHBOUR
+            -- was reachable, which is wrong for a tile a dwarf arrives at
+            -- directly -- a staircase being the plain case: it is its own way in
+            -- and out, and the flood reaches it, yet with every neighbour a hole
+            -- it was declared stranded and the last two tiles of an excavation
+            -- were refused forever.
+            local ix, iy = p.x - x0, p.y - y0
+            local reachable = ix >= 0 and iy >= 0 and ix < w and iy < h
+                and seen[ix * h + iy] or false
+            if not reachable then
+                for _, d in ipairs(NEIGHBOURS) do
+                    local nx, ny = p.x + d.x - x0, p.y + d.y - y0
+                    if nx >= 0 and ny >= 0 and nx < w and ny < h and seen[nx * h + ny] then
+                        reachable = true
+                        break
+                    end
                 end
             end
             if not reachable then return true end
@@ -1121,7 +1183,58 @@ local function window_active(active, cand)
     return sub
 end
 
+-- SMOOTHING BESIDE A CHANNEL GOES FIRST.
+--
+-- Cutting the floor out from under a tile takes away the spot a detailer was
+-- going to stand on, and DF cancels the job when they get there and find a hole.
+-- The work is not lost for good -- the designation comes back -- but the round
+-- trip is wasted and the room is left half finished for as long as the
+-- excavation takes. So a channel tile waits while anything beside it is still
+-- waiting to be smoothed or engraved.
+--
+-- The tile ITSELF counts as well as the eight around it: channelling a tile that
+-- is also designated for smoothing destroys that designation outright.
+--
+-- Both halves have to be asked, because they are never true at once: DF clears
+-- `designation.smooth` the moment it posts the job, so a tile with detailing
+-- actually under way has no designation left to find, and one still waiting has
+-- no job yet.
+local DETAIL_JOB = {}
+for _, name in ipairs({'SmoothWall', 'SmoothFloor', 'DetailWall', 'DetailFloor'}) do
+    DETAIL_JOB[df.job_type[name]] = true
+end
+
+local AROUND = {}
+for dx = -1, 1 do
+    for dy = -1, 1 do AROUND[#AROUND + 1] = {x = dx, y = dy} end
+end
+
+-- Positions of every outstanding detailing job. Walked once per pass rather than
+-- once per candidate: the job list is as long as the fort is busy.
+local function detailing_jobs()
+    local set = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        if job and DETAIL_JOB[job.job_type] then set[key(job.pos)] = true end
+        link = link.next
+    end
+    return set
+end
+
+local function detailing_beside(pos, jobs)
+    for _, d in ipairs(AROUND) do
+        local n = {x = pos.x + d.x, y = pos.y + d.y, z = pos.z}
+        local des = designation_of(n)
+        if des and des.smooth ~= 0 then return true end
+        if jobs[key(n)] then return true end
+    end
+    return false
+end
+
 function choose_release(active, phantom, group)
+    local detail_jobs = detailing_jobs()
+    waiting_on_detail = 0
     local _, base = analyse(active, phantom)
     -- nil means the excavation is bigger than one grid can hold: judge each
     -- candidate through its own window instead of abandoning the whole thing
@@ -1195,6 +1308,13 @@ function choose_release(active, phantom, group)
             goto continue
         end
 
+        -- cheap, and it rules the tile out completely, so it goes ahead of the
+        -- support and stranding searches
+        if detailing_beside(cand, detail_jobs) then
+            waiting_on_detail = waiting_on_detail + 1
+            goto continue
+        end
+
         -- never beside work already out: two adjacent tiles dug at the same
         -- moment can drop a floor that neither would alone, and no amount of
         -- per-tile reasoning sees that coming
@@ -1238,6 +1358,8 @@ local function reclaim_stray_jobs()
         if job.job_type ~= df.job_type.DigChannel then return end
         local pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}
         local k = key(pos)
+        -- (the same walk feeds `inflight_channels`; kept separate because this
+        -- one has to see the job object, not just its position)
         if s.released[k] or s.allowed[k] then return end
         if priority_of(pos) <= EXEMPT_PRIORITY then return end
         if dfhack.job.getWorker(job) then return end
@@ -1245,28 +1367,36 @@ local function reclaim_stray_jobs()
     end)
 end
 
+-- WHEN THE WORKING SET IS FULL THERE IS NOTHING TO DECIDE.
+--
+-- Eight tiles out is the cap, and until one of them is dug no ninth tile can be
+-- released whatever the map looks like. Everything that exists only to pick the
+-- next tile -- gathering the candidate list, rebuilding the walkability groups,
+-- weighing shapes -- is therefore dead work on a fort that has drawn a lot of
+-- channel blueprints, and it was being done once a second against every one of
+-- those tiles. This pass now establishes what is still out FIRST, and does the
+-- deciding work only when there is room for another pick.
+--
+-- What still has to happen every pass, full or not: the eight out tiles stay
+-- restricted, a tile that got dug leaves the set, jobs that escaped are taken
+-- back, and freshly drawn designations are held. All of that is bounded by the
+-- working set or already paid for by the sweep.
 local function apply(found, top)
     local s = get_state()
     s.released = s.released or {}
     s.allowed = s.allowed or {}
+    forget_priorities()
     reclaim_stray_jobs()
 
-    local active = {}
-    for _, pos in ipairs(found) do
-        if pos.z == top and priority_of(pos) > EXEMPT_PRIORITY then
-            active[#active + 1] = pos
-        end
-    end
-
     -- forget released tiles that are done with
-    local out = outstanding(s)
+    local jobs = inflight_channels()
+    local out = outstanding(s, jobs)
 
     -- And take back the ones that were let out but can never be worked: no job
     -- came of them and no miner can reach them. Released tiles stay out until
     -- they are dug, so without this the working set silently fills with tiles
     -- nobody can touch and nothing else is ever released.
     do
-        local jobs = inflight_channels()
         local group = fort_groups()
         for k in pairs(out) do
             if not jobs[k] then
@@ -1290,6 +1420,19 @@ local function apply(found, top)
     end
     for k in pairs(s.released) do
         if not out[k] then s.released[k] = nil end
+    end
+
+    -- The candidate list is only ever read to pick another tile, so it is only
+    -- built when there is room for one. On a fort with thousands of channel
+    -- designations this loop alone was a priority lookup per tile per pass.
+    local active = {}
+    local room = count(out) < MAX_CONCURRENT
+    if room then
+        for _, pos in ipairs(found) do
+            if pos.z == top and priority_of(pos) > EXEMPT_PRIORITY then
+                active[#active + 1] = pos
+            end
+        end
     end
 
     -- Top the working set up to MAX_CONCURRENT, one pick at a time, each chosen
@@ -1323,19 +1466,31 @@ local function apply(found, top)
             -- to happen, not just for the pass that let it out
             restrict(pos)
             freed = freed + 1
+        elseif s.marks[k] and s.traffic[k] == nil then
+            -- Already held, and holding it again writes nothing: the marker bit
+            -- is re-asserted by deny_on_sight on every sweep, which is what
+            -- keeps a hand-cleared suspension from sticking. Skipping the
+            -- re-hold is three block lookups saved per tile per pass, and on a
+            -- fort with a lot of blueprints drawn that is nearly the whole pass.
+            held = held + 1
         else
             hold(pos); held = held + 1
         end
     end
 
-    -- a tile we were holding that is no longer designated must not keep an
-    -- entry, or the marker bit is stranded
-    for k in pairs(s.marks) do
-        local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
-        local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
-        if pos and not is_channel(pos) then
-            set_marked(pos, false)
-            s.marks[k] = nil
+    -- A tile we were holding that is no longer designated must not keep an
+    -- entry, or the marker bit is stranded. Every held tile is a mark and every
+    -- mark of a still-designated tile was just counted as held, so marks and
+    -- held agreeing means there is nothing stale to look for -- and this sweep,
+    -- which reads a block per mark, can be skipped outright.
+    if count(s.marks) > held then
+        for k in pairs(s.marks) do
+            local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+            local pos = x and {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
+            if pos and not is_channel(pos) then
+                set_marked(pos, false)
+                s.marks[k] = nil
+            end
         end
     end
     for k in pairs(s.traffic) do
@@ -1593,6 +1748,11 @@ function status()
                 .. 'set them to priority %d')
                 :format(last_pass_blocked, last_pass_blocked == 1 and '' or 's',
                         EXEMPT_PRIORITY))
+        elseif (waiting_on_detail or 0) > 0 then
+            print(('  %d designation%s are waiting on smoothing or engraving beside them '
+                .. '-- cutting the floor first would send the detailer to a hole and '
+                .. 'cancel the job')
+                :format(waiting_on_detail, waiting_on_detail == 1 and '' or 's'))
         elseif unreachable_pass then
             print(('  %d designation%s cannot be reached yet -- no miner can stand at '
                 .. 'or beside any of them; they stay planned until something is dug '
@@ -1614,6 +1774,23 @@ end
 -- `fort/channel-safely why <x> <y> <z>` -- the verdict for one tile, with the
 -- reason. Written because "it caused a cave-in" is impossible to act on without
 -- knowing which test cleared the tile that did it.
+-- every channel designation on one z-level, for `why` to judge against
+function scan_channels(z)
+    local out = {}
+    for _, b in ipairs(df.global.world.map.map_blocks) do
+        if b.map_pos.z == z and (b.flags.designated or true) then
+            for bx = 0, 15 do
+                for by = 0, 15 do
+                    if b.designation[bx][by].dig == df.tile_dig_designation.Channel then
+                        out[#out + 1] = {x = b.map_pos.x + bx, y = b.map_pos.y + by, z = z}
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
 function why(x, y, z)
     local pos = {x = tonumber(x), y = tonumber(y), z = tonumber(z)}
     if not (pos.x and pos.y and pos.z) then
@@ -1644,13 +1821,26 @@ function why(x, y, z)
     print(('  beside work already out: %s'):format(
         #beside == 0 and 'no' or table.concat(beside, ' ')))
 
-    -- support: what would digging it leave hanging
-    local active = {pos}
+    -- THE SAME SET THE PASS JUDGES AGAINST, not just this tile.
+    --
+    -- Both tests weigh a candidate against every other designated tile on the
+    -- level -- that is the whole point of them -- so asking them about a set of
+    -- one answers a different question. It said "reachability: fine" about a
+    -- tile the pass was refusing for stranding work, which sent the search for
+    -- the fault in the wrong direction entirely.
+    local active = {}
+    for _, p in ipairs(scan_channels(pos.z)) do
+        if priority_of(p) > EXEMPT_PRIORITY then active[#active + 1] = p end
+    end
+    if #active == 0 then active = {pos} end
+    print(('  judged with the %d designation%s on z=%d'):format(
+        #active, #active == 1 and '' or 's', pos.z))
+
     local hyp = {}
     for kk in pairs(out) do hyp[kk] = true end
     hyp[k] = true
-    local _, base = analyse({pos}, out)
-    local _, after = analyse({pos}, hyp)
+    local _, base = analyse(active, out)
+    local _, after = analyse(active, hyp)
     if not after then
         print('  support: area over budget, not checked')
     else
@@ -1670,7 +1860,7 @@ function why(x, y, z)
         end
     end
     print(('  reachability: %s'):format(
-        strands_work({pos}, hyp, fort_groups()) and 'WOULD STRAND WORK' or 'fine'))
+        strands_work(active, hyp, fort_groups()) and 'WOULD STRAND WORK' or 'fine'))
 end
 
 if dfhack_flags and dfhack_flags.module then return end

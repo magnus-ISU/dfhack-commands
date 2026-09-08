@@ -1879,7 +1879,7 @@ STANDING = {
                 .. 'manager order left running on a condition that cannot tell a gem from a lump\n'
                 .. 'of glass, and no second ask. `planner-orders disable` hands it back.',
             build = function()
-                set_auto('Cut gems')
+                set_auto('Cut gems', true)
                 return cut_one()
             end}}
     end,
@@ -2301,7 +2301,7 @@ STANDING = {
                 .. 'Say yes ONCE and the whole ladder is handled from then on, with nothing more\n'
                 .. 'asked. `planner-orders disable` hands it back.',
             build = function()
-                set_auto('Adamantine')
+                set_auto('Adamantine', true)
                 return DO[step.kind](step.n)
             end}}
     end,

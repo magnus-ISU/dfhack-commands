@@ -10,15 +10,46 @@ each one picked with the previous ones imagined as already channelled out. A til
 out if digging it leaves nothing without support — support runs along the four sides and up from
 the rock below, never through a corner — and if every other designated tile still has somewhere
 to stand that connects out of the excavation. Tiles that are out get restricted traffic so
-nobody wanders onto them, and their old traffic setting is restored afterwards. A shape with no
+nobody wanders onto them, and their old traffic setting is restored afterwards. Smoothing beside
+a channel goes first: a tile waits while it or any of the eight around it is still designated for
+smoothing or engraving, or has a detailing job outstanding, since cutting the floor away first
+only sends the detailer to a hole and gets the job cancelled. A shape with no
 safe order, like a ring drawn around floor that is not itself designated, simply stays planned.
-Only tiles a miner can actually get to are let out — revealed, and with somewhere to stand at
-their own level — which keeps a designation drawn across undug rock from filling the working set
+Only tiles a miner can actually get to are let out — revealed, and with somewhere to stand:
+its own tile if that is reachable (a staircase is its own way in), a neighbour at its own level,
+or a hole with one of the fort's ramps under it, which is how a miner walks back up into a level
+that has already been channelled out — which keeps a designation drawn across undug rock from filling the working set
 with tiles nobody can reach; when none of it can be reached yet, `status` says so rather than
 blaming the shape. Priority 1 designations are never touched, and
 `fort/channel-safely why <x> <y> <z>` explains any tile's verdict. Enabled by `magnus-scripts`.
 
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
+
+### **`fort/planned-smoothing`**
+Smooth a room before you have finished digging it. A smooth designation only sticks to tiles
+that are revealed, so the part of your box that lands on undug rock is silently thrown away —
+this remembers those tiles and lays the designation down once each one is a revealed floor of
+natural hard stone with nothing already smoothed and nothing built on it, using DF's own rules.
+Mining comes first: rock beside a fresh excavation is revealed as a wall long before anybody
+digs it out, and smoothing that face is work a miner cuts away an hour later, so the tile waits
+until mining has actually happened in it. Tiles that can never be smoothed — soil, constructions,
+or a tile whose outstanding job is a staircase, a ramp or a channel — are forgotten rather than
+held forever. The eraser takes plans back the same
+way it takes designations back. Plans live in memory only and do not survive a reload, by
+design: a box you dragged a minute ago is not a standing preference.
+
+Smooth designations are also redrawn — DF's full-tile wash is replaced by a small triangle in
+the corner of the tile, the shape DFHack marks damp digs with, in gray: bright for designated,
+dark for planned and still waiting on the rock. A tile keeps that marker once its designation
+becomes a job, which DF otherwise redraws its own way (it clears the tile's designation flag the
+moment it posts the job), so a room looks the same from the drag until a dwarf takes the work —
+at which point DF's flashing takes over and says somebody is on the way. The wash is only taken
+away when smoothing is the one thing designated on the tile: a tile also marked for mining keeps
+DF's art and just gets the triangle drawn over it, and hidden tiles are never drawn on at all.
+Engrave designations keep DF's own graphic. `art off` puts DF's own designation art back and
+leaves it alone.
+`fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
+immediately. Enabled by `magnus-scripts`.
 
 ### **`fort/builder-burrow`**
 Turn a burrow into a district. Pick a burrow (only those on a single z-level are listed, under

@@ -150,6 +150,16 @@ local COLUMNS = {
             dfhack.run_command('overlay', 'enable', 'fort/plan-tile.tile')
          end,
          disable = overlay_set('disable', 'fort/plan-tile.tile')},
+        -- two overlays: one on the designation screens, one on the map
+        {key = 'planned-smoothing', label = 'planned-smoothing',
+         enable = function()
+            dfhack.run_command('overlay', 'enable', 'fort/planned-smoothing.capture')
+            dfhack.run_command('overlay', 'enable', 'fort/planned-smoothing.paint')
+         end,
+         disable = function()
+            dfhack.run_command('overlay', 'disable', 'fort/planned-smoothing.capture')
+            dfhack.run_command('overlay', 'disable', 'fort/planned-smoothing.paint')
+         end},
         {key = 'item-description', label = 'item-description',
          enable = overlay_set('enable', 'fort/item-description.expand'),
          disable = overlay_set('disable', 'fort/item-description.expand')},
