@@ -232,9 +232,17 @@ local COLUMNS = {
          disable = notify_off({'mandates_active', 'mandates_expiring'})},
         {key = 'raid-notification', label = 'raid-notification',
          enable = script('fort/raid-notification'), disable = notify_off({'raids'})},
+        -- two pieces: the notify line and the same line on the depot panel, so the row turns
+        -- the overlay on and off along with it
         {key = 'trader-notification', label = 'trader-notification',
-         enable = script('fort/trader-notification'),
-         disable = notify_off({'trader_ready'}, {'traders_ready'})},
+         enable = function()
+            dfhack.run_script('fort/trader-notification')
+            dfhack.run_command('overlay', 'enable', 'fort/trader-notification.depot_countdown')
+         end,
+         disable = function()
+            notify_off({'trader_ready'}, {'traders_ready'})()
+            dfhack.run_command('overlay', 'disable', 'fort/trader-notification.depot_countdown')
+         end},
         {key = 'empty-labor-notification', label = 'empty-labor-notification',
          enable = script('fort/empty-labor-notification'), disable = notify_off({'empty_labor'})},
         {key = 'moody-items-warning', label = 'moody-items-warning',

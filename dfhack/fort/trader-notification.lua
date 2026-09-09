@@ -1,5 +1,6 @@
--- Adds a "trader is ready to trade" countdown to DFHack's gui/notify panel.
---@ module = false
+-- Adds a "trader is ready to trade" countdown to DFHack's gui/notify panel, and puts the same
+-- line on the trade depot's own panel.
+--@module = true
 --[[
 trader-notification
 
@@ -34,10 +35,17 @@ Either way the broker is asked for -- the depot's "bring the broker" flag -- unl
 he is already standing on the depot. Sending him is what makes the panel you just
 opened worth anything, and it is the step that gets forgotten.
 
+THE SAME LINE GOES ON THE DEPOT'S OWN PANEL, under the "Trade Depot" title -- the screen you
+are on when you are deciding what to send down there is the screen that should be telling you
+how long you have. It is the notification's own text, so the two never disagree.
+
 Run once per DFHack session to register. To make it permanent, add the line
     trader-notification
 to your dfhack-config/init/dfhack.init (magnus-scripts does this for you).
 ]]
+
+local overlay = require('plugins.overlay')
+local widgets = require('gui.widgets')
 
 local NAME = 'trader_ready'
 local STOCK = 'traders_ready'   -- DFHack's built-in trader notification (we supersede it)
@@ -240,6 +248,59 @@ local function on_click()
 end
 
 -- ---------------------------------------------------------------------------
+-- the same line, on the depot's own panel
+-- ---------------------------------------------------------------------------
+
+-- The depot panel is right-anchored and fixed-width, like every other building sheet, so the
+-- position is an offset from the right edge rather than something scraped, the way DFHack's own
+-- caravan overlays anchor to this panel. A negative x is the widget's RIGHT edge measured from
+-- the right of the screen (overlay's own make_frame: r = |x| - 1), so -43 with a width of 52
+-- puts the left edge in the panel's own text column, where "Move goods to/from depot" starts.
+-- Row 9 leaves a blank line between it and the "Trade Depot" title.
+DepotCountdownOverlay = defclass(DepotCountdownOverlay, overlay.OverlayWidget)
+DepotCountdownOverlay.ATTRS{
+    desc = 'Shows the trade countdown on the trade depot panel.',
+    default_pos = {x = -43, y = 9},
+    default_enabled = true,
+    -- the sheet's focus string is not reliably granular: opened by a click it reads
+    -- .../BUILDING/TradeDepot/Items, opened from the notification only .../BUILDING. So the
+    -- widget is registered for the building sheet at large and asks the sheet itself what it
+    -- is showing (see showing_depot below).
+    viewscreens = 'dwarfmode/ViewSheets/BUILDING',
+    frame = {w = 52, h = 1},
+    overlay_onupdate_max_freq_seconds = 1,
+    version = 1,
+}
+
+function DepotCountdownOverlay:init()
+    -- h = 1 and a re-layout when the text changes: a Label built with no text lays out zero
+    -- rows high and clips whatever it is given afterwards
+    self:addviews{
+        widgets.Label{view_id = 'text', frame = {t = 0, l = 0, h = 1},
+                      text = '', text_pen = COLOR_LIGHTCYAN},
+    }
+end
+
+-- is the building sheet showing a trade depot right now?
+local function showing_depot()
+    local vs = df.global.game.main_interface.view_sheets
+    if not vs.open or vs.active_sheet ~= df.view_sheet_type.BUILDING then return false end
+    return df.building_tradedepotst:is_instance(df.building.find(vs.active_id))
+end
+
+function DepotCountdownOverlay:overlay_onupdate()
+    if not showing_depot() then self.visible = false return end
+    local msg = trader_message()
+    self.visible = msg ~= nil
+    if not msg or msg == self.shown then return end
+    self.shown = msg
+    self.subviews.text:setText(msg)
+    if self.frame_parent_rect then self:updateLayout() end
+end
+
+OVERLAY_WIDGETS = {depot_countdown = DepotCountdownOverlay}
+
+-- ---------------------------------------------------------------------------
 -- registration (idempotent; survives notify-module reloads via onStateChange)
 -- ---------------------------------------------------------------------------
 
@@ -282,9 +343,11 @@ dfhack.onStateChange[NAME] = function(ev)
     end
 end
 
+if dfhack_flags and dfhack_flags.module then return end
+
 print('trader-notification: "trader_ready" registered.')
 print('Shows "Merchants are coming to the depot" while a caravan is walking in (click steps')
 print('through the ones not there yet), then "Trader is ready to trade for N days" -- where a')
 print('click asks for the broker and opens the depot panel, or the move-goods window if the')
-print('depot is empty.')
+print('depot is empty. The same line shows on the depot panel, under the title.')
 print('Add `trader-notification` to dfhack.init to load it every session.')

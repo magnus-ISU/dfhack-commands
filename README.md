@@ -550,6 +550,10 @@ trade goods* window. Either way it asks for the **broker**, unless he is already
 depot: sending him is what makes the panel worth opening, and it is the step that gets
 forgotten.
 
+The same line also sits on the **depot's own panel**, under the *Trade Depot* title: the screen
+you are on while deciding what to send down there is the one that should be telling you how long
+you have. It is the notification's own text, so the two can never disagree.
+
 ### **`fort/help-mood` notices**
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
 game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,
