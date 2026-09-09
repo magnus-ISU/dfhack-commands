@@ -38,10 +38,17 @@
 #
 # Re-run after every DFHack update (plugins are ABI-specific to a DFHack version).
 
-# Where the smooth-movement prebuilt releases come from. Tracks notliad's upstream (branch main),
-# which the other-authors/df-smooth-movement submodule also points at. This repo followed anmej's
-# fork while upstream's release deadlocked DF on fort load; upstream v0.5 dropped the render-thread
-# rendezvous that caused it, so there is nothing left to carry a fork for.
+# Where the smooth-movement prebuilt releases come from. Tracks notliad's upstream, which the
+# other-authors/df-smooth-movement submodule also points at. This repo followed anmej's fork while
+# upstream's release deadlocked DF on fort load; upstream v0.5 dropped the render-thread rendezvous
+# that caused it, so there is nothing left to carry a fork for.
+#
+# RELEASES ARE CUT FROM main. When the submodule is checked out on any other BRANCH -- upstream
+# asking for a branch to be tested is the reason this happens -- fetch-plugin compiles that branch
+# from source instead of downloading, since a release build would silently replace the very code
+# under test with the last thing upstream published. A detached HEAD (a pinned tag) still
+# downloads: that is a pin at a release, not a branch under test.
+RELEASE_BRANCH ?= main
 REPO           ?= notliad/df-smooth-movement
 # This repo's own GitHub releases carry the prebuilt ssaudio binaries (tags: ssaudio-v*),
 # built by .github/workflows/ssaudio-release.yml for both linux and windows.
@@ -422,7 +429,7 @@ mods-status:
 install-plugin:
 	@$(MAKE) --no-print-directory fetch-plugin \
 	  FETCH_PLUGIN=smooth-movement FETCH_REPO=$(REPO) FETCH_RELEASE=$(RELEASE) FETCH_ENABLE=1 FETCH_OPTIONAL=0 \
-	  FETCH_BUILD=build
+	  FETCH_BUILD=build FETCH_SUBMODULE=$(PLUGIN_SUBMODULE)
 	$(MAKE) --no-print-directory fetch-plugin \
 	  FETCH_PLUGIN=ssaudio FETCH_REPO=$(SSAUDIO_REPO) FETCH_RELEASE=latest FETCH_ENABLE=0 FETCH_OPTIONAL=1 \
 	  FETCH_BUILD=build-ssaudio
@@ -471,6 +478,14 @@ fetch-plugin:
 	}
 	if [ -z "$(PLATFORM)" ]; then
 	  build_from_source "No prebuilt $(FETCH_PLUGIN) binary for $(UNAME_S)/$(UNAME_M) (releases ship linux-x86_64 and windows-x86_64)."
+	fi
+	# A branch checkout of the plugin's submodule is a branch under test; see RELEASE_BRANCH.
+	if [ -n "$(FETCH_SUBMODULE)" ] && [ -d "$(ROOT)/$(FETCH_SUBMODULE)" ]; then
+	  br="$$(git -C "$(ROOT)/$(FETCH_SUBMODULE)" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	  case "$$br" in
+	    "$(RELEASE_BRANCH)"|HEAD|"") ;;
+	    *) build_from_source "$(FETCH_SUBMODULE) is on branch '$$br', not $(RELEASE_BRANCH): a published release would replace the branch under test." ;;
+	  esac
 	fi
 	if [ ! -d "$(PLUGDIR)" ]; then
 	  echo "DFHack plugin dir not found: $(PLUGDIR)"
