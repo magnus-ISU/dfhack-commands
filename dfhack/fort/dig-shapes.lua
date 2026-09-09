@@ -8,7 +8,14 @@ SHAPED DIG BOXES are reclassified on completion:
   * 1x1xN single column                 -> STAIRCASE (carve stairs in rock, construct in air;
                                            the floor at the bottom of an air gap gets BOTH a
                                            carved down stair -- piercing the floor -- and a
-                                           constructed up/down staircase).
+                                           constructed up/down staircase). Two joins:
+                                           a TOP step that is already an up stair gets an
+                                           up/down staircase CONSTRUCTED over it, adding the
+                                           way down a carve cannot cut into an existing stair;
+                                           and the BOTTOM step becomes up/down when an up/down
+                                           or down stair sits below it, cut or merely
+                                           designated, so the column meets it instead of
+                                           stopping a level short.
   * selection through OPEN-AIR tiles     -> constructed WALLS/FLOORS, bottom-up (wall if the tile
                                             below is a wall -- natural or a placed wall -- else floor).
   * selection of ONLY constructions/ramps (air allowed) -> designate them for REMOVAL, EXCEPT a
@@ -153,6 +160,20 @@ local function is_diggable_wall(pos)
 end
 -- a tile that already has an up-stair carved into it (a staircase continuing up from below)
 local function is_up_stair(pos) return shape_of(pos) == SH.STAIR_UP end
+-- Is there a stairway under this tile for the column's bottom step to meet?
+-- Counts what is already cut AND what is merely designated: the usual case is a
+-- second column designated below this one, waiting to be dug, and the whole
+-- point of asking is to join the two.
+local function stair_below(pos)
+    local under = {x = pos.x, y = pos.y, z = pos.z - 1}
+    local sh = shape_of(under)
+    if sh == SH.STAIR_UPDOWN or sh == SH.STAIR_DOWN then return true end
+    local blk = dfhack.maps.getTileBlock(under)
+    if not blk then return false end
+    local dig = blk.designation[under.x % 16][under.y % 16].dig
+    return dig == DV.UpDownStair or dig == DV.DownStair
+end
+
 -- a natural floor (incl. rock-strewn / plant-covered) that a DOWN stair can be CARVED into --
 -- DF digs down through a floor natively, no construction or materials needed
 local function is_carveable_floor(pos)
@@ -230,14 +251,35 @@ end
 -- place a construction via BUILDINGPLAN, so it uses whatever material/quality the player has
 -- configured for that construction type (e.g. obsidian blocks for walls) rather than "any
 -- material". buildingplan applies the per-type filter and reserves matching items.
+-- set whenever this pass handed buildingplan something new to look at, so the
+-- scan below is only asked for when there is a reason
+local placed_any = false
+
 local function construct_real(pos, subtype)
     if dfhack.buildings.findAtTile(pos) then return end
     local ok, bld = pcall(dfhack.buildings.constructBuilding,
         {type = df.building_type.Construction, subtype = subtype, pos = pos})
     if not ok or not bld then log('  construct FAILED @' .. fmt(pos)); return end
     local b = (type(bld) == 'table') and bld[1] or bld
-    if b then buildingplan.addPlannedBuilding(b) end
+    if b then
+        buildingplan.addPlannedBuilding(b)
+        placed_any = true
+    end
     log(('  construct %s (buildingplan) @%s'):format(df.construction_type[subtype], fmt(pos)))
+end
+
+-- addPlannedBuilding only puts the building on buildingplan's monitor list. The
+-- list is swept twice a game day, so a construction placed from here sat there
+-- unassigned with the materials in the stockpile the whole time -- while the
+-- same wall placed by hand got its items at once, because DFHack's own planner
+-- overlay ends a placement with exactly this call. Asked for ONCE per gesture
+-- rather than per tile: repeated calls while paused collapse into one cycle
+-- anyway, and this matches what quickfort's build blueprints do.
+local function scan_for_items()
+    if not placed_any then return end
+    placed_any = false
+    local ok = pcall(buildingplan.scheduleCycle)
+    log(('  buildingplan cycle scheduled: %s'):format(tostring(ok)))
 end
 
 -- build a Door via buildingplan (a door is built from a crafted door ITEM, which buildingplan
@@ -317,7 +359,46 @@ local function make_staircase(x, y, z1, z2)
         -- if the bottom of the column already has an up-stair carved (a staircase continues below),
         -- carve an up/DOWN stair here instead of a plain up-stair so the new column connects down.
         if z == z1 and is_up_stair(pos) then dig_val = DV.UpDownStair end
-        if construction_here(pos) then
+        -- BOTTOM STEP, and only when there is something below to meet: a plain up
+        -- stair ends the stairway, so a column dug down to a staircase designated
+        -- underneath it stops one level short of joining. Where nothing is below,
+        -- the plain up stair stays -- an up/down step there would advertise a way
+        -- down that does not exist.
+        if z == z1 and stair_below(pos) then
+            dig_val, con_sub = DV.UpDownStair, CT.UpDownStair
+        end
+        -- TOP STEP ON AN EXISTING UP STAIR: build an up/down staircase ON TOP of
+        -- it. The tile already climbs; what it lacks is a way down, and that
+        -- cannot be carved into a stair that is already there -- so the down side
+        -- is added as a CONSTRUCTION over the existing stair. Only here: a top
+        -- step on rock or open air is a plain down stair as before, since there is
+        -- no up side to preserve.
+        --
+        -- A CONSTRUCTED up stair counts, and is in fact the usual case: the tile
+        -- a new column hangs off is the bottom step of the column above it, which
+        -- was itself built as a constructed up stair. Guarding this with "not
+        -- already a construction" made the rule miss exactly the tile it was
+        -- written for, and the skip below swallowed it instead. Nothing stops the
+        -- build either: a COMPLETED construction is not a building, so
+        -- buildings.findAtTile is nil there and construct_real goes ahead.
+        if z == z2 and is_up_stair(pos) then
+            construct_real(pos, CT.UpDownStair)
+            log(('  stair CONSTRUCT up/down over existing up-stair @%s'):format(fmt(pos)))
+        elseif z == z1 and construction_here(pos) and not dfhack.buildings.findAtTile(pos) then
+            -- BOTTOM STEP ON A FINISHED CONSTRUCTION: build the stair over it.
+            --
+            -- A stair tower starts on a constructed floor, and that floor tripped
+            -- the "already a construction" skip below before anything looked at
+            -- what the tile was for -- so the column got its steps and no way on
+            -- to them. Same move as the top step over an existing up stair: a
+            -- COMPLETED construction is not a building, so buildings.findAtTile
+            -- is nil and construct_real goes ahead. An IN-PROGRESS one still
+            -- falls through to the skip, since there is already a build queued
+            -- there and construct_real would refuse it anyway.
+            construct_real(pos, con_sub)
+            log(('  stair CONSTRUCT %s over finished construction @%s')
+                :format(df.construction_type[con_sub], fmt(pos)))
+        elseif construction_here(pos) then
             log('  stair SKIP (already a construction) @' .. fmt(pos))
         elseif is_up_stair(pos) then
             -- existing carved up-stair: re-designate to extend the stairway downward
@@ -366,6 +447,7 @@ function convert_dig_box(a, b)
     if dx == 1 and dy == 1 and dz > 1 then
         log('  -> STAIRCASE (1x1xN column)')
         make_staircase(x1, y1, z1, z2)
+        scan_for_items()
         return true
     end
 
@@ -393,6 +475,7 @@ function convert_dig_box(a, b)
                     :format(spared, spared == 1 and '' or 's', spared == 1 and '' or 's'),
                 COLOR_YELLOW, true)
         end
+        scan_for_items()
         return true
     end
 
@@ -469,6 +552,7 @@ function convert_dig_box(a, b)
         did = did or marked > 0 or skipped > 0
     end
     -- (room smoothing removed -- the implementation was wrong; nothing is designated for smoothing)
+    scan_for_items()
     return did
 end
 
