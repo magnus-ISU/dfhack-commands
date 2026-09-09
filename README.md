@@ -537,11 +537,18 @@ resized it to**, which the window records for itself. Both are class hooks, so a
 them up on its next render.
 
 ### **`fort/trader-notification`**
-Counts down how many days the trader is ready; click to jump to the depot. It also speaks up
-*before* they get there — *"Merchants are coming to the depot"* — which is the window in which
-a caravan quietly fails to arrive, and clicking then zooms to a merchant who has **not** reached
-the depot yet, one per click, so you can walk the stragglers. With one caravan trading and
-another still walking in, the countdown reads *"…for 9 days (more coming)"*.
+Counts down how many days the trader is ready. It also speaks up *before* they get there —
+*"Merchants are coming to the depot"* — which is the window in which a caravan quietly fails to
+arrive. With one caravan trading and another still walking in, the countdown reads *"…for 9 days
+(more coming)"*.
+
+Clicking takes the **next step of the trade**, whatever that is. While merchants are still on
+their way it zooms to one who has not arrived, one per click, so you can walk the stragglers.
+Once somebody is at the depot it opens the screen you would go to next: the depot's own panel —
+the one clicking the depot opens — or, if you have nothing down there to sell, DFHack's *move
+trade goods* window. Either way it asks for the **broker**, unless he is already standing on the
+depot: sending him is what makes the panel worth opening, and it is the step that gets
+forgotten.
 
 ### **`fort/help-mood` notices**
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the

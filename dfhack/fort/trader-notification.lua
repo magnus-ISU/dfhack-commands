@@ -20,10 +20,19 @@ which things go wrong -- a wagon with no route, a pack animal left at the edge -
 and the notice is what tells you to go and look. With a caravan already trading
 and another still walking in, the countdown gets "(more coming)" on the end.
 
-Clicking zooms the map. While merchants are on their way it zooms to one who has
-NOT arrived yet -- the trade goods are only as close as the slowest of them -- and
-each further click steps to the next one, so you can walk the whole caravan. Once
-they are all in, and while trade is on, it zooms to the depot as before.
+CLICKING TAKES THE NEXT STEP OF THE TRADE, whatever that is:
+
+  merchants still walking in   zoom to one who has NOT arrived yet -- the goods are
+                               only as close as the slowest of them -- and a further
+                               click steps to the next, so the caravan can be walked
+  trading, goods at the depot  open the depot's own panel, the one clicking the depot
+                               opens, where the trade and goods buttons are
+  trading, nothing to sell     open DFHack's "move trade goods" window, so the next
+                               thing you do is choose what goes down there
+
+Either way the broker is asked for -- the depot's "bring the broker" flag -- unless
+he is already standing on the depot. Sending him is what makes the panel you just
+opened worth anything, and it is the step that gets forgotten.
 
 Run once per DFHack session to register. To make it permanent, add the line
     trader-notification
@@ -93,7 +102,7 @@ local function trader_message()
 end
 
 -- ---------------------------------------------------------------------------
--- click: zoom to the trade depot
+-- click: take the next step of the trade
 -- ---------------------------------------------------------------------------
 
 local function find_depot()
@@ -139,6 +148,70 @@ local function merchants_en_route()
     return out
 end
 
+-- The fort's own goods sitting on the depot, waiting to be traded. TEMP is the role a hauled-in
+-- trade good has; the depot's construction materials are in the same list under other roles, and
+-- `flags.trader` marks what the merchants brought -- neither is something you can sell.
+local function fort_goods_at_depot(depot)
+    if not depot then return 0 end
+    local n = 0
+    for _, ci in ipairs(depot.contained_items) do
+        if ci.use_mode == df.building_item_role_type.TEMP and ci.item
+            and not ci.item.flags.trader then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+-- the unit in the fort position that carries the TRADE responsibility, whatever that civ calls it
+local function broker_unit()
+    local ent
+    for _, e in ipairs(df.global.world.entities.all) do
+        if e.id == df.global.plotinfo.group_id then ent = e break end
+    end
+    if not ent then return nil end
+    local posbyid = {}
+    for _, p in ipairs(ent.positions.own) do posbyid[p.id] = p end
+    for _, a in ipairs(ent.positions.assignments) do
+        local p = posbyid[a.position_id]
+        if p and p.responsibilities.TRADE and a.histfig >= 0 then
+            local hf = df.historical_figure.find(a.histfig)
+            local u = hf and df.unit.find(hf.unit_id)
+            if u then return u end
+        end
+    end
+    return nil
+end
+
+-- Ask for the broker, which is the step that gets forgotten: a depot full of goods trades
+-- nothing while he is off hauling. Skipped when he is already standing on the depot -- there is
+-- nothing to send him to -- and when the flag is already set, so an existing request is left
+-- exactly as it is. Returns true if this click was what sent him.
+local function request_broker(depot)
+    if not depot or depot.trade_flags.trader_requested then return false end
+    local u = broker_unit()
+    if u and at_depot(u, depot) then return false end
+    depot.trade_flags.trader_requested = true
+    return true
+end
+
+-- the depot's own panel: what clicking the depot opens, and where DFHack hangs its trade buttons
+local function open_depot_panel(depot)
+    local vs = df.global.game.main_interface.view_sheets
+    vs.active_sheet = df.view_sheet_type.BUILDING
+    vs.active_id = depot.id
+    vs.open = true          -- opened LAST, once the sheet it should show is set
+end
+
+-- DFHack's "move trade goods" window. It is a modal of its own and does not need DF's own
+-- (empty, and only fillable by DF) trade-goods screen underneath it.
+local function open_move_goods(depot)
+    local ok, mg = pcall(reqscript, 'internal/caravan/movegoods')
+    if not ok or not mg or not mg.MoveGoodsModal then return false end
+    mg.MoveGoodsModal{depot = depot}:show()
+    return true
+end
+
 -- which one of them the last click showed, so the next click shows the next
 local next_en_route = 1
 
@@ -151,6 +224,19 @@ local function zoom_to_arrival()
     local u = en_route[next_en_route]
     next_en_route = next_en_route + 1
     dfhack.gui.revealInDwarfmodeMap(xyz2pos(u.pos.x, u.pos.y, u.pos.z), true, true)
+end
+
+-- The click does whatever the trade needs next: find the stragglers while there are stragglers,
+-- and once somebody is at the depot, open the screen the next move is made on -- the goods
+-- window when there is nothing down there to sell, the depot's own panel when there is.
+local function on_click()
+    if #ready_caravans() == 0 then return zoom_to_arrival() end
+    local depot = find_depot()
+    if not depot then return end
+    request_broker(depot)
+    zoom_to_depot()
+    if fort_goods_at_depot(depot) == 0 and open_move_goods(depot) then return end
+    open_depot_panel(depot)
 end
 
 -- ---------------------------------------------------------------------------
@@ -169,7 +255,7 @@ local function register()
     entry.desc = 'Counts down the days a merchant caravan is at your depot, and says when one '
         .. 'is still on its way.'
     entry.dwarf_fn = trader_message
-    entry.on_click = zoom_to_arrival
+    entry.on_click = on_click
     -- the overlay gates on config.data[name].enabled; make sure it exists so it
     -- doesn't nil-index (and so the notification is on by default)
     if n.config and n.config.data and not n.config.data[NAME] then
@@ -198,5 +284,7 @@ end
 
 print('trader-notification: "trader_ready" registered.')
 print('Shows "Merchants are coming to the depot" while a caravan is walking in (click steps')
-print('through the ones not there yet), then "Trader is ready to trade for N days".')
+print('through the ones not there yet), then "Trader is ready to trade for N days" -- where a')
+print('click asks for the broker and opens the depot panel, or the move-goods window if the')
+print('depot is empty.')
 print('Add `trader-notification` to dfhack.init to load it every session.')
