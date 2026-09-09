@@ -50,6 +50,11 @@ HOW IT WORKS
   around floor that is not itself designated has no safe order and will sit
   suspended: designate the floor inside it, or dig those tiles by hand.
 
+  Smoothing ON a tile due to be channelled is dropped on sight, whoever
+  designated it: the floor it would be cut into is about to be cut out. Only the
+  smoothing bit is cleared, never through DF's eraser -- that would take the
+  channel designation with it.
+
   Smoothing beside a channel goes first. A tile waits while it or any of the
   eight around it is still designated for smoothing or engraving, or has a
   detailing job outstanding -- cutting the floor away first only sends the
@@ -863,6 +868,27 @@ local function clear_warning(id) warned[id] = nil end
 -- Tiles already released stay released (state.allowed), or the next sweep would
 -- re-suspend everything and nothing would ever be dug. Marker mode set by the
 -- player is never touched: only marks this tool made are in state.marks.
+-- Smoothing on a tile that is going to be channelled is work thrown away: the
+-- floor it is cut into is about to be cut out. So the designation is dropped as
+-- soon as it is seen, whoever put it there -- a hand-drawn smooth box over the
+-- excavation, or `fort/planned-smoothing` designating a floor that was only
+-- marked for channelling afterwards.
+--
+-- Written directly rather than through DF's eraser, which is the usual way to
+-- take a designation back: the eraser would take the CHANNEL designation with
+-- it, since both live on the same tile, and the channel is the one we are here
+-- to keep. Only the smoothing bit is touched.
+--
+-- A detailing job DF has already posted is left alone -- the designation is gone
+-- from the tile by then, and taking a job off the dwarf holding it is how this
+-- fort has been crashed before. That tile gets smoothed and then channelled; the
+-- waste is one tile, not a room.
+local function drop_smoothing(block, bx, by)
+    if block.designation[bx][by].smooth == 0 then return false end
+    block.designation[bx][by].smooth = 0
+    return true
+end
+
 local function deny_on_sight(pos, block, bx, by)
     local s = get_state()
     local k = key(pos)
@@ -951,6 +977,12 @@ local function step_scan()
                         if not scan.top or pos.z > scan.top then scan.top = pos.z end
                         scan.seen[block_key(pos)] = true
                         deny_on_sight(pos, block, bx, by)
+                        -- the block is already in hand here, so this costs a
+                        -- field read per channel tile and no map lookup at all
+                        if drop_smoothing(block, bx, by) then
+                            smoothing_cleared = smoothing_cleared + 1
+                            scan.cleared = (scan.cleared or 0) + 1
+                        end
                     end
                 end
             end
@@ -1192,8 +1224,9 @@ end
 -- excavation takes. So a channel tile waits while anything beside it is still
 -- waiting to be smoothed or engraved.
 --
--- The tile ITSELF counts as well as the eight around it: channelling a tile that
--- is also designated for smoothing destroys that designation outright.
+-- Detailing ON the excavation does not count -- neither the candidate nor any
+-- neighbour that is itself designated for channelling. That smoothing is cut
+-- away by the dig whatever the order, so waiting on it only deadlocks.
 --
 -- Both halves have to be asked, because they are never true at once: DF clears
 -- `designation.smooth` the moment it posts the job, so a tile with detailing
@@ -1209,31 +1242,46 @@ for dx = -1, 1 do
     for dy = -1, 1 do AROUND[#AROUND + 1] = {x = dx, y = dy} end
 end
 
--- Positions of every outstanding detailing job. Walked once per pass rather than
--- once per candidate: the job list is as long as the fort is busy.
-local function detailing_jobs()
-    local set = {}
+-- Outstanding detailing jobs, and outstanding channel jobs, in one walk of the
+-- list -- done once per pass rather than once per candidate, since the job list
+-- is as long as the fort is busy.
+local function pending_jobs()
+    local detail, channel = {}, {}
     local link = df.global.world.jobs.list.next
     while link do
         local job = link.item
-        if job and DETAIL_JOB[job.job_type] then set[key(job.pos)] = true end
+        if job then
+            if DETAIL_JOB[job.job_type] then detail[key(job.pos)] = true
+            elseif job.job_type == df.job_type.DigChannel then channel[key(job.pos)] = true end
+        end
         link = link.next
     end
-    return set
+    return detail, channel
 end
 
-local function detailing_beside(pos, jobs)
+-- ONLY detailing on tiles that are NOT part of this excavation counts.
+--
+-- A tile designated for both channelling and smoothing is going to be cut away
+-- whatever we do -- its smoothing is already wasted work, and it is not the
+-- room's wall we are trying to protect. Counting those held the whole thing
+-- hostage to itself: measured on z=207, all 38 channel tiles sat beside a
+-- smooth designation and every one of those blockers was a channel tile too, so
+-- nothing could ever be released. The candidate drops out of its own ring for
+-- the same reason -- it is a channel tile by definition.
+local function detailing_beside(pos, detail, channel)
     for _, d in ipairs(AROUND) do
         local n = {x = pos.x + d.x, y = pos.y + d.y, z = pos.z}
-        local des = designation_of(n)
-        if des and des.smooth ~= 0 then return true end
-        if jobs[key(n)] then return true end
+        if not (is_channel(n) or channel[key(n)]) then
+            local des = designation_of(n)
+            if des and des.smooth ~= 0 then return true end
+            if detail[key(n)] then return true end
+        end
     end
     return false
 end
 
 function choose_release(active, phantom, group)
-    local detail_jobs = detailing_jobs()
+    local detail_jobs, channel_jobs = pending_jobs()
     waiting_on_detail = 0
     local _, base = analyse(active, phantom)
     -- nil means the excavation is bigger than one grid can hold: judge each
@@ -1310,7 +1358,7 @@ function choose_release(active, phantom, group)
 
         -- cheap, and it rules the tile out completely, so it goes ahead of the
         -- support and stranding searches
-        if detailing_beside(cand, detail_jobs) then
+        if detailing_beside(cand, detail_jobs, channel_jobs) then
             waiting_on_detail = waiting_on_detail + 1
             goto continue
         end
@@ -1528,6 +1576,7 @@ last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
 last_pass_blocked = last_pass_blocked or 0
 last_pass_under_building = last_pass_under_building or 0
 reclaimed = reclaimed or 0
+smoothing_cleared = smoothing_cleared or 0
 reclaim_error = reclaim_error or nil
 
 -- one pump step; returns true when a full pass completed
@@ -1737,6 +1786,10 @@ function status()
     print(('  priority %d designations are never held'):format(EXEMPT_PRIORITY))
     if reclaim_error then
         print('  LAST RECLAIM FAILED: ' .. reclaim_error)
+    end
+    if (smoothing_cleared or 0) > 0 then
+        print(('  %d smoothing designation%s dropped from tiles due to be channelled')
+            :format(smoothing_cleared, smoothing_cleared == 1 and '' or 's'))
     end
     if (reclaimed or 0) > 0 then
         print(('  %d job%s taken back and re-planned since load')

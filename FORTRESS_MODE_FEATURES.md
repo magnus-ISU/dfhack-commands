@@ -11,9 +11,11 @@ out if digging it leaves nothing without support — support runs along the four
 the rock below, never through a corner — and if every other designated tile still has somewhere
 to stand that connects out of the excavation. Tiles that are out get restricted traffic so
 nobody wanders onto them, and their old traffic setting is restored afterwards. Smoothing beside
-a channel goes first: a tile waits while it or any of the eight around it is still designated for
+a channel goes first: a tile waits while any of the eight around it is still designated for
 smoothing or engraving, or has a detailing job outstanding, since cutting the floor away first
-only sends the detailer to a hole and gets the job cancelled. A shape with no
+only sends the detailer to a hole and gets the job cancelled. Detailing on the excavation itself
+does not count — a tile designated for both channelling and smoothing loses that smoothing to the
+dig whatever the order, so waiting on it would only deadlock. A shape with no
 safe order, like a ring drawn around floor that is not itself designated, simply stays planned.
 Only tiles a miner can actually get to are let out — revealed, and with somewhere to stand:
 its own tile if that is reachable (a staircase is its own way in), a neighbour at its own level,
