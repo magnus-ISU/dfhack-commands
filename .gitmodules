@@ -2,3 +2,7 @@
 	path = other-authors/df-smooth-movement
 	url = https://github.com/notliad/df-smooth-movement
 	branch = main
+[submodule "other-authors/replace-wall"]
+	path = other-authors/replace-wall
+	url = https://github.com/LittleFernStudio/replace-wall
+	branch = main

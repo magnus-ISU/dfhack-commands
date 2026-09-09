@@ -19,8 +19,19 @@ a slab an engraver has inscribed rather than a blank.
   setting the build mode by hand opens an empty menu with no buttons. Clicking the rendered
   buttons is the only path that works, so we replicate the clicks.)
 
-Layout: two columns, vertically SCROLLABLE when the list overflows. The window leaves 10 rows of
+Layout: two columns, vertically SCROLLABLE when the list overflows. The window leaves 11 rows of
 negative space at the TOP and 4 rows at the BOTTOM uncovered.
+
+Beneath that grid, under a rule, sits a separate CUSTOM-TOOL band: this repo's own tools rather
+than native DF buildings, one per row across the full width (not in the grid's narrow columns),
+in a hand-written order rather than the alphabetical one, and pinned to the very bottom so it
+never scrolls away. The rule and the full-width layout are the whole separation -- the text is
+plain white like everything else. Today that is `Replace wall` (`fort/dig-replace-walls`);
+anything we add later goes in the same band -- see CUSTOM_ENTRIES.
+
+A custom tool opens its OWN screen, and the picker gets out of its way while it is up: give the
+entry a `focus` prefix and the picker hides (and stops taking input) for as long as that screen
+is the current one.
 
 Registered automatically as overlay `dig-building.picker`. Reposition with `gui/overlay`.
 ]]
@@ -95,6 +106,7 @@ end
 -- drop toward MIN_TOP only as far as needed to reach the fewest columns the screen allows.
 local MIN_TOP, MAX_TOP = 5, 12
 local TOP_MARGIN, BOT_MARGIN = MAX_TOP, 6  -- TOP_MARGIN = initial/default; recomputed live
+local TOP_NUDGE = 1                        -- ...then one row lower than that search picks
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
 local COL_W = 16                          -- each column's cell width (inside the border)
@@ -225,6 +237,32 @@ local ENTRIES = {
 
 -- one fully alphabetical list (by shown label) so anything is easy to find by name
 table.sort(ENTRIES, function(a, b) return a[1] < b[1] end)
+
+-- ---- our own tools ----------------------------------------------------------
+-- A SEPARATE SECTION, and deliberately unlike the rest of the picker. Everything above is a
+-- native DF building reached by driving DF's own build menu; these are this repo's own tools,
+-- which do their own thing when clicked (`opt.run`). So they get their own band at the very
+-- BOTTOM of the panel, under a rule, one per row across the full width instead of the grid's
+-- narrow columns -- and they are NOT sorted alphabetically with everything else: they keep the
+-- curated order written here, since the list is short enough to read whole and the useful
+-- ordering is ours, not the alphabet's. New custom tools go here.
+--
+-- `focus` is the focus-string prefix of the screen the tool opens. The picker hides itself for
+-- as long as that screen is up (see custom_tool_open) so it is not left sitting behind the
+-- tool's own window, and so it stops competing for input while the tool has it.
+local CUSTOM_ENTRIES = {
+    {'Replace wall', {'Replace wall'},
+     {custom = true, alias = {'replace', 'rewall', 'swap wall', 'wall material'},
+      focus = 'dfhack/lua/dig-replace-walls',
+      run = function() reqscript('fort/dig-replace-walls').show() end}},
+}
+local CUSTOM_ROWS = #CUSTOM_ENTRIES + 1   -- the entries plus the rule above them
+
+-- one flat index space over both lists, so search can rank and pick either. Indices
+-- 1..#ENTRIES are the grid; the rest are the custom band.
+local function entry_by_index(i)
+    return ENTRIES[i] or CUSTOM_ENTRIES[i - #ENTRIES]
+end
 
 -- ---- civ custom workshops ----------------------------------------------------
 -- Modded custom workshops the FORT CIV can build (its entity_raw's
@@ -406,7 +444,9 @@ local DRIVEN_KEYS = {D_BUILDING = true, D_STOCKPILES = true}
 
 local function activate(e)
     local opt = e[3]
-    if opt and opt.stockpile then
+    if opt and opt.run then
+        opt.run()
+    elseif opt and opt.stockpile then
         open_stockpile()
     else
         arm_special(opt)
@@ -459,6 +499,16 @@ local function entry_rank(e, needle)
     return best
 end
 
+-- How an entry is drawn, the same rule for the grid and the custom band: empty search = all
+-- white. Otherwise the BEST match (what Enter picks) is bright green, other matches light green,
+-- non-matches dimmed.
+local function entry_pen(search, idx, mset, mbest)
+    if search == '' then return COLOR_WHITE end
+    if idx == mbest then return COLOR_GREEN end
+    if mset[idx] then return COLOR_LIGHTGREEN end
+    return COLOR_DARKGREY
+end
+
 -- ---- overlay -----------------------------------------------------------------
 
 DigBuilding = defclass(DigBuilding, overlay.OverlayWidget)
@@ -479,6 +529,19 @@ local function dig_active()
     return mi().main_designation_selected == df.main_designation_type.DIG_DIG
 end
 
+-- Is one of our own custom tools showing its screen right now? The picker steps aside for the
+-- whole time it is: the tool draws its own window over the map and takes the input, and the
+-- picker sitting behind it is both noise and a rival for clicks. Generic over CUSTOM_ENTRIES --
+-- any tool we add later gets this for free by declaring its `focus` prefix.
+local function custom_tool_open()
+    local foc = dfhack.gui.getCurFocus(true)[1] or ''
+    for _, e in ipairs(CUSTOM_ENTRIES) do
+        local f = e[3] and e[3].focus
+        if f and foc:sub(1, #f) == f then return true end
+    end
+    return false
+end
+
 function DigBuilding:init()
     self.scroll = 0
     self.cols = 2
@@ -492,8 +555,8 @@ end
 function DigBuilding:compute_matches()
     local set, list, best, best_rank = {}, {}, nil, nil
     if self.search ~= '' then
-        for i = 1, #ENTRIES do
-            local r = entry_rank(ENTRIES[i], self.search)
+        for i = 1, #ENTRIES + #CUSTOM_ENTRIES do
+            local r = entry_rank(entry_by_index(i), self.search)
             if r then
                 set[i] = true; list[#list + 1] = i
                 if not best_rank or r < best_rank then best, best_rank = i, r end
@@ -507,16 +570,17 @@ end
 function DigBuilding:scroll_to_match()
     if self.search == '' then return end
     local _, _, best = self:compute_matches()
-    if not best then return end
+    if not best or best > #ENTRIES then return end   -- the custom band is pinned, always visible
     local line = math.floor((best - 1) / self.cols)
     if line < self.scroll then self.scroll = line
     elseif line >= self.scroll + self:list_rows() then self.scroll = line - self:list_rows() + 1 end
     self.scroll = math.max(0, math.min(self.scroll, self:max_scroll()))
 end
 
--- rows available for entries = window height minus the top and bottom border rows
+-- rows available for GRID entries = window height minus the top and bottom border rows and
+-- the custom-tool band pinned at the bottom
 function DigBuilding:list_rows()
-    return math.max(1, self.frame.h - 2)
+    return math.max(1, self.frame.h - 2 - CUSTOM_ROWS)
 end
 
 function DigBuilding:max_scroll()
@@ -527,7 +591,7 @@ end
 function DigBuilding:overlay_onupdate()
     pcall(refresh_custom_workshops)
     self.search = self.search or ''
-    self.visible = dig_active()
+    self.visible = dig_active() and not custom_tool_open()
     if not self.visible then                               -- reset when the picker closes:
         self.search = ''                                   -- clear the filter
         self.unfocused = false                             -- and refocus for next open
@@ -538,6 +602,9 @@ function DigBuilding:overlay_onupdate()
     local gps = df.global.gps
     local max_cols = math.max(1, math.floor((gps.dimx - LEFT_MARGIN - 2) / COL_W))
     -- columns needed for a given top margin (entry rows excl. borders = dimy-top-bot-2)
+    -- The custom-tool band is deliberately NOT part of this calculation: the margin search is
+    -- exactly the one that ran before the band existed, so adding the band does not drag the
+    -- panel up the screen. The band is taken out of the panel's HEIGHT below instead.
     local function cols_for(top)
         local ar = math.max(1, gps.dimy - top - BOT_MARGIN - 2)
         return math.min(max_cols, math.max(2, math.ceil(#ENTRIES / ar))), ar
@@ -550,11 +617,15 @@ function DigBuilding:overlay_onupdate()
     for t = MAX_TOP, MIN_TOP + 1, -1 do
         if (cols_for(t)) <= best_cols then top = t; break end
     end
-    local cols, avail_rows = cols_for(top)
+    local cols = cols_for(top)
+    top = top + TOP_NUDGE                     -- sit one row lower than the search's pick
     self.cols = cols
+    -- rows left for the GRID once the band and the borders are taken out; if the list no longer
+    -- fits in them it simply scrolls
+    local avail_rows = math.max(1, gps.dimy - top - BOT_MARGIN - 2 - CUSTOM_ROWS)
     local rows = math.min(math.ceil(#ENTRIES / cols), avail_rows)
     self.frame.w = cols * COL_W + 2
-    self.frame.h = rows + 2
+    self.frame.h = rows + 2 + CUSTOM_ROWS
     self.frame.t = top                        -- reposition: dynamic top margin
     self.frame.l = LEFT_MARGIN
     if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
@@ -657,24 +728,32 @@ function DigBuilding:onRenderBody(dc)
             local idx = line * cols + c + 1
             local e = ENTRIES[idx]
             if e then
-                -- empty search: all white. Otherwise the BEST match (what Enter picks) is bright
-                -- green, other matches light green, non-matches dimmed.
-                local pen
-                if self.search == '' then pen = COLOR_WHITE
-                elseif idx == mbest then pen = COLOR_GREEN
-                elseif mset[idx] then pen = COLOR_LIGHTGREEN
-                else pen = COLOR_DARKGREY end
-                dc:seek(1 + c * COL_W, r + 1):pen(pen):string(e[1]:sub(1, COL_W - 1))
+                dc:seek(1 + c * COL_W, r + 1):pen(entry_pen(self.search, idx, mset, mbest))
+                    :string(e[1]:sub(1, COL_W - 1))
             end
         end
+    end
+    -- the custom-tool band: a rule, then one full-width entry per row, in RED so it reads as
+    -- a different kind of thing from the native buildings above it
+    local band_top = self:list_rows() + 1
+    dc:seek(1, band_top):pen(COLOR_DARKGREY):string(string.rep(string.char(196), w - 2))
+    for i, e in ipairs(CUSTOM_ENTRIES) do
+        dc:seek(1, band_top + i):pen(entry_pen(self.search, #ENTRIES + i, mset, mbest))
+            :string(e[1]:sub(1, w - 2))
     end
 end
 
 -- body-local (x,y): row 0 & h-1 are borders; entries live in rows 1..h-2, cols 1..cols*COL_W
 function DigBuilding:entry_at(x, y)
     if y < 1 or y >= self.frame.h - 1 then return nil end
+    if x < 1 or x > self.frame.w - 2 then return nil end
+    local band_top = self:list_rows() + 1
+    if y > band_top then                       -- the custom band: one full-width entry per row
+        return CUSTOM_ENTRIES[y - band_top]
+    end
+    if y == band_top then return nil end       -- the rule itself
     local r = y - 1
-    if r >= self:list_rows() or x < 1 or x > self.cols * COL_W then return nil end
+    if x > self.cols * COL_W then return nil end
     local c = math.floor((x - 1) / COL_W)
     return ENTRIES[(self.scroll + r) * self.cols + c + 1]
 end
@@ -703,7 +782,7 @@ function DigBuilding:onInput(keys)
         if keys.SELECT then                                       -- Enter: select the BEST match
             local _, _, best = self:compute_matches()
             if best then
-                local e = ENTRIES[best]
+                local e = entry_by_index(best)
                 self.search = ''
                 activate(e)
                 return true

@@ -101,7 +101,22 @@ entity scaffolding).
 | `plugins/ssaudio/minimp3.h`, `minimp3_ex.h` | lieff/minimp3 | **CC0 1.0** (public domain dedication) |
 | SDL2 (linked, not vendored; a Windows import lib comes from DFHack's `depends/`) | libsdl.org | **zlib** |
 | `other-authors/df-smooth-movement` (git submodule) | <https://github.com/notliad/df-smooth-movement> | **MIT**, © 2026 notliad |
+| `other-authors/replace-wall` (git submodule) | <https://github.com/LittleFernStudio/replace-wall> | **MIT**, © 2026 Little Fern Studio |
 | DFHack (build dependency, not vendored) | DFHack project | **zlib** |
+
+### Derived work
+
+`dfhack/fort/dig-replace-walls.lua` is a rewrite of Little Fern Studio's *Replace Wall*
+(<https://github.com/LittleFernStudio/replace-wall>, MIT). The two-phase design it takes from
+that script — remember each painted wall, take it down, then hand the tile to `buildingplan` as
+a planned construction once it is clear — is theirs; the material handling, the wall-versus-
+furniture rules and the control scheme are this repo's, and none of their code is copied
+verbatim. *Replace Wall*'s MIT licence and copyright notice are reproduced at the top of that
+file, as the licence requires. No art from that project is used: the map markers are drawn with
+DFHack's own cursor tile rather than its `replace_wall.png`.
+
+The upstream project is vendored as a submodule under `other-authors/` for reference only;
+nothing in it is deployed or built.
 
 ## 6. Maintenance
 

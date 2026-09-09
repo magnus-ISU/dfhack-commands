@@ -92,6 +92,24 @@ chopping or removal.
 ### **`fort/dig-building`**
 A searchable building picker while digging that drops you straight into DF's placement flow.
 
+### **`fort/dig-replace-walls`**
+Paint walls that should become constructed walls of your choosing. Reached from the
+`fort/dig-building` picker as **Replace wall**, in the custom-tool band at the bottom.
+A natural wall is designated for mining, a constructed wall for removal, and once the tile
+is actually clear it is handed to `buildingplan` as a planned wall. Doors, hatches, furniture
+and workshops are never taken down, and neither is a constructed wall carrying a masterwork
+engraving.
+
+Materials are `buildingplan`'s, not the tool's. The panel shows the wall filter as it stands, in
+`buildingplan`'s own words ("Any building material of microcline"), and its two controls — `f`
+for the filter dialog and `b`/`l`/`o`/`r` for Blocks/Logs/Boulders/Bars — are `buildingplan`'s
+own, editing `buildingplan`'s own stored wall settings. So a wall painted here is built out of
+exactly what placing a wall by hand would build it out of, and a change made here applies to
+walls generally.
+
+A rewrite of Little Fern Studio's [replace-wall](https://github.com/LittleFernStudio/replace-wall)
+(MIT); see `LICENSE.md`.
+
 ### **`fort/right-click-cancel`**
 Drag to designate, right-drag to erase, right-click to cancel — for every designation and
 build tool.
