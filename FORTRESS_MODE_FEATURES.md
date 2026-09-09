@@ -109,6 +109,14 @@ own, editing `buildingplan`'s own stored wall settings. So a wall painted here i
 exactly what placing a wall by hand would build it out of, and a change made here applies to
 walls generally.
 
+The painter is an overlay rather than a dialog, so opening and closing it neither pauses the game
+nor makes DF blank and redraw the screen; while it is up DF's designation tool is disarmed, so no
+other map tool acts on the clicks it is taking.
+
+A plan lasts only as long as the work does: cancel the dig on a painted tile by any means and the
+replacement is cancelled with it — nothing is ever re-designated behind you — and the plan drops
+itself as soon as the replacement wall is handed to `buildingplan`.
+
 A rewrite of Little Fern Studio's [replace-wall](https://github.com/LittleFernStudio/replace-wall)
 (MIT); see `LICENSE.md`.
 

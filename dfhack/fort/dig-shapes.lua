@@ -602,7 +602,18 @@ end
 -- unconsumed right-click on dwarfmode/Default is cancelled by DF). So we yield (return false,
 -- letting DF/dwarf-rts handle it) whenever the cursor is over UI: the dwarf-rts right-side band,
 -- an announcement alert, another overlay, a DF hover element, or off the exposed map.
+--
+-- ...and whenever another of our map tools owns the mouse. fort/dig-replace-walls' painter draws
+-- over this same map as an overlay, with DF's designation tool deliberately disarmed -- so the
+-- focus is still plain dwarfmode, and a right-click here would otherwise fire underneath it and
+-- arm the Dig tool out from under the player mid-paint.
+local function painter_owns_map()
+    local ok, rw = pcall(reqscript, 'fort/dig-replace-walls')
+    return (ok and rw and rw.painting) and true or false
+end
+
 function DigShapes:onInput(keys)
+    if painter_owns_map() then return false end
     -- Cancelling an IN-PROGRESS dig drag (right-click or Escape) must not be treated as
     -- completing the box. Flag it so overlay_onupdate discards the pending selection, and let
     -- DF process the cancel natively (a right-click here never falls through to enter mining).

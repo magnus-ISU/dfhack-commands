@@ -247,13 +247,16 @@ table.sort(ENTRIES, function(a, b) return a[1] < b[1] end)
 -- curated order written here, since the list is short enough to read whole and the useful
 -- ordering is ours, not the alphabet's. New custom tools go here.
 --
--- `focus` is the focus-string prefix of the screen the tool opens. The picker hides itself for
--- as long as that screen is up (see custom_tool_open) so it is not left sitting behind the
--- tool's own window, and so it stops competing for input while the tool has it.
+-- The picker hides itself for as long as a custom tool is up (see custom_tool_open), so it is
+-- not left sitting behind the tool's own window and stops competing for input while the tool has
+-- it. A tool says it is up in one of two ways: `focus`, the focus-string prefix of a screen it
+-- opens, or `active`, a predicate -- needed for a tool that runs as an overlay on this same
+-- screen and so never changes the focus at all.
 local CUSTOM_ENTRIES = {
     {'Replace wall', {'Replace wall'},
      {custom = true, alias = {'replace', 'rewall', 'swap wall', 'wall material'},
       focus = 'dfhack/lua/dig-replace-walls',
+      active = function() return reqscript('fort/dig-replace-walls').painting end,
       run = function() reqscript('fort/dig-replace-walls').show() end}},
 }
 local CUSTOM_ROWS = #CUSTOM_ENTRIES + 1   -- the entries plus the rule above them
@@ -536,8 +539,16 @@ end
 local function custom_tool_open()
     local foc = dfhack.gui.getCurFocus(true)[1] or ''
     for _, e in ipairs(CUSTOM_ENTRIES) do
-        local f = e[3] and e[3].focus
-        if f and foc:sub(1, #f) == f then return true end
+        local o = e[3]
+        if o then
+            -- a tool that opens its own SCREEN is recognised by its focus path...
+            if o.focus and foc:sub(1, #o.focus) == o.focus then return true end
+            -- ...and one that runs as an overlay on this very screen has to say so itself
+            if o.active then
+                local ok, on = pcall(o.active)
+                if ok and on then return true end
+            end
+        end
     end
     return false
 end

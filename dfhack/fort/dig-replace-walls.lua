@@ -37,9 +37,14 @@ is actually clear -- handed to DFHack's `buildingplan` plugin as a planned const
 So you get "this rock wall should be a smooth block wall" as one gesture, and buildingplan
 waits for the material like it does for anything else.
 
-Two kinds of wall are accepted, and they come down differently:
+Two kinds of wall are accepted:
   * a NATURAL wall (rock/soil) is designated for MINING;
   * a CONSTRUCTED wall is designated for REMOVAL, so it can be rebuilt out of something else.
+
+Both are the same designation underneath. A finished construction is not a building at all --
+DF drops the building once it is built and keeps only the tile's construction record -- and
+`constructions.designateRemove` on one just sets `designation.dig`, the very flag a natural wall
+uses. So one rule covers both, including how the player takes the work back off again.
 
 Anything else on the tile is LEFT ALONE. A door, a hatch, a statue, a workshop, a floor --
 none of them are walls, so none of them are taken down; those tiles are skipped and counted.
@@ -74,10 +79,25 @@ Only clicks on the MAP itself are gestures. A click on a panel -- this tool's ow
 buildingplan filter dialog it opens, a DF menu or notification, another DFHack overlay -- is
 left to whatever was clicked, and never becomes a selection corner.
 
-Pending tiles are marked on the map by overlay `fort/dig-replace-walls.pending`.
+A plan lasts only as long as the work does. CANCELLING THE DIG CANCELS THE REPLACEMENT: take the
+designation off a painted tile by any means -- DF's eraser, `fort/right-click-cancel`, this tool's
+own right-drag -- and the plan goes with it, and is never re-designated behind you. (A tile with
+no designation but a mining job posted on it has NOT been cancelled: DF clears the designation the
+moment it posts the job.) At the other end, the plan drops itself the moment the replacement wall
+is handed to buildingplan, so nothing lingers once the tile is spoken for.
+
+Pending tiles are marked on the map by overlay `fort/dig-replace-walls.pending`, drawn through
+DF's own map layer rather than stamped over the finished frame. The mark goes the moment the
+work does, not when the manager next gets a turn.
+
+The painter is an OVERLAY, not a screen -- `fort/dig-replace-walls.panel`, shown only while
+painting, movable with `gui/overlay`. Nothing is opened or torn down when it comes and goes, so
+closing it does not make DF blank and redraw the screen the way dismissing any DFHack dialog
+does. While it is up DF's own designation tool is disarmed, so neither DF nor the repo's other
+map tools act on the clicks it is taking.
 
 Usually reached from the `fort/dig-building` picker ("Replace wall", in the custom-tool band
-at the bottom; the picker hides itself while this screen is up). `dig-replace-walls` opens the painter; `dig-replace-walls status`
+at the bottom; the picker hides itself while the painter is up). `dig-replace-walls` opens the painter; `dig-replace-walls status`
 reports the plan count; `dig-replace-walls resume` re-designates anything that lost its
 designation; `dig-replace-walls clear` forgets every plan.
 ]]
@@ -93,7 +113,11 @@ local SH = df.tiletype_shape
 local TM = df.tiletype_material
 
 local PERSIST_KEY = 'dig-replace-walls'
-local CYCLE_TICKS = 100        -- how often the manager re-checks the pending tiles
+-- How often the manager re-checks the pending tiles, in FRAMES rather than game ticks.
+-- Deliberate: a tick timeout does not fire while the game is PAUSED, and designating (and
+-- cancelling) is mostly done paused. On ticks, a plan the player had just cancelled kept its
+-- map marker until they unpaused -- the manager reconciling the list was simply not running.
+local CYCLE_FRAMES = 100
 local MAX_HANDOFFS = 50        -- planned walls created per cycle, so a big job can't stall a frame
 local MAX_BOX_TILES = 10000    -- refuse an absurd drag rather than freeze the main thread
 local WALL_TYPE, WALL_SUBTYPE, WALL_CUSTOM = df.building_type.Construction, df.construction_type.Wall, -1
@@ -205,6 +229,11 @@ end
 -- job out from under the unit holding it frees a struct DF is still pointing at, and that is a
 -- crash this fort has already seen -- so a removal already being worked is left to finish and
 -- the caller is told.
+-- Take the pending removal back off a tile. A completed construction is taken down by a dig
+-- designation (see `stale`), so this is the same gesture for both kinds of wall: clear it. Only
+-- an unbuilt construction is a building, and there the queued job is what has to go -- but
+-- never one a dwarf is already holding, since freeing a job DF is still pointing at is a crash
+-- this fort has seen.
 local function cancel_removal(p)
     local b = building_at(p)
     if b then
@@ -215,11 +244,74 @@ local function cancel_removal(p)
             end
         end
     end
-    -- No job we can take back. Either the removal was never queued, or it has already
-    -- happened -- in which case the wall is gone and the plan is moot either way. But if the
-    -- wall is STILL STANDING and we found nothing to cancel, say so rather than report a
-    -- removal taken back that was not.
-    return not is_constructed_wall(p)
+    set_dig(p, DV.No)
+    return true
+end
+
+-- ---- reading back what the player has done ----------------------------------
+--
+-- CANCELLING THE DIG CANCELS THE REPLACEMENT. A plan is only a plan for as long as the tile is
+-- actually on its way to becoming a floor, so when the player takes the designation back off
+-- (DF's eraser, fort/right-click-cancel, anything) the plan goes with it, and we never
+-- re-designate behind them.
+--
+-- "The tile has no dig designation" is NOT on its own evidence of that: DF CLEARS the
+-- designation the moment it posts the mining job, and from then on the job is the only record
+-- that the tile was ever designated. So a plan is cancelled only when there is neither.
+
+local MINING_JOB = {}
+for _, n in ipairs({'Dig', 'CarveUpwardStaircase', 'CarveDownwardStaircase',
+                    'CarveUpDownStaircase', 'CarveRamp', 'DigChannel',
+                    -- taking a CONSTRUCTED wall down posts one of these instead
+                    'RemoveConstruction', 'DestroyBuilding'}) do
+    MINING_JOB[df.job_type[n]] = true
+end
+
+-- every tile with a mining job posted on it, as a position-key set. Built ONCE per cycle: the
+-- job list is walked per plan otherwise, which is a list scan times a plan count.
+local function mining_jobs()
+    local set = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        if job and MINING_JOB[job.job_type] then set[key(job.pos)] = true end
+        link = link.next
+    end
+    return set
+end
+
+-- is this construction still queued for removal?
+local function removal_pending(b)
+    for _, j in ipairs(b.jobs) do
+        if j.job_type == df.job_type.DestroyBuilding then return true end
+    end
+    return false
+end
+
+-- Has this plan stopped being live -- because the player cancelled the work, or because the
+-- replacement has already been handed to buildingplan? One predicate, used by the manager to
+-- drop the record AND by the map marker to decide whether to draw it, so what you see on the
+-- map can never disagree with what the manager is about to do.
+function stale(rec, digging)
+    local p = pos(rec.x, rec.y, rec.z)
+    local b = building_at(p)
+    if b and is_wall_construction(b) then
+        if buildingplan.isPlannedBuilding(b) then return true end   -- replacement planned
+        return rec.con and not removal_pending(b)                   -- removal cancelled
+    end
+    -- THE WALL IS STILL STANDING, AND BOTH KINDS COME DOWN THE SAME WAY: a completed
+    -- construction is not a building at all (DF drops the building the moment it is built and
+    -- keeps only the tile's construction record), and `constructions.designateRemove` on one
+    -- just sets `designation.dig` -- the very flag a natural wall uses. So a constructed wall
+    -- is cancelled exactly like a natural one: no designation left, and no job posted.
+    --
+    -- Getting this wrong is what left every constructed-wall plan in the fort stuck forever:
+    -- the old test looked for a building that a finished construction never has, found none,
+    -- and concluded the plan was still live no matter what the player did to the designation.
+    if is_natural_wall(p) or is_constructed_wall(p) then
+        return dig_val(p) == DV.No and not digging[key(p)]
+    end
+    return false
 end
 
 -- ---- the manager ------------------------------------------------------------
@@ -253,18 +345,16 @@ function plan_wall(p)
 end
 
 -- 'wait' = still coming down, 'done' = handed off or gone, 'drop' = give up (with a reason)
-local function inspect(rec)
+local function inspect(rec, digging)
     local p = pos(rec.x, rec.y, rec.z)
     local b = building_at(p)
+    if stale(rec, digging) then return 'drop' end   -- cancelled, or already handed off
     if b then
-        -- our own planned wall, or the old constructed wall still standing: either way
-        -- there is nothing for us to do on this tile yet.
-        if is_wall_construction(b) then
-            return buildingplan.isPlannedBuilding(b) and 'done' or 'wait'
-        end
+        if is_wall_construction(b) then return 'wait' end
         return 'drop', 'another building was placed here'
     end
-    if is_natural_wall(p) or is_constructed_wall(p) then return 'wait' end
+    if is_natural_wall(p) then return 'wait' end
+    if is_constructed_wall(p) then return 'wait' end
     if not is_clear(p) then return 'drop', 'the tile is neither a wall nor clear ground' end
     local bld, err = plan_wall(p)
     if bld then return 'done' end
@@ -275,14 +365,18 @@ function cycle(gen)
     if gen ~= generation or not dfhack.isMapLoaded() then return end
     local plans = load_plans()
     local keep, handoffs, changed = {}, 0, false
+    local digging = mining_jobs()
     for _, rec in ipairs(plans) do
         local action, err = 'wait', nil
-        if handoffs < MAX_HANDOFFS then action, err = inspect(rec) end
+        if handoffs < MAX_HANDOFFS then action, err = inspect(rec, digging) end
         if action == 'done' then
             handoffs, changed = handoffs + 1, true
         elseif action == 'drop' then
             changed = true
-            dfhack.printerr(('dig-replace-walls (%d,%d,%d): %s'):format(rec.x, rec.y, rec.z, err))
+            -- a cancel carries no reason: it is what the player asked for, not a failure
+            if err then
+                dfhack.printerr(('dig-replace-walls (%d,%d,%d): %s'):format(rec.x, rec.y, rec.z, err))
+            end
         else
             keep[#keep + 1] = rec
             if err then
@@ -292,15 +386,21 @@ function cycle(gen)
     end
     if changed then save_plans(keep) end
     if #keep == 0 then running = false return end
-    dfhack.timeout(CYCLE_TICKS, 'ticks', function() cycle(gen) end)
+    dfhack.timeout(CYCLE_FRAMES, 'frames', function() cycle(gen) end)
 end
 
+-- Start (or restart) the manager. It does NOT bail when `running` is already set, and must not:
+-- `running` survives a script reload while the timeout chain that set it does not, so trusting
+-- it left the flag stuck on with nothing actually scheduled -- the manager silently stopped
+-- reconciling, and cancelled plans kept their markers until something else kicked it. Bumping
+-- the generation invalidates whatever chain was live, so restarting is always safe and there is
+-- never more than one.
 function start()
-    if running or not dfhack.isMapLoaded() then return end
+    if not dfhack.isMapLoaded() then return end
     running = true
     generation = generation + 1
     local gen = generation
-    dfhack.timeout(1, 'ticks', function() cycle(gen) end)
+    dfhack.timeout(1, 'frames', function() cycle(gen) end)
 end
 
 function stop()
@@ -310,17 +410,20 @@ end
 
 -- re-apply anything that lost its designation (a cancelled dig, a reloaded save) and get the
 -- cycle going again
+-- Pick the plan list back up (map load, script reload). This used to re-apply any designation
+-- that had gone missing, which is precisely wrong now: a missing designation is how the player
+-- cancels, and re-applying it put the designation straight back. So resume only DROPS what has
+-- been cancelled and restarts the cycle; the cycle does the rest.
 function resume()
     if not dfhack.isMapLoaded() then return end
     local plans = load_plans()
+    local digging = mining_jobs()
+    local keep = {}
     for _, rec in ipairs(plans) do
-        local p = pos(rec.x, rec.y, rec.z)
-        if is_natural_wall(p) and dig_val(p) == DV.No then set_dig(p, DV.Default) end
-        if rec.con and is_constructed_wall(p) then
-            pcall(dfhack.constructions.designateRemove, p)
-        end
+        if not stale(rec, digging) then keep[#keep + 1] = rec end
     end
-    if #plans > 0 then start() end
+    if #keep ~= #plans then save_plans(keep) end
+    if #keep > 0 then start() end
 end
 
 function clear()
@@ -394,13 +497,8 @@ function erase_box(a, b)
     for _, rec in ipairs(plans) do
         local p = pos(rec.x, rec.y, rec.z)
         if drop[key(rec)] then
-            if rec.con then
-                if cancel_removal(p) then dropped = dropped + 1
-                else keep[#keep + 1] = rec; stuck = stuck + 1 end
-            else
-                if is_natural_wall(p) then set_dig(p, DV.No) end
-                dropped = dropped + 1
-            end
+            if cancel_removal(p) then dropped = dropped + 1
+            else keep[#keep + 1] = rec; stuck = stuck + 1 end
         else
             keep[#keep + 1] = rec
         end
@@ -411,16 +509,16 @@ end
 
 -- ---- the map marker overlay -------------------------------------------------
 
-local PENDING_PEN = dfhack.pen.parse{ch = 'X', fg = COLOR_LIGHTCYAN, keep_lower = true,
-    tile = dfhack.screen.findGraphicsTile('CURSORS', 3, 0)}
-
 ReplaceWallMarks = defclass(ReplaceWallMarks, overlay.OverlayWidget)
 ReplaceWallMarks.ATTRS{
     desc = 'Marks the walls painted for replacement by fort/dig-replace-walls.',
-    default_pos = {x = 1, y = 1},
     default_enabled = true,
     viewscreens = 'dwarfmode',
-    frame = {w = 1, h = 1},
+    -- A PURE MAP PAINTER: no screen footprint at all, so it is never positioned, never
+    -- hovered, and has no cell of its own for the overlay framework to manage or repaint.
+    -- It used to declare a 1x1 frame parked at a default_pos while painting somewhere else
+    -- entirely, which is what made removing it repaint the whole screen black.
+    frame = {w = 0, h = 0},
     overlay_onupdate_max_freq_seconds = 0.25,
 }
 
@@ -428,20 +526,55 @@ function ReplaceWallMarks:init() self.marks = {} end
 
 -- Read the plan list on the SLOW update, never per frame: it is a persistent-data
 -- round trip and this widget renders on every frame of the map.
+--
+-- A record is NOT drawn just because it is still in the list. The manager is what removes
+-- records, and it runs on a timer -- so between the player cancelling a designation and the
+-- next pass there is a window where the list still holds tiles that are no longer going
+-- anywhere. This update fires on a wall-clock timer (it runs while the game is paused, which is
+-- when designating mostly happens), so it re-tests each record and simply does not draw a stale
+-- one. The mark disappears when the designation does, not when the manager next gets a turn.
 function ReplaceWallMarks:overlay_onupdate()
     self.marks = {}
     if not dfhack.isMapLoaded() or not dfhack.isSiteLoaded() then return end
-    for _, r in ipairs(load_plans()) do self.marks[#self.marks + 1] = pos(r.x, r.y, r.z) end
+    local plans = load_plans()
+    if #plans == 0 then return end
+    local digging = mining_jobs()
+    for _, r in ipairs(plans) do
+        if not stale(r, digging) then self.marks[#self.marks + 1] = pos(r.x, r.y, r.z) end
+    end
 end
 
+-- Drawn THROUGH DF'S OWN MAP LAYER, not painted over the finished screen.
+--
+-- `dfhack.screen.paintTile` stamps onto the composed frame, so the marks are something laid on
+-- top that has to be taken back off again -- and taking them off (the overlay being disabled,
+-- the last mark going away) is what flashed the whole screen black.
+--
+-- `gps.main_viewport.screentexpos_interface` is the layer DF renders the building-placement
+-- hologram in: alpha-blended over the map, and NOT recoloured the way the designation layer is,
+-- so the sprite keeps its own look. DF rebuilds the layer every frame, so writing into it means
+-- there is never anything of ours left to erase -- the marks simply stop being written and the
+-- next frame is already correct. Cells DF has drawn in are left alone, so a placement hologram
+-- or anything else DF puts there still wins.
+local MARK_TILE = dfhack.screen.findGraphicsTile('CURSORS', 3, 0)
+PAINT_TILE = dfhack.screen.findGraphicsTile('CURSORS', 1, 0) or MARK_TILE
+ERASE_TILE = dfhack.screen.findGraphicsTile('CURSORS', 3, 0)
+
 function ReplaceWallMarks:onRenderFrame(dc, rect)
-    if #self.marks == 0 then return end
+    if #self.marks == 0 or not MARK_TILE then return end
     local vp = guidm.Viewport.get()
     if not vp then return end
+    local gvp = df.global.gps.main_viewport
+    local dimx, dimy = gvp.dim_x, gvp.dim_y
+    if dimx <= 0 or dimy <= 0 then return end
+    local arr, arr_old = gvp.screentexpos_interface, gvp.screentexpos_interface_old
     for _, p in ipairs(self.marks) do
-        if p.z == vp.z and vp:isVisible(p) then
-            local s = vp:tileToScreen(p)
-            dfhack.screen.paintTile(PENDING_PEN, s.x, s.y, nil, nil, true)
+        if p.z == vp.z then
+            local vx, vy = p.x - vp.x1, p.y - vp.y1
+            if vx >= 0 and vy >= 0 and vx < dimx and vy < dimy then
+                local at = vx * dimy + vy
+                if arr[at] == 0 then arr[at], arr_old[at] = MARK_TILE, MARK_TILE end
+            end
         end
     end
 end
@@ -453,6 +586,17 @@ end
 -- put it back afterwards -- then the dialog edits exactly the filter that placing a wall by
 -- hand would edit. (Its own FilterSelectionScreen is not reused: that one restores
 -- bottom_mode_selected to BUILDING_PLACEMENT on dismiss, which is wrong off the build screen.)
+
+-- THE BLACK FLASH ON CLOSING. gui.Screen:dismiss() asks DF for a full-screen refresh
+-- (`Screen.request_full_screen_refresh`, which the next renderParent turns into
+-- `gps.force_full_display_count = 1`) -- DF then blanks the screen and redraws it from scratch.
+-- That blank frame is the flash. It exists to clear leftovers from screens that stamp onto the
+-- composed frame; nothing we draw needs it. The window sits over the map, which DF repaints
+-- every frame regardless, and the pending marks go into DF's own map layer, which it rebuilds
+-- from scratch each frame. So the request is withdrawn as soon as it is made.
+local function no_full_refresh()
+    gui.Screen.request_full_screen_refresh = false
+end
 
 -- What buildingplan's wall filter currently comes to, in the words buildingplan itself uses:
 -- the same sentence its dialog prints as "Current filter:". Rebuilt here rather than read off
@@ -521,19 +665,23 @@ function WallFilterScreen:onDismiss()
     if self.on_close then self.on_close() end
 end
 
+function WallFilterScreen:dismiss()
+    WallFilterScreen.super.dismiss(self)
+    no_full_refresh()
+end
+
 -- ---- the painter ------------------------------------------------------------
 
-local PAINT_PEN = dfhack.pen.parse{ch = 'X', fg = COLOR_LIGHTGREEN, keep_lower = true,
-    tile = dfhack.screen.findGraphicsTile('CURSORS', 3, 0)}
-local ERASE_PEN = dfhack.pen.parse{ch = 'X', fg = COLOR_LIGHTRED, keep_lower = true,
-    tile = dfhack.screen.findGraphicsTile('CURSORS', 3, 0)}
+-- NOT A ZSCREEN, ON PURPOSE. Every DFHack screen forces a full-screen refresh when it closes:
+-- the C++ teardown sets `gps.force_full_display_count` a frame or two after dismissal, DF blanks
+-- the screen and redraws it, and that blank frame is the black flash. It is not something the
+-- lua side can withdraw -- clearing `Screen.request_full_screen_refresh` and even zeroing the
+-- counter by hand both get overwritten, and a bare do-nothing ZScreen reproduces it exactly. So
+-- the painter is an OVERLAY instead: it is created once and only shown and hidden, no viewscreen
+-- is ever built or torn down, and there is nothing to flash. It also means the gesture poller
+-- keeps running while the game is paused, which is when designating mostly happens.
 
-ReplaceWallScreen = defclass(ReplaceWallScreen, gui.ZScreen)
-ReplaceWallScreen.ATTRS{
-    focus_path = 'dig-replace-walls/paint',
-    pass_movement_keys = true,
-    pass_mouse_clicks = false,
-}
+painting = painting or false
 
 local SETTINGS = {
     {view_id = 'blocks',   key = 'CUSTOM_B', label = 'Blocks'},
@@ -542,7 +690,21 @@ local SETTINGS = {
     {view_id = 'bars',     key = 'CUSTOM_R', label = 'Bars'},
 }
 
-function ReplaceWallScreen:init()
+ReplaceWallPanel = defclass(ReplaceWallPanel, overlay.OverlayWidget)
+ReplaceWallPanel.ATTRS{
+    desc = 'The Replace Wall painter (fort/dig-replace-walls).',
+    default_pos = {x = 7, y = 9},
+    default_enabled = true,
+    viewscreens = 'dwarfmode',
+    frame = {w = 38, h = 13},
+    frame_style = gui.FRAME_MEDIUM,
+    frame_title = 'Replace Wall',
+    frame_background = dfhack.pen.parse{ch = ' ', fg = COLOR_BLACK, bg = COLOR_BLACK},
+    overlay_onupdate_max_freq_seconds = 0,
+    visible = function() return painting end,
+}
+
+function ReplaceWallPanel:init()
     self.summary = filter_summary()
     local subs = {
         -- what walls will actually be built out of, in buildingplan's own words
@@ -573,28 +735,44 @@ function ReplaceWallScreen:init()
             on_change = function(val) self:set_setting(s.view_id, val) end,
         }
     end
-    self:addviews{
-        widgets.Window{
-            view_id = 'window',
-            frame = {l = 6, t = 8, w = 38, h = 15, xalign = 0, yalign = 0},
-            frame_title = 'Replace Wall',
-            subviews = subs,
-        },
-    }
-    self:refresh_settings()
+    self:addviews(subs)
     self:cancel_drag()
-    -- SEED THE BUTTON STATE FROM DF, don't start from nil. The painter is opened BY a click
-    -- (the "Replace wall" entry in fort/dig-building's picker), so the left button is still
-    -- physically down when this screen appears. Starting at nil makes the very next onIdle
-    -- read that held button as a fresh press and take the map tile under the picker entry as
-    -- a selection corner -- which is how clicking the entry started painting the tile behind
-    -- its own label. Seeded, the press is already accounted for and only the NEXT one counts.
-    self.lbut, self.rbut = df.global.enabler.mouse_lbut_down, df.global.enabler.mouse_rbut_down
 end
 
--- read buildingplan's global settings into the toggles (also picks up a change made in
--- buildingplan's own dialog while we were in it)
-function ReplaceWallScreen:refresh_settings()
+-- ---- opening and closing ----------------------------------------------------
+
+function ReplaceWallPanel:open()
+    self.summary = filter_summary()
+    self:refresh_settings()
+    self:cancel_drag()
+    -- DISARM DF'S DESIGNATION TOOL for as long as we are up, and put it back on the way out.
+    --
+    -- The painter is normally opened from fort/dig-building's picker while the Dig tool is
+    -- selected, and that tool stays armed on the map underneath. Our own clicks are swallowed
+    -- here -- but the repo's map tools poll the mouse buttons straight from the overlay pump,
+    -- with no idea another tool has the map. fort/right-click-cancel does exactly that, and on
+    -- the release that ended a paint drag it completed a dig box with a synthetic click of its
+    -- own, leaving a designation on the last tile of the drag. With no designation tool
+    -- selected there is nothing for any of them -- or for DF -- to act on.
+    local mi = df.global.game.main_interface
+    self.saved_tool = mi.main_designation_selected
+    mi.main_designation_selected = df.main_designation_type.NONE
+    -- the click that OPENED us is still held: account for it, so it is not read as a fresh press
+    self.lbut, self.rbut = df.global.enabler.mouse_lbut_down, df.global.enabler.mouse_rbut_down
+    painting = true
+end
+
+function ReplaceWallPanel:close()
+    painting = false
+    self:cancel_drag()
+    if self.saved_tool then
+        df.global.game.main_interface.main_designation_selected = self.saved_tool
+        self.saved_tool = nil
+    end
+end
+
+-- read buildingplan's global settings into the toggles
+function ReplaceWallPanel:refresh_settings()
     local ok, settings = pcall(buildingplan.getGlobalSettings)
     if not ok or not settings then return end
     for _, s in ipairs(SETTINGS) do
@@ -603,14 +781,17 @@ function ReplaceWallScreen:refresh_settings()
     end
 end
 
-function ReplaceWallScreen:set_setting(name, val)
+function ReplaceWallPanel:set_setting(name, val)
     pcall(buildingplan.setSetting, name, val)
     self:refresh_settings()
 end
 
-function ReplaceWallScreen:edit_filter()
+function ReplaceWallPanel:edit_filter()
     self:cancel_drag()
-    WallFilterScreen{on_close = function() self.summary = filter_summary() end}:show()
+    WallFilterScreen{on_close = function()
+        self.summary = filter_summary()
+        self:refresh_settings()
+    end}:show()
 end
 
 -- ---- what counts as a click on the map ---------------------------------------
@@ -640,10 +821,10 @@ end
 -- first confirm something is actually rendered there. Map tiles are graphics (ch == 0); panel
 -- text is not.
 --
--- OUR OWN MAP MARKERS ARE NOT INTERFACE. They are painted onto map tiles with a visible glyph,
--- so the "something is rendered here" test sees them and would call every wall we have already
--- painted a piece of UI -- making exactly those tiles impossible to right-click and unselect.
--- We know which tiles are ours, so they are judged as map, which is what they are.
+-- OUR OWN MAP MARKERS ARE NOT INTERFACE. They are drawn onto map tiles, so the "something is
+-- rendered here" test would call every wall we have already painted a piece of UI -- making
+-- exactly those tiles impossible to right-click and unselect. We know which tiles are ours, so
+-- they are judged as map, which is what they are.
 local function over_other_overlay(mx, my, marked)
     if marked then return false end
     local ok0, t = pcall(dfhack.screen.readTile, mx, my)
@@ -651,7 +832,7 @@ local function over_other_overlay(mx, my, marked)
     local vs = dfhack.gui.getDFViewscreen(true)
     local fullw, fullh = df.global.gps.dimx - 1, df.global.gps.dimy - 1
     for name, e in pairs(overlay.get_state().db) do
-        if name ~= 'fort/dig-replace-walls.pending' then
+        if name ~= 'fort/dig-replace-walls.pending' and name ~= 'fort/dig-replace-walls.panel' then
             local w = e.widget
             local r = w and w.frame_rect
             if r and mx >= r.x1 and mx <= r.x2 and my >= r.y1 and my <= r.y2
@@ -665,10 +846,10 @@ local function over_other_overlay(mx, my, marked)
     return false
 end
 
-function ReplaceWallScreen:map_pos_if_clear()
+function ReplaceWallPanel:map_pos_if_clear()
     local p = dfhack.gui.getMousePos()
     if not p then return nil end
-    if self.subviews.window:getMouseFramePos() then return nil end   -- our own window
+    if self:getMouseFramePos() then return nil end                   -- our own panel
     local m = df.global.game.main_interface
     if m.current_hover ~= -1 then return nil end                     -- a DF hover element
     if m.current_hover_alert then return nil end                     -- a DF notification/alert
@@ -680,20 +861,19 @@ end
 -- ---- gestures ---------------------------------------------------------------
 -- The repo's map gesture scheme (fort/right-click-cancel): drag a box to apply, right-drag a
 -- box to take it back, and a click in place is one corner of a click-and-second-click box.
--- Both buttons are resolved on RELEASE, read off DF's own button state -- release events are
--- not reliably delivered to a screen that is passing clicks through.
+-- Both buttons are resolved on RELEASE, read off DF's own button state.
 
-function ReplaceWallScreen:cancel_drag()
+function ReplaceWallPanel:cancel_drag()
     self.press, self.mode, self.corner = nil, nil, nil
 end
 
 -- the box a gesture would act on right now: from the pending click-click corner if there is
 -- one, else from where the button went down
-function ReplaceWallScreen:anchor()
+function ReplaceWallPanel:anchor()
     return self.corner or self.press
 end
 
-function ReplaceWallScreen:apply(a, b, mode)
+function ReplaceWallPanel:apply(a, b, mode)
     if mode == 'erase' then
         local dropped, stuck = erase_box(a, b)
         if stuck > 0 then
@@ -713,7 +893,7 @@ function ReplaceWallScreen:apply(a, b, mode)
     return painted
 end
 
-function ReplaceWallScreen:on_release(rel, mode)
+function ReplaceWallPanel:on_release(rel, mode)
     local a = self:anchor()
     if not a or not rel or a.z ~= rel.z then self:cancel_drag() return end
     local dragged = not same(self.press, rel)
@@ -729,16 +909,21 @@ function ReplaceWallScreen:on_release(rel, mode)
     end
 end
 
-function ReplaceWallScreen:onIdle()
-    ReplaceWallScreen.super.onIdle(self)
+-- Are we the thing the player is actually looking at? A ZScreen of ours (the buildingplan
+-- filter dialog) sits above the map with its own focus path; while one is up the map is not
+-- being clicked on, and the buttons must not be read.
+local function on_map_screen()
+    local foc = dfhack.gui.getCurFocus(true)[1] or ''
+    return foc:sub(1, 9) == 'dwarfmode'
+end
+
+function ReplaceWallPanel:overlay_onupdate()
+    if not painting then return end
     local e = df.global.enabler
     local l, r = e.mouse_lbut_down, e.mouse_rbut_down
-
-    -- ANOTHER SCREEN IS ON TOP -- our own buildingplan filter dialog, say. This poller keeps
-    -- running underneath it, and a click meant for that screen is not a click on the map. So
-    -- read nothing while it is up, and keep tracking the hardware state so the click that
-    -- dismisses it cannot come back to us as a stray release.
-    if not self:hasFocus() then
+    if not on_map_screen() then
+        -- something of ours is on top: read nothing, but keep tracking the hardware state so
+        -- the click that dismisses it cannot come back to us as a stray release
         self.lbut, self.rbut = l, r
         self:cancel_drag()
         return
@@ -766,7 +951,7 @@ function ReplaceWallScreen:onIdle()
                 -- right-click in place: unselect the tile under the cursor if something is
                 -- painted there; on a bare tile it means "done", and closes.
                 self:cancel_drag()
-                if planned_keys()[key(rel)] then erase_box(rel, rel) else self:dismiss() end
+                if planned_keys()[key(rel)] then erase_box(rel, rel) else self:close() end
             else
                 self:on_release(rel, 'erase')
             end
@@ -776,58 +961,75 @@ function ReplaceWallScreen:onIdle()
     self.rbut = r
 end
 
-function ReplaceWallScreen:onInput(keys)
+function ReplaceWallPanel:onInput(keys)
+    if not painting then return false end
     if keys.LEAVESCREEN then
         if self:anchor() then self:cancel_drag() return true end
-        self:dismiss()
+        self:close()
         return true
     end
-    -- clicks on the window itself belong to the window
-    if (keys._MOUSE_L or keys._MOUSE_R) and self.subviews.window:getMouseFramePos() then
-        return ReplaceWallScreen.super.onInput(self, keys)
+    -- clicks on the panel itself belong to the panel (its hotkey labels and toggles)
+    if (keys._MOUSE_L or keys._MOUSE_R) and self:getMouseFramePos() then
+        return ReplaceWallPanel.super.onInput(self, keys)
     end
-    -- swallow clicks on the MAP (both buttons are resolved on release in onIdle); a click on
-    -- any interface -- ours, DF's, another overlay's -- is passed straight through
+    -- swallow clicks on the MAP (both buttons are resolved on release in overlay_onupdate); a
+    -- click on any interface -- DF's, another overlay's -- is passed straight through
     if keys._MOUSE_L or keys._MOUSE_R then
         return self:map_pos_if_clear() ~= nil
     end
-    return ReplaceWallScreen.super.onInput(self, keys)
+    if ReplaceWallPanel.super.onInput(self, keys) then return true end
+    -- a letter typed at the map while we are up must not also drive DF's own map hotkeys
+    return reqscript('internal/typed-keys').swallows(keys)
 end
 
-function ReplaceWallScreen:onRenderFrame(dc, rect)
-    self:refresh_settings()
-    ReplaceWallScreen.super.onRenderFrame(self, dc, rect)
+function ReplaceWallPanel:onRenderFrame(dc, rect)
+    ReplaceWallPanel.super.onRenderFrame(self, dc, rect)
     local a = self:anchor()
     if not a then return end
     local cur = dfhack.gui.getMousePos()
     if not cur or cur.z ~= a.z then return end
     local vp = guidm.Viewport.get()
     if not vp or vp.z ~= a.z then return end
-    local pen = self.mode == 'erase' and ERASE_PEN or PAINT_PEN
+    local tile = self.mode == 'erase' and ERASE_TILE or PAINT_TILE
+    if not tile then return end
+    -- same map layer as the pending marks: written into DF's own frame, never stamped on top
+    local gvp = df.global.gps.main_viewport
+    local dimx, dimy = gvp.dim_x, gvp.dim_y
+    if dimx <= 0 or dimy <= 0 then return end
+    local arr, arr_old = gvp.screentexpos_interface, gvp.screentexpos_interface_old
     for_box(a, cur, function(p)
-        if vp:isVisible(p) then
-            local s = vp:tileToScreen(p)
-            dfhack.screen.paintTile(pen, s.x, s.y, nil, nil, true)
+        local vx, vy = p.x - vp.x1, p.y - vp.y1
+        if vx >= 0 and vy >= 0 and vx < dimx and vy < dimy then
+            local at = vx * dimy + vy
+            arr[at], arr_old[at] = tile, tile
         end
     end)
 end
 
+-- the painter is a single overlay widget, so opening it is just switching it on
 function show()
     if not dfhack.isMapLoaded() then qerror('a fortress map must be loaded') end
-    ReplaceWallScreen{}:show()
+    local w = overlay.get_state().db['fort/dig-replace-walls.panel']
+    if not w or not w.widget then qerror('the fort/dig-replace-walls.panel overlay is not loaded') end
+    w.widget:open()
+end
+
+function hide()
+    local w = overlay.get_state().db['fort/dig-replace-walls.panel']
+    if w and w.widget then w.widget:close() else painting = false end
 end
 
 -- ---- lifecycle & command ----------------------------------------------------
 
 dfhack.onStateChange[PERSIST_KEY] = function(code)
-    if code == SC_MAP_LOADED then dfhack.timeout(1, 'ticks', resume)
+    if code == SC_MAP_LOADED then dfhack.timeout(1, 'frames', resume)
     elseif code == SC_MAP_UNLOADED then stop() end
 end
 
 -- a reload does not re-emit SC_MAP_LOADED for a map that is already open
 if dfhack.isMapLoaded() then resume() end
 
-OVERLAY_WIDGETS = {pending = ReplaceWallMarks}
+OVERLAY_WIDGETS = {pending = ReplaceWallMarks, panel = ReplaceWallPanel}
 
 if dfhack_flags.module then return end
 

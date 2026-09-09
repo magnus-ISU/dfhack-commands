@@ -138,14 +138,20 @@ local COLUMNS = {
         {key = 'dig-shapes', label = 'dig-shapes',
          enable = script('fort/dig-shapes'),
          disable = overlay_set('disable', 'fort/dig-shapes.watcher')},
-        -- the painter is opened from dig-building's picker, so enabling this row only loads
-        -- the module (which resumes any pending plans) and turns its map marker on
+        -- Two overlays: the painter panel itself (shown only while painting) and the map marks.
+        -- The painter is opened from dig-building's picker, so enabling this row just loads the
+        -- module -- which resumes any pending plans -- and turns both overlays on.
         {key = 'dig-replace-walls', label = 'dig-replace-walls',
          enable = function()
             reqscript('fort/dig-replace-walls')
+            dfhack.run_command('overlay', 'enable', 'fort/dig-replace-walls.panel')
             dfhack.run_command('overlay', 'enable', 'fort/dig-replace-walls.pending')
          end,
-         disable = overlay_set('disable', 'fort/dig-replace-walls.pending')},
+         disable = function()
+            pcall(function() reqscript('fort/dig-replace-walls').hide() end)
+            dfhack.run_command('overlay', 'disable', 'fort/dig-replace-walls.panel')
+            dfhack.run_command('overlay', 'disable', 'fort/dig-replace-walls.pending')
+         end},
         {key = 'right-click-cancel', label = 'right-click-cancel',
          enable = function()
             dfhack.run_script('fort/right-click-cancel')
