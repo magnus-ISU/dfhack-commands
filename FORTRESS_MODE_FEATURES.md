@@ -512,6 +512,23 @@ The same line also sits on the **depot's own panel**, under the *Trade Depot* ti
 you are on while deciding what to send down there is the one that should be telling you how long
 you have. It is the notification's own text, so the two can never disagree.
 
+### **`fort/better-dfhack-trade`**
+DFHack's trade UI is one small window with a tab bar — *Caravan goods* on one tab, *Fort goods*
+on the other — and a trade is a comparison, which a tab switch is not. This opens it as **two
+windows side by side**: what they are selling on the left, what you are offering on the right,
+each a whole DFHack trade window with its own search, sort, filters and selections.
+
+They open against the edges of the screen — four rows of margin at the top, three columns at the
+left, three rows at the bottom — and stop short of the **minimap**, so the thing that tells you
+where your depot is stays visible while you trade. The minimap's width is measured rather than
+assumed (DF draws it itself, so those cells come back empty from the tile grid), and a fort with
+the minimap turned off gets the full width. After that they are ordinary DFHack windows: drag
+and resize them as you like.
+
+It works by swapping the class DFHack's own *DFHack trade UI* button builds, so every way in —
+the banner button, the keybinding — opens this instead, and turning it off in `magnus-scripts`
+puts DFHack's own window straight back.
+
 ### **`fort/help-mood` notices**
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
 game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,

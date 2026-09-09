@@ -243,6 +243,9 @@ local COLUMNS = {
             notify_off({'trader_ready'}, {'traders_ready'})()
             dfhack.run_command('overlay', 'disable', 'fort/trader-notification.depot_countdown')
          end},
+        {key = 'better-dfhack-trade', label = 'better-dfhack-trade',
+         enable = cmd('enable', 'fort/better-dfhack-trade'),
+         disable = cmd('disable', 'fort/better-dfhack-trade')},
         {key = 'empty-labor-notification', label = 'empty-labor-notification',
          enable = script('fort/empty-labor-notification'), disable = notify_off({'empty_labor'})},
         {key = 'moody-items-warning', label = 'moody-items-warning',
