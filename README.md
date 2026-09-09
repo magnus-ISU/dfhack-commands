@@ -131,6 +131,8 @@ fort.
 Right-click to dig; drag shapes that automatically become staircases, constructions, mining,
 chopping or removal.
 
+![fort/dig-shapes demo](demos/fort-dig-shapes.gif)
+
 ### **`fort/dig-building`**
 A searchable building picker while digging that drops you straight into DF's placement flow.
 
@@ -172,6 +174,8 @@ filled, stockpiles leave out tiles another building owns (doors included, since 
 one), and too big a region is refused outright rather than half-drawn: a fort staircase reaches
 every floor you have. The object you repeated on is the one that grows, so its name, settings and
 assignments all survive.
+
+![fort/repeated-flood-fill demo](demos/fort-repeated-flood-fill.gif)
 
 ### **`fort/right-click-cancel`**
 Drag to designate, right-drag to erase, right-click to cancel — for every designation and
