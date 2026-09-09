@@ -20,23 +20,32 @@ which is what makes this safe to leave on.
 
 WHAT COUNTS AS THE ROOM. The fill runs from the repeated tile across floors, boulders, ramps,
 stairs and brook tops -- anything you can stand on -- and stops at walls, fortifications, open
-air and DOORS, on that z-level only, the way DF's own rooms do. Doors matter more than they
-sound: without them a bedroom joins the corridor, the corridor joins the fort, and "the room" is
-the whole level. Hidden tiles are never filled -- a fill may not tell you what is behind an undug
-wall -- and stockpiles also stop at other buildings, since they cannot share a tile. A fill that
-would exceed the tile cap is refused outright rather than half-drawn, which is what happens when
-you repeat a placement out in the open.
+air and DOORS, the way DF's own rooms do. Doors matter more than they sound: without them a
+bedroom joins the corridor, the corridor joins the fort, and "the room" is the whole level.
 
-Burrows fill through DFHack's own burrow flood (`plugins.burrow`), which is what gives them 3D
-for free; the ERASE tool floods in reverse there, un-painting the room. Zones and stockpiles
-grow the object you repeated on -- its settings, its name, its assignments all survive, because
-it is the same object with more tiles.
+THE SHELL COMES WITH IT. What is filled is the floor you could walk plus THE WALLS AND DOORS
+AROUND IT, corners included -- a room is its shell as much as its floor, a bedroom that stops one
+tile short of the wall is not the room you drew, and a burrow that stops there leaves the miner
+outside the rock he was sent to dig. Doors are inside the fill already, since you can stand on
+one; the walls are added around the edge once the inside is known.
+
+Hidden tiles are never filled -- a fill may not tell you what is behind an undug wall -- and
+stockpiles also leave out tiles another building owns, doors included, since a stockpile cannot
+share a tile with one. A fill that would exceed the tile cap is refused outright rather than
+half-drawn, which is what happens when you repeat a placement out in the open.
+
+The 3D fill climbs the way a dwarf does: a staircase reaches the staircase above or below it, a
+ramp reaches the tile over its head, and each level filled brings its own walls. Burrows are
+painted tile by tile, so the ERASE tool floods in reverse there, taking the room back out of the
+burrow. Zones and stockpiles grow the object you repeated on -- its settings, its name, its
+assignments all survive, because it is the same object with more tiles.
 
     repeated-flood-fill          what it does and whether the overlays are on
 
 The overlay `fort/repeated-flood-fill.watcher` is what actually watches for the repeat;
 `magnus-scripts` turns it on. If you also have DFHack's own burrow "Flood fill on double click"
-set to 2D or 3D, turn one of the two off -- they answer the same gesture.
+set to 2D or 3D, turn one of the two off -- they answer the same gesture, and DFHack's fills the
+walkable space without the walls.
 ]]
 
 local gui = require('gui')
@@ -54,8 +63,11 @@ local STANDABLE = {
 }
 
 -- A refused fill is better than a half-drawn one, and out in the open "the room" is the whole
--- map: the cap is what stops a stray double-click turning into a fort-wide stockpile.
+-- map: the cap is what stops a stray double-click turning into a fort-wide stockpile. The 3D cap
+-- is looser because a 3D room legitimately spans levels -- but it is still a cap, since a
+-- staircase reaches every floor in the fort (measured: a four-tile shaft blows past 2000).
 local MAX_TILES = 2000
+local MAX_TILES_3D = 6000
 
 -- DOORS END A ROOM. Without this the fill is useless indoors: a bedroom's doorway joins it to
 -- the corridor, the corridor to the rest of the fort, and a flood from a bed reaches every floor
@@ -97,7 +109,15 @@ local KINDS = {
 
 -- ---- the fill ----------------------------------------------------------------
 
-local function key(x, y) return x * 65536 + y end
+-- one number per tile, so the sets can be plain lua tables. Fort maps top out well under 4096
+-- tiles on a side, so three 12-bit fields fit inside a double with room to spare.
+local function key(x, y, z) return (z * 4096 + y) * 4096 + x end
+local function unkey(k)
+    local x = k % 4096
+    local r = (k - x) / 4096
+    local y = r % 4096
+    return x, y, (r - y) / 4096
+end
 
 local function tile_shape(pos)
     local tt = dfhack.maps.getTileType(pos)
@@ -121,42 +141,90 @@ local function is_boundary(pos)
     return bld ~= nil and BOUNDARY_BUILDING[bld:getType()] or false
 end
 
--- The room around `pos`, on its own z-level: 4-connected standable tiles, out to the walls.
--- Returns a set keyed by key(x,y) and the count, or nil plus a reason.
-function flood_room(pos, blocked)
+-- Where a tile leads. Horizontally: the four sides. Vertically (3D fills only): a stair reaches
+-- the stair above or below it, and a ramp reaches the tile over its head -- which is how a dwarf
+-- gets between z-levels, so it is how the fill does too.
+local function neighbours(x, y, z, three_d)
+    local out = {
+        {x + 1, y, z}, {x - 1, y, z}, {x, y + 1, z}, {x, y - 1, z},
+    }
+    if not three_d then return out end
+    local sh = tile_shape(xyz2pos(x, y, z))
+    if sh == SH.STAIR_UP or sh == SH.STAIR_UPDOWN or sh == SH.RAMP then
+        out[#out + 1] = {x, y, z + 1}
+    end
+    if sh == SH.STAIR_DOWN or sh == SH.STAIR_UPDOWN then
+        out[#out + 1] = {x, y, z - 1}
+    end
+    return out
+end
+
+-- The eight tiles around one, on its own level: the ring is drawn with corners, or a room's
+-- corner walls would be the one thing left out of it.
+local RING = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}
+
+-- The room around `pos`: standable tiles out to the walls, plus THE WALLS AND DOORS THEMSELVES.
+-- A room is its shell as much as its floor -- a bedroom that stops one tile short of the wall is
+-- not the room you drew -- so once the inside is known, every wall and fortification touching it
+-- is added, corners included. Doors are already in: they are standable, and the fill stops at
+-- them rather than passing through.
+--
+-- `opts.blocked(pos)` refuses a tile outright (a stockpile cannot take a tile another building
+-- owns); `opts.three_d` lets it climb stairs and ramps. Returns the tile set, or nil and why.
+function flood_room(pos, opts)
+    opts = opts or {}
     if not dfhack.maps.isValidTilePos(pos) then return nil, 'that is not a map tile' end
     local shape = tile_shape(pos)
     if not shape or not STANDABLE[shape] then
         return nil, 'there is no floor there to fill from'
     end
-    local seen, queue, count = {[key(pos.x, pos.y)] = true}, {{x = pos.x, y = pos.y}}, 1
-    local head = 1
+    local cap = opts.three_d and MAX_TILES_3D or MAX_TILES
+    local inside = {[key(pos.x, pos.y, pos.z)] = true}
+    local queue, head, count = {{pos.x, pos.y, pos.z}}, 1, 1
     while head <= #queue do
         local t = queue[head]
         head = head + 1
-        for _, d in ipairs({{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) do
-            local nx, ny = t.x + d[1], t.y + d[2]
-            local k = key(nx, ny)
-            if not seen[k] then
-                local np = xyz2pos(nx, ny, pos.z)
+        for _, n in ipairs(neighbours(t[1], t[2], t[3], opts.three_d)) do
+            local k = key(n[1], n[2], n[3])
+            if not inside[k] then
+                local np = xyz2pos(n[1], n[2], n[3])
                 if dfhack.maps.isValidTilePos(np) then
                     local sh = tile_shape(np)
                     if sh and STANDABLE[sh] and not is_hidden(np)
-                        and not (blocked and blocked(np)) then
-                        seen[k] = true
+                        and not (opts.blocked and opts.blocked(np)) then
+                        inside[k] = true
                         count = count + 1
-                        if count > MAX_TILES then
+                        if count > cap then
                             return nil, ('more than %d tiles -- that is not a room, it is the '
-                                .. 'outdoors'):format(MAX_TILES)
+                                .. 'whole fort'):format(cap)
                         end
                         -- the door is part of the room; what is beyond it is not
-                        if not is_boundary(np) then queue[#queue + 1] = {x = nx, y = ny} end
+                        if not is_boundary(np) then queue[#queue + 1] = n end
                     end
                 end
             end
         end
     end
-    return seen, count
+    -- the shell: every wall and fortification touching the inside
+    local tiles = {}
+    for k in pairs(inside) do tiles[k] = true end
+    for k in pairs(inside) do
+        local x, y, z = unkey(k)
+        for _, d in ipairs(RING) do
+            local nk = key(x + d[1], y + d[2], z)
+            if not tiles[nk] then
+                local np = xyz2pos(x + d[1], y + d[2], z)
+                if dfhack.maps.isValidTilePos(np) then
+                    local sh = tile_shape(np)
+                    if (sh == SH.WALL or sh == SH.FORTIFICATION) and not is_hidden(np)
+                        and not (opts.blocked and opts.blocked(np)) then
+                        tiles[nk] = true
+                    end
+                end
+            end
+        end
+    end
+    return tiles
 end
 
 -- ---- growing a zone or a stockpile -------------------------------------------
@@ -168,13 +236,13 @@ local function building_tiles(bld)
         for dy = 0, room.height - 1 do
             for dx = 0, room.width - 1 do
                 if room.extents[dy * room.width + dx] ~= 0 then
-                    out[key(room.x + dx, room.y + dy)] = true
+                    out[key(room.x + dx, room.y + dy, bld.z)] = true
                 end
             end
         end
     else
         for x = bld.x1, bld.x2 do
-            for y = bld.y1, bld.y2 do out[key(x, y)] = true end
+            for y = bld.y1, bld.y2 do out[key(x, y, bld.z)] = true end
         end
     end
     return out
@@ -189,7 +257,7 @@ end
 local function write_extents(bld, tiles)
     local x1, y1, x2, y2
     for k in pairs(tiles) do
-        local x, y = math.floor(k / 65536), k % 65536
+        local x, y = unkey(k)
         x1 = math.min(x1 or x, x); x2 = math.max(x2 or x, x)
         y1 = math.min(y1 or y, y); y2 = math.max(y2 or y, y)
     end
@@ -198,7 +266,7 @@ local function write_extents(bld, tiles)
     local buf = df.reinterpret_cast(df.building_extents_type, df.new('uint8_t', w * h))
     for dy = 0, h - 1 do
         for dx = 0, w - 1 do
-            buf[dy * w + dx] = tiles[key(x1 + dx, y1 + dy)] and 1 or 0
+            buf[dy * w + dx] = tiles[key(x1 + dx, y1 + dy, bld.z)] and 1 or 0
         end
     end
     bld.x1, bld.y1, bld.x2, bld.y2 = x1, y1, x2, y2
@@ -213,7 +281,7 @@ end
 -- DF does not treat them as stockpile floor.
 local function mark_stockpile_tiles(bld, tiles)
     for k in pairs(tiles) do
-        local x, y = math.floor(k / 65536), k % 65536
+        local x, y = unkey(k)
         local block = dfhack.maps.getTileBlock(xyz2pos(x, y, bld.z))
         if block then
             local occ = block.occupancy[x % 16][y % 16]
@@ -251,7 +319,7 @@ local function announce(msg, color)
 end
 
 local function grow_building(bld, pos, what, blocked)
-    local tiles, err = flood_room(pos, blocked)
+    local tiles, err = flood_room(pos, {blocked = blocked})
     if not tiles then
         announce(('repeated-flood-fill: %s'):format(err), COLOR_LIGHTRED)
         return false
@@ -319,17 +387,24 @@ end
 function fill_burrow(_, pos, do_3d)
     local burrow = mi.burrow.painting_burrow
     if not burrow then return end
-    local plugin = require('plugins.burrow')
-    local opts = {zlevel = not do_3d}
-    if mi.burrow.erasing then
-        plugin.burrow_tiles_flood_remove(burrow, pos, opts)
-        announce(('repeated-flood-fill: erased the %s from the burrow.')
-            :format(do_3d and 'connected space' or 'room'), COLOR_LIGHTGREEN)
-    else
-        plugin.burrow_tiles_flood_add(burrow, pos, opts)
-        announce(('repeated-flood-fill: filled the %s into the burrow.')
-            :format(do_3d and 'connected space' or 'room'), COLOR_LIGHTGREEN)
+    -- Our own flood rather than DFHack's `burrow_tiles_flood_add`: theirs fills the walkable
+    -- space and nothing else, and a burrow that stops at the walls leaves the miner outside the
+    -- rock he was sent to dig. Ours brings the shell, and climbs stairs and ramps for the 3D one.
+    local tiles, err = flood_room(pos, {three_d = do_3d})
+    if not tiles then
+        announce(('repeated-flood-fill: %s'):format(err), COLOR_LIGHTRED)
+        return
     end
+    local erasing = mi.burrow.erasing
+    local n = 0
+    for k in pairs(tiles) do
+        local x, y, z = unkey(k)
+        dfhack.burrows.setAssignedTile(burrow, xyz2pos(x, y, z), not erasing)
+        n = n + 1
+    end
+    announce(('repeated-flood-fill: %s %d tiles %s the burrow.')
+        :format(erasing and 'took' or 'put', n, erasing and 'out of' or 'into'),
+        COLOR_LIGHTGREEN)
 end
 
 local FILL = {zone = fill_zone, stockpile = fill_stockpile, burrow = fill_burrow}

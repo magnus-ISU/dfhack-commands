@@ -159,14 +159,19 @@ the room in 2D. For burrows a 3×3 placed twice over the same nine tiles floods 
 and stockpiles each live on one z-level, so they have nothing to fill upward into.
 
 The trigger is the *repeat*, never the tile, so clicking once inside a zone you already have does
-nothing unusual. For zones and stockpiles the fill stops at walls, open air and **doors**, the way
-DF's own rooms do — without that a bedroom joins the corridor, the corridor joins the fort, and
-"the room" would be the whole level. It never fills hidden tiles, and stockpiles also stop at
-other buildings, since they cannot share a tile. Too big a region is refused outright rather than
-half-drawn. The object you repeated on is the one that grows, so its name, settings and
-assignments all survive. Burrows fill through DFHack's own burrow flood, which is what gives them
-3D — and which spreads through doorways, since a burrow is a region of the fort rather than a
-room.
+nothing unusual. The fill stops at walls, open air and **doors**, the way DF's own rooms do —
+without that a bedroom joins the corridor, the corridor joins the fort, and "the room" would be
+the whole level — and what it fills is the floor **plus the walls and doors around it**, corners
+included. A room is its shell as much as its floor: a bedroom that stops one tile short of the
+wall is not the room you drew, and a burrow that stops there leaves the miner outside the rock he
+was sent to dig.
+
+The 3D fill climbs the way a dwarf does — a staircase reaches the staircase above or below it, a
+ramp the tile over its head — and brings each level's walls with it. Hidden tiles are never
+filled, stockpiles leave out tiles another building owns (doors included, since they cannot share
+one), and too big a region is refused outright rather than half-drawn: a fort staircase reaches
+every floor you have. The object you repeated on is the one that grows, so its name, settings and
+assignments all survive.
 
 ### **`fort/right-click-cancel`**
 Drag to designate, right-drag to erase, right-click to cancel — for every designation and
