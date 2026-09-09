@@ -203,11 +203,20 @@ local function request_broker(depot)
     return true
 end
 
--- the depot's own panel: what clicking the depot opens, and where DFHack hangs its trade buttons
+-- The depot's own panel: what clicking the depot opens, and where DFHack hangs its trade
+-- buttons.
+--
+-- `viewing_bldid` IS NOT OPTIONAL, even though the sheet draws perfectly well without it. It is
+-- what DF's focus string is built from: with it unset the screen reports itself as
+-- `dwarfmode/ViewSheets/BUILDING` and stops there, and every overlay registered for
+-- `.../BUILDING/TradeDepot` -- DFHack's own "DFHack move trade goods" button among them -- is
+-- skipped, so opening the panel this way silently took features off it. With it set the focus
+-- reads `.../BUILDING/TradeDepot/Items` and they come back.
 local function open_depot_panel(depot)
     local vs = df.global.game.main_interface.view_sheets
     vs.active_sheet = df.view_sheet_type.BUILDING
     vs.active_id = depot.id
+    vs.viewing_bldid = depot.id
     vs.open = true          -- opened LAST, once the sheet it should show is set
 end
 
