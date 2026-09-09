@@ -152,6 +152,12 @@ local COLUMNS = {
             dfhack.run_command('overlay', 'enable', 'fort/right-click-cancel.cancel')
          end,
          disable = overlay_set('disable', 'fort/right-click-cancel.cancel')},
+        {key = 'repeated-flood-fill', label = 'repeated-flood-fill',
+         enable = function()
+            reqscript('fort/repeated-flood-fill')
+            dfhack.run_command('overlay', 'enable', 'fort/repeated-flood-fill.watcher')
+         end,
+         disable = overlay_set('disable', 'fort/repeated-flood-fill.watcher')},
         {key = 'plan-tile', label = 'plan-tile',
          enable = function()
             dfhack.run_script('fort/plan-tile')
