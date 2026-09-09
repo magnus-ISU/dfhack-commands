@@ -605,12 +605,16 @@ goes: every sparring blow is still filed in the units' combat logs and reads bac
 ### **`fort/guild-agreement-dates`**
 Puts the deadline on the map view's agreement notice. DF shows the job, the petitioner and a
 date, but that date is when the agreement was **made**, and the year you have to build the
-temple or guildhall is never spelled out. This adds the count and the month number:
-*"Build temple, 321 days"* over *"8th Galena (6), 109"*. The notice is found by reading the
-screen, so the annotation follows it wherever DF puts it, and there is nothing to draw while the
-squads panel is up, since DF hides the notice there. Long names are shortened to fit the corner
-rather than running off the edge, so a guildhall reads *"Guildhall, 321 days"* and a grand
-guildhall *"Grand hall, 321 days"*. Turning this on in `magnus-scripts` turns DFHack's own
+temple or guildhall is never spelled out. This adds a fourth line under DF's three:
+*"321 days left (month 6)"* — the days remaining, and the agreement's month as a number so you
+can compare it against today's date without counting months in your head. It goes under the
+notice rather than into it because DF repaints those three rows after the overlay draws, and
+anything written on them is wiped before the frame reaches the screen. The notice is found by
+reading the screen, so the line follows it wherever DF puts it, and there is nothing to draw
+while the squads panel is up, since DF hides the notice there. The search is confined to the
+right-edge band DF hangs the notice off, and only to lines that read as *"Build …"*, so a
+window that happens to show a date elsewhere on screen can never be mistaken for the notice.
+Turning this on in `magnus-scripts` turns DFHack's own
 *"N petitions outstanding"* line off, since this says the same thing and three things more;
 turning it off puts that line back.
 

@@ -378,7 +378,30 @@ function NoMonsterSlayersOverlay:reposition()
     self.frame = {w = self.frame.w, h = self.frame.h,
                   l = col - #AUTO_TEXT - ir.x1, t = row - ir.y1}
     self:updateLayout(gui.ViewRect{rect = ir})
+    self.placed = true
+    self.placed_size = {dfhack.screen.getWindowSize()}
     return true
+end
+
+-- Nothing is drawn until the panel has been found. `default_pos` is a guess -- it has to be
+-- something, and whatever it is lands in the middle of the work-detail list -- so on the first
+-- frame after the screen opens the buttons would sit on top of a labor until the first
+-- reposition moved them off. Finding the anchor first and drawing second means the pair is only
+-- ever seen where it belongs.
+function NoMonsterSlayersOverlay:render(dc)
+    if self.placed then
+        -- a resize moves the panel, and the position worked out for the old window is as good
+        -- as a guess: go back to finding it before drawing again
+        local w, h = dfhack.screen.getWindowSize()
+        if w ~= self.placed_size[1] or h ~= self.placed_size[2] then self.placed = false end
+    end
+    if not self.placed then
+        -- the scrape reads the frame the game has already drawn, so it works from here; the
+        -- draw itself waits for the next frame, which is a fifteenth of a second and unseen
+        self:reposition()
+        return
+    end
+    NoMonsterSlayersOverlay.super.render(self, dc)
 end
 
 -- The list grows, shrinks and scrolls, so the end of it moves: re-find it on a slow tick rather
@@ -386,7 +409,8 @@ end
 -- far faster than a work detail can be added.
 function NoMonsterSlayersOverlay:overlay_onupdate()
     local now = dfhack.getTickCount()
-    if self.placed_ms and now >= self.placed_ms and now - self.placed_ms < 500 then return end
+    if self.placed and self.placed_ms and now >= self.placed_ms
+        and now - self.placed_ms < 500 then return end
     self.placed_ms = now
     self:reposition()
 end
