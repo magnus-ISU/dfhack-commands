@@ -237,7 +237,10 @@ what was merely reserved. One rung at a time, and only what that rung asks for.
 ![fort/planner-orders demo](demos/fort-planner-orders.gif)
 
 ### **`fort/labor-groups`**
-Tidies the Labor screen and creates any missing crafting work details.
+Tidies the Labor screen and creates any missing crafting work details. The list ends with
+*Animal Trainer*, then *Military*, then **Strand extraction** — the adamantine labor you go
+hunting for the moment a vein turns up and never think about again, parked at a fixed place
+at the very bottom with the custom-**I** icon, which nothing else here uses.
 
 ### **`fort/sort-locations`**
 When you assign a new temple or guildhall, the deities and professions that have actually

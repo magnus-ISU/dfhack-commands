@@ -13,8 +13,10 @@ Lays the Labor screen out as:
     4. "Cook" and "Brewer" (farmer/plow icon) at the end of the list
     5. an "Animal Trainer" detail (farmer/plow icon; "Everybody Does This" + the animal-
        training labor, so any idle dwarf can pick up queued animal-training jobs)
-    6. the "Military" detail LAST (siege-operators icon; its members are kept in sync with
+    6. the "Military" detail (siege-operators icon; its members are kept in sync with
        your squads by the separate `military-labor` script)
+    7. a "Strand extraction" detail LAST, after Military (the custom-I icon), so the one
+       labor you go looking for when adamantine turns up is at a fixed place: the bottom
 
 NON-DESTRUCTIVE: existing details are reordered (and their icons updated), never deleted
 and never recreated, so your manual assignments and modes are preserved. Only details that
@@ -75,6 +77,17 @@ local MILITARY_ICON = 'SIEGE_OPERATORS'
 local TRAINER_NAME = 'Animal Trainer'
 local TRAINER_ICON = 'PLANTERS'
 local TRAINER_LABOR = 'ANIMALTRAIN'
+
+-- "Strand extraction", the very last row -- after Military. Adamantine is the labor you go
+-- hunting for the moment a vein turns up and never think about the rest of the time, so it
+-- gets a fixed place at the bottom of the list rather than a place in the crafting run.
+-- CUSTOM_1 is vanilla's roman numeral I (see fort/choose-labor-icon), which is nobody else's
+-- glyph here, so the row is findable at a glance. Everybody does this, like every other
+-- labor-carrying detail this script makes: a queued extraction job gets picked up rather
+-- than waiting on an assignment you have to remember to make.
+local STRAND_NAME = 'Strand extraction'
+local STRAND_ICON = 'CUSTOM_1'
+local STRAND_LABOR = 'EXTRACT_STRAND'
 
 -- every moodable skill -> its labor, for the coverage check (Miner/Stonecutter/Engraver
 -- ride on kept DF defaults; <none> has no labor). Reporting only.
@@ -137,9 +150,9 @@ local function already_applied()
             if #labs == #g.labors and labs[1] == g.labors[1] then has_sig = true end
         end
     end
-    -- also require the Animal Trainer detail, so `once` re-runs (non-destructively) to add it to
-    -- forts that were set up before it existed.
-    return has_sig and has_detail(TRAINER_NAME)
+    -- also require the Animal Trainer and Strand extraction details, so `once` re-runs
+    -- (non-destructively) to add them to forts that were set up before they existed.
+    return has_sig and has_detail(TRAINER_NAME) and has_detail(STRAND_NAME)
 end
 
 if once and already_applied() then
@@ -198,6 +211,8 @@ local function plan()
     if mil_idx then placed[mil_idx] = true end                  -- reserve military for last
     local trainer_idx = by_name[TRAINER_NAME]
     if trainer_idx then placed[trainer_idx] = true end          -- reserve Animal Trainer (before Military)
+    local strand_idx = by_name[STRAND_NAME]
+    if strand_idx then placed[strand_idx] = true end            -- reserve Strand extraction (after Military)
     for _, g in ipairs(END_GROUPS) do                           -- reserve cook/brewer for the end
         local i = by_name[g.name]
         if i then placed[i] = true end
@@ -232,6 +247,13 @@ local function plan()
         rows[#rows + 1] = {name = MILITARY_NAME, icon_name = MILITARY_ICON,
                            mode_name = 'OnlySelectedDoesThis', status = 'NEW', military = true}
     end
+    if strand_idx then                                          -- Strand extraction: after Military
+        rows[#rows + 1] = {idx = strand_idx, name = STRAND_NAME, icon_name = STRAND_ICON,
+                           mode_name = 'EverybodyDoesThis', status = 'kept', strand = true}
+    else
+        rows[#rows + 1] = {name = STRAND_NAME, icon_name = STRAND_ICON,
+                           mode_name = 'EverybodyDoesThis', status = 'NEW', strand = true}
+    end
     return rows
 end
 
@@ -257,6 +279,9 @@ if not dry then
             elseif r.trainer then
                 h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- any idle dwarf trains
                 h.allowed_labors[TRAINER_LABOR] = true
+            elseif r.strand then
+                h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- any idle dwarf extracts
+                h.allowed_labors[STRAND_LABOR] = true
             else
                 h.flags.mode = df.work_detail_mode.EverybodyDoesThis      -- new craft
                 for _, list in ipairs({GROUPS, END_GROUPS}) do
@@ -277,9 +302,11 @@ if not dry then
             end
         end
     end
-    -- ensure the Animal Trainer detail carries the animal-training labor (additive, idempotent)
+    -- ensure the Animal Trainer and Strand extraction details carry their labor
+    -- (additive, idempotent)
     for i = 0, #wd - 1 do
         if wd[i].name == TRAINER_NAME then wd[i].allowed_labors[TRAINER_LABOR] = true end
+        if wd[i].name == STRAND_NAME then wd[i].allowed_labors[STRAND_LABOR] = true end
     end
     -- rewrite the vector in the new order: erase every slot (erase does NOT delete the
     -- object -- we hold each handle), then reinsert. Nothing is freed, nothing is reset.
