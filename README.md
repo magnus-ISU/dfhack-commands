@@ -534,6 +534,31 @@ Marks a wild animal for taming, so it's trained the moment it's caught.
 
 ## Automation
 
+### **`fort/auto-needs`**
+Lends a dwarf whose unmet need is wearing them down a labor that answers it, and takes it back
+after.
+
+Today it knows one need: **wander → fishing**. "Wander" is satisfied by being outside the
+fortress, and fishing is the reliable way a dwarf takes themselves out there and stays a while.
+A dwarf qualifies when they are short on the need **and** carrying stress — the need alone is
+ordinary, and the stress alone says nothing about which need is causing it. Both bars are as low
+as they go, deliberately: the point is to catch someone on the way down rather than after the
+tantrum, and the worst a false positive costs is a dwarf who goes fishing for a while.
+
+A labor it turned on is remembered and turned off again once the dwarf no longer qualifies. A
+labor the dwarf **already had** is never recorded and never removed, so a fisherdwarf who was
+fishing before stays one. The record lives with the site, so a reload does not strand a lent
+labor.
+
+It gives the labor the way DF actually accepts it: by adding the dwarf to the **work detail**
+that carries it, putting that detail into *only the selected do this* if the fort had it at
+*nobody does this*, and calling `setAutomaticProfessions` — writing `unit.status.labors` directly
+does nothing that lasts, since the details are recomputed over the top of it. The detail's mode is
+put back the way it was found once the tool has nobody assigned there.
+
+`fort/auto-needs` previews without changing anything, `fort/auto-needs once` runs a pass, and
+`enable fort/auto-needs` runs one about once a game day.
+
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
 Soldiers whose squad is under orders are left to those orders.
