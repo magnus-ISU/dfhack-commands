@@ -1,5 +1,6 @@
 -- Lend a dwarf whose need is eating them a labor that satisfies it, and take it back after.
 --@module = true
+--@enable = true
 --[[
 fort/auto-needs
 

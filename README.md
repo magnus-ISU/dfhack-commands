@@ -557,7 +557,7 @@ does nothing that lasts, since the details are recomputed over the top of it. Th
 put back the way it was found once the tool has nobody assigned there.
 
 `fort/auto-needs` previews without changing anything, `fort/auto-needs once` runs a pass, and
-`enable fort/auto-needs` runs one about once a game day.
+`enable fort/auto-needs` runs one about once a game day. `magnus-scripts` has a row for it.
 
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
