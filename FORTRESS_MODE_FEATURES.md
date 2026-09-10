@@ -344,7 +344,9 @@ ore and it offers the Smelter's "make bronze bars (use ore)" as a single job, sk
 separate smelts — gated on *an ore of* tin and *an ore of* copper rather than on named stones, so
 changing which copper ore you are mining does not strand the order. With a hospital
 up it also stocks the supplies one needs, traction benches included — the bench and its table,
-mechanism and chain each get their own ask. Some asks are standing preferences rather than
+mechanism and chain each get their own ask — and the chain ask, the one kept stocked rather than
+made once, is held at *N chains of the metal it forges*, so the iron ones you already have never
+hold a copper order shut. Some asks are standing preferences rather than
 one-off gaps: say yes to cutting the rough-gem surplus once and it is handled from then on, one
 Cut Gem job at a time, posted again whenever that one is finished and the pile is still over ten
 — no second ask, and `planner-orders disable` hands it back. Adamantine is the same, and has to

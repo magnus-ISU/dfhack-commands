@@ -47,8 +47,9 @@ part is skipped when a planned building has already raised its own ask for the s
 Table and mechanism are ONE-TIME batches for exactly the shortfall -- a "keep N tables in
 stock" order would read the fort's existing dining tables as satisfying it and never make
 anything. The CHAIN is the exception and is KEPT STOCKED, because restraints and wells spend
-chains too: its condition counts only chains ON THE GROUND (the `on_ground` item flag), so
-chains already bolted into a bench, well or restraint don't hold the order shut. It also
+chains too. Its condition counts chains OF THE MATERIAL IT MAKES -- a copper order is held at
+"under N copper chains" -- so the iron ones you already have say nothing about whether the copper
+order has done its work, and two chain orders in different metals never hold each other shut. It also
 offers an UNTYPED choice alongside the metals -- a bench takes a rope or a chain, and pinning
 no material lets DF weave or forge whichever it has.
 
@@ -356,17 +357,28 @@ local HOSPITAL_SUPPLIES = {
         note = 'A mechanism for the traction bench, made at a Mechanic\'s Workshop.'},
     -- The chain is the one part kept STOCKED rather than made once: chains are spent by
     -- restraints and wells as well as benches, so a standing reserve is what stops the bench
-    -- orders stalling. It counts only chains ON THE GROUND (flags3.on_ground) -- a chain bolted
-    -- into a restraint or an assembled bench is not one you can build with, and counting those
-    -- is exactly what would leave the order permanently satisfied and idle.
+    -- orders stalling.
+    --
+    -- IT COUNTS CHAINS OF THE MATERIAL IT MAKES. An order that forges copper chains is held at
+    -- "under N COPPER chains", not at "under N chains of anything": the fort's iron chains say
+    -- nothing about whether the copper order has done its work, and a fort with a drawerful of
+    -- one metal would never forge another. Pinning the count to the order's own material is also
+    -- what makes two chain orders in different metals sit alongside each other without one
+    -- silently holding the other shut.
+    --
+    -- It used to count only chains ON THE GROUND, on the reasoning that a chain bolted into a
+    -- restraint is not one you can build with. That reads well and counts wrong: a chain put
+    -- away in a bin is not on the ground either, so the order never saw its own output and
+    -- forged chains forever.
     {supply = 'Traction bench chain', kind = 'item', job = 'MakeChain', cond_item = 'CHAIN',
-        target = TRACTION_TARGET, plan = traction_part('CHAIN'), cond_flags3 = {'on_ground'},
+        target = TRACTION_TARGET, plan = traction_part('CHAIN'), cond_material = true,
         any_material = 'Rope or chain, any material',
         note = 'The bench takes a chain OR a rope, so this offers both: a specific metal forges\n'
             .. 'a chain, and the untyped choice pins no material at all -- DF fills it with\n'
             .. 'whatever is to hand, cloth rope or metal chain alike.\n\n'
-            .. ('Keeps %d LOOSE chains in stock (ones already built into a restraint, well or\n'):format(TRACTION_TARGET)
-            .. 'bench do not count towards it).'},
+            .. ('Keeps %d chains OF THE METAL YOU PICK in stock -- a copper order counts copper\n'):format(TRACTION_TARGET)
+            .. 'chains, so the iron ones you already have do not hold it shut. (The untyped\n'
+            .. 'choice pins no material, and so counts chains of every kind.)'},
     -- buckets are handled by the general container asks (carpenter-gated material picker)
     -- Thread/Cloth here are the GENERAL orders (process/weave any plant, keep target in stock);
     -- exists_fn ignores the pig-tail-specific orders so both can coexist (see order_targets_pigtail)
@@ -926,6 +938,7 @@ local function make_hospital_gap(spec, amount)
         g.leather = spec.leather                            -- make it from leather
         g.cond_empty = spec.cond_empty                      -- count only EMPTY items (bags)
         g.cond_flags3 = spec.cond_flags3                    -- item-state match (on_ground: loose only)
+        g.cond_material = spec.cond_material                 -- count only items of the material ordered
         g.any_material = spec.any_material                  -- offer an untyped "any material" choice
     end
     return g
@@ -1147,7 +1160,12 @@ local function create_order(gap, choice)
     else
         conds = {{compare = gap.cond_compare or df.logic_condition_type.Exactly,
                   val = gap.cond_val or 0, item_type = gap.cond_item_type, item_subtype = gap.cond_subtype,
-                  empty = gap.cond_empty, flags3 = gap.cond_flags3}}
+                  empty = gap.cond_empty, flags3 = gap.cond_flags3,
+                  -- `cond_material`: hold the order at N of ITS OWN material rather than N of
+                  -- the item in any material. The untyped choice leaves both at -1, which is
+                  -- "any", and is the right answer there.
+                  mat_type = gap.cond_material and choice.mat_type or nil,
+                  mat_index = gap.cond_material and choice.mat_index or nil}}
         amount = gap.amount or ORDER_AMOUNT
         freq = df.workquota_frequency_type.Daily
     end
