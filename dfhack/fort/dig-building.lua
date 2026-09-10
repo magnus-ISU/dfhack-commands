@@ -19,8 +19,12 @@ a slab an engraver has inscribed rather than a blank.
   setting the build mode by hand opens an empty menu with no buttons. Clicking the rendered
   buttons is the only path that works, so we replicate the clicks.)
 
-Layout: two columns, vertically SCROLLABLE when the list overflows. The window leaves 11 rows of
-negative space at the TOP and 4 rows at the BOTTOM uncovered.
+Layout: two columns, and it NEVER SCROLLS -- every entry is on the screen, always. When the list
+is taller than the room available the window grows a column instead, so it gets wider rather than
+deeper. The window keeps negative space clear at the TOP (as many as 11 rows: it sits as low as it
+can while still holding the tightest column count) and 3 rows at the BOTTOM. Those bounds are what
+the whole list has to fit inside; on a screen too small for even the widest layout to manage it,
+the bottom margin gives way and the panel runs to the last row rather than hiding an entry.
 
 Beneath that grid, under a rule, sits a separate CUSTOM-TOOL band: this repo's own tools rather
 than native DF buildings, one per row across the full width (not in the grid's narrow columns),
@@ -104,8 +108,12 @@ local function over_other_overlay(mx, my)
 end
 -- Top margin is DYNAMIC: prefer MAX_TOP (window sits lower, less over the top UI), but
 -- drop toward MIN_TOP only as far as needed to reach the fewest columns the screen allows.
-local MIN_TOP, MAX_TOP = 5, 12
-local TOP_MARGIN, BOT_MARGIN = MAX_TOP, 6  -- TOP_MARGIN = initial/default; recomputed live
+--
+-- The band these search within is what the list has to fit inside, because the list NEVER
+-- scrolls: two rows higher and three rows lower than the picker used to be allowed, which is
+-- what buys the 47-line, two-column list room to show every entry at once on a 67-row screen.
+local MIN_TOP, MAX_TOP = 3, 10
+local TOP_MARGIN, BOT_MARGIN = MAX_TOP, 3  -- TOP_MARGIN = initial/default; recomputed live
 local TOP_NUDGE = 1                        -- ...then one row lower than that search picks
 local LEFT_MARGIN = 8                      -- columns of negative space kept clear on the left
 local WIN_W = 34                          -- window width; border + two columns inside
@@ -554,7 +562,6 @@ local function custom_tool_open()
 end
 
 function DigBuilding:init()
-    self.scroll = 0
     self.cols = 2
     self.search = ''
 end
@@ -577,26 +584,10 @@ function DigBuilding:compute_matches()
     return set, list, best
 end
 
--- scroll so the BEST match is on screen, so you can see what Enter will pick
-function DigBuilding:scroll_to_match()
-    if self.search == '' then return end
-    local _, _, best = self:compute_matches()
-    if not best or best > #ENTRIES then return end   -- the custom band is pinned, always visible
-    local line = math.floor((best - 1) / self.cols)
-    if line < self.scroll then self.scroll = line
-    elseif line >= self.scroll + self:list_rows() then self.scroll = line - self:list_rows() + 1 end
-    self.scroll = math.max(0, math.min(self.scroll, self:max_scroll()))
-end
-
 -- rows available for GRID entries = window height minus the top and bottom border rows and
 -- the custom-tool band pinned at the bottom
 function DigBuilding:list_rows()
     return math.max(1, self.frame.h - 2 - CUSTOM_ROWS)
-end
-
-function DigBuilding:max_scroll()
-    local lines = math.ceil(#ENTRIES / self.cols)
-    return math.max(0, lines - self:list_rows())
 end
 
 function DigBuilding:overlay_onupdate()
@@ -609,7 +600,7 @@ function DigBuilding:overlay_onupdate()
     end
     -- Size the panel to EXACTLY fit the list, and adapt to the screen. Start at 2 columns; if the
     -- list is taller than the space between the top/bottom margins, add columns until it fits (up to
-    -- what the screen width allows). If it still can't fit, cap the height and let it scroll.
+    -- what the screen width allows). NOTHING SCROLLS: an entry that is in the list is on the screen.
     local gps = df.global.gps
     local max_cols = math.max(1, math.floor((gps.dimx - LEFT_MARGIN - 2) / COL_W))
     -- columns needed for a given top margin (entry rows excl. borders = dimy-top-bot-2)
@@ -631,15 +622,19 @@ function DigBuilding:overlay_onupdate()
     local cols = cols_for(top)
     top = top + TOP_NUDGE                     -- sit one row lower than the search's pick
     self.cols = cols
-    -- rows left for the GRID once the band and the borders are taken out; if the list no longer
-    -- fits in them it simply scrolls
+    -- rows the grid actually needs. The column search above sized `cols` to make this fit between
+    -- the margins; where the screen is too small for even the widest layout to manage that, the
+    -- BOTTOM MARGIN is what gives way -- the panel runs on down to the last row of the screen
+    -- rather than hiding entries, since with no scrollbar a hidden entry is an unreachable one.
     local avail_rows = math.max(1, gps.dimy - top - BOT_MARGIN - 2 - CUSTOM_ROWS)
-    local rows = math.min(math.ceil(#ENTRIES / cols), avail_rows)
+    local rows = math.ceil(#ENTRIES / cols)
+    if rows > avail_rows then
+        rows = math.min(rows, math.max(1, gps.dimy - top - 2 - CUSTOM_ROWS))
+    end
     self.frame.w = cols * COL_W + 2
     self.frame.h = rows + 2 + CUSTOM_ROWS
     self.frame.t = top                        -- reposition: dynamic top margin
     self.frame.l = LEFT_MARGIN
-    if self.scroll > self:max_scroll() then self.scroll = self:max_scroll() end
     -- return to the Dig screen once a picker-initiated build flow has fully closed
     if return_state ~= 'idle' then
         local foc = dfhack.gui.getCurFocus(true)[1] or ''
@@ -705,15 +700,10 @@ function DigBuilding:onRenderBody(dc)
         dc:seek(w - 1, r):pen(BG):string(string.char(179))
     end
     dc:seek(2, 0):pen(COLOR_WHITE):string(' Build ')                           -- title on the top border
-    local ms = self:max_scroll()
-    if ms > 0 then                                                             -- scroll controls on top border
-        dc:seek(w - 10, 0):pen(self.scroll > 0 and COLOR_LIGHTCYAN or COLOR_DARKGREY):string(' [-] ')
-        dc:seek(w - 5, 0):pen(self.scroll < ms and COLOR_LIGHTCYAN or COLOR_DARKGREY):string('[+] ')
-    end
     -- fuzzy-search box on the top border, right after " Build " (auto-focused -- just type). Shows
     -- the typed text + a cursor + the live match count; green while Enter has a pick.
     local mset, mlist, mbest = self:compute_matches()
-    local fx1, fx2 = 9, (ms > 0) and (w - 11) or (w - 2)
+    local fx1, fx2 = 9, w - 2                          -- the whole top border, no scroll controls
     if fx2 >= fx1 then
         local fw = fx2 - fx1 + 1
         if self.unfocused then
@@ -734,9 +724,8 @@ function DigBuilding:onRenderBody(dc)
         end
     end
     for r = 0, self:list_rows() - 1 do                                         -- entries inside the border
-        local line = self.scroll + r
         for c = 0, cols - 1 do
-            local idx = line * cols + c + 1
+            local idx = r * cols + c + 1
             local e = ENTRIES[idx]
             if e then
                 dc:seek(1 + c * COL_W, r + 1):pen(entry_pen(self.search, idx, mset, mbest))
@@ -766,7 +755,7 @@ function DigBuilding:entry_at(x, y)
     local r = y - 1
     if x > self.cols * COL_W then return nil end
     local c = math.floor((x - 1) / COL_W)
-    return ENTRIES[(self.scroll + r) * self.cols + c + 1]
+    return ENTRIES[r * self.cols + c + 1]
 end
 
 function DigBuilding:onInput(keys)
@@ -786,9 +775,9 @@ function DigBuilding:onInput(keys)
         -- edits, Enter picks the sole match. Space is deliberately NOT captured (it stays DF's pause;
         -- fuzzy subsequence matching means you never need to type the spaces in "Trade Depot" anyway).
         if keys._STRING == 0 then                                 -- backspace
-            self.search = self.search:sub(1, -2); self:scroll_to_match(); return true
+            self.search = self.search:sub(1, -2); return true
         elseif keys._STRING and keys._STRING >= 33 then           -- a printable, non-space char
-            self.search = self.search .. string.char(keys._STRING); self:scroll_to_match(); return true
+            self.search = self.search .. string.char(keys._STRING); return true
         end
         if keys.SELECT then                                       -- Enter: select the BEST match
             local _, _, best = self:compute_matches()
@@ -816,25 +805,13 @@ function DigBuilding:onInput(keys)
     if mi().current_hover ~= -1 or over_other_overlay(df.global.gps.mouse_x, df.global.gps.mouse_y) then
         return false
     end
-    -- mouse wheel: only scroll our list when the cursor is actually over the picker AND the list
-    -- overflows. Otherwise pass it through so DF still gets the wheel for z-level changes -- stealing
-    -- it unconditionally (as before) broke z-scrolling everywhere while the Dig tool was selected.
-    if keys.CONTEXT_SCROLL_UP or keys.CONTEXT_SCROLL_DOWN then
-        if self:getMousePos() and self:max_scroll() > 0 then
-            if keys.CONTEXT_SCROLL_UP then self.scroll = math.max(0, self.scroll - 1)
-            else self.scroll = math.min(self:max_scroll(), self.scroll + 1) end
-            return true
-        end
-        return false
-    end
+    -- The wheel is never ours: there is nothing to scroll, so it always reaches DF for the
+    -- z-level change, including while the cursor is over the picker.
     if keys._MOUSE_L then
         local x, y = self:getMousePos()       -- body-local coords, nil if the click is outside us
         if not x then return false end        -- click outside the window: pass through to the map
-        local w = self.frame.w
-        if y == 0 then                        -- scroll controls on the title/top border
-            if x >= w - 10 and x <= w - 6 then self.scroll = math.max(0, self.scroll - 1)
-            elseif x >= w - 5 and x <= w - 2 then self.scroll = math.min(self:max_scroll(), self.scroll + 1)
-            elseif x >= 9 then self.unfocused = false end   -- click the search box: refocus it
+        if y == 0 then                        -- the title border: the search box lives here
+            if x >= 9 then self.unfocused = false end   -- click the search box: refocus it
             return true
         end
         local e = self:entry_at(x, y)
