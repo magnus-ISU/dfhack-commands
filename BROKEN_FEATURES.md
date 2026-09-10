@@ -23,6 +23,16 @@ Known residuals on top of that: a soldier with the **mining labor** can't be uni
 (a DF conflict), and one civilian-squad manager's **cloak** slot refuses every assignable
 cloak. Run by `magnus-scripts` every session, which also registers its Equip-screen overlay.
 
+`military-uniforms altsched` is the fort's **schedule** half and works: it builds the **even
+month / odd month** training routines (each trains on its months and stands Ready the rest, with
+three "at least 3" Train orders per training month so the squad spars in shifts instead of mobbing
+one barracks), and sets the two stock routines the way a fort wants them — **Ready** sleeps
+*room/at will* (own bedroom, never a barracks bed at need) and **Off duty** equips *always*, so a
+squad does not spend eleven months of the year undressed. `altsched once` re-applies whenever the
+schedules are found **empty**, not merely when the routines are missing: a fort was found running
+both routines with every month blank, and because the names were there the once-check skipped it
+every session and those squads never trained.
+
 ### **`fort/tarrasque`**
 Each winter solstice, a dead megabeast may return and attack again, so the world's megabeasts
 never go extinct. **Enabled by `magnus-scripts`.**
