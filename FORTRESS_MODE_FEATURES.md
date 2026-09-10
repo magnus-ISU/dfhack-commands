@@ -120,6 +120,24 @@ itself as soon as the replacement wall is handed to `buildingplan`.
 A rewrite of Little Fern Studio's [replace-wall](https://github.com/LittleFernStudio/replace-wall)
 (MIT); see `LICENSE.md`.
 
+### **`fort/rewall`**
+Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
+
+A wall that never gets built is usually waiting on itself. A hauler drops the block for one wall
+onto the tile of the next one; that tile now holds an item another job has claimed, so DF suspends
+the job rather than build over it — and the claim never lapses, because the job holding it is
+suspended too, waiting on a tile of its own. Nothing in the fort resolves that: the walls sit
+*planned* with their material lying right there. This removes each designation and puts back
+exactly what it took away — same construction type, same tile, same item filter, so a wall
+specified in green glass stays a wall in green glass — and the fresh, unsuspended job picks its
+material from scratch. Measured on a fort with 63 suspended walls: none left suspended afterwards.
+
+It leaves alone anything a dwarf is actually building (taking a job out from under its worker is
+how this repo has crashed DF) and anything already part-built. `-n` reports without changing
+anything, `--suspended` limits it to the deadlocked ones, `-v` names each. The one cost is real:
+a material already hauled to the site is released, so a hauler may carry that block elsewhere
+before the new job claims it — the wall is not lost, only the trip.
+
 ### **`fort/repeated-flood-fill`**
 Place a zone, stockpile or burrow **twice in the same spot** and the second one means *"and the
 rest of the room"*. A 1×1 placement is DF's own; a 1×1 placement on the same tile again floods
