@@ -46,6 +46,14 @@ DF drops the building once it is built and keeps only the tile's construction re
 `constructions.designateRemove` on one just sets `designation.dig`, the very flag a natural wall
 uses. So one rule covers both, including how the player takes the work back off again.
 
+A CONSTRUCTED WALL THAT ALREADY MATCHES THE FILTER IS LEFT ALONE. Taking down a conglomerate
+block wall to build a conglomerate block wall costs a mining job, a hauling trip and a hole in
+the meantime, and gains nothing, so painting over one does nothing and says so. Judged against
+buildingplan's own filter -- the item form against its blocks/logs/boulders/bars toggles, the
+material against the category mask and the named materials -- so "turn these boulder walls into
+block walls" still works with no material chosen at all. A filter carrying a heat-safety
+requirement or a special is not judged, and those walls are replaced as before.
+
 Anything else on the tile is LEFT ALONE. A door, a hatch, a statue, a workshop, a floor --
 none of them are walls, so none of them are taken down; those tiles are skipped and counted.
 A constructed wall carrying a MASTERWORK engraving is skipped too, the same rule
@@ -165,6 +173,64 @@ local function is_clear(p)
     if not a then return false end
     return a.shape == SH.FLOOR or a.shape == SH.PEBBLES or a.shape == SH.BOULDER
         or a.shape == SH.SAPLING or a.shape == SH.SHRUB or a.shape == SH.EMPTY
+end
+
+-- ALREADY WHAT YOU ASKED FOR.
+--
+-- A constructed wall that already satisfies buildingplan's wall filter has nothing to gain from
+-- being taken down and put back: the replacement would be the same wall, bought with a mining
+-- job, a hauling trip and a stretch of open hole in the meantime. So painting over one does
+-- nothing and says so.
+--
+-- The test is the finished construction's own record -- it keeps the item type and the material
+-- it was built from -- against the same three things buildingplan's dialog shows:
+--
+--   * the ITEM FORM, against buildingplan's global blocks/logs/boulders/bars toggles, which is
+--     what makes "turn these boulder walls into block walls" work even with no material chosen;
+--   * the MATERIAL CATEGORY mask (stone, wood, metal, ...);
+--   * the NAMED MATERIALS, which only narrow anything while a category mask is set -- the same
+--     rule `filter_summary` prints by.
+--
+-- A filter this cannot judge is never called satisfied: a heat-safety requirement or a special
+-- (artifact, and the like) means the wall gets replaced as before, because proving a given stone
+-- magma-safe is not something to guess at.
+local FORM_SETTING = {
+    [df.item_type.BLOCKS] = 'blocks',
+    [df.item_type.WOOD] = 'logs',
+    [df.item_type.BOULDER] = 'boulders',
+    [df.item_type.BAR] = 'bars',
+}
+
+function matches_filter(p)
+    local con = dfhack.constructions.findAtTile(p)
+    if not con then return false end
+    local ok, verdict = pcall(function()
+        if buildingplan.getHeatSafetyFilter(WALL_TYPE, WALL_SUBTYPE, WALL_CUSTOM) ~= 0 then
+            return false
+        end
+        if next(buildingplan.getSpecials(WALL_TYPE, WALL_SUBTYPE, WALL_CUSTOM)) then return false end
+
+        local setting = FORM_SETTING[con.item_type]
+        local globals = buildingplan.getGlobalSettings()
+        if not setting or not globals[setting] then return false end
+
+        local idx = FILTER_IDX - 1
+        local cats = buildingplan.getMaterialMaskFilter(WALL_TYPE, WALL_SUBTYPE, WALL_CUSTOM, idx)
+        if not cats or cats.unset then return true end        -- any material: the form decided it
+
+        local mat = dfhack.matinfo.decode(con.mat_type, con.mat_index)
+        local name = mat and mat:toString()
+        local filter = buildingplan.getMaterialFilter(WALL_TYPE, WALL_SUBTYPE, WALL_CUSTOM, idx) or {}
+        local props = name and filter[name]
+        if not props or not cats[props.category] then return false end
+        -- named materials narrow the mask only when at least one inside it is enabled
+        local narrowed = false
+        for _, other in pairs(filter) do
+            if other.enabled == 'true' and cats[other.category] then narrowed = true break end
+        end
+        return not narrowed or props.enabled == 'true'
+    end)
+    return ok and verdict or false
 end
 
 -- MASTERWORK ENGRAVINGS ARE NOT TAKEN DOWN. Same rule as fort/dig-shapes' removal boxes:
@@ -449,13 +515,14 @@ local function for_box(a, b, cb)
     return true
 end
 
--- Paint the box. Returns counts: painted, skipped (something that is not a wall, or a
--- masterwork), already (already painted).
+-- Paint the box. Returns counts: painted, skipped (something that is not a wall, a masterwork,
+-- or a wall that is already what the filter asks for), already (already painted), and the
+-- number that were left because they already match.
 function paint_box(a, b)
     local plans = load_plans()
     local have = {}
     for _, r in ipairs(plans) do have[key(r)] = true end
-    local painted, skipped, already = 0, 0, 0
+    local painted, skipped, already, correct = 0, 0, 0, 0
     local ok = for_box(a, b, function(p)
         local k = key(p)
         if have[k] then already = already + 1 return end
@@ -469,6 +536,7 @@ function paint_box(a, b)
             plans[#plans + 1] = {x = p.x, y = p.y, z = p.z}
             painted = painted + 1
         elseif is_constructed_wall(p) then
+            if matches_filter(p) then correct = correct + 1 skipped = skipped + 1 return end
             if has_masterwork_engraving(p) then skipped = skipped + 1 return end
             if not pcall(dfhack.constructions.designateRemove, p) then skipped = skipped + 1 return end
             have[k] = true
@@ -483,7 +551,7 @@ function paint_box(a, b)
         save_plans(plans)
         start()
     end
-    return painted, skipped, already
+    return painted, skipped, already, nil, correct
 end
 
 -- Unselect: forget the plans in the box and take their designations back off. Returns the
@@ -883,9 +951,13 @@ function ReplaceWallPanel:apply(a, b, mode)
         end
         return dropped
     end
-    local painted, skipped, _, err = paint_box(a, b)
+    local painted, skipped, _, err, correct = paint_box(a, b)
     if err then
         dfhack.gui.showAnnouncement('Replace wall: ' .. err, COLOR_LIGHTRED)
+    elseif painted == 0 and (correct or 0) > 0 then
+        dfhack.gui.showAnnouncement(
+            ('Replace wall: %d wall%s already built to that filter -- nothing to replace.')
+            :format(correct, correct == 1 and ' is' or 's are'), COLOR_YELLOW)
     elseif painted == 0 and skipped > 0 then
         dfhack.gui.showAnnouncement('Replace wall: nothing there but floors, doors and furniture.',
             COLOR_YELLOW)

@@ -12,18 +12,25 @@ material lying right there, sometimes for years.
 
 Redrawing the designation is what breaks it: the suspended job and its claim on the item go
 away, and DF issues a fresh, unsuspended job that picks a material from scratch. This does
-that for every planned construction in the fort, and puts back exactly what it took away:
-the same construction type on the same tile, with the same item filter -- the item type,
-subtype and material the designation was drawn with, so a wall you specified in green glass
-stays a wall in green glass.
+that for every planned construction in the fort, and puts back exactly what it took away: the
+same construction type on the same tile, asking for the same material -- which, as the comment
+on `pin_to_item` explains, means reading the item ALREADY HAULED to the site rather than the
+job's filter, because that is where DF keeps the stone you chose. A wall that had conglomerate
+waiting on it is redrawn asking for conglomerate. `--any-material` gives that up deliberately,
+for when breaking the tangle matters more than the stone.
 
     fort/rewall                 redraw every planned construction
     fort/rewall -n              report what it would redraw, change nothing
     fort/rewall --suspended     only the suspended ones -- the deadlocked ones
+    fort/rewall --any-material  let the new jobs take whatever is nearest, choice and all
     fort/rewall -v              name every construction touched
 
 WHAT IT WILL NOT TOUCH
 
+  * Anything BUILDINGPLAN is holding. Its filter -- conglomerate blocks, magma-safe metal --
+    lives in the plugin rather than in the building, so a redraw would throw the plan away and
+    leave a plain construction that takes the nearest rock. Those are not deadlocked on an
+    item claim anyway; they are waiting for stock.
   * Anything a dwarf is actually building. A construction whose job has a worker is left
     alone: that one is not stuck, and taking a job out from under the dwarf holding it is
     how this repo has crashed DF before.
@@ -41,15 +48,18 @@ WHAT IT COSTS
 ]]
 
 local args = {...}
-local dry, verbose, suspended_only = false, false, false
+local dry, verbose, suspended_only, any_material = false, false, false, false
 for _, a in ipairs(args) do
     if a == '-n' or a == '--dry-run' then dry = true
     elseif a == '-v' or a == '--verbose' then verbose = true
     elseif a == '--suspended' then suspended_only = true
+    elseif a == '--any-material' then any_material = true
     else qerror('unknown argument: ' .. a) end
 end
 
 if not dfhack.isMapLoaded() then qerror('fort/rewall needs a loaded fort') end
+
+local buildingplan = require('plugins.buildingplan')
 
 local function act(fmt, ...)
     print((dry and '[dry] ' or '') .. fmt:format(...))
@@ -91,6 +101,53 @@ local function snapshot_filters(job)
     return out
 end
 
+-- THE MATERIAL YOU CHOSE IS NOT IN THE FILTER. It is in the ITEM.
+--
+-- When you pick a stone for a construction, DF does not narrow the job's filter -- that stays the
+-- generic "any building material, nothing economic" it was born with. What it does is ATTACH the
+-- item you picked to the job. So a redraw that keeps the filter and releases the item keeps the
+-- half that says nothing and throws away the half that was your decision: walls that had
+-- conglomerate reserved came back sandstone, which is exactly what happened the first time this
+-- ran on a live fort.
+--
+-- So when a job has an item attached, the new filter is built FROM THAT ITEM -- its item type,
+-- its subtype and its material -- and the fresh job goes looking for the same thing. The
+-- non-economic flag is dropped along with it: that guard exists to stop DF spending economic
+-- stone when anything would do, and this is no longer a case where anything would do.
+local function pin_to_item(base, item)
+    local one = {}
+    for k, v in pairs(base or {}) do
+        if k == 'flags1' or k == 'flags2' or k == 'flags3' then
+            local bits = {}
+            for bit, on in pairs(v) do bits[bit] = on end
+            one[k] = bits
+        else
+            one[k] = v
+        end
+    end
+    one.item_type = item:getType()
+    one.item_subtype = item:getSubtype()
+    one.mat_type = item:getMaterial()
+    one.mat_index = item:getMaterialIndex()
+    if one.flags2 then one.flags2.non_economic = nil end
+    return one
+end
+
+-- filters for the redraw, and the material name if the choice was pinned
+local function filters_for(job)
+    local base = snapshot_filters(job)
+    if any_material or not job or #job.items == 0 then return base, nil end
+    local pinned, name = {}, nil
+    for i, ji in ipairs(job.items) do
+        pinned[#pinned + 1] = pin_to_item(base[i + 1] or base[1], ji.item)
+        if not name then
+            local mat = dfhack.matinfo.decode(ji.item)
+            name = mat and mat:toString() or nil
+        end
+    end
+    return pinned, name
+end
+
 -- Draw it again. `constructBuilding` rather than `constructions.designateNew`, and that is not
 -- a preference: designateNew REFUSES a tile that already carries a finished construction, and a
 -- wall queued on top of a constructed floor is an ordinary thing to want. Four of those were
@@ -109,23 +166,32 @@ end
 --
 -- Redrawing a designation adds and removes entries in world.buildings.all, so the list is
 -- snapshotted before a single one is touched.
-local targets, working, part_built = {}, 0, 0
+local targets, working, part_built, planned = {}, 0, 0, 0
 
 for _, bld in ipairs(df.global.world.buildings.all) do
     if bld:getType() == df.building_type.Construction then
         if bld.construction_stage > 0 then
             part_built = part_built + 1
+        elseif buildingplan.isPlannedBuilding(bld) then
+            -- BUILDINGPLAN'S, NOT OURS. A wall it is holding is waiting for a material that
+            -- matches ITS filter -- conglomerate blocks, magma-safe metal, whatever was set --
+            -- and that filter lives in the plugin, not in the building. Redrawing one throws
+            -- the plan away and leaves a plain construction that will take the nearest rock,
+            -- which is a wall built out of the wrong thing rather than a wall unstuck.
+            planned = planned + 1
         else
             local job = bld.jobs[0]
             if job and dfhack.job.getWorker(job) then
                 working = working + 1
             elseif not (suspended_only and not (job and job.flags.suspend)) then
+                local filters, material = filters_for(job)
                 targets[#targets + 1] = {
                     pos = {x = bld.x1, y = bld.y1, z = bld.z},
                     ctype = bld.type,
                     suspended = job and job.flags.suspend or false,
                     held = job and #job.items or 0,
-                    filters = snapshot_filters(job),
+                    filters = filters,
+                    material = material,
                 }
             end
         end
@@ -147,7 +213,8 @@ for _, t in ipairs(targets) do
                                            t.pos.x, t.pos.y, t.pos.z)
     if verbose then
         act('%s%s%s', what, t.suspended and ' -- suspended' or '',
-            t.held > 0 and (', %d item held'):format(t.held) or '')
+            t.material and (', keeping ' .. t.material) or
+            (t.held > 0 and (', %d item held'):format(t.held) or ''))
     end
     if not dry then
         local removed = dfhack.constructions.designateRemove(t.pos)
@@ -180,7 +247,15 @@ if stuck > 0 then
         stuck == 1 and 'was' or 'were')
 end
 if freed > 0 then
+    local pinned = 0
+    for _, t in ipairs(targets) do if t.material then pinned = pinned + 1 end end
     act('  %d had a material already hauled to the site; that claim is released.', freed)
+    if pinned > 0 then
+        act('  %d %s redrawn asking for the same material again.', pinned,
+            pinned == 1 and 'was' or 'were')
+    elseif any_material then
+        act('  --any-material: the new jobs will take whatever is nearest.')
+    end
 end
 if working > 0 then
     print(('  %d left alone: a dwarf is building %s right now.'):format(
@@ -188,6 +263,10 @@ if working > 0 then
 end
 if part_built > 0 then
     print(('  %d left alone: already part-built.'):format(part_built))
+end
+if planned > 0 then
+    print(('  %d left alone: buildingplan is holding %s for a material of its own.'):format(
+        planned, planned == 1 and 'it' or 'them'))
 end
 if #failed > 0 then
     print(('  %d FAILED:'):format(#failed))

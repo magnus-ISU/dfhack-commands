@@ -142,7 +142,13 @@ Paint walls that should become constructed walls of your choosing. Reached from 
 A natural wall is designated for mining, a constructed wall for removal, and once the tile
 is actually clear it is handed to `buildingplan` as a planned wall. Doors, hatches, furniture
 and workshops are never taken down, and neither is a constructed wall carrying a masterwork
-engraving.
+engraving — **nor one that already satisfies the filter**: taking down a conglomerate block wall
+to build a conglomerate block wall costs a mining job, a hauling trip and a hole in the meantime
+and gains nothing, so painting over one does nothing and says so. That judgement is made against
+`buildingplan`'s own filter — the item form against its Blocks/Logs/Boulders/Bars toggles, the
+material against the category mask and the named materials — so "turn these boulder walls into
+block walls" still works with no material chosen at all. A filter carrying a heat-safety
+requirement or a special is not judged, and those walls are replaced as before.
 
 Materials are `buildingplan`'s, not the tool's. The panel shows the wall filter as it stands, in
 `buildingplan`'s own words ("Any building material of microcline"), and its two controls — `f`
@@ -170,12 +176,20 @@ onto the tile of the next one; that tile now holds an item another job has claim
 the job rather than build over it — and the claim never lapses, because the job holding it is
 suspended too, waiting on a tile of its own. Nothing in the fort resolves that: the walls sit
 *planned* with their material lying right there. This removes each designation and puts back
-exactly what it took away — same construction type, same tile, same item filter, so a wall
-specified in green glass stays a wall in green glass — and the fresh, unsuspended job picks its
-material from scratch. Measured on a fort with 63 suspended walls: none left suspended afterwards.
+exactly what it took away — same construction type, same tile, **same material** — and the fresh,
+unsuspended job goes looking for it. Measured on a fort with 63 suspended walls: none left
+suspended afterwards.
+
+The material is the subtle part. Choosing a stone for a construction does not narrow the job's
+filter; DF leaves that generic and *attaches the item you picked*. So the material is read off
+the item already hauled to the site, not off the filter, or a wall with conglomerate waiting on
+it comes back sandstone. `--any-material` gives that up deliberately, for when breaking the
+tangle matters more than the stone.
 
 It leaves alone anything a dwarf is actually building (taking a job out from under its worker is
-how this repo has crashed DF) and anything already part-built. `-n` reports without changing
+how this repo has crashed DF), anything already part-built, and anything **`buildingplan` is
+holding** — that filter lives in the plugin rather than in the building, so a redraw would throw
+the plan away and leave a plain construction that takes the nearest rock. `-n` reports without changing
 anything, `--suspended` limits it to the deadlocked ones, `-v` names each. The one cost is real:
 a material already hauled to the site is released, so a hauler may carry that block elsewhere
 before the new job claims it — the wall is not lost, only the trip.
