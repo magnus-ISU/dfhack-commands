@@ -306,6 +306,20 @@ Keeps the "Military" work detail matched to your standing squads.
 ### **`fort/training-barracks`**
 Marks one barracks as the fort's training barracks and assigns every squad to train there.
 
+### **`fix/assigned-equipment`**
+Frees gear the squad equipment lists refuse to offer.
+
+Two things hide a perfectly good item from the uniform pickers. One is a *phantom assignment*: an id
+left in `plotinfo.equipment.items_assigned` after the squad, uniform or soldier that claimed it is
+gone, so the item belongs to a soldier who does not exist and nothing ever releases it — those ids
+are moved back to the unassigned lists (ids whose item is gone are dropped). The other is *personal
+property*: an item a citizen has claimed, which the equipment manager skips outright while it sits in
+the unassigned list looking available — the symptom is a uniform slot that names exactly what you own
+and stays empty forever. Owned items that match an unfilled uniform slot are reported, and `--unclaim`
+drops the claim so DF hands the item out on its next equipment update. Everything a squad, hunter,
+work detail or soldier still references is left alone. `-n` reports only, `-v` names every item, and
+`--all-squads` widens the reference scan from your fort's squads to every squad in the world.
+
 ### **`fort/squad-buttons`**
 A Squads-screen button that selects or deselects all squads.
 
