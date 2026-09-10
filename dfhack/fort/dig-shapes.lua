@@ -9,21 +9,32 @@ SHAPED DIG BOXES are reclassified on completion:
                                            the floor at the bottom of an air gap gets BOTH a
                                            carved down stair -- piercing the floor -- and a
                                            constructed up/down staircase). Two joins:
-                                           a TOP step that is already an up stair gets an
-                                           up/down staircase CONSTRUCTED over it, adding the
-                                           way down a carve cannot cut into an existing stair;
+                                           a TOP step that is already a CONSTRUCTED up stair
+                                           gets an up/down staircase CONSTRUCTED over it (a
+                                           construction cannot be carved into), while a
+                                           NATURALLY DUG up stair is simply designated for a
+                                           down stair -- it is rock, and a miner cuts the down
+                                           side into it for free;
                                            and the BOTTOM step becomes up/down when an up/down
                                            or down stair sits below it, cut or merely
                                            designated, so the column meets it instead of
                                            stopping a level short.
   * selection through OPEN-AIR tiles     -> constructed WALLS/FLOORS, bottom-up (wall if the tile
                                             below is a wall -- natural or a placed wall -- else floor).
-  * selection of ONLY constructions/ramps (air allowed) -> designate them for REMOVAL, EXCEPT a
+  * selection of ONLY constructions/ramps (air allowed, but see below) -> designate them for
+                                            REMOVAL, EXCEPT a
                                             constructed wall bearing a MASTERWORK engraving --
                                             that one is left standing (an announcement says how
                                             many were spared). Natural stone walls are still
                                             mined out however they are engraved: digging is the
                                             only way to remove one at all.
+  * a box holding constructions AND open tiles that would become WALLS -> BUILD, not remove.
+                                            Drawing a box from a wall you already have up into
+                                            the air above it is how you add another course, so
+                                            the walls in the box are left standing and the air
+                                            is built. Air with nothing under it (sky beside a
+                                            bridge you are dismantling) would only ever become
+                                            floor, and stays incidental to the removal.
   * tree tiles                            -> CHOP.
   * ANY tree in the selection             -> chop ONLY; no walls or floors are built anywhere in
                                             that box. Boxing in woodland means "clear this", so
@@ -367,21 +378,24 @@ local function make_staircase(x, y, z1, z2)
         if z == z1 and stair_below(pos) then
             dig_val, con_sub = DV.UpDownStair, CT.UpDownStair
         end
-        -- TOP STEP ON AN EXISTING UP STAIR: build an up/down staircase ON TOP of
-        -- it. The tile already climbs; what it lacks is a way down, and that
-        -- cannot be carved into a stair that is already there -- so the down side
-        -- is added as a CONSTRUCTION over the existing stair. Only here: a top
-        -- step on rock or open air is a plain down stair as before, since there is
-        -- no up side to preserve.
+        -- TOP STEP ON AN EXISTING **CONSTRUCTED** UP STAIR: build an up/down
+        -- staircase ON TOP of it. The tile already climbs; what it lacks is a way
+        -- down, and a construction cannot be carved into -- so the down side is
+        -- added as another construction over the existing stair. This is the usual
+        -- case for a stair tower: the tile a new column hangs off is the bottom
+        -- step of the column above it, which was itself built as a constructed up
+        -- stair. Nothing stops the build: a COMPLETED construction is not a
+        -- building, so buildings.findAtTile is nil there and construct_real goes
+        -- ahead.
         --
-        -- A CONSTRUCTED up stair counts, and is in fact the usual case: the tile
-        -- a new column hangs off is the bottom step of the column above it, which
-        -- was itself built as a constructed up stair. Guarding this with "not
-        -- already a construction" made the rule miss exactly the tile it was
-        -- written for, and the skip below swallowed it instead. Nothing stops the
-        -- build either: a COMPLETED construction is not a building, so
-        -- buildings.findAtTile is nil there and construct_real goes ahead.
-        if z == z2 and is_up_stair(pos) then
+        -- A NATURAL up stair is a different tile entirely and is DUG, not built:
+        -- it is rock with a stair carved in it, and rock takes another cut. The
+        -- designation falls through to the "extend the stairway" branch below,
+        -- which asks for a DOWN stair here -- DF carves the down side into the
+        -- existing up and the tile becomes up/down. Stacking a construction on it
+        -- instead spent a block and a mason on something a miner does for free,
+        -- and left a built stair sitting on carved rock.
+        if z == z2 and is_up_stair(pos) and construction_here(pos) then
             construct_real(pos, CT.UpDownStair)
             log(('  stair CONSTRUCT up/down over existing up-stair @%s'):format(fmt(pos)))
         elseif z == z1 and construction_here(pos) and not dfhack.buildings.findAtTile(pos) then
@@ -463,8 +477,23 @@ function convert_dig_box(a, b)
     log(('  scan: cons=%d ramps=%d trees=%d rocks=%d opens=%d'):format(
         #cons, #ramps, #trees, #rocks, #opens))
 
-    -- selection is ONLY removables (constructions/ramps), open tiles allowed -> designate removal
-    if (#cons + #ramps) > 0 and #trees == 0 and #rocks == 0 then
+    -- BUILDING ON TOP OF WHAT IS ALREADY BUILT beats tearing it down. A box drawn from an
+    -- existing wall upward holds both the wall (a construction) and the air above it, which used
+    -- to read as "a box of constructions with some air in it" -- a REMOVAL -- so extending a wall
+    -- by another course designated the course you already had for removal instead. Now an open
+    -- tile that would become a WALL (something solid under it: the wall below, a floor) says
+    -- plainly that this is a build, and the constructions in the box are left standing.
+    --
+    -- Air with NOTHING under it does not count, and that is what keeps removals working: the sky
+    -- caught alongside a bridge you are dismantling would only ever become a floor, so it stays
+    -- what it always was -- incidental to a removal, not a request for a floor in mid-air.
+    local build_over = false
+    for _, p in ipairs(opens) do
+        if has_floor_here(p) then build_over = true break end
+    end
+
+    -- selection is ONLY removables (constructions/ramps), incidental sky allowed -> removal
+    if (#cons + #ramps) > 0 and #trees == 0 and #rocks == 0 and not build_over then
         log('  -> REMOVE (constructions/ramps)')
         local spared = 0
         for _, p in ipairs(cons) do if remove_here(p) then spared = spared + 1 end end

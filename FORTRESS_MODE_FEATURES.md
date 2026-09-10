@@ -94,6 +94,17 @@ fort.
 Right-click to dig; drag shapes that automatically become staircases, constructions, mining,
 chopping or removal.
 
+A box that holds constructions **and** open tiles which would become walls is a **build**, not a
+removal: drawing from a wall you already have up into the air above it is how you add another
+course, so the walls in the box are left standing and the air is built. Air with nothing under it
+— the sky caught alongside a bridge you are dismantling — would only ever become floor, and stays
+incidental to the removal.
+
+Where a staircase column tops out on an existing up stair, a **constructed** one gets an up/down
+staircase built over it (a construction cannot be carved into) while a **naturally dug** one is
+simply designated for a down stair — it is rock, and a miner cuts the down side into it for free
+rather than spending a block and a mason on it.
+
 ![fort/dig-shapes demo](demos/fort-dig-shapes.gif)
 
 ### **`fort/dig-building`**
