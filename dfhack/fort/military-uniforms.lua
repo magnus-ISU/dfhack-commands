@@ -2991,6 +2991,11 @@ end
 
 OVERLAY_WIDGETS = {entry = MilitaryUniformOverlay}
 
+-- (`military-uniforms altsched`) also sets the two STOCK routines the way a fort wants them:
+-- READY sleeps at will (own bedroom, never a barracks bed at need) and OFF DUTY equips always
+-- (a squad that undresses for the eleven months it is off duty meets the next ambush in its
+-- underclothes). Both are applied to every fort squad, every month.
+--
 -- EXPERIMENTAL (`military-uniforms altsched`): add two fort schedules, "even month" and "odd
 -- month", right after "Ready" -- each trains on those months and stands Ready the rest -- and give
 -- EVERY fort squad matching 6-entry schedules. All squads must stay length-synced with the routine
@@ -3010,6 +3015,76 @@ OVERLAY_WIDGETS = {entry = MilitaryUniformOverlay}
 -- give it one. Editing any schedule and pressing "Done editing" makes it recompute, after which the
 -- same data reads normally. The months themselves are correct throughout -- worth knowing before
 -- "fixing" a schedule that was never broken.
+-- Are the alt schedules REALLY there? Both routines present, and every squad on them carrying
+-- training orders in the months that should have them. Anything less is a fort that will look
+-- set up and train nobody.
+local function alt_schedules_intact()
+    local routines = df.global.plotinfo.alerts.routines
+    local eidx, oidx
+    for i = 0, #routines - 1 do
+        if routines[i].name == 'even month' then eidx = i end
+        if routines[i].name == 'odd month' then oidx = i end
+    end
+    if not eidx or not oidx then return false end
+    local gid = df.global.plotinfo.group_id
+    local squads = 0
+    for _, sq in ipairs(df.global.world.squads.all) do
+        if sq.entity_id == gid then
+            squads = squads + 1
+            if #sq.schedule.routine <= oidx then return false end
+            for _, ri in ipairs({eidx, oidx}) do
+                local sched = sq.schedule.routine[ri]
+                local orders = 0
+                for m = 0, 11 do orders = orders + #sched.month[m].orders end
+                if orders == 0 then return false end
+            end
+        end
+    end
+    return squads > 0
+end
+
+-- THE TWO STOCK ROUTINES, set the way a fort actually wants them.
+--
+--   READY -> sleep/room at will. A soldier on Ready is on call, not on shift: sending them to
+--   a barracks bed at need parks them asleep on the job in a room they do not live in. Their
+--   own bedroom is where they sleep, and DF only asks when they are tired.
+--
+--   OFF DUTY -> equip/always. Off duty is where a squad spends most of the year, and a squad
+--   that undresses for it is a squad that meets the next ambush in its underclothes -- the
+--   armour is in the stockpile and the pickup takes days. Uniform on, always.
+local function setup_stock_routines()
+    local routines = df.global.plotinfo.alerts.routines
+    local ready, off
+    for i = 0, #routines - 1 do
+        local name = routines[i].name:lower()
+        if name == 'ready' then ready = i
+        elseif name == 'off duty' or name == 'off-duty' then off = i end
+    end
+    local gid = df.global.plotinfo.group_id
+    local n = 0
+    for _, sq in ipairs(df.global.world.squads.all) do
+        if sq.entity_id == gid then
+            local touched = false
+            if ready and #sq.schedule.routine > ready then
+                for m = 0, 11 do
+                    sq.schedule.routine[ready].month[m].sleep_mode =
+                        df.squad_sleep_option_type.AnywhereAtWill
+                end
+                touched = true
+            end
+            if off and #sq.schedule.routine > off then
+                for m = 0, 11 do
+                    sq.schedule.routine[off].month[m].uniform_mode =
+                        df.squad_civilian_uniform_type.Regular
+                end
+                touched = true
+            end
+            if touched then n = n + 1 end
+        end
+    end
+    return n, ready, off
+end
+
 local function setup_alt_schedules()
     local function set_assignments(e, idx)
         e.order_assignments:resize(0)
@@ -3213,16 +3288,21 @@ if args[1] == 'altsched' then
     -- exist yet, so hand-edited schedules on an already-initialized fort survive every
     -- session. Bare `altsched` = force re-apply (e.g. after adding squads).
     if args[2] == 'once' then
-        local routines = df.global.plotinfo.alerts.routines
-        for i = 0, #routines - 1 do
-            if routines[i].name == 'even month' then
-                print('military-uniforms: alt schedules already set up (skipped -- run `military-uniforms altsched` to re-apply).')
-                return
-            end
+        -- SET UP means the months actually carry orders, not merely that the routines are
+        -- named. A fort was found running both routines with every month EMPTY -- the names
+        -- were there, so `once` skipped it every session and never repaired it, and the squads
+        -- assigned to those routines simply never trained. The names are the cheap half of the
+        -- state and the only half that had been checked.
+        if alt_schedules_intact() then
+            print('military-uniforms: alt schedules already set up (skipped -- run `military-uniforms altsched` to re-apply).')
+            return
         end
     end
     local n, eidx, oidx = setup_alt_schedules()
+    local sn = setup_stock_routines()
     print(('military-uniforms: "even month" (idx %d) + "odd month" (idx %d) schedules ready on %d fort squads.'):format(eidx, oidx, n))
+    print(('  Ready set to sleep/room at will and Off duty to equip/always on %d squad%s.')
+        :format(sn, sn == 1 and '' or 's'))
     print('  even month = train even months / Ready odd;  odd month = train odd months / Ready even.')
     print('  each training month carries 3 "at least 3" Train orders, so the squad trains in shifts.')
     print('  Assign squads to them on the Schedule screen. Re-run after adding new squads.')
