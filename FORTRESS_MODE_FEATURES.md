@@ -129,16 +129,18 @@ and stockpiles each live on one z-level, so they have nothing to fill upward int
 The trigger is the *repeat*, never the tile, so clicking once inside a zone you already have does
 nothing unusual. The fill stops at walls, open air and **doors**, the way DF's own rooms do —
 without that a bedroom joins the corridor, the corridor joins the fort, and "the room" would be
-the whole level — and what it fills is the floor **plus the walls and doors around it**, corners
-included. A room is its shell as much as its floor: a bedroom that stops one tile short of the
-wall is not the room you drew, and a burrow that stops there leaves the miner outside the rock he
-was sent to dig.
+the whole level. For a **zone or a burrow** what it fills is the floor **plus the walls and doors
+around it**, corners included: a room is its shell as much as its floor, a bedroom that stops one
+tile short of the wall is not the room you drew, and a burrow that stops there leaves the miner
+outside the rock he was sent to dig. A **stockpile gets the floor only** — nothing is ever stored
+in a wall, so a stockpile drawn over one counts tiles it can never use and holds them away from a
+stockpile that could.
 
 The 3D fill climbs the way a dwarf does — a staircase reaches the staircase above or below it, a
 ramp the tile over its head — and brings each level's walls with it. Hidden tiles are never
-filled, stockpiles leave out tiles another building owns (doors included, since they cannot share
-one), and too big a region is refused outright rather than half-drawn: a fort staircase reaches
-every floor you have. The object you repeated on is the one that grows, so its name, settings and
+filled, stockpiles also leave out tiles another building owns (doors included, since they cannot
+share one), and too big a region is refused outright rather than half-drawn: a fort staircase
+reaches every floor you have. The object you repeated on is the one that grows, so its name, settings and
 assignments all survive.
 
 ![fort/repeated-flood-fill demo](demos/fort-repeated-flood-fill.gif)

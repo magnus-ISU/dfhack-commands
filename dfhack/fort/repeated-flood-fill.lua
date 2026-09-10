@@ -23,15 +23,18 @@ stairs and brook tops -- anything you can stand on -- and stops at walls, fortif
 air and DOORS, the way DF's own rooms do. Doors matter more than they sound: without them a
 bedroom joins the corridor, the corridor joins the fort, and "the room" is the whole level.
 
-THE SHELL COMES WITH IT. What is filled is the floor you could walk plus THE WALLS AND DOORS
-AROUND IT, corners included -- a room is its shell as much as its floor, a bedroom that stops one
-tile short of the wall is not the room you drew, and a burrow that stops there leaves the miner
-outside the rock he was sent to dig. Doors are inside the fill already, since you can stand on
-one; the walls are added around the edge once the inside is known.
+THE SHELL COMES WITH IT -- FOR ZONES AND BURROWS. What those fill is the floor you could walk plus
+THE WALLS AND DOORS AROUND IT, corners included: a room is its shell as much as its floor, a
+bedroom that stops one tile short of the wall is not the room you drew, and a burrow that stops
+there leaves the miner outside the rock he was sent to dig. Doors are inside the fill already,
+since you can stand on one; the walls are added around the edge once the inside is known.
 
-Hidden tiles are never filled -- a fill may not tell you what is behind an undug wall -- and
-stockpiles also leave out tiles another building owns, doors included, since a stockpile cannot
-share a tile with one. A fill that would exceed the tile cap is refused outright rather than
+STOCKPILES GET THE FLOOR ONLY. Nothing is ever stored in a wall, so a stockpile drawn over one is
+counting tiles it can never use and holding them away from a stockpile that could. It stops at the
+inside of the room -- doors and all other tiles another building owns are left out too, since a
+stockpile cannot share a tile with one.
+
+Hidden tiles are never filled -- a fill may not tell you what is behind an undug wall. A fill that would exceed the tile cap is refused outright rather than
 half-drawn, which is what happens when you repeat a placement out in the open.
 
 The 3D fill climbs the way a dwarf does: a staircase reaches the staircase above or below it, a
@@ -170,7 +173,9 @@ local RING = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -
 -- them rather than passing through.
 --
 -- `opts.blocked(pos)` refuses a tile outright (a stockpile cannot take a tile another building
--- owns); `opts.three_d` lets it climb stairs and ramps. Returns the tile set, or nil and why.
+-- owns); `opts.three_d` lets it climb stairs and ramps; `opts.no_shell` keeps the walls OUT, which
+-- is what a stockpile wants -- nothing can ever be stored in a wall, so a stockpile drawn over one
+-- is counting tiles it cannot use. Returns the tile set, or nil and why.
 function flood_room(pos, opts)
     opts = opts or {}
     if not dfhack.maps.isValidTilePos(pos) then return nil, 'that is not a map tile' end
@@ -208,6 +213,7 @@ function flood_room(pos, opts)
     -- the shell: every wall and fortification touching the inside
     local tiles = {}
     for k in pairs(inside) do tiles[k] = true end
+    if opts.no_shell then return tiles end
     for k in pairs(inside) do
         local x, y, z = unkey(k)
         for _, d in ipairs(RING) do
@@ -318,8 +324,8 @@ local function announce(msg, color)
     dfhack.gui.showAnnouncement(msg, color or COLOR_WHITE)
 end
 
-local function grow_building(bld, pos, what, blocked)
-    local tiles, err = flood_room(pos, {blocked = blocked})
+local function grow_building(bld, pos, what, fill_opts)
+    local tiles, err = flood_room(pos, fill_opts)
     if not tiles then
         announce(('repeated-flood-fill: %s'):format(err), COLOR_LIGHTRED)
         return false
@@ -374,9 +380,15 @@ end
 function fill_stockpile(_, pos)
     local sp = stockpile_at(pos)
     if not sp then return end
-    local ok, added = grow_building(sp, pos, 'stockpile', function(p)
-        return tile_taken_by_building(p, sp)
-    end)
+    -- No shell for a stockpile. A zone or a burrow wants the walls -- a bedroom is its walls, and
+    -- a burrow that stops at the rock face leaves the miner outside the wall he was sent to dig --
+    -- but a stockpile cannot store anything in a wall, so tiles there are dead weight: they inflate
+    -- what the stockpile claims to hold, and they take the tile away from any stockpile that could
+    -- use it. Same reasoning as the tiles another building owns, which have always been left out.
+    local ok, added = grow_building(sp, pos, 'stockpile', {
+        no_shell = true,
+        blocked = function(p) return tile_taken_by_building(p, sp) end,
+    })
     if ok then
         mark_stockpile_tiles(sp, building_tiles(sp))
         announce(('repeated-flood-fill: filled the room -- %d tiles added to the stockpile.')
