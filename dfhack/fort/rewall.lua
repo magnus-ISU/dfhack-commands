@@ -1,4 +1,5 @@
 -- Redraw every planned construction, to shake loose the ones deadlocked on a reserved item.
+--@module = true
 --[[
 fort/rewall
 
@@ -24,6 +25,7 @@ for when breaking the tangle matters more than the stone.
     fort/rewall --suspended     only the suspended ones -- the deadlocked ones
     fort/rewall --any-material  let the new jobs take whatever is nearest, choice and all
     fort/rewall -v              name every construction touched
+    fort/rewall register        load the deadlock warning only, and redraw nothing
 
 WHAT IT WILL NOT TOUCH
 
@@ -37,6 +39,15 @@ WHAT IT WILL NOT TOUCH
   * Anything already part-built (`construction_stage` above 0). Only designations that have
     never been started are redrawn -- a half-built wall is progress, not a deadlock.
 
+THE WARNING
+
+  A deadlocked wall is invisible: it looks exactly like a wall waiting its turn, and the fort
+  works around it, so nobody looks until a corridor has been open to the caverns for a season.
+  `fort/rewall register` puts a line in DFHack's notification panel -- "7 constructions
+  deadlocked -- run fort/rewall" -- counting the planned constructions that are suspended with
+  their material already hauled and nobody working them, which is the signature this tool
+  exists to clear. Clicking the line walks you through the tiles. `magnus-scripts` turns it on.
+
 WHAT IT COSTS
 
   Any material already hauled to the site is released. That is the point -- the reservation is
@@ -47,19 +58,9 @@ WHAT IT COSTS
   Priorities set per designation are DF's own and ride on the building, so they go with it.
 ]]
 
-local args = {...}
-local dry, verbose, suspended_only, any_material = false, false, false, false
-for _, a in ipairs(args) do
-    if a == '-n' or a == '--dry-run' then dry = true
-    elseif a == '-v' or a == '--verbose' then verbose = true
-    elseif a == '--suspended' then suspended_only = true
-    elseif a == '--any-material' then any_material = true
-    else qerror('unknown argument: ' .. a) end
-end
-
-if not dfhack.isMapLoaded() then qerror('fort/rewall needs a loaded fort') end
-
 local buildingplan = require('plugins.buildingplan')
+
+local dry, verbose, suspended_only, any_material = false, false, false, false
 
 local function act(fmt, ...)
     print((dry and '[dry] ' or '') .. fmt:format(...))
@@ -162,10 +163,40 @@ local function redraw(pos, ctype, filters)
     return false
 end
 
+-- ---- the deadlock, as a question anything can ask ---------------------------
+--
+-- A construction is stuck in the way this tool exists to fix when its job is SUSPENDED with a
+-- material already hauled to it and nobody working it. That is the whole signature: the block is
+-- there, the job will not run, and nothing in the fort will ever change its mind.
+function stuck_constructions()
+    local out = {}
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        if bld:getType() == df.building_type.Construction and bld.construction_stage == 0
+                and not buildingplan.isPlannedBuilding(bld) then
+            local job = bld.jobs[0]
+            if job and job.flags.suspend and #job.items > 0 and not dfhack.job.getWorker(job) then
+                out[#out + 1] = {x = bld.x1, y = bld.y1, z = bld.z}
+            end
+        end
+    end
+    return out
+end
+
 -- ---- collect first, act afterwards -------------------------------------------
 --
 -- Redrawing a designation adds and removes entries in world.buildings.all, so the list is
 -- snapshotted before a single one is touched.
+function run(...)
+    dry, verbose, suspended_only, any_material = false, false, false, false
+    for _, a in ipairs({...}) do
+        if a == '-n' or a == '--dry-run' then dry = true
+        elseif a == '-v' or a == '--verbose' then verbose = true
+        elseif a == '--suspended' then suspended_only = true
+        elseif a == '--any-material' then any_material = true
+        else qerror('unknown argument: ' .. a) end
+    end
+    if not dfhack.isMapLoaded() then qerror('fort/rewall needs a loaded fort') end
+
 local targets, working, part_built, planned = {}, 0, 0, 0
 
 for _, bld in ipairs(df.global.world.buildings.all) do
@@ -272,3 +303,79 @@ if #failed > 0 then
     print(('  %d FAILED:'):format(#failed))
     for _, f in ipairs(failed) do print('    ' .. f) end
 end
+end
+
+-- ---------------------------------------------------------------------------
+-- the notification: "these are deadlocked"
+-- ---------------------------------------------------------------------------
+--
+-- A deadlocked wall is invisible. It looks exactly like a wall waiting its turn -- planned, with
+-- a block beside it -- and the fort keeps working around it, so nobody looks until a corridor
+-- has been open to the caverns for a season. This puts the count in DFHack's notification panel
+-- and names the command that fixes it, and a click walks you to the tiles.
+local NOTIFY_NAME = 'construction_deadlock'
+local CACHE_MS = 3000        -- buildings.all is over a thousand entries; do not walk it per frame
+local cache = {ms = -CACHE_MS, list = {}}
+local zoom_cursor = 0
+
+local function stuck_cached()
+    local now = dfhack.getTickCount()
+    if now - cache.ms >= CACHE_MS then
+        cache.ms = now
+        cache.list = dfhack.isMapLoaded() and stuck_constructions() or {}
+    end
+    return cache.list
+end
+
+function deadlock_message()
+    local n = #stuck_cached()
+    if n == 0 then return nil end
+    return ('%d construction%s deadlocked -- run fort/rewall'):format(n, n == 1 and '' or 's')
+end
+
+local function zoom_to_stuck()
+    local list = stuck_cached()
+    if #list == 0 then return end
+    zoom_cursor = zoom_cursor % #list + 1
+    local pos = list[zoom_cursor]
+    dfhack.gui.revealInDwarfmodeMap(xyz2pos(pos.x, pos.y, pos.z), true, true)
+end
+
+local function register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME]
+    if not entry then
+        entry = {name = NOTIFY_NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME] = entry
+    end
+    entry.desc = 'Warns when planned constructions are deadlocked -- suspended with their '
+        .. 'material already hauled to the site. Click to step through them; fort/rewall fixes them.'
+    entry.dwarf_fn = deadlock_message
+    entry.on_click = zoom_to_stuck
+    if n.config and n.config.data and not n.config.data[NOTIFY_NAME] then
+        n.config.data[NOTIFY_NAME] = {enabled = true, version = 1}
+    end
+end
+
+dfhack.onStateChange[NOTIFY_NAME] = function(ev)
+    if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then register_notification() end
+end
+
+register_notification()
+
+if dfhack_flags and dfhack_flags.module then return end
+
+-- `fort/rewall register` loads the warning and redraws NOTHING. The warning is only worth
+-- anything before you have thought to run the tool, so it has to be loadable at startup --
+-- and running the tool itself at startup would redraw every designation in the fort.
+local first = ({...})[1]
+if first == 'register' then
+    print('fort/rewall: "construction_deadlock" registered -- '
+        .. 'DFHack will warn when planned constructions are deadlocked.')
+    print('Add `fort/rewall register` to dfhack-config/init/dfhack.init to load it every session.')
+    return
+end
+
+run(...)

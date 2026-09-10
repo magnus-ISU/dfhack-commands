@@ -62,6 +62,12 @@ HOW IT WORKS
   been cut away does not count: DF leaves a dead SmoothFloor job on a ramp top
   forever, and waiting on one of those froze every designation in the fort.
 
+WHEN IT CAN DIG NOTHING IT SAYS SO. A pass that refuses every tile raises a line in DFHack's
+notification panel -- "23 channels blocked: smoothing beside them first" -- because held
+designations look exactly like working ones, and without that the fort waits on a blueprint
+nobody is ever going to dig. The line carries the reason, and clicking it steps through the
+refused tiles on the map. It goes away by itself when something can be released again.
+
 PRIORITY 1 IS THE ESCAPE HATCH
   A designation at priority 1 is never touched. That is the way to say "dig this
   now, I know what I am doing".
@@ -503,6 +509,7 @@ end
 -- honest thing is to plan around them: whatever has a job is treated as a hole
 -- that already exists.
 local MAX_SETTLE = 5
+local BLOCKED_SAMPLE = 40      -- refused tiles remembered for the notification to zoom to
 
 -- world.jobs.list is a LINKED LIST of job_list_link, not a vector. The first
 -- version of this iterated it with ipairs, which silently walks nothing at all,
@@ -1574,6 +1581,15 @@ local function apply(found, top)
     s.allowed = {}
     for k in pairs(s.released) do s.allowed[k] = true end
     last_pass_blocked = (next(picks) == nil and next(out) == nil) and #active or 0
+    -- a handful of the refused tiles, so the notification can walk you to them. A handful is
+    -- enough: they are all on one level and usually all the same problem.
+    blocked_sample = {}
+    if last_pass_blocked > 0 then
+        for _, pos in ipairs(active) do
+            if #blocked_sample >= BLOCKED_SAMPLE then break end
+            blocked_sample[#blocked_sample + 1] = {x = pos.x, y = pos.y, z = pos.z}
+        end
+    end
 
     -- When nothing could be let out, say WHICH refusal it was. "No safe order"
     -- reads as a fault in the shape you drew, and for a barracks floor sitting on
@@ -1595,6 +1611,7 @@ end
 
 last_pass = last_pass or {held = 0, freed = 0, channels = 0, top = nil}
 last_pass_blocked = last_pass_blocked or 0
+blocked_sample = blocked_sample or {}
 last_pass_under_building = last_pass_under_building or 0
 reclaimed = reclaimed or 0
 smoothing_cleared = smoothing_cleared or 0
@@ -1789,6 +1806,73 @@ dfhack.onStateChange[GLOBAL_KEY] = function(sc)
         if get_state().enabled then register_hooks() end
     end
 end
+
+-- ---------------------------------------------------------------------------
+-- the notification: "nothing can be dug"
+-- ---------------------------------------------------------------------------
+--
+-- WHEN THIS TOOL REFUSES EVERYTHING IT SAYS NOTHING, and that is the failure mode worth
+-- warning about: the designations sit there looking planned, which is exactly what they look
+-- like when the tool is working normally, so a fort can wait a season on a blueprint that was
+-- never going to be dug. Running `fort/channel-safely` says why -- but only if you thought to
+-- ask, and you only think to ask once you have noticed, which is the part that takes a season.
+--
+-- So it goes in the always-on notification list instead (DFHack's gui/notify, the same panel as
+-- "needs a tomb" and the trade countdown), with the reason in the line rather than a bare "look
+-- at this", and a click that walks you through the tiles it refused.
+local NOTIFY_NAME = 'channel_stuck'
+local blocked_cursor = 0
+
+function stuck_message()
+    local s = get_state()
+    if not s.enabled then return end
+    local n = last_pass_blocked or 0
+    if n == 0 then return end
+    local tiles = ('%d channel%s'):format(n, n == 1 and '' or 's')
+    if (last_pass_under_building or 0) >= n then
+        return tiles .. ' blocked: a building stands on them'
+    elseif (waiting_on_detail or 0) > 0 then
+        return tiles .. ' blocked: smoothing beside them first'
+    elseif unreachable_pass then
+        return tiles .. ' blocked: nobody can reach them'
+    end
+    return tiles .. ' blocked: no safe order to dig them'
+end
+
+-- step through the refused tiles, one per click, the way the trader notice steps through
+-- merchants: the answer to "which ones?" is on the map, not in a dialog
+local function zoom_to_blocked()
+    local sample = blocked_sample or {}
+    if #sample == 0 then return end
+    blocked_cursor = blocked_cursor % #sample + 1
+    local pos = sample[blocked_cursor]
+    dfhack.gui.revealInDwarfmodeMap(xyz2pos(pos.x, pos.y, pos.z), true, true)
+end
+
+local function register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME]
+    if not entry then
+        entry = {name = NOTIFY_NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME] = entry
+    end
+    entry.desc = 'Warns when fort/channel-safely is holding channel designations it cannot '
+        .. 'prove safe to dig, with the reason; click to step through the refused tiles.'
+    entry.dwarf_fn = stuck_message
+    entry.on_click = zoom_to_blocked
+    if n.config and n.config.data and not n.config.data[NOTIFY_NAME] then
+        n.config.data[NOTIFY_NAME] = {enabled = true, version = 1}
+    end
+end
+
+-- the notify module is rebuilt on a new world, taking the registration with it
+dfhack.onStateChange[NOTIFY_NAME] = function(ev)
+    if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then register_notification() end
+end
+
+register_notification()
 
 -- ---------------------------------------------------------------------------
 -- command

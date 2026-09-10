@@ -242,6 +242,9 @@ local COLUMNS = {
         {key = 'mandate-notification', label = 'mandate-notification',
          enable = script('fort/mandate-notification'),
          disable = notify_off({'mandates_active', 'mandates_expiring'})},
+        {key = 'rewall-notification', label = 'rewall-notification',
+         enable = script('fort/rewall', 'register'),
+         disable = notify_off({'construction_deadlock'})},
         {key = 'raid-notification', label = 'raid-notification',
          enable = script('fort/raid-notification'), disable = notify_off({'raids'})},
         -- two pieces: the notify line and the same line on the depot panel, so the row turns

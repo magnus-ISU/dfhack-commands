@@ -27,6 +27,11 @@ blaming the shape. Priority 1 designations are never touched, and
 
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
 
+When a pass can prove **nothing** safe to dig, that now raises a line in DFHack's notification
+panel — *"23 channels blocked: smoothing beside them first"* — with the reason in the line and a
+click that steps through the refused tiles. Held designations look exactly like working ones, so
+without it a fort can wait a season on a blueprint nobody was ever going to dig.
+
 ### **`fort/planned-smoothing`**
 Smooth a room before you have finished digging it. A smooth designation only sticks to tiles
 that are revealed, so the part of your box that lands on undug rock is silently thrown away —
@@ -144,6 +149,12 @@ the item already hauled to the site, not off the filter, or a wall with conglome
 it comes back sandstone. `--any-material` gives that up deliberately, for when breaking the
 tangle matters more than the stone.
 
+`fort/rewall register` loads its warning without redrawing anything: a line in DFHack's
+notification panel — *"7 constructions deadlocked — run fort/rewall"* — counting the planned
+constructions suspended with their material already hauled and nobody working them, which is the
+signature the tool clears. Clicking it walks you through them. A deadlocked wall is otherwise
+invisible: it looks exactly like a wall waiting its turn.
+
 It leaves alone anything a dwarf is actually building (taking a job out from under its worker is
 how this repo has crashed DF), anything already part-built, and anything **`buildingplan` is
 holding** — that filter lives in the plugin rather than in the building, so a redraw would throw
@@ -159,7 +170,11 @@ the room in 2D. For burrows a 3×3 placed twice over the same nine tiles floods 
 and stockpiles each live on one z-level, so they have nothing to fill upward into.
 
 The trigger is the *repeat*, never the tile, so clicking once inside a zone you already have does
-nothing unusual. The fill stops at walls, open air and **doors**, the way DF's own rooms do —
+nothing unusual — and the repeat has to **stand alone**: a 1×1 with a zone, stockpile or burrow
+tile of its own kind in any of the eight tiles around it is left to DF, because clicking the same
+tile twice is also what painting one tile at a time looks like when a click does not register.
+It says nothing when it works, either; the room filling in front of you is the report, and only a
+**refused** fill announces itself (too big to be a room, no floor to fill from, nothing to add). The fill stops at walls, open air and **doors**, the way DF's own rooms do —
 without that a bedroom joins the corridor, the corridor joins the fort, and "the room" would be
 the whole level. For a **zone or a burrow** what it fills is the floor **plus the walls and doors
 around it**, corners included: a room is its shell as much as its floor, a bedroom that stops one

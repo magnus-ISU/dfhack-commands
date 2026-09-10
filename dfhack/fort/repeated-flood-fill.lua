@@ -9,7 +9,9 @@ REPEATING A PLACEMENT mean "and the rest of it":
 
     a 1x1 placement            does what DF does -- one tile
     a 1x1 placement ON THE     floods the room in 2D: every tile you could walk to from there
-      SAME TILE, again         without leaving the z-level, out to the walls
+      SAME TILE, again         without leaving the z-level, out to the walls -- but only when
+                               the 1x1 STANDS ALONE, with none of the same kind of thing in the
+                               eight tiles around it
     a 3x3 placement            does what DF does -- nine tiles
     a 3x3 placement ON THE     floods in 3D -- BURROWS ONLY, since a zone and a stockpile each
       SAME NINE TILES, again     live on one z-level
@@ -369,12 +371,8 @@ function fill_zone(gesture, pos)
             dfhack.buildings.deconstruct(z)
         end
     end
-    local ok, added = grow_building(target, pos, 'zone')
-    if ok then
-        dfhack.buildings.notifyCivzoneModified(target)
-        announce(('repeated-flood-fill: filled the room -- %d tiles added to the zone.')
-            :format(added), COLOR_LIGHTGREEN)
-    end
+    local ok = grow_building(target, pos, 'zone')
+    if ok then dfhack.buildings.notifyCivzoneModified(target) end
 end
 
 function fill_stockpile(_, pos)
@@ -385,15 +383,11 @@ function fill_stockpile(_, pos)
     -- but a stockpile cannot store anything in a wall, so tiles there are dead weight: they inflate
     -- what the stockpile claims to hold, and they take the tile away from any stockpile that could
     -- use it. Same reasoning as the tiles another building owns, which have always been left out.
-    local ok, added = grow_building(sp, pos, 'stockpile', {
+    local ok = grow_building(sp, pos, 'stockpile', {
         no_shell = true,
         blocked = function(p) return tile_taken_by_building(p, sp) end,
     })
-    if ok then
-        mark_stockpile_tiles(sp, building_tiles(sp))
-        announce(('repeated-flood-fill: filled the room -- %d tiles added to the stockpile.')
-            :format(added), COLOR_LIGHTGREEN)
-    end
+    if ok then mark_stockpile_tiles(sp, building_tiles(sp)) end
 end
 
 function fill_burrow(_, pos, do_3d)
@@ -408,18 +402,41 @@ function fill_burrow(_, pos, do_3d)
         return
     end
     local erasing = mi.burrow.erasing
-    local n = 0
     for k in pairs(tiles) do
         local x, y, z = unkey(k)
         dfhack.burrows.setAssignedTile(burrow, xyz2pos(x, y, z), not erasing)
-        n = n + 1
     end
-    announce(('repeated-flood-fill: %s %d tiles %s the burrow.')
-        :format(erasing and 'took' or 'put', n, erasing and 'out of' or 'into'),
-        COLOR_LIGHTGREEN)
 end
 
 local FILL = {zone = fill_zone, stockpile = fill_stockpile, burrow = fill_burrow}
+
+-- A 1x1 REPEAT ONLY MEANS "FILL THE ROOM" WHEN THE 1x1 STANDS ALONE.
+--
+-- Clicking the same tile twice is not a rare gesture: it is what painting one tile at a time
+-- looks like when a click does not register, or when you are nudging the edge of something you
+-- already have. Told from a fill by the eight tiles around it -- a placement with a neighbour of
+-- its own kind is somebody extending a shape by hand, and taking that as "and the rest of the
+-- room" turns a one-tile correction into a room-sized one you then have to undo.
+--
+-- So the fill needs a clean ring: nothing of the same kind in any of the eight. The cost is a
+-- real gesture refused -- filling a room into a burrow that already touches it, say -- and the
+-- way through that is to start the 1x1 somewhere in the room the burrow does not reach yet.
+local RING8 = {{-1,-1},{0,-1},{1,-1},{-1,0},{1,0},{-1,1},{0,1},{1,1}}
+
+function neighbour_of_kind(kind, pos)
+    for _, d in ipairs(RING8) do
+        local n = xyz2pos(pos.x + d[1], pos.y + d[2], pos.z)
+        if kind == 'zone' then
+            if #zones_at(n) > 0 then return true end
+        elseif kind == 'stockpile' then
+            if stockpile_at(n) then return true end
+        elseif kind == 'burrow' then
+            local burrow = mi.burrow.painting_burrow
+            if burrow and dfhack.burrows.isAssignedTile(burrow, n) then return true end
+        end
+    end
+    return false
+end
 
 -- ---- watching for the repeat -------------------------------------------------
 
@@ -515,7 +532,10 @@ function RepeatFillOverlay:act(kind, b)
     if same_bounds(last and last.bounds, b) then
         self.last[kind] = nil                    -- a third repeat starts over, never re-fills
         if w == 1 and h == 1 then
-            FILL[kind](last, pos, false)
+            -- a 1x1 with company is hand-painting, not a fill; leave it to DF, quietly
+            if not neighbour_of_kind(kind, pos) then
+                FILL[kind](last, pos, false)
+            end
             return
         elseif w == 3 and h == 3 and tool.allow_3d then
             FILL[kind](last, pos, true)
