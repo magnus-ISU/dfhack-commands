@@ -155,6 +155,24 @@ constructions suspended with their material already hauled and nobody working th
 signature the tool clears. Clicking it walks you through them. A deadlocked wall is otherwise
 invisible: it looks exactly like a wall waiting its turn.
 
+**It also picks materials that will not get stuck again.** A construction cannot be built while
+loose items sit on its tile, and an item only leaves a tile if a hauler has somewhere to take it —
+so in a fort with no stockpile accepting stone, blocks or bars, the blocks dropped along a wall
+line sit exactly where the wall goes, forever, and a plain redraw hands the job back the same
+blocked tile. So: if a loose item on the tile is what the job wants, **that** item becomes the
+job's material, attached at creation — the job starts unsuspended with nothing to fetch and the
+tile loses a blocker instead of gaining one — and whatever is left on the tile is moved to the
+nearest reachable tile that is not a building site (`--no-clear` leaves it). Measured on this
+fort: 16 sites blocked by unmovable items, 16 built from a block already lying on them, 48 items
+moved aside, and *"Blocked by an unmovable item"* gone from the fort entirely.
+
+Sites **nobody can reach** are named rather than redrawn — a pocket sealed by walls already
+built, or a floor designated out over open air with nothing to build it from. No material and no
+ordering fixes those.
+
+`--material INORGANIC:CONGLOMERATE` (with `--item BLOCKS` for the form) overrides both the pin and
+the old filter, for when the material a wall is carrying is itself the mistake.
+
 It leaves alone anything a dwarf is actually building (taking a job out from under its worker is
 how this repo has crashed DF), anything already part-built, and anything **`buildingplan` is
 holding** — that filter lives in the plugin rather than in the building, so a redraw would throw
