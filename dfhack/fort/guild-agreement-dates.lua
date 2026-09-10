@@ -285,6 +285,43 @@ function GuildAgreementOverlay:init()
     end
 end
 
+-- WHAT IS ON SCREEN, RE-ASKED PROPERLY.
+--
+-- Two costs pull against each other here: reading the whole screen every frame is wasteful, and
+-- reading only the notices already known is BLIND TO NEW ONES. The second is what bit: a sixth
+-- agreement was struck, the cheap re-read kept confirming the five it knew, and the sixth notice
+-- never got its day count at all -- not flickering, just permanently absent.
+--
+-- So the full scan runs on a timer (twice a second, which is as often as a petition can plausibly
+-- matter) and the cheap re-read carries the frames in between, keeping the counts live as the day
+-- rolls over. A cheap read that fails no longer blanks the overlay either: the next scan is at
+-- most half a second away and will settle it, where blanking made the notice wink out first.
+local SCAN_MS = 500
+
+function GuildAgreementOverlay:overlay_onupdate()
+    if not agreement_outstanding() then
+        self.notices, self.visible = {}, false
+        return
+    end
+    local now = dfhack.getTickCount()
+    if self.scan_ms and now - self.scan_ms < SCAN_MS and now >= self.scan_ms then
+        -- between scans: re-read the ones we know, so the day count stays honest
+        if #self.notices > 0 then
+            local intact = true
+            for _, n in ipairs(self.notices) do
+                local date = self:read_notice(n.col, n.date_row)
+                if not date then intact = false break end
+                n.date = date
+            end
+            if intact then self.visible = self:layout_over_notices() end
+        end
+        return
+    end
+    self.scan_ms = now
+    self.notices = find_notices()
+    self.visible = #self.notices > 0 and self:layout_over_notices()
+end
+
 -- Lay the widget over every notice on screen -- from the first job line to the last -- and put a
 -- label at the end of each one. The frame has to cover them all: a label is clipped to it.
 function GuildAgreementOverlay:layout_over_notices()
