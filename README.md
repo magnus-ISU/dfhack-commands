@@ -413,6 +413,28 @@ the agreements themselves and filtered to your own site, so another settlement's
 pulls a profession up your list. *(No particular deity)* keeps its place at the head, and a
 list already in the right order is left alone so nothing shifts while you read it.
 
+### **`fort/holiday`**
+Stops the fort working, and starts it again with everything exactly where it was. A **[Holiday]**
+button sits on the work detail screen beside [Change Icon]; `fort/holiday on` / `off` does the
+same from the console.
+
+A fort that has to *be* somewhere — everyone into the burrow before the siege lands, everyone off
+the surface before the clouds arrive — spends the crucial minute being dragged back to workshops
+by jobs already queued. Turning the labors off turns the queue off with it.
+
+Nobody's work detail membership is touched. Every detail's **mode** is set to *nobody does this*
+and the mode it had is written down; every labor still standing after that is cleared on the dwarf
+and **written down per dwarf**, so the fort resumes exactly as it was rather than as DF would
+guess. Measured on a 92-dwarf fort: 6,069 labors enabled before, **0** during, 6,069 after with
+all 92 dwarves identical to their snapshot and every detail mode back.
+
+The order is the fiddly part and the comments say so: `setAutomaticProfessions` rebuilds the
+uncovered labors from DF's defaults, so it runs *before* the direct clears going in and *before*
+the direct restores coming out. A running holiday also re-asserts itself a few times a second,
+since DF rebuilds a dwarf's labors whenever it recomputes one — opening the labor screen is
+enough — and a holiday that ends the moment you look at it is no holiday. It survives a save and
+reload, and ends correctly from the other side.
+
 ### **`fort/choose-labor-icon`**
 Pick a work detail's icon from a grid of the actual icons instead of cycling DF's little
 selector one at a time.
