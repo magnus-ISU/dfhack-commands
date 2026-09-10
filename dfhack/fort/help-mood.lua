@@ -1695,6 +1695,60 @@ local function mood_skill_name(unit)
     return df.job_skill[skill]
 end
 
+-- WHERE THE MOOD HAS TO WORK, and whether the fort has one.
+--
+-- A moody dwarf claims a workshop of their own craft and nothing else will do. With none built
+-- they wander until the mood runs out, and then they go insane -- and DF never says a word about
+-- it: the announcement names the mood and stops. Building the workshop is the one thing that
+-- still fixes it at that point, and it only fixes it if somebody knows in time.
+--
+-- Magma variants count: a mood does not care which forge it is. A craft with no rule here says
+-- nothing at all rather than guessing, since a wrong "they need X" is worse than silence.
+local W, F = df.workshop_type, df.furnace_type
+local MOOD_SHOP = {
+    [df.job_skill.CARPENTRY]      = {"Carpenter's Workshop",   w = {W.Carpenters}},
+    [df.job_skill.MASONRY]        = {"Mason's Workshop",       w = {W.Masons}},
+    [df.job_skill.WEAVING]        = {'Loom',                   w = {W.Loom}},
+    [df.job_skill.CLOTHESMAKING]  = {"Clothier's Shop",        w = {W.Clothiers}},
+    [df.job_skill.LEATHERWORK]    = {'Leather Works',          w = {W.Leatherworks}},
+    [df.job_skill.BOWYER]         = {"Bowyer's Workshop",      w = {W.Bowyers}},
+    [df.job_skill.MECHANICS]      = {"Mechanic's Workshop",    w = {W.Mechanics}},
+    [df.job_skill.SIEGECRAFT]     = {'Siege Workshop',         w = {W.Siege}},
+    [df.job_skill.CUTGEM]         = {"Jeweler's Workshop",     w = {W.Jewelers}},
+    [df.job_skill.ENCRUSTGEM]     = {"Jeweler's Workshop",     w = {W.Jewelers}},
+    [df.job_skill.WOODCRAFT]      = {"Craftsdwarf's Workshop", w = {W.Craftsdwarfs}},
+    [df.job_skill.STONECRAFT]     = {"Craftsdwarf's Workshop", w = {W.Craftsdwarfs}},
+    [df.job_skill.BONECARVE]      = {"Craftsdwarf's Workshop", w = {W.Craftsdwarfs}},
+    [df.job_skill.EXTRACT_STRAND] = {"Craftsdwarf's Workshop", w = {W.Craftsdwarfs}},
+    [df.job_skill.METALCRAFT]     = {"Metalsmith's Forge",     w = {W.MetalsmithsForge, W.MagmaForge}},
+    [df.job_skill.FORGE_WEAPON]   = {"Metalsmith's Forge",     w = {W.MetalsmithsForge, W.MagmaForge}},
+    [df.job_skill.FORGE_ARMOR]    = {"Metalsmith's Forge",     w = {W.MetalsmithsForge, W.MagmaForge}},
+    [df.job_skill.FORGE_FURNITURE]= {"Metalsmith's Forge",     w = {W.MetalsmithsForge, W.MagmaForge}},
+    [df.job_skill.GLASSMAKER]     = {'Glass Furnace',          f = {F.GlassFurnace, F.MagmaGlassFurnace}},
+}
+
+-- the workshop this mood needs, ONLY when the fort does not have a finished one; nil otherwise
+function mood_workshop_missing(unit)
+    local ok, skill = pcall(function() return unit.job.mood_skill end)
+    if not ok or not skill or skill < 0 then return nil end
+    local want = MOOD_SHOP[skill]
+    if not want then return nil end
+    for _, bld in ipairs(df.global.world.buildings.all) do
+        local t = bld:getType()
+        local subtypes = (t == df.building_type.Workshop and want.w)
+                      or (t == df.building_type.Furnace and want.f)
+        if subtypes then
+            for _, sub in ipairs(subtypes) do
+                -- an unfinished workshop is not one they can claim, so it does not count
+                if bld:getSubtype() == sub and bld:getBuildStage() >= bld:getMaxBuildStage() then
+                    return nil
+                end
+            end
+        end
+    end
+    return want[1]
+end
+
 -- "Gautier, Clothier, is taken by a fey mood!"
 local function named(unit, name)
     local craft = mood_skill_name(unit)
@@ -1818,8 +1872,15 @@ function moody_message()
 
     if not bld then
         -- before a workshop is claimed there is nothing to report but the mood itself, which
-        -- is exactly what the game announces at that moment
-        return ('%s %s'):format(named(unit, name), words.begun)
+        -- is exactly what the game announces at that moment -- unless the workshop they are
+        -- looking for does not exist, in which case the search will never end and saying so is
+        -- the whole point of watching
+        local line = ('%s %s'):format(named(unit, name), words.begun)
+        local missing = mood_workshop_missing(unit)
+        if missing then
+            return {{text = ('%s They need a %s!'):format(line, missing), pen = COLOR_LIGHTRED}}
+        end
+        return line
     end
     if live.flags.working then
         return ('%s %s'):format(name, words.working)

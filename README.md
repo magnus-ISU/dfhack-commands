@@ -697,7 +697,11 @@ puts DFHack's own window straight back.
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
 game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,
 *"...keeps muttering..."* — the right line for the mood type, and the dwarf's first name
-rather than "moody dwarf". While they are fetching it keeps the mood's own line and counts what has arrived —
+rather than "moody dwarf". **If the fort has no workshop of their craft it says so** — *"Dunstan,
+Bowyer, has been possessed! They need a Bowyer's Workshop!"*, in red — because a moody dwarf who
+cannot find their workshop wanders until the mood runs out and then goes insane, and DF never
+mentions it: its announcement names the mood and stops. Magma forges and magma glass furnaces
+count, and a craft with no rule for it says nothing rather than guessing. While they are fetching it keeps the mood's own line and counts what has arrived —
 *"Thåkut withdraws from society... Claimed 3 items."* When they are stuck it names what they
 are short of the way DF would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
 days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
