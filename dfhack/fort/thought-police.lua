@@ -35,10 +35,28 @@ READING IT
   citizens had it -- a thought that hits everybody once is usually the fort's
   problem, one that hits a single dwarf forty times is usually that dwarf's.
 
-  STRESS is what it actually cost, and it is often zero: DF records plenty of sour
-  thoughts at severity 0, which annoy without wearing anybody down. A row with a big
-  count and no stress is a grumble; a row with real stress behind it is what is
-  driving your dwarves to the tantrum spiral.
+  STILL FELT is how many of those a dwarf has not got over yet. DF gives a fresh
+  emotion a `strength` and decays it to zero as the dwarf overcomes it, so this is
+  the part of the count that is still weighing on somebody right now.
+
+  WORST FEELING is the harshest emotion DF attached to that thought -- horror and
+  grief divide their way into stress far faster than annoyance does -- so it ranks
+  the rows the count cannot: sixty dwarves mildly annoyed about cups is a smaller
+  problem than three reliving a death.
+
+WHAT IS NOT HERE, AND WHY
+
+  There is no "stress caused" column, because DF does not record one. An emotion
+  keeps its type, its thought, a strength that decays, and the moment it happened
+  -- nothing else. The stress it caused was applied to the dwarf's running total
+  when it happened and is not attributable afterwards. `severity` looks like the
+  number you want and is not: DF leaves it at 0 or -1 on most unpleasant thoughts,
+  including witnessing a death, so anything computed from it reports a contented
+  paradise with the fort's real miseries all reading zero.
+
+  `-v` gives the honest version of that question: the dwarves who had the thought
+  most, each with the running stress total DF does keep for them. Higher is worse;
+  a negative total is a dwarf who is content on balance.
 ]]
 
 local args = {...}
@@ -89,11 +107,19 @@ local function is_bad(emotion)
     return divider_of(emotion) > 0
 end
 
--- and what it actually cost, which is often nothing
-local function stress_of(emotion)
-    local divider = divider_of(emotion)
-    if divider <= 0 or emotion.severity <= 0 then return 0 end
-    return math.ceil(emotion.severity / divider)
+-- The harshest feeling wins the row's WORST FEELING. A smaller divider means DF
+-- divides the same severity into MORE stress, so divider 1 (horror, grief) is the
+-- bottom of the pit and 8 (annoyance) the top.
+local function harsher(a, b)
+    if not a then return b end
+    if not b then return a end
+    return divider_of(a) <= divider_of(b) and a or b
+end
+
+-- DF hands a fresh emotion a strength and decays it to zero as the dwarf gets over
+-- it, so a strength still above zero is a thought still being felt.
+local function still_felt(emotion)
+    return emotion.strength > 0
 end
 
 local function label_of(emotion)
@@ -108,6 +134,20 @@ local function label_of(emotion)
     return prettify(thought)
 end
 
+-- the only stress figure DF actually keeps: the dwarf's own running total. Higher
+-- is worse and a NEGATIVE total is a dwarf in credit -- content on balance -- which
+-- is why it is never printed as a bare number.
+local function stress_of_unit(unit)
+    local soul = unit.status.current_soul
+    return soul and soul.personality.stress or 0
+end
+
+local function stress_text(unit)
+    local stress = stress_of_unit(unit)
+    if stress > 0 then return ('carrying %d stress'):format(stress) end
+    return ('content on balance, %d stress'):format(stress)
+end
+
 local rows, order = {}, {}
 
 for _, unit in ipairs(df.global.world.units.active) do
@@ -118,21 +158,22 @@ for _, unit in ipairs(df.global.world.units.active) do
             -- year -1 is an empty slot, never a thing that happened
             if is_bad(emotion) and emotion.year >= 0
                     and stamp(emotion.year, emotion.year_tick) >= cutoff then
-                local stress = stress_of(emotion)
                 local label = label_of(emotion)
                 local row = rows[label]
                 if not row then
-                    row = {label = label, count = 0, stress = 0, who = {}, names = {}}
+                    row = {label = label, count = 0, live = 0, worst = nil,
+                           who = {}, names = {}}
                     rows[label] = row
                     order[#order + 1] = row
                 end
                 row.count = row.count + 1
-                row.stress = row.stress + stress
+                if still_felt(emotion) then row.live = row.live + 1 end
+                row.worst = harsher(row.worst, emotion)
                 if not row.who[unit.id] then
                     row.who[unit.id] = 0
                     row.names[#row.names + 1] = unit
                 end
-                row.who[unit.id] = row.who[unit.id] + stress
+                row.who[unit.id] = row.who[unit.id] + 1
             end
         end
     end
@@ -145,24 +186,32 @@ end
 
 table.sort(order, function(a, b)
     if a.count ~= b.count then return a.count > b.count end
-    return a.stress > b.stress
+    if a.live ~= b.live then return a.live > b.live end
+    return a.label < b.label
 end)
 
 local shown = math.min(top, #order)
 print(('Worst thoughts of the last %d days (%d kind%s in all, top %d):'):format(
     days, #order, #order == 1 and '' or 's', shown))
-print(('  %-40s %11s %8s %8s'):format('THOUGHT', 'OCCURRENCES', 'DWARVES', 'STRESS'))
+print(('  %-34s %11s %8s %10s  %s'):format(
+    'THOUGHT', 'OCCURRENCES', 'DWARVES', 'STILL FELT', 'WORST FEELING'))
 
 for i = 1, shown do
     local row = order[i]
     local dwarves = #row.names
-    print(('  %-40s %11d %8d %8d'):format(row.label:sub(1, 40), row.count, dwarves, row.stress))
+    local feeling = row.worst and prettify(df.emotion_type[row.worst.type] or '?') or '?'
+    print(('  %-34s %11d %8d %10d  %s'):format(
+        row.label:sub(1, 34), row.count, dwarves, row.live, feeling))
     if verbose then
-        table.sort(row.names, function(a, b) return row.who[a.id] > row.who[b.id] end)
+        table.sort(row.names, function(a, b)
+            if row.who[a.id] ~= row.who[b.id] then return row.who[a.id] > row.who[b.id] end
+            return stress_of_unit(a) > stress_of_unit(b)
+        end)
         for n = 1, math.min(3, dwarves) do
             local unit = row.names[n]
-            print(('      %s (%d stress)'):format(
-                dfhack.units.getReadableName(unit), row.who[unit.id]))
+            print(('      %s -- %d time%s, %s'):format(
+                dfhack.units.getReadableName(unit), row.who[unit.id],
+                row.who[unit.id] == 1 and '' or 's', stress_text(unit)))
         end
         if dwarves > 3 then print(('      ... and %d more'):format(dwarves - 3)) end
     end

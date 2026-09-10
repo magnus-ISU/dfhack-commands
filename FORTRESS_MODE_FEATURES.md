@@ -481,12 +481,17 @@ The stress screen names the miserable dwarf; it never names the cause, and a hun
 not a diagnosis. This walks every citizen's emotions, keeps the ones from the last month (`days=N`),
 and groups them by what happened rather than by which feeling it produced — "sad about X" and "angry
 about X" are one problem to fix. `NeedsUnfulfilled` is broken out by the need that went unmet, since
-that is the entire content of the row. Each row shows how often it happened, how many separate
-citizens had it, and the stress it added; `-v` names the three worst-hit dwarves per row.
+that is the entire content of the row. Each row shows how often it happened, how many citizens had
+it, how many have not got over it yet, and the harshest emotion DF attached to it — horror divides
+into stress eight times faster than annoyance does, so fifty dwarves wanting a cup is a smaller
+problem than three reliving a death. `-v` names the three dwarves who had it most, with the running
+stress total each is carrying; `top=N` changes how many rows print.
 
 What counts as bad is DF's own arithmetic, not a hand-written list of unpleasant-sounding emotions:
 each emotion carries a `divider` DF uses to turn severity into stress, so a positive divider is a
-thought that hurt and a negative one is a thought that helped. `top=N` changes how many rows print.
+thought that hurt. There is deliberately no "stress caused" column — DF does not record one, and the
+`severity` field that looks like it sits at 0 on most unpleasant thoughts, witnessing a death
+included, so anything computed from it reports a contented paradise.
 
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill
