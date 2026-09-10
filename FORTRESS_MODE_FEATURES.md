@@ -482,9 +482,12 @@ not a diagnosis. This walks every citizen's emotions, keeps the ones from the la
 and groups them by what happened rather than by which feeling it produced — "sad about X" and "angry
 about X" are one problem to fix. `NeedsUnfulfilled` is broken out by the need that went unmet, since
 that is the entire content of the row. Each row shows how often it happened, how many citizens had
-it, how many have not got over it yet, and the harshest emotion DF attached to it — horror divides
-into stress eight times faster than annoyance does, so fifty dwarves wanting a cup is a smaller
-problem than three reliving a death. `-v` names the three dwarves who had it most, with the running
+it, how many have not got over it yet, and the harshest emotion DF attached to it with how hard that
+bites on a scale of 1 to 8 — Annoyance (1), Sadness (2), Grief (4), Horror (8). The number is DF's
+own: it divides a thought's severity by the emotion's divider to reach stress, and every negative
+emotion in the game uses 1, 2, 4 or 8, so the same thought recorded as horror really does cost eight
+times what it costs as annoyance. Fifty dwarves wanting a cup is a smaller problem than three
+reliving a death. `-v` names the three dwarves who had it most, with the running
 stress total each is carrying; `top=N` changes how many rows print.
 
 What counts as bad is DF's own arithmetic, not a hand-written list of unpleasant-sounding emotions:

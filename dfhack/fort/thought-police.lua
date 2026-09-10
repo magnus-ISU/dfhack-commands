@@ -39,10 +39,13 @@ READING IT
   emotion a `strength` and decays it to zero as the dwarf overcomes it, so this is
   the part of the count that is still weighing on somebody right now.
 
-  WORST FEELING is the harshest emotion DF attached to that thought -- horror and
-  grief divide their way into stress far faster than annoyance does -- so it ranks
-  the rows the count cannot: sixty dwarves mildly annoyed about cups is a smaller
-  problem than three reliving a death.
+  WORST FEELING is the harshest emotion DF attached to that thought, with how hard
+  it bites on a scale of 1 to 8 -- Annoyance (1), Sadness (2), Grief (4), Horror (8).
+  The number is DF's own: it divides a thought's severity by the emotion's divider
+  to reach stress, and every negative emotion in the game uses 1, 2, 4 or 8, so the
+  same thought recorded as horror really does cost eight times what it costs as
+  annoyance. It ranks the rows the count cannot: sixty dwarves mildly annoyed about
+  cups is a smaller problem than three reliving a death.
 
 WHAT IS NOT HERE, AND WHY
 
@@ -107,9 +110,28 @@ local function is_bad(emotion)
     return divider_of(emotion) > 0
 end
 
--- The harshest feeling wins the row's WORST FEELING. A smaller divider means DF
--- divides the same severity into MORE stress, so divider 1 (horror, grief) is the
--- bottom of the pit and 8 (annoyance) the top.
+-- How hard a feeling bites, on a scale of 1 to 8.
+--
+-- DF divides a thought's severity by the emotion's `divider` to reach stress, so a
+-- SMALLER divider is a WORSE feeling -- which reads backwards in a report. Every
+-- negative emotion in the game uses one of exactly four dividers (1, 2, 4, 8: 13,
+-- 13, 21 and 26 emotions each), so 8/divider turns that upside down into a plain
+-- ladder where bigger is worse and each step is genuinely double the last:
+--
+--   8  agony, anguish, despair, fear, horror, misery, panic, rage, shock, terror
+--   4  anger, bitterness, distress, grief, hatred, hopelessness, loathing, outrage
+--   2  anxiety, dejection, guilt, humiliation, loneliness, sadness, shame, disgust
+--   1  annoyance, boredom, doubt, frustration, regret, uneasiness, worry, self-pity
+--
+-- It is DF's own arithmetic, not a judgement of ours: the same thought recorded as
+-- horror really does cost eight times what it costs as annoyance.
+local function bite_of(emotion)
+    local divider = divider_of(emotion)
+    if divider <= 0 then return 0 end
+    return math.floor(8 / divider)
+end
+
+-- The harshest feeling wins the row's WORST FEELING.
 local function harsher(a, b)
     if not a then return b end
     if not b then return a end
@@ -187,6 +209,8 @@ end
 table.sort(order, function(a, b)
     if a.count ~= b.count then return a.count > b.count end
     if a.live ~= b.live then return a.live > b.live end
+    local ba, bb = bite_of(a.worst), bite_of(b.worst)
+    if ba ~= bb then return ba > bb end
     return a.label < b.label
 end)
 
@@ -199,7 +223,11 @@ print(('  %-34s %11s %8s %10s  %s'):format(
 for i = 1, shown do
     local row = order[i]
     local dwarves = #row.names
-    local feeling = row.worst and prettify(df.emotion_type[row.worst.type] or '?') or '?'
+    local feeling = '?'
+    if row.worst then
+        feeling = ('%s (%d)'):format(
+            prettify(df.emotion_type[row.worst.type] or '?'), bite_of(row.worst))
+    end
     print(('  %-34s %11d %8d %10d  %s'):format(
         row.label:sub(1, 34), row.count, dwarves, row.live, feeling))
     if verbose then
