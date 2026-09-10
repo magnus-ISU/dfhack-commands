@@ -150,10 +150,13 @@ it comes back sandstone. `--any-material` gives that up deliberately, for when b
 tangle matters more than the stone.
 
 `fort/rewall register` loads its warning without redrawing anything: a line in DFHack's
-notification panel — *"7 constructions deadlocked — run fort/rewall"* — counting the planned
-constructions suspended with their material already hauled and nobody working them, which is the
-signature the tool clears. Clicking it walks you through them. A deadlocked wall is otherwise
-invisible: it looks exactly like a wall waiting its turn.
+notification panel — *"7 constructions deadlocked — run fort/rewall"*. It counts **one shape**: a
+suspended construction with an item on its tile that *another construction job has claimed*. That
+tile cannot be built while the item sits on it, the item cannot be hauled while a job holds it,
+and nothing in the fort ever undoes that. A wall suspended because another wall goes first is not
+counted — that is `suspendmanager` sequencing, the fort working correctly, and a warning that
+fires every season is one you stop reading. Clicking it walks you through the tiles. A deadlocked
+wall is otherwise invisible: it looks exactly like a wall waiting its turn.
 
 **It also picks materials that will not get stuck again.** A construction cannot be built while
 loose items sit on its tile, and an item only leaves a tile if a hauler has somewhere to take it —

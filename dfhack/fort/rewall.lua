@@ -48,9 +48,12 @@ THE WARNING
   A deadlocked wall is invisible: it looks exactly like a wall waiting its turn, and the fort
   works around it, so nobody looks until a corridor has been open to the caverns for a season.
   `fort/rewall register` puts a line in DFHack's notification panel -- "7 constructions
-  deadlocked -- run fort/rewall" -- counting the planned constructions that are suspended with
-  their material already hauled and nobody working them, which is the signature this tool
-  exists to clear. Clicking the line walks you through the tiles. `magnus-scripts` turns it on.
+  deadlocked -- run fort/rewall" -- and it counts ONE shape: a suspended construction with an
+  item on its tile that ANOTHER construction job has claimed. That tile cannot be built while
+  the item sits on it, and the item cannot be hauled while a job holds it, so nothing in the
+  fort ever undoes it. A wall suspended because another wall goes first is NOT counted: that is
+  the fort working, and a warning that fires every season is one you stop reading. Clicking the
+  line walks you through the tiles. `magnus-scripts` turns it on.
 
 WHAT IT COSTS
 
@@ -298,17 +301,55 @@ end
 
 -- ---- the deadlock, as a question anything can ask ---------------------------
 --
--- A construction is stuck in the way this tool exists to fix when its job is SUSPENDED with a
--- material already hauled to it and nobody working it. That is the whole signature: the block is
--- there, the job will not run, and nothing in the fort will ever change its mind.
+-- THE WARNING IS FOR ONE SHAPE ONLY, and it is narrow on purpose.
+--
+-- A suspended construction is not news. Most of them are suspendmanager sequencing walls that
+-- would block each other, which resolves itself as the neighbours go up -- 28 of this fort's 44
+-- suspensions were exactly that. Warning about those is warning about the fort working, and a
+-- warning that fires every season is one you stop reading.
+--
+-- The shape worth waking somebody for is the one nothing in the fort will ever undo: a loose item
+-- on the construction's tile that ANOTHER construction job has claimed. The tile cannot be built
+-- while the item sits on it, the item cannot be hauled off while a job holds it, and the job
+-- holding it is usually blocked in its own turn. No hauler, no stockpile and no amount of waiting
+-- clears that; releasing the claim does, which is what this tool is for.
+--
+-- Items with NO claim on them are a different problem with a different answer -- a stockpile that
+-- accepts them, or the redraw's own site clearing -- and they are handled quietly.
+local function construction_job_claims()
+    local claims = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local job = link.item
+        if job and job.job_type == df.job_type.ConstructBuilding then
+            for _, ji in ipairs(job.items) do
+                if ji.item then claims[ji.item.id] = job.id end
+            end
+        end
+        link = link.next
+    end
+    return claims
+end
+
 function stuck_constructions()
     local out = {}
+    local claims = construction_job_claims()
     for _, bld in ipairs(df.global.world.buildings.all) do
         if bld:getType() == df.building_type.Construction and bld.construction_stage == 0
                 and not buildingplan.isPlannedBuilding(bld) then
             local job = bld.jobs[0]
-            if job and job.flags.suspend and #job.items > 0 and not dfhack.job.getWorker(job) then
-                out[#out + 1] = {x = bld.x1, y = bld.y1, z = bld.z}
+            if job and job.flags.suspend and not dfhack.job.getWorker(job) then
+                local pos = {x = bld.x1, y = bld.y1, z = bld.z}
+                local block = dfhack.maps.getTileBlock(pos)
+                for _, id in ipairs(block and block.items or {}) do
+                    local item = df.item.find(id)
+                    if item and item.flags.on_ground and item.flags.in_job
+                            and item.pos.x == pos.x and item.pos.y == pos.y and item.pos.z == pos.z
+                            and claims[id] and claims[id] ~= job.id then
+                        out[#out + 1] = pos
+                        break
+                    end
+                end
             end
         end
     end
@@ -543,8 +584,9 @@ local function register_notification()
         table.insert(n.NOTIFICATIONS_BY_IDX, entry)
         n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME] = entry
     end
-    entry.desc = 'Warns when planned constructions are deadlocked -- suspended with their '
-        .. 'material already hauled to the site. Click to step through them; fort/rewall fixes them.'
+    entry.desc = 'Warns when a planned construction is deadlocked: an item on its tile is '
+        .. 'claimed by another construction job, so nothing will ever move it. Click to step '
+        .. 'through them; fort/rewall releases the claims.'
     entry.dwarf_fn = deadlock_message
     entry.on_click = zoom_to_stuck
     if n.config and n.config.data and not n.config.data[NOTIFY_NAME] then
