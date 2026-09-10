@@ -673,17 +673,18 @@ goes: every sparring blow is still filed in the units' combat logs and reads bac
 ### **`fort/guild-agreement-dates`**
 Puts the deadline on the map view's agreement notice. DF shows the job, the petitioner and a
 date, but that date is when the agreement was **made**, and the year you have to build the
-temple or guildhall is never spelled out. This adds a fourth line under DF's three:
-*"321 days left (month 6)"* — the days remaining, and the agreement's month as a number so you
-can compare it against today's date without counting months in your head. It goes under the
-notice rather than into it because DF repaints those three rows after the overlay draws, and
-anything written on them is wiped before the frame reaches the screen. The notice is found by
-reading the screen, so the line follows it wherever DF puts it, and there is nothing to draw
-while the squads panel is up, since DF hides the notice there. The search is confined to the
-right-edge band DF hangs the notice off, and only to lines that read as *"Build …"*, so a
-window that happens to show a date elsewhere on screen can never be mistaken for the notice.
+temple or guildhall is never spelled out. This puts the count on the end of DF's own first line —
+*"Build temple, 321 days"* — in the pen read off that line, so it reads as part of the notice.
+It goes there rather than on a line of its own because DF **stacks** the notices when more than
+one agreement is outstanding, three rows each, and a number on its own line lands in the gap
+between two notices and belongs visibly to neither; on the job line it can only be the deadline
+for the thing named beside it. Every notice on screen gets its own count. The notices are found
+by reading the screen, so the counts follow them wherever DF puts them, and there is nothing to
+draw while the squads panel is up, since DF hides the notice there. The search is confined to the
+right-edge band DF hangs the notice off, and only to lines that read as *"Build …"*, so a window
+that happens to show a date elsewhere on screen can never be mistaken for the notice.
 Turning this on in `magnus-scripts` turns DFHack's own
-*"N petitions outstanding"* line off, since this says the same thing and three things more;
+*"N petitions outstanding"* line off, since this says the same thing and more;
 turning it off puts that line back.
 
 ### **`fort/missing-noble-warning`**

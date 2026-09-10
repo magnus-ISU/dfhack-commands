@@ -13,24 +13,24 @@ the map view:
 
 That date is when the agreement was MADE, and the petitioner expects the location within a
 year of it -- which the notice never says, so the only way to know how long you have is to
-count months in your head. This adds both halves of the answer, on a fourth line under DF's
-three:
+count months in your head. This puts the count on the END OF DF'S OWN FIRST LINE:
 
-    Build temple
+    Build temple, 321 days
     The Communion of Coal
     8th Galena, 109
-    321 days left (month 6)
 
-The count is the days left of the year you were given. The month is that date's month counted
-from Granite, so you can compare it against today's date without knowing the calendar by heart.
+ON THE JOB LINE, NOT UNDER THE NOTICE. DF STACKS the notices when more than one agreement is
+outstanding -- three rows each, one directly under the last -- so a count on a line of its own
+lands in the gap between two notices and belongs visibly to neither. On the job line it can only
+be read as the deadline for the thing named beside it, and every notice on screen gets its own.
 
-THE LINE GOES UNDER THE NOTICE RATHER THAN INTO IT, and that is not a style choice: DF repaints
-those three rows AFTER the overlay pass -- padding and all, so even the blank columns past the
-end of its text come back -- and anything drawn on them is wiped before the frame reaches the
-screen. The row below is DF's map, which it does not repaint, so that is where the answer fits.
+The annotation is written straight onto DF's line with the pen read off that line, so it looks
+like part of the notice rather than something stuck to it, and it is written every frame: DF
+paints the notice late -- later than the overlay pass -- which is what the `fullscreen` attribute
+below answers.
 
-The notice is found by reading the screen, so the line follows it: it moves with the window, and
-when something covers the notice -- the squads panel takes that corner -- there is nothing to
+The notices are found by reading the screen, so the counts follow them: they move with the
+window, and when something covers the corner -- the squads panel takes it -- there is nothing to
 find and nothing is drawn. The search only ever looks in the right-edge band DF hangs the notice
 off, and only at lines that read as `Build ...`, so a window that happens to show a date
 somewhere else on screen -- `gui/autochop` did exactly this -- can never be mistaken for it.
@@ -153,12 +153,13 @@ local function is_job_line(job)
     return job:lower():find('^build %a') ~= nil
 end
 
--- Find the notice: the date line, and the job line two rows above it. Returns the screen column
--- the notice starts at, the job row, and the parsed date. Only the right-edge band is searched,
--- and only a "Build ..." line counts, so the first hit is the notice or there is no notice.
-local function find_notice()
+-- Find the notices: a date line, and the job line two rows above it. Returns one entry per
+-- notice on screen -- DF stacks them when more than one agreement is outstanding, and each has
+-- its own deadline. Only the right-edge band is searched, and only a "Build ..." line counts.
+local function find_notices()
     local _, sh = dfhack.screen.getWindowSize()
     local x1, x2 = notice_band()
+    local out = {}
     for y = 2, sh - 1 do
         local text = line_at(y, x1, x2)
         local day, month, year, month_name = parse_date(text)
@@ -167,11 +168,13 @@ local function find_notice()
             local col = job:find('%S')
             job = strip_annotation(job:gsub('^%s+', ''))
             if col and is_job_line(job) then
-                return x1 + col - 1, y - 2, {day = day, month = month, year = year,
-                                             month_name = month_name, job = job}
+                out[#out + 1] = {col = x1 + col - 1, job_row = y - 2, date_row = y,
+                                 date = {day = day, month = month, year = year,
+                                         month_name = month_name, job = job}}
             end
         end
     end
+    return out
 end
 
 -- ---- the arithmetic -----------------------------------------------------------
@@ -184,9 +187,18 @@ function days_left(date)
     return made + GRACE_DAYS - now_days
 end
 
--- "321 days left (month 6)", or "12 days over (month 6)" once the year has run out. The month is
--- the agreement's own month as a number, which is the half of the answer the notice already has
--- but spells out in a name.
+-- What gets appended to the job line: ", 321 days", or ", 12 days over" once the year has run
+-- out. It reads as part of DF's own line -- "Build temple, 321 days" -- which is the whole point
+-- of putting it there: with two agreements outstanding DF stacks the notices, and a number on a
+-- line of its own sits between two of them belonging visibly to neither.
+function annotation_suffix(date)
+    local left = days_left(date)
+    return left >= 0
+        and (', %d day%s'):format(left, left == 1 and '' or 's')
+        or (', %d day%s over'):format(-left, left == -1 and '' or 's')
+end
+
+-- the same thing as a sentence, for the command line
 function annotation_line(date)
     local left = days_left(date)
     return left >= 0
@@ -218,55 +230,59 @@ GuildAgreementOverlay.ATTRS{
     version = 1,
 }
 
+-- One label per notice, laid over the end of DF's own job line.
+--
+-- The annotation is drawn by LABEL SUBVIEWS rather than by painting in `onRenderBody`: measured
+-- on this build, a widget with no subviews renders nothing at all from its own body -- the same
+-- text through a label appears exactly where it was asked for. So the labels are the mechanism,
+-- and everything else here is just keeping their frames on top of lines DF moves around.
+local MAX_NOTICES = 8
+
 function GuildAgreementOverlay:init()
-    self:addviews{
-        widgets.Label{view_id = 'note', frame = {t = 0, l = 0, h = 1},
-                      text = '', text_pen = COLOR_LIGHTCYAN},
-    }
+    self.notices = {}
+    for i = 1, MAX_NOTICES do
+        self:addviews{
+            widgets.Label{view_id = 'note' .. i, frame = {t = 0, l = 0, h = 1},
+                          text = '', visible = false},
+        }
+    end
 end
 
--- Re-find the notice on a slow tick: it appears and disappears with the agreement and moves with
--- the window, and a full screen read is not something to do every frame. A cheap probe of the
--- date line we already found keeps the common case to a dozen tile reads.
-function GuildAgreementOverlay:overlay_onupdate()
-    -- the cheap gate first: no agreement, no notice, nothing to read
-    if not agreement_outstanding() then
-        self.col, self.date_row, self.visible = nil, nil, false
-        return
-    end
-    -- Cheap path: the notice is where it was last time. Re-read its two lines rather than trust
-    -- a cached copy -- the day rolls over, and the agreement itself can be replaced by another.
-    if self.col and self.date_row then
-        local date = self:read_notice(self.col, self.date_row)
-        if date then self:show_notice(date); return end
-    end
-    -- Otherwise look for it again, at most twice a second: a whole-screen read is not something
-    -- to do every frame, and most frames have no agreement outstanding at all.
-    local now = dfhack.getTickCount()
-    if self.scan_ms and now >= self.scan_ms and now - self.scan_ms < 500 then
-        self.visible = false
-        return
-    end
-    self.scan_ms = now
-    local col, row, date = find_notice()
-    if not col then
-        self.col, self.date_row, self.visible = nil, nil, false
-        return
-    end
-    self.col, self.date_row = col, row + 2
-    -- laid out against the interface rect, like every other snapping overlay here; the widget
-    -- renders into the FULL painter (see fullscreen above), and on this build the two rects are
-    -- the same screen, so the offsets line up. The row is the one UNDER the date -- DF repaints
-    -- its own three rows after the overlay pass, so a line drawn on them never survives.
+-- Lay the widget over every notice on screen -- from the first job line to the last -- and put a
+-- label at the end of each one. The frame has to cover them all: a label is clipped to it.
+function GuildAgreementOverlay:layout_over_notices()
     local ir = gui.get_interface_rect()
-    if self.date_row + 1 > ir.y2 then
-        self.visible = false
-        return
+    local top, bottom, left
+    for _, n in ipairs(self.notices) do
+        if not top or n.job_row < top then top = n.job_row end
+        if not bottom or n.job_row > bottom then bottom = n.job_row end
+        if not left or n.col < left then left = n.col end
     end
-    self.frame = {w = self.frame.w, h = self.frame.h,
-                  l = col - ir.x1, t = self.date_row + 1 - ir.y1}
+    if not top then return false end
+    self.frame = {l = left - ir.x1, t = top - ir.y1,
+                  w = ir.x2 - left + 1, h = bottom - top + 1}
+    for i = 1, MAX_NOTICES do
+        local label, n = self.subviews['note' .. i], self.notices[i]
+        if not n then
+            label.visible = false
+        else
+            local x = n.col + #n.date.job
+            local room = ir.x2 - x + 1
+            label.visible = room > 0
+            if label.visible then
+                -- DF's own pen for that line, so the count reads as part of the notice rather
+                -- than as something stuck to it
+                local p = dfhack.screen.readTile(n.col, n.job_row)
+                label.text_pen = (p and p.fg) and {fg = p.fg, bg = p.bg, bold = p.bold}
+                    or COLOR_LIGHTCYAN
+                label.frame.t = n.job_row - top
+                label.frame.l = x - left
+                label:setText(annotation_suffix(n.date):sub(1, room))
+            end
+        end
+    end
     self:updateLayout(gui.ViewRect{rect = ir})
-    self:show_notice(date)
+    return true
 end
 
 -- the notice as it reads on screen right now at this position, or nil if it is gone
@@ -281,30 +297,19 @@ function GuildAgreementOverlay:read_notice(col, date_row)
     return {day = day, month = month, year = year, month_name = month_name, job = job}
 end
 
--- The text changes once a day, and the LAYOUT HAS TO FOLLOW IT. `Label:setText` writes the
--- label's own frame height from the text it was given and leaves it at that: a label built with
--- no text is laid out zero rows high, so the line it is later given is clipped away to nothing
--- and the widget draws blank forever. Re-laying out on the change fixes the height once and
--- costs nothing the rest of the day.
-function GuildAgreementOverlay:show_notice(date)
-    self.visible = true
-    local text = annotation_line(date)
-    if text == self.shown_text then return end
-    self.shown_text = text
-    self.subviews.note:setText(text)
-    if self.frame_parent_rect then self:updateLayout() end
-end
-
 OVERLAY_WIDGETS = {notice = GuildAgreementOverlay}
 
 if dfhack_flags and dfhack_flags.module then return end
 
-local col, row, date = find_notice()
-if not date then
+local notices = find_notices()
+if #notices == 0 then
     print('guild-agreement-dates: no agreement notice on screen right now.')
     print('  It shows on the map view while a temple or guildhall agreement is outstanding.')
     return
 end
-print(('guild-agreement-dates: %s -- %s'):format(date.job, annotation_line(date)))
-print(('  agreed %d %s, %d'):format(date.day, date.month_name, date.year))
-print(('  (notice found at column %d, row %d)'):format(col, row))
+for _, n in ipairs(notices) do
+    local d = n.date
+    print(('guild-agreement-dates: %s -- %s'):format(d.job, annotation_line(d)))
+    print(('  agreed %d %s, %d'):format(d.day, d.month_name, d.year))
+    print(('  (notice found at column %d, row %d)'):format(n.col, n.job_row))
+end
