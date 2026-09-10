@@ -13,11 +13,15 @@ the map view:
 
 That date is when the agreement was MADE, and the petitioner expects the location within a
 year of it -- which the notice never says, so the only way to know how long you have is to
-count months in your head. This puts the count on the END OF DF'S OWN FIRST LINE:
+count months in your head. This REWRITES DF'S OWN FIRST LINE to carry the count:
 
-    Build temple, 321 days
+    Temple Complex, 321 days
     The Communion of Coal
     8th Galena, 109
+
+The word "Build" goes because it is the same on every notice and says nothing you did not
+already know -- and because the band is 26 columns wide, so "Build temple complex, 321 days"
+ran off the end of the screen and took the count with it.
 
 ON THE JOB LINE, NOT UNDER THE NOTICE. DF STACKS the notices when more than one agreement is
 outstanding -- three rows each, one directly under the last -- so a count on a line of its own
@@ -123,9 +127,32 @@ local function parse_date(text)
     return tonumber(day), m, tonumber(year), month
 end
 
--- the job name as DF wrote it, with any annotation of ours taken back off
+-- "Build temple complex" -> "Temple Complex". The word "Build" is the same on every notice and
+-- says nothing you did not already know, and dropping it is what buys the room the day count
+-- needs: the band is 26 columns wide and "Build temple complex, 321 days" does not fit in it,
+-- so the count fell off the end of the screen.
+local function short_label(job)
+    local body = job:gsub('^%s*[Bb][Uu][Ii][Ll][Dd]%s+', '')
+    return (body:gsub("[%a']+", function(w)
+        return dfhack.upperCp437(w:sub(1, 1)) .. w:sub(2)
+    end))
+end
+
+-- every short label this tool writes, lower-cased, so it can recognise its own handiwork on the
+-- next frame. Built from the notices DF raises: temple, temple complex, guildhall, grand guildhall.
+SHORT_LABELS = {}
+for _, name in ipairs({'temple', 'temple complex', 'guildhall', 'grand guildhall'}) do
+    SHORT_LABELS[short_label(name):lower()] = true
+end
+
+-- The job name with any annotation of ours taken back off -- BOTH forms, and the truncated
+-- tails of them, since a line clipped at the edge of the band is still a line this tool wrote
+-- and still has to be recognised as one. Miss a form here and the notice it belongs to stops
+-- being found the moment it is written: found, overwritten, lost, repainted, found again.
 local function strip_annotation(job)
-    return (job:gsub(',%s*%d+%s+days?%s*o?v?e?r?%s*$', ''))
+    local out = job:gsub(',%s*%d+%s+da?y?s?%s*o?v?e?r?%s*$', '')
+    out = out:gsub(',%s*%d+%s+o?v?e?r?%s*$', '')
+    return out
 end
 
 -- WHERE THE NOTICE CAN BE, and nowhere else.
@@ -150,7 +177,13 @@ end
 -- and so does our own annotated version of it, which has to keep reading as a notice. Anything
 -- else in the band is somebody else's window, not an agreement.
 local function is_job_line(job)
-    return job:lower():find('^build %a') ~= nil
+    if job:lower():find('^build %a') ~= nil then return true end
+    -- AND OUR OWN VERSION OF IT. The line is REWRITTEN in place -- "Build temple complex"
+    -- becomes "Temple Complex, 321 days" -- so from the next frame on, the thing the search
+    -- finds at that spot is this tool's own text. Refusing to recognise it is what made the
+    -- notice flicker: found, overwritten, not found, DF repaints its own line, found again,
+    -- several times a second. So the rewritten forms anchor just as well as DF's.
+    return SHORT_LABELS[job:lower()] ~= nil
 end
 
 -- Find the notices: a date line, and the job line two rows above it. Returns one entry per
@@ -187,15 +220,19 @@ function days_left(date)
     return made + GRACE_DAYS - now_days
 end
 
--- What gets appended to the job line: ", 321 days", or ", 12 days over" once the year has run
--- out. It reads as part of DF's own line -- "Build temple, 321 days" -- which is the whole point
--- of putting it there: with two agreements outstanding DF stacks the notices, and a number on a
--- line of its own sits between two of them belonging visibly to neither.
+-- What goes on the end of the rewritten line: ", 321 days", or ", 12 over" once the year has run
+-- out. The line as a whole -- "Temple Complex, 321 days" -- is what makes the count belong to the
+-- thing it is counting for: with several agreements outstanding DF stacks the notices, and a
+-- number on a line of its own sits between two of them belonging visibly to neither.
+--
+-- THE OVERDUE FORM DROPS THE WORD "days" because the band is 26 columns and nothing wider fits:
+-- "Grand Guildhall, 120 days over" is 30. "Grand Guildhall, 120 over" is 25, and after a count
+-- of days on every other notice on the screen, "over" reads as what it is.
 function annotation_suffix(date)
     local left = days_left(date)
     return left >= 0
         and (', %d day%s'):format(left, left == 1 and '' or 's')
-        or (', %d day%s over'):format(-left, left == -1 and '' or 's')
+        or (', %d over'):format(-left)
 end
 
 -- the same thing as a sentence, for the command line
@@ -266,18 +303,21 @@ function GuildAgreementOverlay:layout_over_notices()
         if not n then
             label.visible = false
         else
-            local x = n.col + #n.date.job
-            local room = ir.x2 - x + 1
+            local room = ir.x2 - n.col + 1
             label.visible = room > 0
             if label.visible then
-                -- DF's own pen for that line, so the count reads as part of the notice rather
-                -- than as something stuck to it
+                -- The WHOLE line is rewritten: "Temple Complex, 321 days" in place of "Build
+                -- temple complex". Padded out to at least what DF wrote, so no tail of its own
+                -- text is left showing when ours is the shorter of the two.
+                local text = short_label(n.date.job) .. annotation_suffix(n.date)
+                if #text < #n.date.job then text = text .. (' '):rep(#n.date.job - #text) end
+                -- DF's own pen for that line, so the line still reads as part of the notice
                 local p = dfhack.screen.readTile(n.col, n.job_row)
                 label.text_pen = (p and p.fg) and {fg = p.fg, bg = p.bg, bold = p.bold}
                     or COLOR_LIGHTCYAN
                 label.frame.t = n.job_row - top
-                label.frame.l = x - left
-                label:setText(annotation_suffix(n.date):sub(1, room))
+                label.frame.l = n.col - left
+                label:setText(text:sub(1, room))
             end
         end
     end

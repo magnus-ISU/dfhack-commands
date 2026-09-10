@@ -763,8 +763,11 @@ goes: every sparring blow is still filed in the units' combat logs and reads bac
 ### **`fort/guild-agreement-dates`**
 Puts the deadline on the map view's agreement notice. DF shows the job, the petitioner and a
 date, but that date is when the agreement was **made**, and the year you have to build the
-temple or guildhall is never spelled out. This puts the count on the end of DF's own first line —
-*"Build temple, 321 days"* — in the pen read off that line, so it reads as part of the notice.
+temple or guildhall is never spelled out. This rewrites DF's own first line to carry the count —
+*"Temple Complex, 321 days"* — in the pen read off that line, so it reads as part of the notice.
+The word *Build* goes with it: it is the same on every notice, and the band is only 26 columns
+wide, so *"Build temple complex, 321 days"* ran off the end and took the count with it. Past the
+deadline the line reads *"Temple Complex, 12 over"*, which is what fits.
 It goes there rather than on a line of its own because DF **stacks** the notices when more than
 one agreement is outstanding, three rows each, and a number on its own line lands in the gap
 between two notices and belongs visibly to neither; on the job line it can only be the deadline
