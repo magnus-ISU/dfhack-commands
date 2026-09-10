@@ -368,7 +368,12 @@ stock" repeats. Only offers subtypes your civilization actually knows how to mak
 ![fort/quick-order demo](demos/fort-quick-order.gif)
 
 ### **`fort/planner-orders`**
-Warns of planned buildings nothing produces and offers the orders to make them. With a hospital
+Warns of planned buildings nothing produces and offers the orders to make them, along with the
+standing orders a fort keeps forgetting — brewing, fuel, milling, containers, and one smelting
+ask per ore as you find it. **Bronze comes straight from the ore**: hold a tin ore and a copper
+ore and it offers the Smelter's "make bronze bars (use ore)" as a single job, skipping the two
+separate smelts — gated on *an ore of* tin and *an ore of* copper rather than on named stones, so
+changing which copper ore you are mining does not strand the order. With a hospital
 up it also stocks the supplies one needs, traction benches included — the bench and its table,
 mechanism and chain each get their own ask. Some asks are standing preferences rather than
 one-off gaps: say yes to cutting the rough-gem surplus once and it is handled from then on, one

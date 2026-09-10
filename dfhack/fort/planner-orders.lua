@@ -80,7 +80,10 @@ accepting creates it (all conditioned so they only run when sensible):
   - Coke: from your bituminous coal / lignite (at a Smelter) while fuel is low.
   - Smelting: a SEPARATE ask per metal ore you have (so each ore is offered as you find it),
     smelting it while that metal < 10 bars; plus pig iron (< 10) and steel (< 100) asks
-    when you have iron ore -- each checks ingredients.
+    when you have iron ore -- each checks ingredients. And BRONZE STRAIGHT FROM ORE (< 10)
+    once you hold both a tin ore and a copper ore -- one job at the Smelter instead of two
+    smelts, gated on "an ore of tin" and "an ore of copper" rather than named stones, so a
+    change of which copper ore you are mining does not strand the order.
   - Containers (barrels, bins, buckets, wheelbarrows): a material-picked keep-stocked order
     each (wood or metal, e.g. copper), only offered when you have a Carpenter's Workshop.
   - Cages: once any cage trap is built, a material-picked (wood/metal/glass) order keeping
@@ -698,6 +701,7 @@ local FIXED_WS = {
     ADAMANTINE_WAFERS     = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     PIG_IRON_MAKING       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     STEEL_MAKING          = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
+    BRONZE_MAKING         = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     MeltMetalObject       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
 }
 
@@ -1054,10 +1058,13 @@ end
 -- ---- order creation ---------------------------------------------------------
 
 -- a condition spec. compare is a logic_condition_type name string.
-local function C(compare, val, item_type, mat_type, mat_index, reaction_class, flags2)
+local function C(compare, val, item_type, mat_type, mat_index, reaction_class, flags2, metal_ore)
     return {compare = df.logic_condition_type[compare], val = val, item_type = item_type or -1,
             item_subtype = -1, mat_type = mat_type or -1, mat_index = mat_index or -1,
-            reaction_class = reaction_class, flags2 = flags2}   -- flags2: list of material-class flag names
+            reaction_class = reaction_class, flags2 = flags2, metal_ore = metal_ore}
+    -- flags2: list of material-class flag names. metal_ore: an inorganic METAL index -- counts
+    -- every stone that smelts into it, which is the only way to say "any copper ore" in one
+    -- condition, since the ores have nothing else in common to match on.
 end
 
 -- general manager-order builder. p: job_type, [reaction_name], [item_subtype], [mat_type,
@@ -1087,7 +1094,7 @@ local function add_order(p)
             compare_type = c.compare, compare_val = c.val,
             item_type = c.item_type or -1, item_subtype = c.item_subtype or -1,
             mat_type = c.mat_type or -1, mat_index = c.mat_index or -1,
-            reaction_class = c.reaction_class or ''})
+            reaction_class = c.reaction_class or '', metal_ore = c.metal_ore or -1})
         -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
         if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
         -- flags1 item-state match (unrotten / millable / processable_to_barrel / cookable /
@@ -1330,6 +1337,20 @@ local function present_metal_ores()
                     out[#out + 1] = {idx = mi, metal = raw.metal_ore.mat_index[0], name = raw.id}
                 end
             end
+        end
+    end
+    return out
+end
+
+-- the ores present that smelt into `metal` (an inorganic index), by name. Reads the WHOLE
+-- metal_ore list rather than its first entry: tetrahedrite is copper AND silver, and the ore of
+-- a metal is any stone that lists it, not only the stones that list it first.
+local function ores_of(metal)
+    local out = {}
+    for _, ore in ipairs(present_metal_ores()) do
+        local raw = df.inorganic_raw.find(ore.idx)
+        for _, m in ipairs(raw and raw.metal_ore.mat_index or {}) do
+            if m == metal then out[#out + 1] = ore.idx break end
         end
     end
     return out
@@ -2108,6 +2129,37 @@ STANDING = {
                             C('AtLeast', 1, BAR, 0, iron), C('LessThan', PIG_IRON_CAP, BAR, 0, pig),
                             C('AtLeast', 1, BOULDER, nil, nil, 'FLUX')}}
                     return missing_shops({'PIG_IRON_MAKING'})
+                end}
+        end
+        -- BRONZE STRAIGHT FROM THE ORE. The smelter's "make bronze bars (use ore)" takes a tin
+        -- ore and a copper ore together and skips the two smelting steps entirely -- which is
+        -- worth offering on its own, because a fort that has cassiterite usually has very little
+        -- of it, and spending it on tin bars first is a step that can go wrong (tin bars are
+        -- worth making things out of, and then the bronze never happens).
+        --
+        -- Both sides are gated by METAL_ORE rather than by a named stone: the reaction itself
+        -- asks for "an ore of tin" and "an ore of copper", and so does this, so a fort holding
+        -- tetrahedrite today and malachite tomorrow keeps running without the order going stale.
+        local tin, copper, bronze = inorg_idx('TIN'), inorg_idx('COPPER'), inorg_idx('BRONZE')
+        local tin_ores, copper_ores = ores_of(tin), ores_of(copper)
+        if #tin_ores > 0 and #copper_ores > 0 and not reaction_ordered('BRONZE_MAKING') then
+            local names = {}
+            for _, idx in ipairs(tin_ores) do names[#names + 1] = mat_name(idx) end
+            for _, idx in ipairs(copper_ores) do names[#names + 1] = mat_name(idx) end
+            out[#out + 1] = {name = 'Bronze from ore', shops = {'BRONZE_MAKING'},
+                note = ('Makes bronze at a Smelter straight from ORE -- one tin ore plus one copper\n'
+                    .. 'ore in a single job, skipping the two separate smelts. You have %s.\n\n'
+                    .. 'Runs while you hold at least one ore of each and under %d bronze bars. Both\n'
+                    .. 'sides are gated on the ORE OF the metal rather than on a named stone, so it\n'
+                    .. 'keeps working when a different copper ore is what you happen to be mining.')
+                    :format(table.concat(names, ', '), SMELT_CAP),
+                build = function()
+                    add_order{job_type = df.job_type.CustomReaction, reaction_name = 'BRONZE_MAKING',
+                        amount = 5, frequency = Daily, conds = {
+                            C('AtLeast', 1, BOULDER, nil, nil, nil, nil, tin),
+                            C('AtLeast', 1, BOULDER, nil, nil, nil, nil, copper),
+                            C('LessThan', SMELT_CAP, BAR, 0, bronze)}}
+                    return missing_shops({'BRONZE_MAKING'})
                 end}
         end
         if have_iron_ore and not reaction_ordered('STEEL_MAKING') then
