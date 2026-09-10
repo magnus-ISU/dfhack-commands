@@ -474,6 +474,20 @@ and it does not pause the fort. Click any attribute for the list of jobs and ski
 exercise it — transcribed from the DF wiki, since the game does not expose that mapping at all,
 and the panel says so.
 
+### **`fort/thought-police`**
+Counts the fort's recent bad thoughts and prints the worst, most common first.
+
+The stress screen names the miserable dwarf; it never names the cause, and a hundred unit sheets is
+not a diagnosis. This walks every citizen's emotions, keeps the ones from the last month (`days=N`),
+and groups them by what happened rather than by which feeling it produced — "sad about X" and "angry
+about X" are one problem to fix. `NeedsUnfulfilled` is broken out by the need that went unmet, since
+that is the entire content of the row. Each row shows how often it happened, how many separate
+citizens had it, and the stress it added; `-v` names the three worst-hit dwarves per row.
+
+What counts as bad is DF's own arithmetic, not a hand-written list of unpleasant-sounding emotions:
+each emotion carries a `divider` DF uses to turn severity into stress, so a positive divider is a
+thought that hurt and a negative one is a thought that helped. `top=N` changes how many rows print.
+
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill
 list — each megabeast type by name, the cursed called out ahead of everything sentient

@@ -58,7 +58,9 @@ HOW IT WORKS
   Smoothing beside a channel goes first. A tile waits while it or any of the
   eight around it is still designated for smoothing or engraving, or has a
   detailing job outstanding -- cutting the floor away first only sends the
-  detailer to a hole and gets the job cancelled.
+  detailer to a hole and gets the job cancelled. A neighbour that has ALREADY
+  been cut away does not count: DF leaves a dead SmoothFloor job on a ramp top
+  forever, and waiting on one of those froze every designation in the fort.
 
 PRIORITY 1 IS THE ESCAPE HATCH
   A designation at priority 1 is never touched. That is the way to say "dig this
@@ -1268,10 +1270,29 @@ end
 -- smooth designation and every one of those blockers was a channel tile too, so
 -- nothing could ever be released. The candidate drops out of its own ring for
 -- the same reason -- it is a channel tile by definition.
+--
+-- AND ONLY tiles that still have a floor to detail.
+--
+-- DF posts a SmoothFloor job and CLEARS the tile's smooth designation in the same
+-- moment, so a tile designated for both smoothing and channelling can lose its
+-- floor with the detailing job still sitting in the job list. That job can never
+-- be worked and DF never cancels it: what is left is a ramp top, open air with
+-- nothing to stand on and nothing to smooth. It is also no longer a channel
+-- designation and has no channel job, so neither test above excludes it, and it
+-- blocks its eight neighbours for the rest of the fort's life.
+--
+-- Measured here: ten dead SmoothFloor jobs on ramp tops at z=202, all 23 of that
+-- level's remaining channel tiles refused for "waiting on smoothing" -- and since
+-- only the top level is ever considered, 1,803 designations across twenty levels
+-- frozen behind them. A tile that has already been cut is not waiting for
+-- anybody: the hole the guard exists to prevent is already there.
 local function detailing_beside(pos, detail, channel)
+    local codes = shape_code_table()
     for _, d in ipairs(AROUND) do
         local n = {x = pos.x + d.x, y = pos.y + d.y, z = pos.z}
-        if not (is_channel(n) or channel[key(n)]) then
+        local block, bx, by = tile_parts(n)
+        local cut = block and codes[block.tiletype[bx][by]] == SHAPE_OPEN
+        if not (cut or is_channel(n) or channel[key(n)]) then
             local des = designation_of(n)
             if des and des.smooth ~= 0 then return true end
             if detail[key(n)] then return true end
