@@ -355,12 +355,16 @@ Two things hide a perfectly good item from the uniform pickers. One is a *phanto
 left in `plotinfo.equipment.items_assigned` after the squad, uniform or soldier that claimed it is
 gone, so the item belongs to a soldier who does not exist and nothing ever releases it — those ids
 are moved back to the unassigned lists (ids whose item is gone are dropped). The other is *personal
-property*: an item a citizen has claimed, which the equipment manager skips outright while it sits in
-the unassigned list looking available — the symptom is a uniform slot that names exactly what you own
-and stays empty forever. Owned items that match an unfilled uniform slot are reported, and `--unclaim`
-drops the claim so DF hands the item out on its next equipment update. Everything a squad, hunter,
-work detail or soldier still references is left alone. `-n` reports only, `-v` names every item, and
-`--all-squads` widens the reference scan from your fort's squads to every squad in the world.
+property*: an item a citizen has claimed is skipped by the equipment manager outright while it sits
+in the unassigned list looking available, so it never appears in the picker however hard you look —
+which is how adventurer gear carried into a fort usually ends up unusable. Every piece of military
+gear a citizen has claimed is reported, and `--unclaim` drops the claim so DF offers it on its next
+equipment update. "Military gear" is the item types the equipment screen deals in — weapons, shields,
+ammo, quivers, flasks, packs, and for the armour slots only real armour (`armorlevel > 0`) or an
+artifact — so the clothes dwarves own are left to `cleanowned`, and a visitor's own sword is never
+confiscated. Anything a squad, hunter, work detail or soldier still references is left alone. `-n`
+reports only, `-v` names every item, and `--all-squads` widens the reference scan from your fort's
+squads to every squad in the world.
 
 ### **`fort/squad-buttons`**
 A Squads-screen button that selects or deselects all squads.

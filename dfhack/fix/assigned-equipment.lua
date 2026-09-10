@@ -15,23 +15,28 @@ repairs both.
      back to `items_unassigned` (ids whose item is gone are simply dropped), which is where
      the equipment screen reads from.
 
-  2. PERSONAL PROPERTY. An item a citizen has claimed as their own -- adventurer gear
-     carried into the fort, a masterwork somebody took a liking to -- is skipped by the
-     equipment manager entirely. It sits in `items_unassigned` looking perfectly available
-     and is never handed out. The giveaway is a uniform slot that names exactly what you
-     own and stays empty forever. This reports every owned item that matches an unfilled
-     uniform slot; `--unclaim` drops the claim, and DF assigns the item on the next
-     equipment update.
+  2. PERSONAL PROPERTY. An item a citizen has claimed as their own -- adventurer gear carried
+     into the fort, a masterwork somebody took a liking to -- is skipped by the equipment
+     manager entirely. It sits in `items_unassigned` looking perfectly available, never gets
+     handed out, and never appears in the picker when you go looking for it by name. This
+     reports every piece of military gear a citizen has claimed; `--unclaim` drops the claim,
+     and DF offers the item on the next equipment update.
 
-Reported, not touched: anything a squad, a hunter or a work detail still references, and any
-owned item nobody's uniform asks for (that is `cleanowned`'s job, not this one).
+     "Military gear" means the item types the equipment screen deals in -- weapons, shields,
+     ammo, quivers, flasks, backpacks and armour -- and for the armour slots, only real
+     armour: `armorlevel > 0`, or an artifact. The robe a dwarf owns is their own business.
+     Gear owned by VISITORS is never touched: a mercenary's own sword is not yours, and a
+     mercenary you disarm is a mercenary with a grudge.
+
+Reported, not touched: anything a squad, a hunter or a work detail still references, and the
+ordinary clothing citizens own (that is `cleanowned`'s job, not this one).
 
 Only your own fort's squads are read. `--all-squads` walks all ~300 squads in the world
 instead, which is a paranoid check that freezes DF for a couple of seconds.
 
 Usage:
-    fix/assigned-equipment              free phantom assignments, report owned gear
-    fix/assigned-equipment --unclaim    also drop the claims on gear a uniform wants
+    fix/assigned-equipment              free phantom assignments, report claimed gear
+    fix/assigned-equipment --unclaim    also drop citizens' claims on military gear
     fix/assigned-equipment -n           report only (dry run)
     fix/assigned-equipment -v           name every item, not just the counts
     fix/assigned-equipment --all-squads read every squad in the world, not just yours
@@ -147,10 +152,36 @@ for item_type = 0, #equipment.items_assigned - 1 do
     end
 end
 
--- ---- 2) gear a uniform asks for that a citizen owns -------------------------
+-- ---- 2) military gear a citizen has claimed as personal property ------------
 
--- entity_material_category -> "does this material qualify". nil means we cannot judge the
--- class, and an item we cannot judge is never unclaimed.
+-- what the squad equipment screen hands out
+local EQUIPMENT_TYPE = {
+    [df.item_type.WEAPON] = true, [df.item_type.SHIELD] = true,
+    [df.item_type.AMMO] = true,   [df.item_type.QUIVER] = true,
+    [df.item_type.FLASK] = true,  [df.item_type.BACKPACK] = true,
+    [df.item_type.ARMOR] = true,  [df.item_type.HELM] = true,
+    [df.item_type.SHOES] = true,  [df.item_type.GLOVES] = true,
+    [df.item_type.PANTS] = true,
+}
+-- those five armour slots double as ordinary clothing, and `armorlevel` is what separates a
+-- breastplate from a robe. The clothes a dwarf owns are their own business -- confiscating
+-- those is `cleanowned`'s job -- so only real armour counts here, plus artifacts, which are
+-- worth asking about whatever they turn out to be.
+local ARMOR_SLOT = {
+    [df.item_type.ARMOR] = true, [df.item_type.HELM] = true, [df.item_type.SHOES] = true,
+    [df.item_type.GLOVES] = true, [df.item_type.PANTS] = true,
+}
+
+local function is_military_gear(item)
+    local item_type = item:getType()
+    if not EQUIPMENT_TYPE[item_type] then return false end
+    if not ARMOR_SLOT[item_type] or item.flags.artifact then return true end
+    local subtype = item.subtype
+    return subtype and subtype.armorlevel and subtype.armorlevel > 0
+end
+
+-- entity_material_category -> "does this material qualify". Only used to say WHICH uniform
+-- slot is waiting for an item; a class we cannot judge just means we say nothing.
 local MATERIAL_CLASS = {
     [df.entity_material_category.Clothing] = function() return true end,
     [df.entity_material_category.Armor] = function(m) return m.flags.IS_METAL end,
@@ -176,7 +207,6 @@ local MATERIAL_CLASS = {
     [df.entity_material_category.Gem] = function(m) return m.flags.IS_GEM end,
 }
 
--- true / false / nil, where nil is "the spec names a material class we cannot evaluate"
 local function spec_matches(spec, item)
     if spec.item_type ~= -1 and item:getType() ~= spec.item_type then return false end
     if spec.item_subtype ~= -1 and item:getSubtype() ~= spec.item_subtype then return false end
@@ -186,14 +216,14 @@ local function spec_matches(spec, item)
     end
     if spec.material_class ~= -1 then
         local test = MATERIAL_CLASS[spec.material_class]
-        if not test then return nil end
+        if not test then return false end
         local mat = dfhack.matinfo.decode(item)
         if not mat or not test(mat.material) then return false end
     end
     return true
 end
 
--- every uniform slot that is still waiting for an item
+-- every uniform slot still waiting for an item, so we can name the one an owned item would fill
 local function unfilled_specs()
     local out = {}
     for _, squad in ipairs(squads) do
@@ -211,50 +241,53 @@ local function unfilled_specs()
     return out
 end
 
--- owned items sitting in the unassigned lists, deduplicated: one item is listed under
--- several categories (a helm is both HELM and ANY_GOES_IN_ARMORSTAND)
-local function owned_unassigned()
+local function squad_name(squad)
+    if squad.alias ~= '' then return squad.alias end
+    return dfhack.translation.translateName(squad.name, true)
+end
+
+-- owned gear sitting in the unassigned lists, deduplicated: one item is listed under several
+-- categories (a helm is both HELM and ANY_GOES_IN_ARMORSTAND)
+local function owned_gear()
     local seen, out = {}, {}
     for item_type = 0, #equipment.items_unassigned - 1 do
         for _, id in ipairs(equipment.items_unassigned[item_type]) do
             if not seen[id] then
                 seen[id] = true
                 local item = df.item.find(id)
-                if item and item.flags.owned then table.insert(out, item) end
+                if item and item.flags.owned and is_military_gear(item) then
+                    -- a visitor's own sword is not ours to confiscate, and a mercenary
+                    -- stripped of their weapon is a mercenary with a grudge
+                    local owner = dfhack.items.getOwner(item)
+                    if owner and dfhack.units.isCitizen(owner) then
+                        table.insert(out, {item = item, owner = owner})
+                    end
+                end
             end
         end
     end
     return out
 end
 
-local claimed, unjudged = {}, 0
+local claimed = {}
 do
     local specs = unfilled_specs()
-    if #specs > 0 then
-        for _, item in ipairs(owned_unassigned()) do
-            local hit, unknown
-            for _, entry in ipairs(specs) do
-                local m = spec_matches(entry.spec, item)
-                if m then hit = entry break elseif m == nil then unknown = true end
-            end
-            if hit then
-                local owner = dfhack.items.getOwner(item)
-                local squad_name = hit.squad.alias
-                if squad_name == '' then
-                    squad_name = dfhack.translation.translateName(hit.squad.name, true)
-                end
-                table.insert(claimed, {
-                    item = item,
-                    text = ('%s -- claimed by %s, wanted by %s position %d%s'):format(
-                        describe(item),
-                        owner and dfhack.units.getReadableName(owner) or 'somebody',
-                        squad_name, hit.position + 1,
-                        item.flags.forbid and ' (and forbidden)' or ''),
-                })
-            elseif unknown then
-                unjudged = unjudged + 1
-            end
+    for _, entry in ipairs(owned_gear()) do
+        local wanted
+        for _, candidate in ipairs(specs) do
+            if spec_matches(candidate.spec, entry.item) then wanted = candidate break end
         end
+        local holder = dfhack.items.getHolderUnit(entry.item)
+        table.insert(claimed, {
+            item = entry.item,
+            text = ('%s -- claimed by %s%s%s%s'):format(
+                describe(entry.item),
+                dfhack.units.getReadableName(entry.owner),
+                holder and (', carried by ' .. dfhack.units.getReadableName(holder)) or '',
+                wanted and (', wanted by %s position %d'):format(
+                    squad_name(wanted.squad), wanted.position + 1) or '',
+                entry.item.flags.forbid and ' (and forbidden)' or ''),
+        })
     end
 end
 
@@ -292,16 +325,16 @@ else
 end
 
 if #claimed > 0 then
+    local n, plural = #claimed, #claimed == 1 and '' or 's'
     if unclaim and not dry then
-        act('%d owned item%s unclaimed -- a uniform slot was waiting for %s:', #claimed,
-            #claimed == 1 and '' or 's', #claimed == 1 and 'it' or 'them')
+        act('%d piece%s of gear unclaimed -- the equipment manager can hand %s out now:',
+            n, plural, n == 1 and 'it' or 'them')
     else
-        print(('%d owned item%s a uniform slot is waiting for -- rerun with --unclaim to free %s:'):format(
-            #claimed, #claimed == 1 and '' or 's', #claimed == 1 and 'it' or 'them'))
+        print(('%d piece%s of military gear %s personal property, which is why the squad lists ' ..
+            'never offer %s -- rerun with --unclaim to drop the claim%s:'):format(
+            n, plural, n == 1 and 'is' or 'are', n == 1 and 'it' or 'them', plural))
     end
     for _, entry in ipairs(claimed) do print('    ' .. entry.text) end
-end
-if unjudged > 0 then
-    print(('  (%d owned item%s left alone: the uniform slot names a material class this tool cannot evaluate)'):format(
-        unjudged, unjudged == 1 and ' was' or 's were'))
+elseif verbose then
+    print('No citizen is sitting on military gear -- nothing owned that a squad could be given.')
 end
