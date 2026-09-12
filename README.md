@@ -698,6 +698,14 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/clickable-broker`**
+The Trade Depot's sheet names your broker, says what they are doing and whether they can even
+reach the depot — and then does nothing with any of it. This makes that block live: click the
+icon, the name, the job line or the access line and the broker's sheet opens with the camera
+following them. The block is found by reading the screen for the broker's own name, so it does
+not care where the merchant notice or the tab strip have pushed it, and DF's three
+"requested at depot" buttons just above are named explicitly and never swallowed.
+
 ### **`fort/clickable-squad-members`**
 On a squad's details screen, clicking anywhere on a member's row — portrait or name — opens
 that dwarf's sheet and follows them instead of offering to replace them. Clicking again,
