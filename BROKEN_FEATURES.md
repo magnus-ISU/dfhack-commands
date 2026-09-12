@@ -4,11 +4,22 @@ Everything here still ships and still runs exactly as it always did — nothing 
 changed, disabled or removed. These are grouped out of the feature lists so the main README
 only advertises things that work.
 
-Three groups, most urgent first:
+Four groups, most urgent first:
 
 - **Fixer Uppers** — broken *and still switched on*, so they are acting on your fort right now.
-- **TODO** — broken, not switched on, and there is a plan to fix them.
+- **TODO** — work with a plan attached: broken tools that are switched off, plus repairs
+  queued against tools that do ship and work (each of those says so).
+- **Planned** — not built at all: features that have been asked for, with what each would take.
 - **Broken** — everything else: no plan, or not yet decided whether it is worth keeping.
+
+**Difficulty** is given on every TODO and Planned entry, and means the same thing throughout:
+
+| | |
+|---|---|
+| **Easy** | The data is known and reachable, nothing new has to be discovered, and it is mostly writing. A session. |
+| **Moderate** | One or two things still have to be pinned down live (a focus string, a struct, a job shape), but nothing about it is known to be blocked. Two or three sessions. |
+| **Hard** | A real unsolved problem sits in the middle of it — 3D pathing, forcing a decision DF makes for itself, or a mechanism that has already crashed DF once. Expect a spike first, and a real chance the answer is "not this way". |
+| **Blocked** | A specific thing is known to be impossible or unavailable today. The entry says what, and what would unblock it. |
 
 # Fixer Uppers
 
@@ -32,6 +43,9 @@ squad does not spend eleven months of the year undressed. `altsched once` re-app
 schedules are found **empty**, not merely when the routines are missing: a fort was found running
 both routines with every month blank, and because the names were there the once-check skipped it
 every session and those squads never trained.
+
+**Difficulty of the repair: Moderate–Hard** — see `BROKEN_FEATURES.md` § Planned →
+`fort/military-reequip`, which is where that work is planned to land.
 
 ### **`fort/tarrasque`**
 Each winter solstice, a dead megabeast may return and attack again, so the world's megabeasts
@@ -71,13 +85,19 @@ stable version and the list is a tick stale until you reopen it. The likely fix 
 own picker selection instead of hunting for the row on screen. **Enabled by `magnus-scripts`**,
 which also binds `.` on that screen.
 
+**Difficulty: Hard.** The plan is known — drive DF's own picker selection rather than scraping for
+the row — but it depends on the report picker exposing a selection index that a write actually
+acts on, and the screen-scraping version of this is already on record as laggy and fragile. If the
+index turns out to be read-only in practice, there is no second idea.
+
 ### **`fort/mandate-notification`**
 Shows noble mandates the moment they appear. **Run by `magnus-scripts` every session.** Unused
 in practice and likely to be **removed** rather than repaired.
 
 # TODO
 
-Broken and switched off, with a plan to fix them.
+Work with a plan attached. Mostly tools that are broken and switched off — but also repairs
+queued against tools that ship and work today, which say so in their entry.
 
 ### **`fort/adamantine-hospital` — the `retarget` mode (REMOVED, worth retrying)**
 The tool itself works; this was a third mode, now deleted from the script. Instead of forbidding
@@ -100,13 +120,259 @@ carried item. A retry needs a mechanism that never edits a live job's item vecto
 re-post the treatment with a pre-attached replacement, or find a DF-side call that reassigns a
 claim atomically.
 
+**Difficulty: Hard.** Not because the swap is complicated — the old code worked — but because the
+only known-safe shape is "never touch a live job's item vector", and the obvious substitute has a
+crash of its own: cancelling a job a dwarf is *currently doing* segfaults, so a retry may only act
+on treatments no unit has picked up yet, which is a narrower window than the bug needs. Budget a
+spike that proves the cancel-and-re-post path survives a siege before any of it is written.
+
+### **`fort/quick-order` — fix up**
+The order box works and is used constantly. What needs repair is **parsing and item matching**:
+some inputs resolve to the wrong item, or a legal item is not found at all. The matcher is doing
+a lot at once — every split point between material and item name is scored, each side fuzzily
+(prefix, substring, edit distance, plural-folded), against a vocabulary that includes every
+weapon/armour/tool itemdef, every fort-permitted reaction and the fixed-job furniture — so a
+wrong answer is usually a scoring accident rather than a missing entry, and the fix is a matter
+of tightening the scoring, not of adding vocabulary.
+
+Still open alongside it, and recorded in the tool's own header: **suggested conditions**. An
+`r`/`rN` repeating order gets its frequency but none of the `item_conditions` DF would attach
+through its own "add suggested conditions" step, so a repeat ships ungated unless the parser
+added a stock condition itself.
+
+**Difficulty: Moderate for both, and they are independent.** The matching repair needs a bench of
+failing inputs more than it needs new mechanism: collect the phrases that mismatch, make them a
+table of expectations, then tune. The scoring already has the pieces a fix would use (an ambiguity
+check that fails rather than guesses when the top two candidates disagree). For conditions, both
+routes are open — drive DF's own add-order flow, or build `item_conditions` directly — and the
+second is much cheaper than when it was written down, because `planner-orders` now hand-builds
+conditioned repeating orders across two dozen asks, including the flag-based ones (`empty`,
+`sand_bearing`) that used to be the unknown.
+
+### **`fort/channel-safely` — fix up**
+The scheduler is sound in principle — suspend on sight, release a few non-adjacent tiles at a
+time, prove each release against a pretend map — and it is **enabled every session by
+`magnus-scripts`**, so whatever it gets wrong it gets wrong on a live fort. Three things, in the
+order they matter:
+
+1. **A rare case still looks like it can cave in**, and it is not understood. That is the serious
+   one: the tool's whole claim is that a release is *provable*, so an unexplained collapse means
+   the proof has a hole in it rather than a tuning problem. Wanted first is a repro — the
+   designation shape and the tile that went — because `channel-safely why <x> <y> <z>` will
+   explain any tile's verdict and that is where the faulty step will show.
+2. **The pathability check is not perfect.** The release test asks that every still-designated
+   tile keeps somewhere to stand that connects out of the excavation; when that answer is wrong,
+   tiles are either stranded or let out when they should not be.
+3. **Big designations over open space should be dug, not channelled, first.** Where the tile
+   below is already open, channelling opens a hole under the miner instead of a step down. The
+   fix is an ordering rule: mine those tiles as a plain dig where that is legal, then channel
+   **back to front** — each channel taken from the tile nearest the untouched rock, so the miner
+   always has solid ground behind them and retreats out of the hole instead of into it.
+
+**Difficulty: Hard for (1), Moderate for (2), Moderate for (3).** (1) is hard because it is a
+correctness proof, not a behaviour: without a repro there is nothing to test against, and the bar
+for "fixed" is higher than for anything else in this file. (3) is the most self-contained of the
+three and could ship on its own — it is a new phase in an ordering the tool already owns, and the
+back-to-front rule is the same connectivity search run with the order reversed. Mind the standing
+constraint throughout: the safety scan stays inside ONE z-level per pass, because the wider
+version froze the game.
+
+### **`fort/planner-orders` — material types**
+Three reported faults in the material picker and the orders it writes:
+
+1. **Stone types that are available are not offered.** The picker's "any other metal/stone you
+   have" pass is built from `fort_materials()`, so a stone the fort holds but that pass does not
+   see never appears.
+2. **There is no magma-safe rock choice.** The generic `Rock (any stone)` entry is *dropped
+   outright* when the building requires magma safety, on the grounds that "rock" cannot be
+   promised safe — which is true of the generic but leaves the player with no stone option at all
+   for a magma building. The right shape is `quick-order`'s: resolve the class to a concrete
+   magma-safe stone the fort actually has (most-numerous wins) and pin that.
+3. **It writes orders DF renders as an unknown material.** Strong suspect, and it lines up with
+   (2): the `Rock (any stone)` choice becomes `mat_type = 0, mat_index = -1` on the manager
+   order, and there is **no "any inorganic" pin** — DF's material categories have no `stone`,
+   `metal` or `glass` flag at all, so an order pinned that way names a material that does not
+   exist. Metals are offered as concrete indices and should be fine unless `inorg()` failed to
+   find one, which is worth checking at the same time.
+
+**Difficulty: Moderate**, and mostly already solved next door. `quick-order` implements exactly
+the model this needs — the fourteen real `job_material_category` flags for the category case, and
+concrete-class resolution (stone/metal/glass → a specific material, filtered by magma-safety and
+picked by stock) for everything else — so this is largely making `planner-orders` agree with it,
+plus a sweep of the existing asks for material pins of the same broken shape. Verify against the
+Work Orders screen, not just the struct: "unknown material" is a rendering of the pin, so the
+screen is where the fix is confirmed.
+
 ### **`fort/mood-burrow`**
 Confines a moody dwarf to a chosen burrow until it grabs its first material. Not referenced by
 `magnus-scripts`.
 
+**Difficulty: Moderate**, and mostly a testing problem. The burrow API is simple and proven
+(`isAssignedTile` / `setAssignedUnit`), but the two hazards around it are known and sharp: a
+burrow that does not contain both the dwarf's workshop and its materials strands the dwarf
+instead of steering it, and a strange mood is the one job in the fort that must never be
+cancelled or rewritten. Testing needs a live mood, which arrives when it arrives.
+
 ### **`fort/no-pausing`**
 Stops the game from ever pausing. Deliberately **not** enabled by `magnus-scripts` — it
 suppresses *all* pausing, so it is left as a manual toggle.
+
+**Difficulty: Easy**, but there is nothing to implement — it does what it says. What is open is a
+decision, not work: whether a selective version (suppress the nuisance pauses, keep the ones that
+mean something) is worth building, which is a list of announcement types and a filter.
+
+# Planned
+
+Not built yet. Each of these has been asked for; each entry says what it would do and what
+stands between here and there.
+
+### **`fort/masterwork-engrave-walls`**
+Like `dig-replace-walls`, but for engravings: paint an area and it drives the walls all the way
+to a **masterwork** engraving, retrying until every tile is one. Smooth, engrave, read the
+quality of what was carved, and where it came out below masterful, re-smooth that tile (which
+destroys the engraving) and engrave it again.
+
+**Difficulty: Moderate.** Every piece exists: `planned-smoothing` already lays designations down
+as tiles become legal, `better-engraving` already chooses what is carved, and the job types are
+pinned (`SmoothWall`/`SmoothFloor` are smoothing, `DetailWall`/`DetailFloor` are engraving, and
+`designation.smooth` clears the moment the job posts). The two open questions are where the
+finished engraving's quality is read back from (`world.engravings`, per tile) and what stops the
+loop: a fort whose best engraver is not legendary will never produce a masterwork, so a retry
+budget, or a "wait for a better engraver" state, is part of the design rather than a nicety.
+
+### **`fort/move-items`**
+In the `dig-building` left-hand picker, click a spot to move things TO, then pick what goes there
+from a proper list — by type, material, quality, where it is now — and the tool moves it with a
+**garbage dump zone it creates and manages itself**: place the zone on the target, mark the chosen
+items `flags.dump`, and clear the whole arrangement away once the haul is done.
+
+**Difficulty: Moderate**, with one nasty detail. The zone side is proven in this repo
+(`internal/planeswalkers/buildings.lua` builds `building_civzonest` records) and the picker is the
+same shape as the trade and planner dialogs. The detail: dumping is fort-wide, not per-zone —
+dwarves carry a dumped item to whichever *active* dump zone suits them, so the tool has to
+deactivate the fort's other dump zones for the duration and put them back exactly as they were,
+which is the same "restore what you took" discipline `fort/holiday` already needs. Also needs
+verifying live whether items land forbidden (DF's dump-forbid standing order) and un-forbidding
+them if so.
+
+### **`fort/auto-scaffold`**
+Automatically build the stairs needed to reach a build job nothing can path to, then take them
+down again once the building is up.
+
+**Difficulty: Hard**, and the hardest thing on this list along with the pathing half of
+suspendmanager-supreme. Reachability itself is cheap (`dfhack.maps.canWalkBetween` answers it from
+DF's own walkability groups), but *routing* a scaffold is a 3D search through open air and solid
+rock that nothing here has ever attempted, and it has to be built bottom-up in dependency order —
+each stair is only placeable from the one below it. Removal is worse than construction: the last
+tile has to be taken out from a place that still exists after it is gone, which is the classic way
+a dwarf is left standing on nothing. Worth a spike that only answers "can we route and stage a
+three-tile scaffold and get it back down cleanly", before anything else is written.
+
+### **`fort/suspendmanager-supreme`**
+Make suspendmanager succeed in more cases: compute the pathing it gives up on, and/or — when it
+does suspend a job — **haul the planned building's materials to the site anyway**, so the builder
+starts the moment the job unsuspends instead of starting with a walk.
+
+**Difficulty: Hard for the pathing half, Moderate for the hauling half** — and they are separable,
+which is the useful finding. Suspendmanager is a **C++ plugin** (`suspendmanager.plug.so`), so its
+analysis cannot be edited in Lua; but it exposes `isKeptSuspended`, `suspensionDescription` and
+`foreach_construction_job` through `require('plugins.suspendmanager')`, so a companion tool can
+read *why* each job is suspended and act on that without touching the plugin. The hauling half
+then rides on `move-items` above: DF has no "carry this stone to that tile" order, and a managed
+dump zone is the only native way to make a dwarf put an item on a chosen square. Build `move-items`
+first and this gets much cheaper.
+
+### **`fort/manage-encrusting`**
+A GUI with real control over encrusting: pick the items to decorate, pick what to decorate them
+with (gems, glass, shell), and queue the jobs — instead of a manager order that decorates whatever
+it feels like with whatever is nearest.
+
+**Difficulty: Moderate.** The job types are confirmed live (`EncrustWithGems` = 86,
+`EncrustWithGlass` = 87), and the posting mechanism is now well understood from the silk-web work:
+a job can be given the exact item it is for by inserting a `general_ref_item` before it reaches its
+workshop. What still needs a live pass is the encrust job's own shape — which reagent is a
+`job_item` and which is a ref, and how DF picks the target item when both are left open — plus the
+picker UI, which is ordinary work.
+
+### **`fort/good-soup`**
+Manage kitchen jobs so every cooking job produces the highest-value stack it can, rather than
+whatever DF felt like combining.
+
+**Difficulty: Moderate**, and the shape of it is unusual: you cannot tell a `PrepareMeal` job what
+to cook. The levers are indirect — the fort's kitchen restrictions (`plotinfo.kitchen`, which
+ingredients may be cooked at all) and what is in stock and unforbidden when the job runs — so the
+tool is really "curate the pantry, then queue the meal", toggling the cook flags of the cheap
+ingredients off while a lavish batch runs and putting them back after. All of that data is
+readable and writable today; the work is the value model (what a stack is actually worth, and what
+else wants those ingredients — syrup is also the brewer's) and not starving the rest of the fort
+to feed one job. `planner-orders`' Good meals ask already owns the order side.
+
+### **`fort/animal-tribute`**
+Let messengers bring back local fauna from your outlying holdings — a mountain home that sends you
+its wildlife, caged, as tribute.
+
+**Difficulty: Moderate to Hard, and it is a design problem rather than a blocked one.** DF has no
+such mechanic, so all of it is fabricated: which holding was visited, what lives in its region
+(readable — each world region carries its populations), and then producing the animals. Producing
+them is the part this repo has already solved (`create` + position seed + active-insert + teleport,
+with the emigration trap noted), and caging plus taming on top of that is known work. The honest
+risk is fidelity: a tribute that spawns creatures out of nothing will look like what it is unless
+the messenger round trip, the timing and the announcement are built to carry it.
+
+### **`fort/trade-agreements`**
+Default each year's import requests to what you asked for last year — or to a list you keep — so
+the liaison meeting stops being a fresh fifteen minutes of clicking every year.
+
+**Difficulty: Moderate, but on a once-a-year clock.** The screen is reachable
+(`main_interface.diplomacy`, with `taking_requests`, `taking_requests_tablist` and the scroll
+state alongside it) and remembering last year's picks is trivial persisted site data. What makes
+it slow is that the request UI only exists while a liaison is actually meeting you: every
+structure question — where a request is stored, whether it can be written directly or has to be
+clicked — can only be answered during that visit, so the build is gated on the calendar rather
+than on effort.
+
+### **`fort/auto-needs` — three more needs**
+Extend the existing tool past its one need (WANDER → fishing): **eat the highest-value food**,
+**pray when the stress is coming from prayer**, and **acquire something** when that is the need
+doing the damage.
+
+**Difficulty: Moderate for prayer, Moderate for food, uncertain for acquire** — one research
+question each, because needs are *derived* and cannot be written directly (editing `pers.needs` is
+cosmetic; the fix has to be the real-world act that drains them). Prayer has an obvious lever (a
+temple location the dwarf is steered toward) and an obvious hazard (a burrow that strands them —
+see `mood-burrow`). Food overlaps `good-soup`: you cannot pick what a dwarf eats, only what is
+available and unforbidden when they go looking. "Acquire an object" is the one with no known
+lever at all — whether ownership assignment satisfies it needs proving before it is promised.
+
+### **`fort/quickfort` — complex multi-z-level blueprints**
+Take the replacement quickfort front end past flat, single-level blueprints to the ones people
+actually publish: a whole fort in one file, `#>` / `#<` stepping down and up through z-levels,
+`#meta` sections stitching several blueprints together, and stairs that have to exist before the
+level below them can be reached at all.
+
+**Difficulty: Hard, and step zero is not the multi-z part.** The tool has still never applied
+anything to a map — no designation, no building, no zone — so the per-tile readiness machinery it
+already has is entirely unexercised; that has to be true before layering z on top. What multi-z
+then adds is a real ordering problem rather than more of the same one: the existing dependency
+chain is per tile (dig → smooth → engrave → build), while levels depend on *each other* — a level
+is unreachable until the stairway above it is dug and built, constructions need something to stand
+on, and channelling from above changes the level below. That is the same access question
+`auto-scaffold` faces, arriving from the other direction, and the two should be designed together.
+The parsing half is comparatively cheap: the library blueprints are already read correctly,
+including the `hidden()` sections behind `#meta` that the offline verification turned up.
+
+### **`fort/military-reequip` — its own squad gear manager**
+Split the re-equip logic out of `military-uniforms` into a tool of its own, with a squad gear
+manager: per squad and per soldier, what each slot wants, what is filling it, and what to do about
+the ones that are empty.
+
+**Difficulty: Moderate to Hard, and the hard part is the diagnosis, not the UI.** This is the
+`dwarf-reequip` problem in `DEVNOTES.md` given a proper home, and it has resisted twice. A lot is
+already known — assignment lists are indexed by item type and sorted by id, an *owned* item is
+invisible to the equipment manager, `spec.assigned` is what actually drives a pickup while
+`spec.item` alone never fetches anything, amputee demand is `min(2, limbs)`, and size comes from
+the manager order's `specdata.race` — so the work is turning that pile into a reliable
+slot → root cause → action mapping, with the screen as the easy half on top.
 
 # Broken
 
@@ -198,35 +464,6 @@ but no fort was loaded, so the two **writes** have never executed and nothing ha
 in the Standing Orders UI. One claim in the header is also unverified: whether DF starts a fort
 with obsidian restricted at all. The world checked had it already free, which would make that
 half of the tool a no-op.
-
-### **`fort/initial-standing-orders` — UNTESTED, never run in a fort**
-Sets the two standing orders a new fort should have started with: children stop hauling refuse
-and corpses (`labor_info.chores[HAUL_REFUSE]` / `[HAUL_BODY]` — DF has no separate burial chore,
-hauling a corpse to its coffin *is* the burial job), and obsidian is released from the fort's
-stone-use restrictions (`plotinfo.economic_stone`). Idempotent, touches nothing else on the
-Standing Orders screen, and `fort/initial-standing-orders status` reports without changing.
-
-The field reads were verified against the running game — `status` prints correct values live —
-but no fort was loaded, so the two **writes** have never executed and nothing has been confirmed
-in the Standing Orders UI. One claim in the header is also unverified: whether DF starts a fort
-with obsidian restricted at all. The world checked had it already free, which would make that
-half of the tool a no-op.
-
-### **`fort/choose-labor-icon` — UNTESTED, never opened in a fort**
-A picker for a work detail's icon: your details on the left, all nineteen icons on the right,
-drawn as DF draws them (each is a 4x3 tile rectangle on the `INTERFACE_BITS_LABOR` page, at
-coordinates read out of vanilla's `graphics_interface.txt`). Click a detail, click an icon, and
-`work_detail.icon` is written. `OVERRIDE_PAGES` lists tile pages consulted before vanilla's for
-the `CUSTOM_1..8` slots, so a mod that rebinds those identifiers — the Steam Workshop *Work
-Detail Icons* mod is the one it ships knowing about — shows its art in the picker too.
-
-**Two reasons it is here.** No fort was loaded while it was written, so the window has never
-been opened: the list, the click targets and the write are unverified. Worse, on the machine it
-was written on `dfhack.screen.findGraphicsTile` returned nil for *every* page tried, including
-`CURSORS`, which stock scripts use successfully — so the sprite path may never run and the
-picker may always fall back to its name-only list. That fallback is functional (same clicks,
-same result) but it is not what the tool is for. Confirm in a fort, in graphics mode, before
-promoting this.
 
 ### **`fort/noble-warriors`**
 Assigns each fort noble's symbols of office as specific items in their squad uniform, so

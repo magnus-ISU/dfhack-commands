@@ -531,6 +531,13 @@ scavenge pen.
 These need the fort loaded + the relevant screen open to nail down the
 viewscreen focus strings and data structures before building.
 
+**A second planned list lives in `BROKEN_FEATURES.md` § Planned** (masterwork
+engrave walls, move-items, auto-scaffold, suspendmanager-supreme,
+manage-encrusting, good-soup, animal-tribute, trade-agreements, the auto-needs
+extensions, military-reequip) — the ones there are whole tools that do not exist
+yet, with a difficulty on each; the ones below are the specs worked out in
+detail. Difficulty notes here use the same scale as that file.
+
 ### labor-screen "hide military" filter button
 A button on the labor / Work Details assignment screen that filters **military
 units out** of the unit list, so you only assign labors to civilians.
@@ -553,6 +560,8 @@ units out** of the unit list, so you only assign labors to civilians.
   `work_detail.assigned_units` IS accessible, so a one-shot or background service
   could keep military units out of work details (un-assign + clear those labors).
   Not the same as a visual filter, but achieves the intent. Awaiting a decision.
+- **Difficulty: Blocked** as specified (the widget exposes no rows to filter);
+  the `assigned_units` alternative is **Easy** — a few lines and a decision.
 
 ### ✅ deceased-dwarf relatives & info browser — DONE (`needs-tomb-notification.lua`)
 See a **dead** dwarf's relatives and full information from inside the fort. Built
@@ -585,6 +594,9 @@ stock / stalled pickup job / wrong-material incumbent / size mismatch / anatomy,
 per the stall-anatomy notes) and exactly what to queue. Needs: a reliable mapping
 from "slot unfilled" → root cause → the specific order, replacing the current
 best-effort heuristics. **Status: partially working, being reworked.**
+- **Difficulty: Moderate–Hard**, and it is the diagnosis that is hard, not the
+  code. See `BROKEN_FEATURES.md` § Planned → `fort/military-reequip`, which is
+  this work given its own tool and a squad gear manager on top.
 
 ### dwarf-clicks-everywhere (requested)
 Make dwarves clickable **wherever their name/portrait appears** — noble/
@@ -599,6 +611,9 @@ unit sheet or follow them.
 - **Needs live inspection:** the focus strings + widget hierarchies for the
   Nobles/Administrators screen and the Squads member list (use the
   `dfhack.gui.getWidget` navigation pattern from `sort/deathcause_button`).
+- **Difficulty: Moderate** — no unknown mechanism, just one focus string and one
+  widget walk per screen, and `clickable-noble-names` / `clickable-squad-members`
+  already do exactly this for two of them.
 
 ### stockpile-info (requested)
 A script/overlay that surfaces a selected **stockpile's** useful information at a
@@ -607,6 +622,10 @@ glance — what it currently holds (counts by type), its capacity/fill, links
 customize screen to see what a pile is actually storing.
 - **Needs live inspection:** stockpile building focus string; read
   `building_stockpilest` (`settings`, `container_type`, `links`, contained items).
+- **Difficulty: Easy–Moderate.** Everything it displays is already readable, and
+  `binnable-stockpile` / `stable-stockpile-bins` / the custom-stockpile panel have
+  mapped the structures. Mind the panel's raw-pointer hazard: never resize a
+  settings vector while the customize panel is open.
 
 ### ✅ auto-create labor groups (Work Details) — DONE (`labor-groups.lua`)
 `labor-groups` creates the crafting Work Details (stone carving, metal/weapon/
@@ -631,6 +650,10 @@ repeating** (`r`/`rN` → `frequency = Monthly`). Verified live.
 **Still TODO:** *suggested conditions* — auto-adding an order's `item_conditions`
 (the "add suggested conditions" DF does when you make a repeating order); the
 frequency is set, but no conditions are attached yet.
+**Difficulty: Moderate.** Two known routes (drive DF's own add-order flow, or
+build `item_conditions` directly), and `planner-orders` now builds conditioned
+repeating orders by hand all over the place — including the flag-based ones
+(`empty`, `sand_bearing`) — so the struct is no longer the unknown it was.
 
 **Goal:** a text field on the Work Orders screen that turns freeform text into a
 manager order.
