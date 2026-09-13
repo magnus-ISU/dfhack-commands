@@ -276,6 +276,57 @@ local function race_plural(race)
     return (n ~= '' and n) or c.name[0]
 end
 
+-- Magma, and how far up it comes.
+--
+-- Resolved PER EMBARK TILE through `region_details`, exactly the way the adamantine count
+-- above is, and for exactly the same reason. The world tile's `feature_init` list carries
+-- UNPLACED CANDIDATES -- 242 of 256 world tiles in the test world list magma pools, every one
+-- of them with `start_x` = -1 -- so reading it directly says "magma" almost everywhere and
+-- means nothing. Measured on the embark that prompted this: the world tile had pools under 9
+-- of its 256 embark tiles, none of them under the 4x4 rectangle, and the candidate list
+-- cheerfully reported magma in the first cavern.
+--
+-- `start_depth` counts down from the first cavern: 0 is cavern 1, the one you can reach
+-- without digging to the bottom of the world.
+local CAVERN_WORD = {[0] = 'magma in first cavern', 'magma in second cavern',
+                     'magma in third cavern'}
+
+local function magma_words(etiles)
+    local volcano, best, known = false, nil, false
+    pcall(function()
+        local details, inits = {}, {}
+        for _, t in ipairs(etiles) do
+            local wx, wy = t.x // 16, t.y // 16
+            local key = wx * 4096 + wy
+            if details[key] == nil then
+                details[key] = region_details_at(wx, wy) or false
+                inits[key] = details[key] and feature_inits(wx, wy) or false
+            end
+            local d, init = details[key], inits[key]
+            if d and init then
+                known = true
+                local list = d.features[t.x % 16][t.y % 16]
+                for i = 0, #list - 1 do
+                    local idx = list[i].feature_idx
+                    if idx >= 0 and idx < #init then
+                        local f = init[idx]
+                        if df.feature_init_volcanost:is_instance(f) then
+                            volcano = true
+                        elseif df.feature_init_magma_poolst:is_instance(f) then
+                            if not best or f.start_depth < best then best = f.start_depth end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    local out = {}
+    if volcano then out[#out + 1] = 'volcano' end
+    if best and CAVERN_WORD[best] then out[#out + 1] = CAVERN_WORD[best] end
+    if #out == 0 and known then out[#out + 1] = 'no magma' end
+    return out
+end
+
 local function wildlife(wtiles)
     local seen_region, fauna, seen_name = {}, {}, {}
     for _, t in ipairs(wtiles) do
@@ -563,6 +614,24 @@ local function stone_summary(wtiles)
         local w = layer_weight[idx] or 0
         if not best[k] or w > best[k].w then best[k] = {idx = idx, w = w} end
     end
+
+    -- The stones the fort is actually cut out of, thickest layer first. ONE name was not
+    -- enough: the thickest layer is very often the same handful of rocks (gabbro, over and
+    -- over), so naming only the winner says almost nothing about what this embark is made
+    -- of. Four says what you will be digging through.
+    local function common_stones(n)
+        local ranked = {}
+        for idx, w in pairs(layer_weight) do
+            if present[idx] then ranked[#ranked + 1] = {idx = idx, w = w} end
+        end
+        table.sort(ranked, function(a, b)
+            if a.w ~= b.w then return a.w > b.w end
+            return a.idx < b.idx                     -- stable, so the list does not shuffle
+        end)
+        local out = {}
+        for i = 1, math.min(n, #ranked) do out[i] = ranked[i].idx end
+        return out
+    end
     for idx in pairs(present) do
         local m = inor[idx]
         if m then
@@ -586,9 +655,21 @@ local function stone_summary(wtiles)
         ores = tally(ores),
         gems = tally(gems),
         common = best.common and name_of(best.common.idx) or nil,
+        -- the four thickest, in order, as {idx, name} so the panel can tell which of them
+        -- is also the flux / coal / plaster stone instead of naming it twice
+        common_list = (function()
+            local out = {}
+            for _, idx in ipairs(common_stones(4)) do
+                out[#out + 1] = {idx = idx, name = name_of(idx)}
+            end
+            return out
+        end)(),
         flux = best.flux and name_of(best.flux.idx) or nil,
         coal = best.coal and name_of(best.coal.idx) or nil,
         casts = best.casts and name_of(best.casts.idx) or nil,
+        flux_idx = best.flux and best.flux.idx or nil,
+        coal_idx = best.coal and best.coal.idx or nil,
+        casts_idx = best.casts and best.casts.idx or nil,
         -- obtainable from the rock here, as an ore or as the metal itself?
         yields = function(metal_idx)
             if present[metal_idx] then return true end
@@ -806,18 +887,41 @@ function build_lines(scr, maxrows)
     end
     local water = water_word(wtiles)
     if water then parts[#parts + 1] = water end
+    for _, w in ipairs(magma_words(etiles)) do parts[#parts + 1] = w end
     if #parts > 0 then lines[#lines + 1] = table.concat(parts, ', ') end
 
     if geo and geo.stones > 0 then
         wrap(lines, ('Stone: %d types, %d ore, %d gem')
             :format(geo.stones, geo.ores, geo.gems), '')
-        -- the three that decide what can be built, named or missed by name
+        -- The four thickest layers, then the three stones that decide what can be built --
+        -- and a stone that is both is tagged where it stands rather than named twice.
+        local tag = {}
+        if geo.flux_idx then tag[geo.flux_idx] = 'flux' end
+        if geo.coal_idx then tag[geo.coal_idx] = 'coal' end
+        if geo.casts_idx then tag[geo.casts_idx] = 'casts' end
+        local common, listed = {}, {}
+        for _, st in ipairs(geo.common_list or {}) do
+            if st.name then
+                listed[st.idx] = true
+                common[#common + 1] = st.name .. (tag[st.idx] and (' (' .. tag[st.idx] .. ')') or '')
+            end
+        end
+        if #common > 0 then
+            wrap(lines, 'most common: ' .. table.concat(common, ', '), '  ')
+        elseif geo.common then
+            wrap(lines, 'most common: ' .. geo.common, '  ')
+        end
         local named = {}
-        if geo.common then named[#named + 1] = geo.common .. ' (most common)' end
-        named[#named + 1] = geo.flux and (geo.flux .. ' (flux)') or 'NO FLUX'
-        named[#named + 1] = geo.coal and (geo.coal .. ' (coal)') or 'no coal'
-        named[#named + 1] = geo.casts and (geo.casts .. ' (casts)') or 'no casts'
-        wrap(lines, table.concat(named, ', '), '  ')
+        if geo.flux_idx and not listed[geo.flux_idx] then
+            named[#named + 1] = geo.flux .. ' (flux)'
+        elseif not geo.flux_idx then named[#named + 1] = 'NO FLUX' end
+        if geo.coal_idx and not listed[geo.coal_idx] then
+            named[#named + 1] = geo.coal .. ' (coal)'
+        elseif not geo.coal_idx then named[#named + 1] = 'no coal' end
+        if geo.casts_idx and not listed[geo.casts_idx] then
+            named[#named + 1] = geo.casts .. ' (casts)'
+        elseif not geo.casts_idx then named[#named + 1] = 'no casts' end
+        if #named > 0 then wrap(lines, table.concat(named, ', '), '  ') end
     end
 
     local wood = wood_summary(wtiles)

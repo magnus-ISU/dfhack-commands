@@ -868,16 +868,35 @@ the map on a scored spot near its halls, and clicks Embark. You place the fortre
 
 ### **`embark/extra-info`**
 Panel under DF's own, on the final placement step only: the adamantine spire count (or
-`NO ADAMANTIUM` when there is none), salt or fresh water, the seven commonest stones (flux, coal and plaster called out) plus a count of
-the rest, commonest wood, the wildlife, and **every** civ that can reach you — not vanilla's four.
+`NO ADAMANTIUM` when there is none), salt or fresh water, **magma and how far up it comes**
+(`volcano`, `magma in first cavern` … `third`, or `no magma` — the first cavern is the one you
+can reach without digging to the bottom of the world), read per embark tile rather than off the
+world tile's candidate list, which claims magma nearly everywhere, the **four commonest stones** — the
+thickest layers first, which is what the fort gets cut out of — plus a count of the rest, and the
+flux, coal and plaster stones, tagged in place when they are already among the four and named
+after them when they are not. Then commonest wood, the wildlife, and **every** civ that can reach
+you — not vanilla's four. Naming only the single commonest stone said almost nothing: it is
+gabbro over and over.
 
 ### **`embark/assistant`**
 Site finder, replacing the retired `embark-assistant` plugin. Bare `embark/assistant` opens a
-window: type filters, press Enter, press Enter on a result to jump the map there. Filters cover
+window: type filters, press Enter, then press Enter on a result to **place the embark rectangle
+on that exact world tile** — the local embark screen opens with the rectangle on the tile that
+matched and the site chosen, and *nothing confirmed*: whether you actually embark there stays
+your call, and DF's own Confirm button is how you make it. Getting it to stay there is the
+awkward part and is why this is more than one write: in placement mode DF re-derives the
+rectangle from wherever your pointer is, every frame, so the tool moves the **camera** by the
+error it measures — a nudge per frame, since the hover it measures only updates once a frame —
+until the tile under your pointer is the one you asked for, then commits with the click you
+would have made. Filters cover
 flux, coal, plaster, named metals and minerals, sand, clay, soil, rivers, aquifers, volcanoes,
 biome, tree density, freezing, evil weather, savagery, evil, and neighbouring civs and towers by
-name or count. `s` runs an ~11 s survey that adds **magma pools by cavern level**, which is not
-world-wide data. Also works from the console — `embark/assistant help`.
+name or count. `s` runs a survey that adds **magma pools by cavern level**, which is not world-wide data and
+cannot be faked: a world tile's feature list carries *candidate* pools that are not placed
+anywhere (242 of 256 tiles in one world), so magma is resolved per embark tile through
+`region_details` — the survey walks the camera to make those resident. It also records *which*
+of the tile's 256 embark tiles the magma is under, and `goto` puts the rectangle over that
+spot, which is the difference between "this world tile has magma" and "your fort has magma". Also works from the console — `embark/assistant help`.
 
 ## One-time-commands
 

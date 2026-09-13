@@ -10,7 +10,7 @@ longer ships.
 
     embark/assistant flux coal river fresh
     embark/assistant biome=Forest soil3 calm near=DWARF
-    embark/assistant goto 2          -- centre the map on result 2
+    embark/assistant goto 2          -- put the embark rectangle on result 2
     embark/assistant                 -- no filters: just the best all-round tiles
 
 Filters (all AND-ed, all optional)
@@ -57,20 +57,27 @@ volcano on the world map -- and aquifers fall out of the geology column, a layer
 bottoming at -3 or deeper whose stone carries the `AQUIFER` flag (a non-soil one
 being the heavy kind).  Both are the original plugin's own rules.
 
-**Magma pools are not.**  A world tile's feature list is only filled in once DF
-has had that tile in focus, so `embark/assistant survey` walks the camera over
-the map to fill them.  The original embark-assistant did the same thing by
-driving DF's own cursor across all 4,225 tiles with `feed_key(CURSOR_*)`; this
-covers ~50 tiles per stop instead of one, so it is ~128 stops rather than 4,225.
-Magma levels are the original's: 3 volcano, 2 a pool reaching cavern 1, 1 cavern
-2, 0 cavern 3.
+**Magma pools are not**, and they are not world-wide in a nastier way than that.
+A world tile's `feature_init` list carries magma pools as CANDIDATES -- 242 of
+256 tiles in one test world listed pools, every one with `start_x` of -1, meaning
+"not placed anywhere" -- exactly like the sixty-four candidate adamantine tubes
+below.  Reading that list says "magma" almost everywhere and means nothing: it
+sent an embark to a site whose world tile did hold magma, under 9 of its 256
+embark tiles, none of them under the rectangle.
 
-The 16x16 `feature_map` shell is NOT the unit to survey by, which is worth
-recording because it looks like it should be.  A shell does become resident as a
-whole, but the per-world-tile `feature_init` vectors inside it fill in
-separately, with the viewport: measured 50 of 256 filled in a freshly resident
-shell.  So the number of camera stops is set by how much one viewport covers, not
-by the shell size, and aligning the walk to shells buys nothing.
+So magma is resolved PER EMBARK TILE through `region_details.features[ex][ey]`,
+the same source `embark/extra-info` uses for its spire count, and
+`embark/assistant survey` walks the camera to make those details resident.  That
+is what the original embark-assistant did all along.  Region details stay
+resident once loaded and accumulate, so the walk is a grid of stops (36 on a
+17x17 pocket world; a 65x65 world takes a few hundred) rather than a visit to
+every tile.  Magma levels are the original's: 3 volcano, 2 a pool reaching cavern
+1, 1 cavern 2, 0 cavern 3.
+
+The survey also records WHICH of the world tile's 256 embark tiles the magma is
+under, and `goto` puts the rectangle over that spot instead of the middle of the
+tile -- which is the difference between "this world tile has magma" and "your
+fort has magma".
 
 **Adamantine is deliberately not a filter here.**  It cannot be read the cheap
 way -- a world tile lists sixty-four *candidate* tubes whatever the tile is, so
@@ -369,11 +376,15 @@ end
 -- positions and harvesting what appears covers the world in ~100 steps instead
 -- of 4,225.
 --
+-- What the camera loads for a stop is `region_details` -- a small neighbourhood, not the
+-- 10x6 block the old feature-candidate read appeared to get -- so the stride below is tight
+-- and the gap pass does real work rather than mopping up a handful of edges.
+--
 -- Magma levels are the original's: 3 volcano, 2 pool reaching cavern 1, 1 cavern
 -- 2, 0 cavern 3 -- higher is shallower.  `2 - start_depth` on a magma pool,
 -- since layer_type is Cavern1=0, Cavern2=1, Cavern3=2.
 
-deep = deep or {}            -- [wx*4096+wy] = {magma = n|nil}
+deep = deep or {}            -- [wx*4096+wy] = {magma = n|nil, spot = {x, y}|nil}
 deep_world = deep_world or nil
 deep_count = deep_count or 0
 
@@ -389,41 +400,65 @@ local function reset_deep()
     deep, deep_count, deep_world = {}, 0, world_key()
 end
 
--- Read one world tile's magma from its feature list.
+-- Read one world tile's magma, PER EMBARK TILE.
 --
--- This reads `feature_init` directly rather than going through
--- `region_details.features`, and the difference is worth stating because the
--- adamantine code deliberately does NOT do this.  A world tile's feature list
--- contains sixty-four *candidate* deep-special-tubes whatever the tile is, so
--- adamantine has to be resolved per embark tile through `region_details`.
--- Volcanoes and magma pools are not like that: they appear in the list only
--- where they are real.  Checked on all 4,225 tiles of a 65x65 world against the
--- region_details answer -- 4,225 agreements, zero disagreements -- which is what
--- lets this skip the 16x16 walk that made the first version of the survey take
--- minutes.
+-- This was wrong until 2026-09-12 and wrong in a way that recommended sites with no magma
+-- under them, so the reason is worth writing down. A world tile's `feature_init` list is a
+-- list of CANDIDATES: sixty-four deep-special-tubes whatever the tile is, and -- this is the
+-- part that was missed -- magma pools too, with `start_x`/`start_y` of -1 meaning "not placed
+-- anywhere yet". 242 of the 256 world tiles in the test world carry pool candidates, so
+-- reading the list directly reports magma nearly everywhere.
+--
+-- The truth is `region_details.features[ex][ey]`, the same source the adamantine count in
+-- `embark/extra-info` uses: a per-embark-tile list of indices into the candidate list, and a
+-- candidate that no embark tile points at is not there. Measured on the embark that prompted
+-- this fix: world tile (4,4) listed nine pool candidates, only 9 of its 256 embark tiles
+-- actually sat over a pool, and the 4x4 rectangle we were sent to had none of them.
+--
+-- So the survey is per embark tile after all -- which is what the original embark-assistant
+-- did, and what the note above wrongly claimed could be skipped. The saving grace is that the
+-- 16x16 walk only runs for tiles whose details are RESIDENT, which is a handful at a time.
+--
+-- What is kept is the best level and WHERE it is, because "there is magma somewhere in this
+-- world tile" is not the answer the player needs -- the rectangle has to land on it.
+-- Levels are the original's: 3 volcano, 2 pool reaching cavern 1, 1 cavern 2, 0 cavern 3.
 local function absorb_tile(wx, wy)
     local key = wx * 4096 + wy
     if deep[key] then return false end
     local got = false
     pcall(function()
+        local rd
+        for _, d in ipairs(wd().midmap_data.region_details) do
+            if d.pos.x == wx and d.pos.y == wy then rd = d; break end
+        end
+        if not rd then return end            -- not resident: no data, not "no magma"
         local sx, sy = wx // 16, wy // 16
         local shell = wd().feature_map[sx]:_displace(sy)
         if not shell or not shell.features or shell.x ~= sx or shell.y ~= sy then return end
         local inits = shell.features.feature_init[wx % 16][wy % 16]
-        -- an empty vector means DF has not put this tile in focus yet: no data,
-        -- not "no magma".  Leave it uncached so a later pass picks it up.
         if #inits == 0 then return end
-        local magma
-        for i = 0, #inits - 1 do
-            local f = inits[i]
-            if df.feature_init_volcanost:is_instance(f) then
-                magma = 3
-            elseif df.feature_init_magma_poolst:is_instance(f) then
-                local lv = 2 - f.start_depth
-                if not magma or lv > magma then magma = lv end
+        local best, spot
+        for ex = 0, 15 do
+            for ey = 0, 15 do
+                local list = rd.features[ex][ey]
+                for i = 0, #list - 1 do
+                    local idx = list[i].feature_idx
+                    if idx >= 0 and idx < #inits then
+                        local f = inits[idx]
+                        local lv
+                        if df.feature_init_volcanost:is_instance(f) then
+                            lv = 3
+                        elseif df.feature_init_magma_poolst:is_instance(f) then
+                            lv = 2 - f.start_depth
+                        end
+                        if lv and (not best or lv > best) then
+                            best, spot = lv, {x = ex, y = ey}
+                        end
+                    end
+                end
             end
         end
-        deep[key] = {magma = magma}
+        deep[key] = {magma = best, spot = spot}
         deep_count = deep_count + 1
         got = true
     end)
@@ -462,7 +497,7 @@ function deep_survey(cont)
     end
     if deep_world ~= world_key() then reset_deep() end
     local W, H = wd().world_width, wd().world_height
-    local STRIDE_X, STRIDE_Y = 8, 4      -- one camera stop loaded a 10x6 block
+    local STRIDE_X, STRIDE_Y = 3, 3      -- region_details load in a small neighbourhood
     local stops = {}
     for x = STRIDE_X // 2, W - 1, STRIDE_X do
         for y = STRIDE_Y // 2, H - 1, STRIDE_Y do
@@ -587,7 +622,7 @@ local USAGE = [=[
 embark/assistant -- find embark sites matching what you want.
 
   embark/assistant [filter ...]     sweep the world, print the best matches
-  embark/assistant goto <n>         centre the map on result <n>
+  embark/assistant goto <n>         place the embark rectangle on result <n>
   embark/assistant survey           deep pass: fill in the magma data
   embark/assistant help             this text
 
@@ -888,6 +923,9 @@ function sweep(f)
                         sand = g.sand, clay = g.clay, trees = tl, weather = wthr,
                         freeze = fz,
                         volcano = volc_d, magma = dp and dp.magma,
+                        -- WHICH embark tile inside the world tile the magma is under, so the
+                        -- rectangle can be put on it rather than in the middle of the tile
+                        magma_spot = dp and dp.spot or nil,
                         surveyed = dp ~= nil,
                     }
                 end
@@ -945,6 +983,178 @@ local function get_screen()
     if df.viewscreen_choose_start_sitest:is_instance(scr) then return scr end
 end
 
+-- Put the embark rectangle ON a world tile, the way clicking the tile would.
+--
+-- The rectangle is stored in EMBARK-TILE coordinates -- sixteen to a world tile, counted
+-- across the whole world -- so a world tile (wx, wy) is the block
+-- [wx*16 .. wx*16+15] x [wy*16 .. wy*16+15], and the rectangle is centred inside it. Its
+-- size is the player's own (`embark_dx`/`embark_dy`, the 4x4 default unless they changed
+-- it), which is why the offset is computed rather than fixed.
+--
+-- This is the whole point of the tool landing where it searched: DF puts the rectangle
+-- wherever you happened to click, and a click that is one tile out is a different site
+-- with different stone.
+-- Where the rectangle wants to sit, in embark-tile coordinates.
+--
+-- Centred in the world tile by default -- but a result that matched on MAGMA knows which of
+-- the tile's 256 embark tiles the magma is actually under, and then the rectangle goes there
+-- instead, clamped so it stays inside the world tile. Centring on the tile is what sent an
+-- embark to a site whose magma was nine sub-tiles away and not under the fort at all.
+local function wanted_rect(scr, wx, wy, spot)
+    local dx = math.max(1, math.min(16, scr.embark_dx))
+    local dy = math.max(1, math.min(16, scr.embark_dy))
+    local ox, oy = math.floor((16 - dx) / 2), math.floor((16 - dy) / 2)
+    if spot then
+        ox = math.max(0, math.min(16 - dx, spot.x - dx // 2))
+        oy = math.max(0, math.min(16 - dy, spot.y - dy // 2))
+    end
+    return wx * 16 + ox, wy * 16 + oy, dx, dy
+end
+
+-- the rectangle ALONE. Kept apart from the camera because the correction pass below nudges
+-- the camera and must not then undo its own nudge by re-centring it.
+local function set_rect(scr, wx, wy, spot)
+    local x, y, dx, dy = wanted_rect(scr, wx, wy, spot)
+    local L = scr.location
+    L.region_pos.x, L.region_pos.y = wx, wy
+    L.embark_pos_min.x, L.embark_pos_min.y = x, y
+    L.embark_pos_max.x, L.embark_pos_max.y = x + dx - 1, y + dy - 1
+    L.reclaim_idx, L.reclaim_site = -1, -1
+end
+
+local function place_embark(scr, wx, wy, spot)
+    local x, y, dx, dy = wanted_rect(scr, wx, wy, spot)
+    set_rect(scr, wx, wy, spot)
+    scr.zoom_cent_x = x + math.floor(dx / 2)
+    scr.zoom_cent_y = y + math.floor(dy / 2)
+end
+
+-- WRITING THE RECTANGLE IS NOT ENOUGH, and this is the whole reason the next two functions
+-- exist.
+--
+-- While the local embark screen is in PLACEMENT mode ("Click on the map to embark!") DF
+-- re-derives the rectangle from where the pointer is, every frame. A rectangle written from a
+-- script holds for exactly as long as it takes the pointer to be noticed and then the site
+-- snaps back under the cursor -- which is what "it went to the right tile and then didn't"
+-- looks like.
+--
+-- Two things fix it, in this order:
+--
+--   1. COMMIT. Feeding the click a player would make takes DF out of placement mode into its
+--      own Confirm / Abort, where the pointer no longer moves anything. Measured: the click
+--      commits WHATEVER RECTANGLE IS CURRENTLY SET rather than re-reading the tile under the
+--      pointer, so setting the rectangle and clicking in the same breath commits ours. The
+--      committed rectangle is readable afterwards as `warn_mm_*`, which is how the result is
+--      checked rather than assumed.
+--   2. MOVE THE CAMERA, when the commit lands somewhere else anyway. The tile under the
+--      pointer is a function of the camera centre, so shifting the centre by the measured
+--      error shifts what the pointer is over by the same amount, and the next commit lands
+--      right. The error can only be measured, never predicted -- it depends on where the
+--      pointer happens to be -- so this is a loop that looks, nudges and looks again.
+--
+-- What none of it does is press Confirm. That stays the player's: this tool finds the site and
+-- sets every piece up, and whether to embark there is a decision nobody asked it to make.
+local CORRECT_TRIES = 10
+
+-- is DF showing its own Confirm / Abort for an already-committed rectangle?
+local function committed(scr)
+    return scr.choosing_embark and scr.warn_mm_startx >= 0
+end
+
+local function feed_at(scr, key, mx, my)
+    local gps = df.global.gps
+    if mx then
+        gps.mouse_x, gps.mouse_y = mx, my
+        gps.precise_mouse_x, gps.precise_mouse_y = mx * gps.tile_pixel_x, my * gps.tile_pixel_y
+    end
+    require('gui').simulateInput(scr, key)
+end
+
+-- Roughly a third across and two thirds down is MAP rather than panel at every window size
+-- this screen has: DF's buttons and the size box are top left, the site report is the right
+-- third. Only used when the player's own pointer is NOT over the map.
+local function probe_cell()
+    local w, h = dfhack.screen.getWindowSize()
+    return math.floor(w * 0.3), math.floor(h * 0.6)
+end
+
+-- Is the player's pointer somewhere DF is reading as map? If it is, DF's hover is live and
+-- the click has to be made THERE -- moving the pointer first would only pick a different
+-- tile. The top ten rows and the right-hand two fifths are panel, and a click into those is
+-- how a script presses Confirm by accident, which must never happen.
+local function pointer_on_map()
+    local w, h = dfhack.screen.getWindowSize()
+    local gps = df.global.gps
+    local mx, my = gps.mouse_x, gps.mouse_y
+    return mx >= 0 and my >= 10 and mx < math.floor(w * 0.6) and my < h - 1
+end
+
+local function release_site(scr)
+    if committed(scr) then
+        local mx, my = probe_cell()
+        if pointer_on_map() then mx, my = nil, nil end
+        feed_at(scr, '_MOUSE_R', mx, my)      -- back to placement mode
+    end
+end
+
+-- Commit: the click a player would make. It takes DF out of placement mode into its own
+-- Confirm / Abort, where the pointer stops moving anything -- and it commits the rectangle as
+-- it stands, which is why this is only called once the rectangle IS where we want it.
+local function commit_site(scr)
+    if pointer_on_map() then
+        feed_at(scr, '_MOUSE_L')              -- at the player's own pointer: its hover is live
+    else
+        local mx, my = probe_cell()
+        feed_at(scr, '_MOUSE_L', mx, my)      -- no live hover: DF commits what we wrote
+    end
+end
+
+-- WRITING THE RECTANGLE IS NOT ENOUGH, and this is why this function exists.
+--
+-- While the embark screen is in PLACEMENT mode ("Click on the map to embark!") DF re-derives
+-- the rectangle from where the pointer is, every frame. A rectangle written from a script
+-- holds only until the pointer is noticed, and then the site snaps back under the cursor --
+-- which is what "it went to the right tile and then didn't" looks like.
+--
+-- So this does not fight over the rectangle. It moves the CAMERA: the tile under the pointer
+-- is the camera centre plus the pointer's offset from the middle of the view, so shifting the
+-- centre by the error shifts what the pointer is over by the same amount, and DF's own next
+-- recompute lands on the tile we wanted, by its own rules, with nothing to overwrite.
+--
+-- ONE NUDGE PER FRAME, and that part is not optional. The error can only be MEASURED -- it
+-- depends on where the pointer happens to be -- and the measurement is DF's hover, which is
+-- recomputed once a frame. A loop that nudges twice inside one frame is measuring a stale
+-- hover the second time: the first version did exactly that and walked the camera off across
+-- the world, five world tiles from the target, because it read the same error over and over
+-- and applied it every time.
+--
+-- Once the hover lands on the target the site is COMMITTED with a fed click, which is what
+-- ends the chase for good. Confirm is never pressed: that stays the player's.
+function correct_embark(wx, wy, spot, tries)
+    tries = tries or CORRECT_TRIES
+    local scr = get_screen()
+    if not scr or not scr.choosing_embark then return end
+    local want_x, want_y = wanted_rect(scr, wx, wy, spot)
+    local L = scr.location
+    local ex, ey = want_x - L.embark_pos_min.x, want_y - L.embark_pos_min.y
+    if ex == 0 and ey == 0 then
+        L.region_pos.x, L.region_pos.y = wx, wy
+        commit_site(scr)
+        return
+    end
+    if tries <= 0 then return end          -- placed but not committed; the player can click
+    local maxx, maxy = wd().world_width * 16 - 1, wd().world_height * 16 - 1
+    scr.zoom_cent_x = math.max(0, math.min(maxx, scr.zoom_cent_x + ex))
+    scr.zoom_cent_y = math.max(0, math.min(maxy, scr.zoom_cent_y + ey))
+    scr.region_cent_x, scr.region_cent_y = wx, wy
+    set_rect(scr, wx, wy, spot)            -- hold it there for this frame at least
+    dfhack.timeout(1, 'frames', function() correct_embark(wx, wy, spot, tries - 1) end)
+end
+
+-- Go to a result and ARM THE EMBARK on it: the local embark screen opens with the rectangle
+-- sitting on the tile that matched, and nothing is confirmed. Confirming is the one step that
+-- stays yours -- this tool finds the site and stands the pieces up; whether you actually
+-- embark there is a decision, and a decision nobody asked it to make.
 function goto_result(n)
     if not last_results or not last_results[n] then
         qerror('embark/assistant: no result ' .. tostring(n) ..
@@ -957,13 +1167,20 @@ function goto_result(n)
     local r = last_results[n]
     scr.choosing_civilization = false
     scr.choosing_reclaim = false
-    scr.choosing_embark = false
     scr.doing_site_finder = false
     scr.region_cent_x, scr.region_cent_y = r.x, r.y
-    scr.zoom_cent_x, scr.zoom_cent_y = r.x * 16 + 8, r.y * 16 + 8
     scr.zoomed_in = true
-    print(('embark/assistant: centred on (%d, %d) -- %s, %s.')
-        :format(r.x, r.y, r.biome, describe(r)))
+    release_site(scr)                   -- an already-committed site has to be let go of first
+    place_embark(scr, r.x, r.y, r.magma_spot)
+    scr.choosing_embark = true          -- the local embark screen, rectangle already placed
+    correct_embark(r.x, r.y, r.magma_spot)  -- keep it there, a nudge a frame, then commit
+    print(('embark/assistant: embark placed on (%d, %d)%s -- %s, %s.')
+        :format(r.x, r.y,
+                r.magma_spot and (' over the magma at %d,%d in the tile'):format(
+                    r.magma_spot.x, r.magma_spot.y) or '',
+                r.biome, describe(r)))
+    print('  the site is chosen and NOT confirmed -- press Confirm yourself, ' ..
+          'or right-click to move it.')
 end
 
 function run(args)
@@ -1004,7 +1221,7 @@ function run(args)
         local r = results[i]
         print(('  %2d. (%3d,%3d) %-12s %s'):format(i, r.x, r.y, r.biome, describe(r)))
     end
-    print('  embark/assistant goto <n>   centre the map on one of these')
+    print('  embark/assistant goto <n>   place the embark rectangle on one of these')
     print('  embark/assistant help       every filter')
 end
 
@@ -1046,14 +1263,16 @@ function AssistantWindow:init()
             text_to_wrap = HINT,
             text_pen = COLOR_GREY,
         },
+        -- t=7, not 6: the filter hint above wraps to five lines at this width, and the
+        -- status was being drawn on top of its last one ("30 matches (177 ms)CE civs=N...")
         widgets.Label{
             view_id = 'status',
-            frame = {t = 6, l = 0},
+            frame = {t = 7, l = 0},
             text = 'Type filters and press Enter. Empty = rank the whole world.',
         },
         widgets.List{
             view_id = 'list',
-            frame = {t = 8, l = 0, b = 3},
+            frame = {t = 9, l = 0, b = 3},
             on_submit = function(idx) self:jump(idx) end,
         },
         widgets.HotkeyLabel{
