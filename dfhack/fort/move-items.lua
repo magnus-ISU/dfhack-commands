@@ -814,12 +814,25 @@ end
 
 targeting = targeting or false
 local saved_tool = nil
+-- THE CLICK THAT OPENED US IS STILL HELD. This is normally started by clicking "Move items" in
+-- the dig-building picker, and that button is released a moment later -- straight into an
+-- overlay watching for exactly that release, which read the map tile under the picker panel as
+-- the destination, announced "that tile is not somewhere a dwarf can stand" and gave up. From
+-- the outside: a menu entry that does nothing.
+--
+-- Adopting the button state once is not enough, because the release still arrives afterwards.
+-- So we ARM instead: the opening click's release is what arms us, and only a press-and-release
+-- made after that counts as picking a spot.
+local armed = false
 
 local function start_targeting()
     local mi = df.global.game.main_interface
     saved_tool = mi.main_designation_selected
     mi.main_designation_selected = df.main_designation_type.NONE
+    armed = false
     targeting = true
+    dfhack.gui.showAnnouncement('move-items: click the spot to move things to ' ..
+                                '(right-click cancels).', COLOR_WHITE, false)
 end
 
 local function stop_targeting()
@@ -835,7 +848,9 @@ TargetOverlay.ATTRS{
     desc = 'move-items: click the spot to move things to.',
     default_pos = {x = -33, y = 6},
     default_enabled = true,
-    viewscreens = 'dwarfmode/Default',
+    -- plain `dwarfmode`, not /Default: with a designation tool selected the focus is
+    -- dwarfmode/Designate/DIG_DIG, and this is opened from the Dig tool
+    viewscreens = 'dwarfmode',
     frame = {w = 32, h = 4},
     overlay_onupdate_max_freq_seconds = 0,
     version = 1,
@@ -869,6 +884,11 @@ function TargetOverlay:overlay_onupdate()
     if not targeting then return end
     local e = df.global.enabler
     local l, r = e.mouse_lbut_down, e.mouse_rbut_down
+    if not armed then                          -- waiting for the opening click to be let go
+        if l ~= 1 and r ~= 1 then armed = true end
+        self.lbut, self.rbut = l, r
+        return
+    end
     local l_rel, r_rel = (l ~= 1 and self.lbut == 1), (r ~= 1 and self.rbut == 1)
     self.lbut, self.rbut = l, r
     if r_rel then
@@ -878,6 +898,13 @@ function TargetOverlay:overlay_onupdate()
     if not l_rel then return end
     local pos = dfhack.gui.getMousePos()
     if not pos then return end                 -- released off the map: not a choice
+    -- A tile nobody can stand on is a MISS, not an answer: stay up and let them click again,
+    -- rather than closing with a one-line complaint.
+    if not walk_group(pos) then
+        dfhack.gui.showAnnouncement(
+            'move-items: nothing could stand there -- pick a floor tile.', COLOR_YELLOW, false)
+        return
+    end
     stop_targeting()
     open_picker(pos)
 end
