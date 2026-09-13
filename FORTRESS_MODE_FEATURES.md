@@ -142,6 +142,31 @@ itself as soon as the replacement wall is handed to `buildingplan`.
 A rewrite of Little Fern Studio's [replace-wall](https://github.com/LittleFernStudio/replace-wall)
 (MIT); see `LICENSE.md`.
 
+### **`fort/move-items`**
+Moves things to a spot you pick. DF has no "carry this to there" — it has *dumping*, which is
+the same order with the controls filed off: you mark items, and haulers take them to whichever
+garbage dump zone suits them, where they land forbidden. This puts the controls back. Reached
+from the `fort/dig-building` picker as **Move items**, beside Replace wall.
+
+Click the destination and it makes a dump zone there and **deletes every other dump zone in the
+fort**, so there is exactly one place a dumped item can go and it is the one you picked. Then a
+picker opens: every kind of item that can actually reach that spot — same walkability group,
+which is DF's own answer to "can a dwarf get from here to there" — one row per kind, with the
+same search, sort, value, quality and wear filters as DFHack's *move goods to depot* screen.
+Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
+behind a row, by distance, if you want to choose among them.
+
+Corpses come as three rows rather than five hundred, because a heap of bodies is three different
+chores wearing one word: **butcherable corpses** (a whole, unrotten animal), **refuse corpses and
+body parts** (an elephant trunk, a goblin, anything left over), and **fallen allies and
+residents** — your own dead, and the merchants and visitors who died here.
+
+It also turns on the three standing orders the haulers need (*gather refuse*, *gather refuse
+outdoors*, *gather outdoor vermin remains*) and says which it changed: a fort with any of them
+off never finishes the job and never says why. When the last item arrives it removes the zone and
+**unforbids everything it moved** — dumped goods land forbidden, and a pile of forbidden goods is
+not a delivery. The job survives a save and reload, and `move-items cancel` calls it off.
+
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
 

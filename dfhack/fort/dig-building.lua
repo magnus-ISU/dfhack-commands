@@ -30,8 +30,9 @@ Beneath that grid, under a rule, sits a separate CUSTOM-TOOL band: this repo's o
 than native DF buildings, one per row across the full width (not in the grid's narrow columns),
 in a hand-written order rather than the alphabetical one, and pinned to the very bottom so it
 never scrolls away. The rule and the full-width layout are the whole separation -- the text is
-plain white like everything else. Today that is `Replace wall` (`fort/dig-replace-walls`);
-anything we add later goes in the same band -- see CUSTOM_ENTRIES.
+plain white like everything else. Today that is `Replace wall` (`fort/dig-replace-walls`) and
+`Move items` (`fort/move-items`); anything we add later goes in the same band -- see
+CUSTOM_ENTRIES.
 
 A custom tool opens its OWN screen, and the picker gets out of its way while it is up: give the
 entry a `focus` prefix and the picker hides (and stops taking input) for as long as that screen
@@ -266,6 +267,11 @@ local CUSTOM_ENTRIES = {
       focus = 'dfhack/lua/dig-replace-walls',
       active = function() return reqscript('fort/dig-replace-walls').painting end,
       run = function() reqscript('fort/dig-replace-walls').show() end}},
+    {'Move items', {'Move items'},
+     {custom = true, alias = {'move', 'haul', 'dump', 'bring', 'fetch'},
+      focus = 'dfhack/lua/move-items',
+      active = function() return reqscript('fort/move-items').active() end,
+      run = function() reqscript('fort/move-items').show() end}},
 }
 local CUSTOM_ROWS = #CUSTOM_ENTRIES + 1   -- the entries plus the rule above them
 
