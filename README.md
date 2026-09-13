@@ -949,9 +949,6 @@ an adamantine door of merely good quality stays a door, and a masterwork lying i
 left for you to place. Each promotion mints a real artifact record with a name from DF's own
 generator, and `undo` takes every one of them back.
 
-### **`fort/cheatmine`**
-Instantly finishes all designated digging and any planned staircases (cheat).
-
 ### **`fort/force-more`**
 Forces attack events the stock `force` can't, like real forgotten-beast cavern attacks.
 
