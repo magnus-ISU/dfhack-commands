@@ -353,7 +353,12 @@ Cut Gem job at a time, posted again whenever that one is finished and the pile i
 be: its ladder — keep 3 raw boulders always, then 3 wafers, 3 thread, 3 cloth, 9 wafers for a
 true throne, and the rest stays raw — counts the adamantine you have set *aside*, and a manager
 order gated on a condition cannot see a forbidden wafer, so it would extract more to replace
-what was merely reserved. One rung at a time, and only what that rung asks for.
+what was merely reserved. One rung at a time, and only what that rung asks for. **Silk webs**
+are the third: it gathers three cobwebs at a time, but only ones hanging inside your emergency
+(civilian alert) burrow, and only while you hold under ten silk thread — *your* thread, not the
+webs, which DF files as silk thread too and so reads as stock you already have. Each job names
+the web it is for, because a plain collect-webs order is gated on that same lying count and
+sends the weaver to whichever web is nearest, cavern included.
 
 ![fort/planner-orders demo](demos/fort-planner-orders.gif)
 

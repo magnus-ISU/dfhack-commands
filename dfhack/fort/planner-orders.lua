@@ -104,6 +104,12 @@ accepting creates it (all conditioned so they only run when sensible):
     count adamantine you have set ASIDE -- a forbidden wafer is still a wafer, and an order
     gated on a condition cannot see one, so it would extract more to replace what is merely
     reserved. Say yes once and the whole ladder is managed for you thereafter.
+  - Silk webs: gathers 3 cobwebs at a time, but ONLY ones hanging inside the fort's emergency
+    (civilian alert) burrow, and only while you hold under 10 silk thread -- counting the
+    thread on your looms and NOT the uncollected webs, which DF files as silk thread too and
+    therefore reads as stock. Also posted as JOBS, and each job NAMES the web it is for: a
+    plain collect-webs order is gated on that same lying count and sends the weaver to whatever
+    web is nearest, cavern included. Needs a Loom. Say yes once and it runs thereafter.
 
 For every order it creates, if the workshop that would make it ISN'T BUILT (e.g. no Soap
 Maker's Workshop, Ashery, Kiln, Loom, Farmer's Workshop, Kitchen, Still, or the right
@@ -710,6 +716,7 @@ local FIXED_WS = {
     LIGNITE_TO_COKE       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     SmeltOre              = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     ExtractMetalStrands   = {label = "a Craftsdwarf's Workshop", ws = df.workshop_type.Craftsdwarfs},
+    CollectWebs           = {label = 'a Loom',                 ws = df.workshop_type.Loom},
     ADAMANTINE_WAFERS     = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     PIG_IRON_MAKING       = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
     STEEL_MAKING          = {label = 'a Smelter',              fu = df.furnace_type.Smelter},
@@ -1309,6 +1316,11 @@ local function post_job(shop, spec)
     job.mat_index = spec.mat_index or -1
     job.item_subtype = spec.item_subtype or -1
     if spec.reaction then job.reaction_name = spec.reaction end
+    -- Item refs go on BEFORE the job reaches its workshop: this is how a gathering job names
+    -- the thing it is for (the particular web to collect), and DF reads them as it takes the job.
+    for _, id in ipairs(spec.item_refs or {}) do
+        job.general_refs:insert('#', {new = df.general_ref_item, item_id = id})
+    end
     for _, it in ipairs(spec.items or {}) do
         local jitem = df.job_item:new()
         jitem.item_type = it.item_type or -1
@@ -1530,6 +1542,12 @@ local ADAM_THRONE = 9      -- ...but hold this many WAFERS once the rest is stoc
                            -- are this many raw boulders spare: nine is a true throne
 local ADAM_BATCH = 1       -- ...one job at a time, so an order reads 1/1, not 3/3
 
+-- SILK WEBS. Gathered in small batches, by hand, and only from webs hanging inside the fort's
+-- emergency (civilian alert) burrow -- the cavern ones are somebody else's problem.
+local SILK_THREAD_KEEP = 10   -- stop once this much silk THREAD is in stock (webs NOT counted)
+local SILK_WEB_MIN = 3        -- ...and only while at least this many silk webs hang inside it
+local SILK_BATCH = 3          -- webs gathered per round, one job each
+
 -- Every bag-consuming order must leave a FLOOR of empty bags behind, or whichever job runs
 -- first eats the last bag and starves the rest -- this fort hit 0 empty bags because milling
 -- sugar kept claiming them the moment they were sewn. Three jobs compete for the pool today
@@ -1548,6 +1566,184 @@ local function lavish_meal_ordered()
         if all[i].job_type == df.job_type.PrepareMeal and all[i].mat_type == LAVISH then return true end
     end
     return false
+end
+
+-- ---- silk webs ---------------------------------------------------------------
+
+-- The burrows of the fort's civilian ("emergency") alert -- the ground the fort retreats onto,
+-- and here the definition of "inside". Read whether or not the alert is currently RAISED: webs
+-- are gathered in peacetime, when it is off, and the burrow still says where inside is.
+local function alert_burrows()
+    local out = {}
+    local al = df.global.plotinfo.alerts
+    local idx, a = al.civ_alert_idx, nil
+    if idx >= 0 and idx < #al.list and #al.list[idx].burrows > 0 then a = al.list[idx] end
+    if not a then   -- the alert is off: civ_alert_idx points at the burrow-less "No alert" row
+        for _, e in ipairs(al.list) do if #e.burrows > 0 then a = e; break end end
+    end
+    if not a then return out end
+    for _, bid in ipairs(a.burrows) do
+        local b = df.burrow.find(bid)
+        if b then out[#out + 1] = b end
+    end
+    return out
+end
+
+-- is this item made of SILK? Cached by material, because the answer is a raw fact and the
+-- caller walks thousands of webs -- decoding each one is the whole cost of the scan.
+local silk_mat = {}
+local function is_silk(it)
+    local key = it:getMaterial() .. ':' .. it:getMaterialIndex()
+    local v = silk_mat[key]
+    if v == nil then
+        local mi = dfhack.matinfo.decode(it)
+        v = false
+        if mi then pcall(function() v = mi.material.flags.SILK end) end
+        silk_mat[key] = v
+    end
+    return v
+end
+
+-- Silk THREAD on the looms -- NOT the webs. DF files an uncollected cobweb as a THREAD item of
+-- the spider's silk, so DF's own silk-thread count (and any manager-order condition on it)
+-- reads a cavern full of cobwebs as a fully stocked loom. `usable_stock` drops `spider_web`,
+-- which is exactly the difference, and it is cheap enough to run before the material decode.
+local function silk_thread_stock()
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.THREAD) do
+        if usable_stock(it) and is_silk(it) then n = n + (it.stack_size or 1) end
+    end
+    return n
+end
+
+-- Webs already spoken for by a queued collect-webs job, so a second round never sends two
+-- dwarves to the same cobweb -- plus how many of those jobs are OURS.
+--
+-- "Ours" means the job names a web (carries an ITEM ref). A fort may well have a plain
+-- collect-webs manager order running as well, and its jobs must not be counted against our
+-- batch: they are the untargeted gathering this ask exists to replace, so letting them hold the
+-- batch shut would mean the webs indoors never get picked while a weaver walks to a cavern.
+local function webs_claimed()
+    local claimed, mine = {}, 0
+    local link = df.global.world.jobs.list.next
+    while link do
+        local j = link.item
+        if j and j.job_type == df.job_type.CollectWebs then
+            local named = false
+            for _, r in ipairs(j.general_refs) do
+                if r:getType() == df.general_ref_type.ITEM then
+                    claimed[r.item_id] = true
+                    named = true
+                end
+            end
+            if named then mine = mine + 1 end
+        end
+        link = link.next
+    end
+    return claimed, mine
+end
+
+-- how many collect-webs jobs this ask has posted and DF has not finished yet
+local function web_jobs_posted()
+    local _, mine = webs_claimed()
+    return mine
+end
+
+-- a web this fort could collect: still hanging, nobody else's, not already spoken for
+local function web_available(it, claimed)
+    local f = it.flags
+    return f.spider_web and not (f.forbid or f.dump or f.in_job or f.hostile or f.trader)
+        and not claimed[it.id]
+end
+
+-- Silk webs hanging INSIDE the emergency burrow, at most `limit` of them.
+--
+-- SAMPLED, never swept. `isAssignedTile` costs ~50us a call -- it walks the burrow's block list
+-- -- and a cavern map carries thousands of webs, so asking the question of every one of them
+-- freezes DF for a fifth of a second. Instead each pass tests 100 webs picked at random and
+-- remembers what it learned, hit or miss, so repeat passes cover new ground instead of redoing
+-- the same work.
+--
+-- What is learned never expires: a web does not move, so "this one hangs inside the burrow" is
+-- true until the web is gone, and gone is checked cheaply on every read. Only the SAMPLING is
+-- rate-limited, and only happens at all while we are still short of webs -- a fort with three
+-- known webs indoors does no work whatsoever.
+--
+-- The one thing that does invalidate the learning is the burrow itself changing shape, so the
+-- tables are dropped when the alert's burrows (or their size) change.
+local WEB_SAMPLE = 100        -- webs examined per sampling pass
+local WEB_SAMPLE_TTL_MS = 10000   -- ...and at most one pass this often. A pass is ~10ms, and
+                                  -- webs indoors are maybe 1% of the webs on a cavern map, so
+                                  -- it takes a handful of passes to turn up three -- a minute
+                                  -- of being short, paid in hitches too small to see.
+local web_known = {}          -- ids confirmed to hang inside the burrow
+local web_tested = {}         -- id -> true for every web the burrow test has answered
+local web_sample_t, web_burrow_sig = nil, nil
+
+-- cheap fingerprint of the alert burrows: which ones, and how big. Changes when the player
+-- redraws the burrow, which is exactly when what we learned stops being true.
+local function burrow_sig(burrows)
+    local parts = {}
+    for _, b in ipairs(burrows) do parts[#parts + 1] = b.id .. ':' .. #b.block_x end
+    return table.concat(parts, ',')
+end
+
+local web_seeded = false
+local function sample_silk_webs(burrows)
+    local now = dfhack.getTickCount()
+    if web_sample_t and now - web_sample_t < WEB_SAMPLE_TTL_MS then return end
+    web_sample_t = now
+    -- seeded from the clock so a reloaded fort does not re-test the same hundred webs it tested
+    -- last session before it learns anything new
+    if not web_seeded then web_seeded = true; math.randomseed(now) end
+    local webs = df.global.world.items.other.ANY_WEBS
+    local n = #webs
+    if n == 0 then return end
+    local claimed = webs_claimed()
+    for _ = 1, math.min(WEB_SAMPLE, n) do
+        local it = webs[math.random(0, n - 1)]
+        -- a web that is claimed or otherwise out of reach is SKIPPED, not recorded: its burrow
+        -- membership was never tested, and marking it would lose the tile for good
+        if it and not web_tested[it.id] and web_available(it, claimed) and is_silk(it) then
+            web_tested[it.id] = true
+            for _, b in ipairs(burrows) do
+                if dfhack.burrows.isAssignedTile(b, it.pos) then
+                    web_known[#web_known + 1] = it.id
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function silk_webs_inside(limit)
+    local burrows = alert_burrows()
+    if #burrows == 0 then return {} end
+    local sig = burrow_sig(burrows)
+    if sig ~= web_burrow_sig then
+        web_burrow_sig, web_known, web_tested, web_sample_t = sig, {}, {}, nil
+    end
+    -- what we already know, minus the webs that have since been taken or spoken for
+    local claimed, out, live = webs_claimed(), {}, {}
+    for _, id in ipairs(web_known) do
+        local it = df.item.find(id)
+        if it and web_available(it, claimed) then
+            live[#live + 1] = id
+            out[#out + 1] = it
+        end
+    end
+    web_known = live
+    if #out >= limit then return out end
+    -- still short: learn about a few more webs, then answer with whatever that added
+    sample_silk_webs(burrows)
+    for _, id in ipairs(web_known) do
+        if #out >= limit then break end
+        local it = df.item.find(id)
+        local seen = false
+        for _, have in ipairs(out) do if have.id == id then seen = true; break end end
+        if it and not seen and web_available(it, claimed) then out[#out + 1] = it end
+    end
+    return out
 end
 
 -- each STANDING entry is a function returning a list of gap descriptors
@@ -2375,6 +2571,59 @@ STANDING = {
                 return DO[step.kind](step.n)
             end}}
     end,
+    function()   -- silk webs: gather the cobwebs inside the emergency burrow, a few at a time
+        -- Posted as JOBS, each one NAMING ITS WEB, for two reasons a manager order cannot meet.
+        -- The cap first: DF counts an uncollected web as silk thread, so a "while silk thread
+        -- under 10" condition reads a cavern of cobwebs as a stocked loom and the order never
+        -- runs. And the place: a plain collect-webs order sends the weaver to whichever web is
+        -- nearest, which on a fort with open caverns means walking out into one. Naming a web
+        -- that hangs inside the emergency burrow keeps the errand indoors.
+        local have = silk_thread_stock()
+        if have >= SILK_THREAD_KEEP then return {} end
+        -- our own queued jobs count against the batch, so clicking twice does not stack rounds
+        local want = math.min(SILK_BATCH, SILK_THREAD_KEEP - have) - web_jobs_posted()
+        if want <= 0 then return {} end
+        local webs = silk_webs_inside(math.max(SILK_WEB_MIN, want))
+        if #webs < SILK_WEB_MIN then return {} end    -- not worth a trip for one or two
+        want = math.min(want, #webs)
+
+        local function gather()
+            local shop = find_shop(FIXED_WS.CollectWebs)
+            if shop then
+                for i = 1, want do
+                    post_job(shop, {job_type = df.job_type.CollectWebs, item_refs = {webs[i].id}})
+                end
+            end
+            return missing_shops({'CollectWebs'})
+        end
+
+        -- Handed over for good, like cut gems and the adamantine ladder: gathering the webs
+        -- indoors is a standing preference, not a fresh question every time the thread runs low.
+        if is_auto('Silk webs') then
+            gather()
+            return {}
+        end
+
+        return {{name = 'Silk webs', shops = {'CollectWebs'},
+            note = ('You have %d silk thread (webs NOT counted) and %d+ silk webs hanging inside\n'):format(
+                    have, #webs)
+                .. 'the emergency burrow.\n\n'
+                .. ('Creates: %d Collect Webs JOB(S), each naming one web inside that burrow.\n\n'):format(want)
+                .. ('Runs while you hold under %d silk thread and at least %d silk webs hang\n'):format(
+                    SILK_THREAD_KEEP, SILK_WEB_MIN)
+                .. 'inside the burrow.\n\n'
+                .. 'Posted as jobs rather than a repeating order for two reasons. DF files an\n'
+                .. 'uncollected web as silk THREAD, so an order gated on "under 10 silk thread"\n'
+                .. 'reads the cobwebs themselves as stock and never runs. And a plain collect-webs\n'
+                .. 'order sends the weaver to the nearest web, cavern included -- naming the web\n'
+                .. 'keeps the trip inside the burrow.\n\n'
+                .. 'Say yes ONCE and the webs indoors are gathered from then on, with nothing more\n'
+                .. 'asked. `planner-orders disable` hands it back.',
+            build = function()
+                set_auto('Silk webs', true)
+                return gather()
+            end}}
+    end,
 }
 
 -- Names for the standing checks above, in the same order, so the status screen can list every
@@ -2488,6 +2737,19 @@ STANDING_INFO = {
         end
         if boulders >= ADAM_THRONE then return wafers >= ADAM_THRONE end
         return true end},
+    {name = 'Silk webs',              blocked = function()
+        if #alert_burrows() == 0 then return 'no civilian alert burrow set' end
+        local have = silk_thread_stock()
+        if have >= SILK_THREAD_KEEP then
+            return ('%d silk thread already, needs under %d (webs not counted)')
+                :format(have, SILK_THREAD_KEEP) end
+        local n = #silk_webs_inside(SILK_WEB_MIN)
+        if n < SILK_WEB_MIN then
+            return ('only %d silk webs inside the alert burrow, needs %d'):format(n, SILK_WEB_MIN) end
+    end,
+                                      done  = function()
+        -- managed counts as done: there is no gap to chase, the tool posts the jobs
+        return is_auto('Silk webs') or web_jobs_posted() > 0 end},
 }
 if #STANDING_INFO ~= #STANDING then
     qerror(('planner-orders: %d standing checks but %d names -- they must stay in step')
