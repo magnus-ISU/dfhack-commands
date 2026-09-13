@@ -34,7 +34,8 @@ Filters (all AND-ed, all optional)
     nonear=<RACE>            that race NOT in range
     civs= / maxcivs= / towers= / maxtowers=
     aquifer / lightaq / noaquifer
-    volcano / volcanoN      a volcano on the tile, or within N tiles
+    volcano / volcanoN      a volcano on the tile, or within N tiles (results say
+                            which: VOLCANO HERE, or "volcano 4 tiles away")
     magma / magmaN / maxmagmaN   magma pool (needs `survey`); magma1 = cavern 1
     calm / savage   savagery under 33 / 66 and over
     good / evil     evilness under 33 / 66 and over
@@ -948,9 +949,12 @@ function describe(r)
     if r.coal then bits[#bits + 1] = 'coal' end
     if r.casts then bits[#bits + 1] = 'casts' end
     if r.ore then bits[#bits + 1] = 'ore' end
-    if r.volcano == 0 then bits[#bits + 1] = 'VOLCANO'
+    -- SAY WHAT THE NUMBER IS. "volcano 4" was read as a volcano on the tile (or as four of
+    -- them); it is the DISTANCE to the nearest one, and a site four tiles from a volcano has
+    -- no volcano on it at all.
+    if r.volcano == 0 then bits[#bits + 1] = 'VOLCANO HERE'
     elseif r.volcano and r.volcano <= 5 then
-        bits[#bits + 1] = ('volcano %d'):format(r.volcano)
+        bits[#bits + 1] = ('volcano %d tile%s away'):format(r.volcano, r.volcano == 1 and '' or 's')
     end
     if r.magma == 3 then bits[#bits + 1] = 'magma: volcano'
     elseif r.magma then bits[#bits + 1] = ('magma: cavern %d'):format(3 - r.magma) end

@@ -286,6 +286,11 @@ local function make_dump_zone(pos)
                   assigned_unit_id = -1},
     })
     if not ok or not bld then return nil end
+    -- ACTIVE, or the zone is drawn greyed out and does nothing: a civzone created through
+    -- constructBuilding comes up switched off, and the flag that turns it on is
+    -- `spec_sub_flag.active` (quickfort sets it on every zone it makes, for the same reason).
+    -- Nothing in the zone's own UI calls this "suspended", but that is what it looks like.
+    pcall(function() bld.spec_sub_flag.active = true end)
     pcall(function() dfhack.buildings.notifyCivzoneModified(bld) end)
     return bld
 end
@@ -853,6 +858,10 @@ TargetOverlay.ATTRS{
     viewscreens = 'dwarfmode',
     frame = {w = 32, h = 4},
     overlay_onupdate_max_freq_seconds = 0,
+    -- the supported way to hide an overlay: a `visible` predicate. Overriding `render` to
+    -- return early instead leaves the framework's frame state unset under a widget the C++
+    -- overlay plugin is about to draw, and DF segfaulted in `render_things` doing it.
+    visible = function() return targeting end,
     version = 1,
 }
 
@@ -870,11 +879,6 @@ function TargetOverlay:init()
             },
         },
     }
-end
-
-function TargetOverlay:render(dc)
-    if not targeting then return end
-    TargetOverlay.super.render(self, dc)
 end
 
 -- The button states are INTS, not booleans, and that matters in Lua: `not 0` is false, so a
