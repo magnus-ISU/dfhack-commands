@@ -15,17 +15,19 @@ cheapest / most renewable material the item can be made from:
                                                    no bars must still be able to comply
     * stone goods (mechanisms, statues, querns,
       millstones, slabs)                        -> obsidian if the fort has usable
-                                                   boulders of it, else gabbro, else
-                                                   unconstrained
+                                                   boulders of it, else whichever
+                                                   unrestricted stone it has most of,
+                                                   else unconstrained
 
 If a mandate demands a specific material, that material is used instead.
 
 Obsidian is preferred for stone goods because it is worthless to trade and endlessly
 renewable from a magma/water casting setup, so spending it on a noble's whim costs
-nothing; gabbro is the fallback, being the commonest dull stone in most forts. Either is
-skipped when the stone-use settings hold it back as an economic stone (obsidian is one of
-DF's defaults) -- an order pinned to a stone the masons will not touch is worse than an
-open one, since an unmade mandate is a punished mandate. Run `auto-mandate`
+nothing. Failing that it takes whichever stone the fort has MOST boulders of, which is the
+one it can least miss -- on a fort cut out of gabbro that is gabbro, without having to name
+it. Any stone the stone-use settings hold back as economic (obsidian is one of DF's defaults)
+is skipped: an order pinned to a stone the masons will not touch is worse than an open one,
+since an unmade mandate is a punished mandate. Run `auto-mandate`
 and the reason is printed next to the order.
 
 Every order queued is announced in the report log -- who mandated it, and what was
@@ -211,6 +213,55 @@ local function usable_stone(token, amount)
     return nil, ('no %s boulders in stock'):format(name)
 end
 
+-- The stone to spend on a whim: whichever the fort has MOST of, among the ones its own
+-- stone-use settings have not held back.
+--
+-- Most plentiful is the right rule for the same reason cheapest is right for metal -- it is the
+-- stone the fort can least miss, and on a fort cut out of gabbro that is gabbro without having
+-- to name it. Economic stones are skipped exactly as obsidian is: an order pinned to a stone
+-- the masons will not touch is worse than an open one.
+local function pick_stone(amount)
+    local econ = df.global.plotinfo.economic_stone
+    local by, out = {}, {}
+    for _, it in ipairs(df.global.world.items.other.BOULDER) do
+        if it.mat_type == 0 then
+            local key = it.mat_index
+            if by[key] == nil then
+                local ok = false
+                if not (key < #econ and econ[key] == 1) then
+                    pcall(function()
+                        local mi = dfhack.matinfo.decode(0, key)
+                        ok = mi and mi.material.flags.IS_STONE or false
+                    end)
+                end
+                if ok then
+                    by[key] = {mat_index = key, n = 0}
+                    out[#out + 1] = by[key]
+                else
+                    by[key] = false
+                end
+            end
+            if by[key] then by[key].n = by[key].n + 1 end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.n ~= b.n then return a.n > b.n end
+        return a.mat_index < b.mat_index          -- stable when two piles are the same size
+    end)
+    local function name_of(idx)
+        local mi = dfhack.matinfo.decode(0, idx)
+        return mi and mi:toString() or 'stone'
+    end
+    for _, st in ipairs(out) do
+        if st.n >= amount then return 0, st.mat_index, name_of(st.mat_index) end
+    end
+    local st = out[1]
+    if st then                              -- nothing has enough: the biggest pile, and say so
+        return 0, st.mat_index, name_of(st.mat_index),
+               ('only %d boulder%s'):format(st.n, st.n == 1 and '' or 's')
+    end
+end
+
 -- is this material in stock as a craftable input (bar/boulder/log/block)?
 local function material_in_stock(mt, mi)
     for _, name in ipairs({'BAR', 'BOULDER', 'WOOD', 'BLOCKS'}) do
@@ -307,14 +358,17 @@ function choose_material(o, policy, m, amount)
         -- fort cut out of it, and no more valuable than the floor it came from. Only when
         -- neither is available (or the stone settings hold it back) is the order left open,
         -- which is the one thing that cannot fail outright.
-        local why
-        for _, token in ipairs({'OBSIDIAN', 'GABBRO'}) do
-            local st, reason = usable_stone(token, amount)
-            if st then
-                o.mat_type, o.mat_index = st.type, st.index
-                return token:lower()
-            end
-            why = why and (why .. '; ' .. reason) or reason
+        local ob, why = usable_stone('OBSIDIAN', amount)
+        if ob then
+            o.mat_type, o.mat_index = ob.type, ob.index
+            return 'obsidian'
+        end
+        local mt, mi, name, short = pick_stone(amount)
+        if mt then
+            o.mat_type, o.mat_index = mt, mi
+            -- one parenthetical, not two: why obsidian was passed over, and (if it applies)
+            -- that even this pile is smaller than the mandate
+            return ('%s (%s)'):format(name, short and (why .. '; ' .. short) or why)
         end
         return 'any material (' .. why .. ')'
     end

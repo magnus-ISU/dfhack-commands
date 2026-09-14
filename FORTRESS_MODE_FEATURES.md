@@ -608,8 +608,10 @@ backed by one copper bar stalls after the first, and a stalled mandate is a puni
 it moves to the next material the fort actually has. Metals are ranked cheapest first (ties to
 whichever there is more of) and filtered to things that can actually be forged into items —
 `items.other.BAR` also holds coal and pearlash, and bismuth is an alloy ingredient, none of which
-make an earring. **Stone goods** take obsidian (worthless and renewable), then **gabbro**, then
-an unpinned order; either stone is skipped when the fort's stone-use settings hold it back, since
+make an earring. **Stone goods** take obsidian (worthless and renewable), and
+failing that **whichever stone the fort has most boulders of** — the one it can least miss, which
+on a fort cut out of gabbro is gabbro and on one cut out of sandstone is sandstone, without having
+to name either. Stones the fort's own stone-use settings hold back as economic are skipped, since
 an order pinned to a stone the masons will not touch is worse than an open one.
 
 ### **`fort/auto-elf-chop`**
