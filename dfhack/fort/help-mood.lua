@@ -1844,9 +1844,69 @@ local function spoken_class(ji)
     return nil          -- generic requirement: spoken as the requirement reads
 end
 
-local function spoken_demand(job)
+-- A SECRETIVE DWARF DRAWS THE THING, and DF gives the drawing its own vocabulary -- not the
+-- material, and not the words the other moods use. Bones are sketched as SKELETONS, stone as
+-- a quarry, wood as a forest, metal bars as shining bars of metal. Saying "sketches pictures
+-- of any bone" is our words in DF's sentence; "sketches pictures of skeletons" is the line the
+-- game actually prints. From the wiki's Strange mood table, which lists a demand's wording for
+-- each kind of mood separately.
+--
+-- Categories first, item types second, because the requirement that matters most here -- bone
+-- -- is a CORPSEPIECE carrying a category bit, and so are shell and leather (see CORPSE_FLAG).
+local SKETCH_CATEGORY = {
+    bone = 'skeletons',
+    skull = 'death',
+    shell = 'shells',
+    leather = 'stacked leather',
+    silk = 'stacked cloth',
+    yarn = 'stacked cloth',
+    plant = 'stacked cloth',
+}
+
+local SKETCH_ITEM = {}
+local function sketch_item(name, word)
+    local t = df.item_type[name]
+    if t ~= nil then SKETCH_ITEM[t] = word end
+end
+sketch_item('BOULDER', 'a quarry')
+sketch_item('WOOD', 'a forest')
+sketch_item('BAR', 'shining bars of metal')
+sketch_item('BLOCKS', 'square blocks')
+sketch_item('SMALLGEM', 'cut gems')
+sketch_item('ROUGH', 'rough gems')          -- ...unless the rough thing is glass, below
+sketch_item('SKIN_TANNED', 'stacked leather')
+sketch_item('CLOTH', 'stacked cloth')
+sketch_item('THREAD', 'stacked cloth')
+sketch_item('CORPSEPIECE', 'skeletons')
+sketch_item('SHELL', 'shells')
+
+local SKETCH_GLASS = {
+    [df.builtin_mats.GLASS_GREEN] = 'glass',
+    [df.builtin_mats.GLASS_CLEAR] = 'glass and burning wood',
+    [df.builtin_mats.GLASS_CRYSTAL] = 'rough gems and glass',
+}
+
+-- what a secretive dwarf's sketch is OF, or nil if we have no word for it and the ordinary
+-- demand should be spoken instead
+function sketch_demand(ji)
+    if not ji then return nil end
+    local glass = SKETCH_GLASS[ji.mat_type]
+    if glass then return glass end
+    for bit, word in pairs(SKETCH_CATEGORY) do
+        local wanted = false
+        pcall(function() wanted = ji.flags2[bit] end)
+        if wanted then return word end
+    end
+    return SKETCH_ITEM[ji.item_type]
+end
+
+local function spoken_demand(job, mood)
     local _, ji = current_step(job, {})
     if not ji then return nil end
+    if mood == df.mood_type.Secretive then
+        local drawn = sketch_demand(ji)
+        if drawn then return drawn end
+    end
     local class = spoken_class(ji)
     local noun = SPOKEN_NOUN[ji.item_type]
     if class and noun then return ('%s... %s...'):format(noun, class) end
@@ -1896,7 +1956,7 @@ function moody_message()
     -- stuck: name the thing, and once it has gone on long enough, say how long
     local want = wanted_now(job) or 'something'
     local days = stall_days(unit, job)
-    local spoken = spoken_demand(job) or want
+    local spoken = spoken_demand(job, unit.mood) or want
     local said
     if unit.mood == df.mood_type.Possessed then
         -- DF names the artifact in this one: "The Flighty Shrine requires bars... metal..."

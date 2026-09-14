@@ -529,10 +529,16 @@ since that is what decides the base material and whether the fort can supply it 
 `unit.job.mood_skill` when the mood begins, so it is known before a workshop is claimed.
 
 The status line quotes the dwarf the way DF does — a fey or fell dwarf *screams, "I must have rock
-blocks!"*, a secretive one *sketches pictures of* it, a possessed one names the artifact and trails off the
-way DF does, *mutters, "The Flighty Shrine requires bars... metal..."*, a macabre one *broods, "Yes. I need
-…"*. A dwarf never says the specific material: where the mood wants iron bars he asks for *bars... metal…*,
-and only a requirement that is already generic ("rock blocks") is spoken as it reads.
+blocks!"*, a possessed one names the artifact and trails off the way DF does, *mutters, "The Flighty Shrine
+requires bars... metal..."*, a macabre one *broods, "Yes. I need …"*. A dwarf never says the specific
+material: where the mood wants iron bars he asks for *bars... metal…*, and only a requirement that is
+already generic ("rock blocks") is spoken as it reads.
+
+**A secretive dwarf draws it instead**, and DF gives the drawing its own vocabulary — so that is the
+vocabulary used: bone is sketched as *skeletons*, stone as *a quarry*, wood as *a forest*, metal bars as
+*shining bars of metal*, blocks as *square blocks*, leather and cloth as *stacked* leather and cloth, a
+skull as *death*, and clear glass as *glass and burning wood*. Not the requirement's own name in DF's
+sentence — the line DF actually prints.
 
 Items the dwarf cannot walk to are listed last and marked `UNREACHABLE`, and the picker refuses to take
 one — hiding them made the panel claim the fort had nothing when it held twenty-five blocks across a
