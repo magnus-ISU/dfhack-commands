@@ -751,6 +751,15 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/clickable-job-worker`**
+A building's Tasks list tells you somebody is on a job — the row carries the green check DF
+draws for a claimed task — and then refuses to say who. Click that row (the check, the job's
+name, the space around them) and the worker's sheet opens with the camera following them. Only
+rows that actually have a worker are taken; a job nobody has picked up is left to DF entirely,
+which is every row on a quiet workshop. Rows are identified by reading the line — `job.getName`
+returns exactly the string DF drew — so a scrolled list still hands back the right dwarf, and
+two rows with the same name are matched to those jobs in order.
+
 ### **`fort/clickable-broker`**
 The Trade Depot's sheet names your broker, says what they are doing and whether they can even
 reach the depot — and then does nothing with any of it. This makes that block live: click the
