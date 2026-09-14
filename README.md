@@ -642,6 +642,18 @@ Soldiers whose squad is under orders are left to those orders.
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.
 
+**Jewelry is metal, not wood**: a wooden earring is legal and worthless, so amulets, rings,
+bracelets, earrings, crowns and scepters follow the cage rule — copper if there is any, then
+any metal, then wood, so a fort with no bars can still comply. And every choice asks whether
+there is **enough for the whole mandate**, not whether there is one: a mandate for ten earrings
+backed by one copper bar stalls after the first, and a stalled mandate is a punished mandate, so
+it moves to the next material the fort actually has. Metals are ranked cheapest first (ties to
+whichever there is more of) and filtered to things that can actually be forged into items —
+`items.other.BAR` also holds coal and pearlash, and bismuth is an alloy ingredient, none of which
+make an earring. **Stone goods** take obsidian (worthless and renewable), then **gabbro**, then
+an unpinned order; either stone is skipped when the fort's stone-use settings hold it back, since
+an order pinned to a stone the masons will not touch is worse than an open one.
+
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
 

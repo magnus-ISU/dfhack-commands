@@ -5,7 +5,7 @@
 Queues a manager work order for each unfulfilled "Make" mandate, choosing the
 cheapest / most renewable material the item can be made from:
 
-    * craft / jewelry items (amulet, ring, ...) -> wood
+    * craft / jewelry items (amulet, ring, ...) -> copper (else any metal, else wood)
     * furniture & wooden goods                  -> wood
     * metal gear (weapons, armor, ...)          -> copper
     * coins (minted from a metal bar)           -> copper (else any metal bar)
@@ -15,15 +15,17 @@ cheapest / most renewable material the item can be made from:
                                                    no bars must still be able to comply
     * stone goods (mechanisms, statues, querns,
       millstones, slabs)                        -> obsidian if the fort has usable
-                                                   boulders of it, else unconstrained
+                                                   boulders of it, else gabbro, else
+                                                   unconstrained
 
 If a mandate demands a specific material, that material is used instead.
 
 Obsidian is preferred for stone goods because it is worthless to trade and endlessly
 renewable from a magma/water casting setup, so spending it on a noble's whim costs
-nothing. It is skipped when the stone-use settings hold obsidian back as an economic
-stone (DF's default) -- an order pinned to a stone the masons will not touch is worse
-than an open one, since an unmade mandate is a punished mandate. Run `auto-mandate`
+nothing; gabbro is the fallback, being the commonest dull stone in most forts. Either is
+skipped when the stone-use settings hold it back as an economic stone (obsidian is one of
+DF's defaults) -- an order pinned to a stone the masons will not touch is worse than an
+open one, since an unmade mandate is a punished mandate. Run `auto-mandate`
 and the reason is printed next to the order.
 
 Every order queued is announced in the report log -- who mandated it, and what was
@@ -55,9 +57,13 @@ local W, C, A, S, CW = 'wood', 'copper', 'any', 'stone', 'copper_else_wood'
 local RAW = {
     -- jewelry/craft goods: use the SPECIFIC make-job (NOT generic "make crafts",
     -- which makes a random item and would not satisfy the mandate)
-    {'AMULET', 'MakeAmulet', W, 'fixed'}, {'RING', 'MakeRing', W, 'fixed'},
-    {'BRACELET', 'MakeBracelet', W, 'fixed'}, {'EARRING', 'MakeEarring', W, 'fixed'},
-    {'CROWN', 'MakeCrown', W, 'fixed'}, {'SCEPTER', 'MakeScepter', W, 'fixed'},
+    -- JEWELRY IS METAL, not wood. A wooden earring is legal and worthless -- the noble who
+    -- mandated it gets a trinket worth three dwarfbucks, and the fort spends a log on it --
+    -- so these follow the cage rule instead: copper if there is any, then any metal, then
+    -- wood, so a fort with no bars can still comply.
+    {'AMULET', 'MakeAmulet', CW, 'fixed'}, {'RING', 'MakeRing', CW, 'fixed'},
+    {'BRACELET', 'MakeBracelet', CW, 'fixed'}, {'EARRING', 'MakeEarring', CW, 'fixed'},
+    {'CROWN', 'MakeCrown', CW, 'fixed'}, {'SCEPTER', 'MakeScepter', CW, 'fixed'},
     {'FIGURINE', 'MakeFigurine', W, 'fixed'},
     {'TOY', 'MakeToy', W, 'fixed'}, {'GOBLET', 'MakeGoblet', W, 'fixed'},
     {'FLASK', 'MakeFlask', W, 'fixed'}, {'CAGE', 'MakeCage', CW, 'fixed'},
@@ -105,41 +111,104 @@ local function wood_logs()
     return #df.global.world.items.other.WOOD
 end
 
+-- HOW MANY, not whether. A mandate for ten earrings backed by one copper bar is an order that
+-- stalls after the first, and a stalled mandate is a punished mandate -- so every choice below
+-- asks for enough to finish the job and moves on to the next material when the fort is short.
 local function bars_of(mat_type, mat_index)
-    local bars = df.global.world.items.other.BAR
-    for i = 0, #bars - 1 do
-        local it = bars[i]
-        if it.mat_type == mat_type and it.mat_index == mat_index then return true end
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        if it.mat_type == mat_type and it.mat_index == mat_index then n = n + (it.stack_size or 1) end
     end
-    return false
+    return n
 end
 
-local function any_metal_bar()
-    local bars = df.global.world.items.other.BAR
-    if #bars > 0 then return bars[0].mat_type, bars[0].mat_index end
+-- Every METAL the fort holds bars of, cheapest first.
+--
+-- Two traps here, both found in this fort's own stock. `items.other.BAR` is not a metal list:
+-- it holds coal and pearlash too (28 and 9 bars of them here), so a bare scan offers to forge
+-- an earring out of coke. And a metal that cannot be made into items -- bismuth, an alloy
+-- ingredient -- is no better. So the list is filtered to IS_METAL plus ITEMS_HARD, the same
+-- test `quick-order` uses to reject impossible orders.
+--
+-- Cheapest first, because this tool spends materials on a noble's whim: value ascending, ties
+-- broken by whichever there is more of. Sorting by quantity alone happily forges silver
+-- trinkets while the copper sits there.
+local function metal_stocks()
+    local by, out = {}, {}
+    for _, it in ipairs(df.global.world.items.other.BAR) do
+        local key = it.mat_type .. ':' .. it.mat_index
+        if by[key] == nil then
+            local usable, value = false, 0
+            pcall(function()
+                local mi = dfhack.matinfo.decode(it.mat_type, it.mat_index)
+                local mat = mi and mi.material
+                if mat and mat.flags.IS_METAL and mat.flags.ITEMS_HARD then
+                    usable = true
+                    value = mat.material_value or 0
+                end
+            end)
+            if usable then
+                by[key] = {mat_type = it.mat_type, mat_index = it.mat_index, n = 0, value = value}
+                out[#out + 1] = by[key]
+            else
+                by[key] = false
+            end
+        end
+        if by[key] then by[key].n = by[key].n + (it.stack_size or 1) end
+    end
+    table.sort(out, function(a, b)
+        if a.value ~= b.value then return a.value < b.value end
+        return a.n > b.n
+    end)
+    return out
 end
 
--- Obsidian for stone goods -- but only when the masons would actually pick it up. Returns the
+-- the best metal for `amount` items: copper if there is enough, else the most plentiful metal
+-- that has enough, else the most plentiful metal there is (better a short order than none)
+function pick_metal(amount)   -- module-level: checkable from the command line
+    local cu = dfhack.matinfo.find('COPPER')
+    if cu and bars_of(cu.type, cu.index) >= amount then return cu.type, cu.index, 'copper' end
+    local stocks = metal_stocks()
+    for _, m in ipairs(stocks) do
+        if m.n >= amount then
+            local info = dfhack.matinfo.decode(m.mat_type, m.mat_index)
+            return m.mat_type, m.mat_index, info and info:toString() or 'metal'
+        end
+    end
+    local m = stocks[1]
+    if m then
+        local info = dfhack.matinfo.decode(m.mat_type, m.mat_index)
+        return m.mat_type, m.mat_index,
+               ('%s (only %d bar%s)'):format(info and info:toString() or 'metal', m.n,
+                                             m.n == 1 and '' or 's')
+    end
+end
+
+-- A stone for stone goods -- but only when the masons would actually pick it up. Returns the
 -- matinfo, or nil plus the reason it was passed over.
 --
 -- A stone flagged in `economic_stone` is held back by the fort's stone-use settings for its
 -- industrial purpose (obsidian is one of DF's defaults, alongside the ores, gems and flux).
 -- Pinning an order to a held-back stone risks queueing work nobody picks up, and an unmade
--- mandate is a PUNISHED mandate -- so a restricted obsidian counts as "not available" and we
--- leave the material open instead.
-local function usable_obsidian()
-    local ob = dfhack.matinfo.find('OBSIDIAN')
-    if not ob then return nil, 'no obsidian in this world' end
+-- mandate is a PUNISHED mandate -- so a restricted stone counts as "not available" and we try
+-- the next one instead.
+local function usable_stone(token, amount)
+    local st = dfhack.matinfo.find(token)
+    local name = token:lower()
+    if not st then return nil, ('no %s in this world'):format(name) end
     local econ = df.global.plotinfo.economic_stone
     -- economic_stone is a 0/1 vector, NOT booleans -- and 0 is truthy in Lua, so a bare
     -- `if econ[i]` reads every stone as restricted. Compare explicitly.
-    if ob.index < #econ and econ[ob.index] == 1 then
-        return nil, 'obsidian is restricted in the stone-use settings'
+    if st.index < #econ and econ[st.index] == 1 then
+        return nil, ('%s is restricted in the stone-use settings'):format(name)
     end
+    local n = 0
     for _, it in ipairs(df.global.world.items.other.BOULDER) do
-        if it.mat_type == ob.type and it.mat_index == ob.index then return ob end
+        if it.mat_type == st.type and it.mat_index == st.index then n = n + 1 end
     end
-    return nil, 'no obsidian boulders in stock'
+    if n >= (amount or 1) then return st end
+    if n > 0 then return nil, ('only %d %s boulder%s'):format(n, name, n == 1 and '' or 's') end
+    return nil, ('no %s boulders in stock'):format(name)
 end
 
 -- is this material in stock as a craftable input (bar/boulder/log/block)?
@@ -179,8 +248,18 @@ end
 
 -- pick a material the order can actually be made from. Returns a description, or
 -- nil if it cannot be fulfilled at all (so the caller skips it).
-local function choose_material(o, policy, m)
-    -- a mandate that demands a specific material: honour it (no substitution)
+-- Pick a material the order can actually be made from, IN THE AMOUNT THE MANDATE ASKS FOR.
+-- Returns a description, or nil if it cannot be fulfilled at all (so the caller skips it).
+--
+-- Every branch asks "have I got enough for all of them", not "have I got one", and falls
+-- through to the next material when the answer is no. A mandate is a deadline with a
+-- punishment on the end of it: an order pinned to a material that runs out after the third
+-- earring is worse than an order made of something duller that finishes.
+-- module-level so a running fort can be asked what it would choose, without queueing
+function choose_material(o, policy, m, amount)
+    amount = math.max(1, amount or 1)
+    -- a mandate that demands a specific material: honour it (no substitution -- the noble
+    -- asked for that, and a substitute does not satisfy the mandate however much of it we have)
     if m.mat_type and m.mat_type >= 0 then
         o.mat_type = m.mat_type
         o.mat_index = m.mat_index
@@ -188,48 +267,54 @@ local function choose_material(o, policy, m)
         return mi and mi:toString() or 'specified material'
     end
     if policy == W then
-        if wood_logs() > 0 then
+        if wood_logs() >= amount then
             o.material_category.wood = true
             return 'wood'
         end
-        return 'any material'   -- no wood: leave unconstrained (stone/bone/...)
-    elseif policy == C then
-        local cu = dfhack.matinfo.find('COPPER')
-        if cu and bars_of(cu.type, cu.index) then
-            o.mat_type, o.mat_index = cu.type, cu.index
-            return 'copper'
+        local mt, mi, name = pick_metal(amount)
+        if mt then                                  -- no wood: metal will do for furniture
+            o.mat_type, o.mat_index = mt, mi
+            return name .. ' (not enough wood)'
         end
-        local mt, mi = any_metal_bar()        -- fall back to any metal in stock
+        return 'any material'   -- nothing to pin to: leave unconstrained (stone/bone/...)
+    elseif policy == C then
+        local mt, mi, name = pick_metal(amount)
         if mt then
             o.mat_type, o.mat_index = mt, mi
-            local info = dfhack.matinfo.decode(mt, mi)
-            return info and info:toString() or 'metal'
+            return name
         end
         return nil   -- no metal at all: cannot fulfil
     elseif policy == CW then
-        -- copper first, then any metal, then wood: a metal cage is the better mandate good
-        -- (higher value, fireproof) but must never make the mandate impossible
-        local cu = dfhack.matinfo.find('COPPER')
-        if cu and bars_of(cu.type, cu.index) then
-            o.mat_type, o.mat_index = cu.type, cu.index
-            return 'copper'
-        end
-        local mt, mi = any_metal_bar()
-        if mt then
+        -- copper first, then any metal with enough bars, then wood: the metal one is worth far
+        -- more to the noble who mandated it, but must never make the mandate impossible
+        local mt, mi, name = pick_metal(amount)
+        if mt and not name:find('only %d') then
             o.mat_type, o.mat_index = mt, mi
-            local info = dfhack.matinfo.decode(mt, mi)
-            return info and info:toString() or 'metal'
+            return name
         end
-        if wood_logs() > 0 then
+        if wood_logs() >= amount then
             o.material_category.wood = true
-            return 'wood (no metal bars)'
+            return mt and 'wood (not enough metal bars)' or 'wood (no metal bars)'
+        end
+        if mt then                                  -- short of both: the metal is worth more
+            o.mat_type, o.mat_index = mt, mi
+            return name
         end
         return 'any material'
     elseif policy == S then
-        local ob, why = usable_obsidian()
-        if ob then
-            o.mat_type, o.mat_index = ob.type, ob.index
-            return 'obsidian'
+        -- Obsidian first: worthless to trade and endlessly renewable from a magma/water cast,
+        -- so spending it on a whim costs nothing. GABBRO next -- the commonest dull stone in a
+        -- fort cut out of it, and no more valuable than the floor it came from. Only when
+        -- neither is available (or the stone settings hold it back) is the order left open,
+        -- which is the one thing that cannot fail outright.
+        local why
+        for _, token in ipairs({'OBSIDIAN', 'GABBRO'}) do
+            local st, reason = usable_stone(token, amount)
+            if st then
+                o.mat_type, o.mat_index = st.type, st.index
+                return token:lower()
+            end
+            why = why and (why .. '; ' .. reason) or reason
         end
         return 'any material (' .. why .. ')'
     end
@@ -337,7 +422,7 @@ local function scan_and_queue()
                     o.frequency = 0
                     o.status.validated = true
                     o.status.active = true
-                    local matdesc = choose_material(o, map.mat, m)
+                    local matdesc = choose_material(o, map.mat, m, m.amount_remaining)
                     if matdesc then
                         local mo = df.global.world.manager_orders
                         o.id = mo.manager_order_next_id
