@@ -206,7 +206,10 @@ residents** — your own dead, and the merchants and visitors who died here.
 It also turns on the three standing orders the haulers need (*gather refuse*, *gather refuse
 outdoors*, *gather outdoor vermin remains*) and says which it changed: a fort with any of them
 off never finishes the job and never says why. While the haul runs, DFHack's notification panel
-carries a **"Moving N items"** line — click it to look at the destination.
+carries a **"Moving N items"** line, and clicking it walks the items still on their way — one
+per click, so you can see where each has got to (an item being carried shows you the hauler).
+The announcement when the delivery lands is a zoom announcement, so clicking *that* recentres
+the map on the finished pile.
 
 Starting a delivery **unmarks everything else the fort had marked for dumping** and **cancels any
 delivery already in flight** (it says how many of each). Both for the same reason it deletes the

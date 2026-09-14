@@ -21,12 +21,18 @@ custom-tool band beside Replace wall), it runs the whole errand:
      screen uses. Say how many of each you want and it marks the CLOSEST ones.
   4. It marks them for dumping, sets the three standing orders the haulers need, and gets
      out of the way -- and reports "Moving N items" in DFHack's notification panel for as
-     long as the haul takes (click it to look at the destination).
+     long as the haul takes. Clicking that line walks the items still on their way, one per
+     click, so you can see where each has got to.
+
+     Anything you mark for dumping yourself while it runs JOINS the delivery: with one dump
+     zone in the fort it was going to that spot anyway, and joining is what gets it counted,
+     waited for, and unforbidden with the rest.
      Starting a delivery first UNMARKS everything else the fort had marked for dumping, and
      cancels any delivery already in flight: there is one dump zone and one set of marks, so
      two deliveries at once would land in each other's pile.
   5. When the last one has arrived it deletes the zone and UNFORBIDS everything it moved --
-     dumped items land forbidden, and a pile of forbidden goods is not a delivery.
+     dumped items land forbidden, and a pile of forbidden goods is not a delivery. That last
+     announcement carries the destination, so clicking it recentres the map on the pile.
 
 Nothing is done at all unless you pick both a place and at least one item.
 
@@ -368,11 +374,20 @@ function finish(quiet)
     if not s then return false end
     remove_zone(s.zone_id)
     local n = unforbid(s.items or {})
+    local target = s.target
     clear_state()
     if not quiet then
-        dfhack.gui.showAnnouncement(
-            ('move-items: delivery finished -- %d item(s) unforbidden, dump zone removed.')
-            :format(n), COLOR_GREEN, true)
+        local text = ('move-items: delivery finished -- %d item(s) unforbidden, dump zone removed.')
+            :format(n)
+        -- A ZOOM announcement, so the line recentres the map on the pile when you click it (or
+        -- press the recentre key). "It arrived" is not much use without "and it is over there":
+        -- the whole point of the delivery was a place, and this is the one message that names it.
+        local ok = false
+        if target then
+            ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.CANCEL_JOB,
+                       xyz2pos(target.x, target.y, target.z), text, COLOR_GREEN, true)
+        end
+        if not ok then pcall(dfhack.gui.showAnnouncement, text, COLOR_GREEN, true) end
     end
     return true
 end
@@ -461,9 +476,38 @@ WatchOverlay.ATTRS{
     version = 3,
 }
 
+-- ANYTHING ELSE YOU MARK FOR DUMPING JOINS THE DELIVERY.
+--
+-- While a delivery is running there is exactly one dump zone in the fort -- this tool deleted
+-- the others -- so an item marked by hand IS going to the same spot whether we adopt it or
+-- not. Adopting it is what makes the rest true: it is counted in "Moving N items", the
+-- delivery is not declared finished while it is still walking, and it is unforbidden with
+-- everything else when it lands. Left unadopted it would arrive forbidden, on a pile the tool
+-- had already cleaned up and forgotten.
+local function adopt_new_dumps(s)
+    local known = {}
+    for _, id in ipairs(s.items or {}) do known[id] = true end
+    local added = 0
+    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+        if it.flags.dump and not known[it.id] then
+            s.items[#s.items + 1] = it.id
+            known[it.id] = true
+            added = added + 1
+        end
+    end
+    if added > 0 then
+        save_state(s)
+        dfhack.gui.showAnnouncement(
+            ('move-items: %d newly dumped item(s) joined the delivery.'):format(added),
+            COLOR_WHITE, false)
+    end
+    return added
+end
+
 function WatchOverlay:overlay_onupdate()
     local s = load_state()
     if not s then moving_count = 0; return end
+    adopt_new_dumps(s)
     local left = #still_pending(s.items or {})
     if left == 0 then
         moving_count = 0
@@ -486,10 +530,36 @@ local function notify_message()
     return {{text = ('Moving %d item%s'):format(left, left == 1 and '' or 's'), pen = COLOR_WHITE}}
 end
 
+-- Clicking the line walks the items that have not arrived yet, one per click -- the same
+-- cycle-zoom the fort's other notifications use. "Moving 7 items" answers how many; WHICH
+-- seven, and where they have got to, is the question you click for. An item being carried
+-- reports the hauler's position, since that is where it is.
+local notify_cycle = 0
+
 local function notify_click()
     local s = load_state()
-    if not s or not s.target then return end
-    dfhack.gui.revealInDwarfmodeMap(xyz2pos(s.target.x, s.target.y, s.target.z), true, true)
+    if not s then return end
+    local pending = still_pending(s.items or {})
+    if #pending == 0 then
+        if s.target then
+            dfhack.gui.revealInDwarfmodeMap(xyz2pos(s.target.x, s.target.y, s.target.z), true, true)
+        end
+        return
+    end
+    -- skip over anything that has stopped having a position (eaten, melted, hauled into a
+    -- container that is itself in flight) rather than sitting on a dead item forever
+    for _ = 1, #pending do
+        notify_cycle = (notify_cycle % #pending) + 1
+        local it = df.item.find(pending[notify_cycle])
+        local x, y, z = nil, nil, nil
+        if it then x, y, z = dfhack.items.getPosition(it) end
+        if x and x >= 0 then
+            df.global.plotinfo.follow_unit = -1
+            df.global.plotinfo.follow_item = -1
+            dfhack.gui.revealInDwarfmodeMap(xyz2pos(x, y, z), true, true)
+            return
+        end
+    end
 end
 
 local function register_notification()
