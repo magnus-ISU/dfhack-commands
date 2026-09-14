@@ -709,6 +709,22 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/improve-minecart-selector`**
+*Choose a vehicle for Route 9* lists every minecart in the fort as `gabbro minecart`, over and
+over, with nothing to tell them apart but a footnote about which route already has one. This
+writes **what each cart is carrying** after its name — `+gabbro minecart+ (833 lava)`, in the
+liquid's own colour — and **sorts the list** in the order that decides whether a cart is
+any use to you: *None*, then unassigned carts (lava, water, empty), then carts already hitched
+to another route (lava, water, empty), then the unreachable ones (same again). A cart you cannot
+reach is no use whatever it holds; one already on a route costs that route its vehicle; and after
+that, what is in it decides.
+
+Reachability is DF's own walkability groups — the cart's tile and the route's first stop in the
+same group is exactly "can a dwarf get from one to the other", answered from a field rather than
+a path search; checked row for row against DF's own *Inaccessible from first stop* on a 26-cart
+list. The sort reorders DF's display list itself, so clicking a row still picks the cart that row
+shows.
+
 ### **`fort/clickable-job-worker`**
 A building's Tasks list tells you somebody is on a job — the row carries the green check DF
 draws for a claimed task — and then refuses to say who. Click that row (the check, the job's
