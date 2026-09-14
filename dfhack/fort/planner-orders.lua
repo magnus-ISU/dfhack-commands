@@ -1454,6 +1454,9 @@ end
 local ASH_MAT, LYE_MAT = 9, 11
 local POTASH_MAT, PEARLASH_MAT = 8, 10
 local GLASS_CLEAR_MAT = 4        -- builtin material id for clear glass
+local GLASS_GREEN_MAT = 3        -- ...and for green
+local GLASS_RAW_KEEP = 5         -- keep this many RAW glass of a colour once it is being made
+local GLASS_GEM_KEEP = 5         -- ...and this many cut glass gems of it
 -- The leather-bag rule, for when a bag order is made from hides rather than cloth: a batch of
 -- FIVE, and never while the fort holds fewer than eight tanned hides. Leather is what a mood
 -- most often demands and the slowest input to replace, so it gets a deeper reserve than the
@@ -1532,7 +1535,6 @@ local SYRUP_CAP = 100      -- stop pressing syrup once this much is in stock
 local ROCK_NUT_MIN = 100   -- only press nuts for oil above this many (it eats the seeds)
 local GLASS_WOOD_MIN = 50  -- pearlash chain starts at wood; only offer with a real surplus
 local GLASS_KEEP = 5       -- keep this many ash / potash / pearlash bars
-local GLASS_BATCH = 5      -- one-time batch: raw clear glass, then cut it to gems
 local ROUGH_GEM_MIN = 10   -- start cutting once the rough GEM pile is bigger than this
 -- ONE cut gem job at a time, ever. A jeweler with ten queued jobs is a jeweler doing nothing
 -- else, and there is no hurry: the next one is posted when this one is finished.
@@ -1995,11 +1997,11 @@ STANDING = {
         local need_potash = not has_order(df.job_type.MakePotashFromAsh, -1)
         local need_pearl  = not reaction_ordered('MAKE_PEARLASH')
         if not (need_ash or need_potash or need_pearl) then return {} end
-        -- The glass batch rides along with the chain it depends on -- it never raises the ask
-        -- by itself. Pearlash is the thing worth prompting about; the raw glass and the gems
-        -- are just what you do with it once the chain exists. Still once per fort: delete
-        -- either order and it stays deleted.
-        local need_glass = not offered_once('clear_glass_batch')
+        -- The glass itself is NOT here any more. It used to ride along with this ask as a
+        -- one-time batch, which meant two things went wrong together: the batch could only be
+        -- offered while a chain order happened to be missing, and once offered it never came
+        -- back. A fort that ran the batch and then wanted more glass had no way to ask for it.
+        -- Clear glass is its own ask now, repeating, offered whenever its order is missing.
         local shops, lines = {}, {}
         if need_ash then
             shops[#shops + 1] = 'MakeAsh'
@@ -2013,12 +2015,6 @@ STANDING = {
             shops[#shops + 1] = 'MAKE_PEARLASH'
             lines[#lines + 1] = ('  * Make pearlash from potash, while under %d pearlash.'):format(GLASS_KEEP)
         end
-        if need_glass then
-            shops[#shops + 1] = 'MakeRawGlass'
-            shops[#shops + 1] = 'CutGlass'
-            lines[#lines + 1] = ('  * Make %d raw clear glass (one-time).'):format(GLASS_BATCH)
-            lines[#lines + 1] = ('  * Cut %d clear glass to gems (one-time). Offered once -- delete\n    them and they will not come back.'):format(GLASS_BATCH)
-        end
         return {{name = 'Pearlash (clear glass)', shops = shops,
             note = 'Clear glass takes SAND + PEARLASH; green glass takes sand alone. Clear is worth\n'
                 .. 'more and makes better windows, so the only thing standing between you and it is\n'
@@ -2026,7 +2022,7 @@ STANDING = {
                 .. 'Pearlash comes off the end of a wood chain: wood -> ash (Wood Furnace) -> potash\n'
                 .. '(Ashery) -> pearlash (Kiln). These orders keep each step stocked so the glass\n'
                 .. 'furnace always has pearlash to hand.\n\n'
-                .. (need_glass and ('It also queues a ONE-TIME batch to put the chain straight to use: %d raw clear\nglass, and %d of it cut to gems. Those two are offered once per fort -- delete them\nand they will not come back.\n\n'):format(GLASS_BATCH, GLASS_BATCH) or '')
+                .. 'The glass itself is a separate ask ("Clear glass"), so it can be asked for again\nwhenever its order is gone.\n\n'
                 .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
             build = function()
                 if need_ash then
@@ -2045,17 +2041,91 @@ STANDING = {
                         conds = {C('LessThan', GLASS_KEEP, df.item_type.BAR, PEARLASH_MAT),
                                  C('GreaterThan', 0, df.item_type.BAR, POTASH_MAT)}}
                 end
-                if need_glass then
+                return missing_shops(shops)
+            end}}
+    end,
+    function()   -- clear glass: keep raw clear glass in stock, and gems cut from it
+        -- ITS OWN ASK, repeating, and offered whenever the orders are missing. It used to be a
+        -- one-time batch riding along with the pearlash chain, which could only be offered
+        -- while a chain order happened to be missing and never came back once taken. A fort
+        -- with a working pearlash chain and no glass had nothing it could say. An ask you do
+        -- not want is what `i` (ignore) is for -- that is the part that used to be missing.
+        --
+        -- Only once the pearlash is real: clear glass is sand PLUS pearlash, so a fort with
+        -- neither pearlash nor an order for it is being asked for something it cannot make.
+        local pearl_stock = 0
+        for _, it in ipairs(df.global.world.items.other.BAR) do
+            if it:getMaterial() == 0 and it:getMaterialIndex() == PEARLASH_MAT then
+                pearl_stock = pearl_stock + (it.stack_size or 1)
+            end
+        end
+        if pearl_stock == 0 and not reaction_ordered('MAKE_PEARLASH') then return {} end
+
+        local need_raw = not order_exists_mat(df.job_type.MakeRawGlass, GLASS_CLEAR_MAT, -1)
+        local need_cut = not order_exists_mat(df.job_type.CutGlass, GLASS_CLEAR_MAT, -1)
+        if not (need_raw or need_cut) then return {} end
+        local shops, lines = {}, {}
+        if need_raw then
+            shops[#shops + 1] = 'MakeRawGlass'
+            lines[#lines + 1] = ('  * Make raw clear glass, while under %d of it and pearlash is\n    on hand.'):format(GLASS_RAW_KEEP)
+        end
+        if need_cut then
+            shops[#shops + 1] = 'CutGlass'
+            lines[#lines + 1] = ('  * Cut clear glass to gems, while under %d glass gems and raw\n    clear glass is on hand.'):format(GLASS_GEM_KEEP)
+        end
+        return {{name = 'Clear glass', shops = shops,
+            note = 'Clear glass takes SAND + PEARLASH, and is worth more than green. These keep it\n'
+                .. 'coming rather than making a batch once: the raw order refills what the cutter\n'
+                .. 'spends, and the cutter stops at its own cap, so the pair settles instead of\n'
+                .. 'grinding sand forever.\n\n'
+                .. ('You hold %d pearlash.\n\n'):format(pearl_stock)
+                .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
+            build = function()
+                if need_raw then
                     -- GLASS_CLEAR is a BUILTIN material (type 4, no index), not an inorganic
                     add_order{job_type = df.job_type.MakeRawGlass,
                         mat_type = GLASS_CLEAR_MAT, mat_index = -1,
-                        amount = GLASS_BATCH, frequency = OneTime}
+                        amount = GLASS_RAW_KEEP, frequency = Daily,
+                        conds = {C('LessThan', GLASS_RAW_KEEP, df.item_type.ROUGH, GLASS_CLEAR_MAT),
+                                 C('GreaterThan', 0, df.item_type.BAR, PEARLASH_MAT),
+                                 F1(C('AtLeast', 1, df.item_type.NONE), 'sand_bearing')}}
+                end
+                if need_cut then
                     add_order{job_type = df.job_type.CutGlass,
                         mat_type = GLASS_CLEAR_MAT, mat_index = -1,
-                        amount = GLASS_BATCH, frequency = OneTime}
-                    mark_offered('clear_glass_batch')
+                        amount = GLASS_GEM_KEEP, frequency = Daily,
+                        conds = {C('LessThan', GLASS_GEM_KEEP, df.item_type.SMALLGEM, GLASS_CLEAR_MAT),
+                                 C('GreaterThan', 0, df.item_type.ROUGH, GLASS_CLEAR_MAT)}}
                 end
                 return missing_shops(shops)
+            end}}
+    end,
+    function()   -- green glass: keep a stock of it once the fort has any at all
+        -- The trigger is HAVING SOME. Green glass costs nothing but sand and fuel, so a fort
+        -- holding a piece of it is a fort that uses it -- and one piece is exactly the state
+        -- where nothing is making more. Offered the moment there is one and no order.
+        if order_exists_mat(df.job_type.MakeRawGlass, GLASS_GREEN_MAT, -1) then return {} end
+        local have = 0
+        for _, it in ipairs(df.global.world.items.other.ROUGH) do
+            if it:getMaterial() == GLASS_GREEN_MAT and usable_stock(it) then
+                have = have + (it.stack_size or 1)
+            end
+        end
+        if have < 1 then return {} end
+        if have >= GLASS_RAW_KEEP then return {} end     -- already stocked: nothing to ask for
+        return {{name = 'Green glass', shops = {'MakeRawGlass'},
+            note = ('You have %d raw green glass and nothing making more.\n\n'):format(have)
+                .. 'Green glass is sand and fuel -- no pearlash, no ore, and the sand does not run\n'
+                .. 'out. It is what glass windows, terrariums and the cheap half of a glass\n'
+                .. 'industry are made of.\n\n'
+                .. ('Creates: Make raw green glass, Daily, while under %d raw green glass and\nsand is on hand.'):format(GLASS_RAW_KEEP),
+            build = function()
+                add_order{job_type = df.job_type.MakeRawGlass,
+                    mat_type = GLASS_GREEN_MAT, mat_index = -1,
+                    amount = GLASS_RAW_KEEP, frequency = Daily,
+                    conds = {C('LessThan', GLASS_RAW_KEEP, df.item_type.ROUGH, GLASS_GREEN_MAT),
+                             F1(C('AtLeast', 1, df.item_type.NONE), 'sand_bearing')}}
+                return missing_shops({'MakeRawGlass'})
             end}}
     end,
     function()   -- cut gems: turn the rough surplus into cut stones
@@ -2657,6 +2727,30 @@ STANDING_INFO = {
         local w = #df.global.world.items.other.WOOD
         if w <= GLASS_WOOD_MIN then
             return ('only %d wood logs, needs over %d'):format(w, GLASS_WOOD_MIN) end end},
+    {name = 'Clear glass',            done  = function()
+        return order_exists_mat(df.job_type.MakeRawGlass, GLASS_CLEAR_MAT, -1)
+           and order_exists_mat(df.job_type.CutGlass, GLASS_CLEAR_MAT, -1) end,
+                                      blocked = function()
+        local n = 0
+        for _, it in ipairs(df.global.world.items.other.BAR) do
+            if it:getMaterial() == 0 and it:getMaterialIndex() == PEARLASH_MAT then
+                n = n + (it.stack_size or 1)
+            end
+        end
+        if n == 0 and not reaction_ordered('MAKE_PEARLASH') then
+            return 'no pearlash and no order for it -- clear glass needs it' end end},
+    {name = 'Green glass',            done  = function()
+        return order_exists_mat(df.job_type.MakeRawGlass, GLASS_GREEN_MAT, -1) end,
+                                      blocked = function()
+        local n = 0
+        for _, it in ipairs(df.global.world.items.other.ROUGH) do
+            if it:getMaterial() == GLASS_GREEN_MAT and usable_stock(it) then
+                n = n + (it.stack_size or 1)
+            end
+        end
+        if n < 1 then return 'no raw green glass on hand yet' end
+        if n >= GLASS_RAW_KEEP then
+            return ('%d raw green glass already, which is the target'):format(n) end end},
     -- counted by MATERIAL and judged by queued JOBS, matching the ask itself. Counting
     -- `items.other.ROUGH` here reported "19 rough gems" for a fort holding one, because
     -- raw glass and raw adamantine are ROUGH items too.

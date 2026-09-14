@@ -416,7 +416,14 @@ made once, is held at *N chains of the metal it forges*, so the iron ones you al
 hold a copper order shut. Some asks are standing preferences rather than
 one-off gaps: say yes to cutting the rough-gem surplus once and it is handled from then on, one
 Cut Gem job at a time, posted again whenever that one is finished and the pile is still over ten
-— no second ask, and `planner-orders disable` hands it back. Adamantine is the same, and has to
+— no second ask, and `planner-orders disable` hands it back. **Glass is two standing asks**:
+*Clear glass* keeps raw clear glass in stock and cuts it to gems (offered once there is pearlash
+or an order making some, since clear glass is sand *plus* pearlash), and *Green glass* offers to
+keep five raw green glass on hand the moment the fort holds any at all and nothing is making
+more — green glass costs only sand and fuel, so a fort down to its last piece is a fort that
+simply forgot to ask. Both are repeating orders offered whenever they are missing, rather than
+the one-time batch that used to ride along with the pearlash chain and could never be asked for
+again. Adamantine is the same, and has to
 be: its ladder — keep 3 raw boulders always, then 3 wafers, 3 thread, 3 cloth, 9 wafers for a
 true throne, and the rest stays raw — counts the adamantine you have set *aside*, and a manager
 order gated on a condition cannot see a forbidden wafer, so it would extract more to replace
