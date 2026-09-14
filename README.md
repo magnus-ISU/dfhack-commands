@@ -205,7 +205,14 @@ residents** — your own dead, and the merchants and visitors who died here.
 
 It also turns on the three standing orders the haulers need (*gather refuse*, *gather refuse
 outdoors*, *gather outdoor vermin remains*) and says which it changed: a fort with any of them
-off never finishes the job and never says why. When the last item arrives it removes the zone and
+off never finishes the job and never says why. While the haul runs, DFHack's notification panel
+carries a **"Moving N items"** line — click it to look at the destination.
+
+Starting a delivery **unmarks everything else the fort had marked for dumping** and **cancels any
+delivery already in flight** (it says how many of each). Both for the same reason it deletes the
+other dump zones: a dumped item goes to whatever dump zone is going, so old marks would arrive
+mixed in with what you asked for. On one live fort that first sweep cleared 361 stray dump
+designations. When the last item arrives it removes the zone and
 **unforbids everything it moved** — dumped goods land forbidden, and a pile of forbidden goods is
 not a delivery. The job survives a save and reload, and `move-items cancel` calls it off.
 

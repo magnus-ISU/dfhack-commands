@@ -20,7 +20,11 @@ custom-tool band beside Replace wall), it runs the whole errand:
      same search / sort / value / quality / wear filters DFHack's "move goods to depot"
      screen uses. Say how many of each you want and it marks the CLOSEST ones.
   4. It marks them for dumping, sets the three standing orders the haulers need, and gets
-     out of the way.
+     out of the way -- and reports "Moving N items" in DFHack's notification panel for as
+     long as the haul takes (click it to look at the destination).
+     Starting a delivery first UNMARKS everything else the fort had marked for dumping, and
+     cancels any delivery already in flight: there is one dump zone and one set of marks, so
+     two deliveries at once would land in each other's pile.
   5. When the last one has arrived it deletes the zone and UNFORBIDS everything it moved --
      dumped items land forbidden, and a pile of forbidden goods is not a delivery.
 
@@ -395,8 +399,30 @@ function status()
 end
 
 -- start the job: zone, marks, standing orders, persisted state
+-- Everything the fort currently has marked for dumping, unmarked.
+--
+-- A new delivery starts from a clean slate for the same reason it deletes the other dump
+-- zones: a dumped item goes to whatever dump zone is going, so anything ALREADY marked --
+-- the last delivery's leftovers, a stray `d`-`b`-`d` from months ago, another tool's work --
+-- would be carried to the spot you just picked, mixed in with what you asked for. This is
+-- deliberately fort-wide and deliberately blunt; the alternative is a delivery that quietly
+-- brings things nobody asked for.
+local function clear_all_dumps()
+    local n = 0
+    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+        if it.flags.dump then it.flags.dump = false; n = n + 1 end
+    end
+    return n
+end
+
 local function begin_move(target, ids)
     if not target or #ids == 0 then return nil, 'nothing to do' end
+    -- A NEW JOB REPLACES THE OLD ONE. Two deliveries at once cannot both be true: there is one
+    -- dump zone and one set of marks, so the second would silently steal the first's haulers
+    -- and land its items in the wrong place. The old one is cancelled properly -- its marks
+    -- dropped, its zone removed, whatever already arrived unforbidden -- rather than forgotten.
+    local replaced = cancel() and true or false
+    local stale = clear_all_dumps()
     local zone = make_dump_zone(target)
     if not zone then return nil, 'could not place a dump zone there' end
     local removed = clear_dump_zones(zone.id)
@@ -408,13 +434,21 @@ local function begin_move(target, ids)
     local orders = ensure_standing_orders()
     save_state{target = {x = target.x, y = target.y, z = target.z},
                zone_id = zone.id, items = marked}
-    return {marked = #marked, removed_zones = removed, orders = orders}
+    return {marked = #marked, removed_zones = removed, orders = orders,
+            replaced = replaced, stale_dumps = stale}
 end
 
--- ---- the watcher ---------------------------------------------------------------
+-- ---- the watcher, and the progress line ------------------------------------------
 --
--- Runs while a move is in progress and does nothing whatsoever otherwise: one persisted-state
--- read, throttled to a few seconds, since a haul takes minutes.
+-- The watcher runs while a move is in progress and does nothing whatsoever otherwise: one
+-- persisted-state read, throttled to a few seconds, since a haul takes minutes.
+--
+-- It reports through DFHack's OWN notification panel rather than a window of its own. A
+-- delivery is minutes of nothing visibly happening, so "is it still going?" deserves an
+-- answer on screen -- but it deserves one line among the fort's other standing notices, not
+-- a floating box the player has to place and then look past.
+
+moving_count = moving_count or 0      -- how many items are still on their way; 0 = idle
 
 WatchOverlay = defclass(WatchOverlay, overlay.OverlayWidget)
 WatchOverlay.ATTRS{
@@ -422,15 +456,57 @@ WatchOverlay.ATTRS{
     default_pos = {x = 1, y = 1},
     default_enabled = true,
     viewscreens = 'dwarfmode',
-    frame = {w = 1, h = 1},
+    frame = {w = 1, h = 1},          -- draws nothing: the progress line is a notification
     overlay_onupdate_max_freq_seconds = 5,
-    version = 1,
+    version = 3,
 }
 
 function WatchOverlay:overlay_onupdate()
     local s = load_state()
+    if not s then moving_count = 0; return end
+    local left = #still_pending(s.items or {})
+    if left == 0 then
+        moving_count = 0
+        finish()
+        return
+    end
+    moving_count = left
+end
+
+-- the notification line: "Moving 7 items", and clicking it shows you where they are going
+local NOTIFY_NAME = 'move_items_progress'
+
+local function notify_message()
+    if not dfhack.world.isFortressMode() then return end
+    local s = load_state()
     if not s then return end
-    if #still_pending(s.items or {}) == 0 then finish() end
+    local left = #still_pending(s.items or {})
+    if left == 0 then return end
+    moving_count = left
+    return {{text = ('Moving %d item%s'):format(left, left == 1 and '' or 's'), pen = COLOR_WHITE}}
+end
+
+local function notify_click()
+    local s = load_state()
+    if not s or not s.target then return end
+    dfhack.gui.revealInDwarfmodeMap(xyz2pos(s.target.x, s.target.y, s.target.z), true, true)
+end
+
+local function register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME]
+    if not entry then
+        entry = {name = NOTIFY_NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME] = entry
+    end
+    entry.desc = 'Shows how many items a fort/move-items delivery still has on the way.'
+    entry.dwarf_fn = notify_message
+    entry.on_click = notify_click
+    if n.config and n.config.data and not n.config.data[NOTIFY_NAME] then
+        n.config.data[NOTIFY_NAME] = {enabled = true, version = 1}
+    end
 end
 
 -- ---- the individual-item window -------------------------------------------------
@@ -794,6 +870,10 @@ function PickerScreen:apply()
     end
     local msg = ('move-items: %d item(s) marked, %d other dump zone(s) removed.')
         :format(res.marked, res.removed_zones)
+    if res.replaced then msg = msg .. ' The delivery already running was cancelled.' end
+    if res.stale_dumps > 0 then
+        msg = msg .. (' %d item(s) already marked for dumping were unmarked.'):format(res.stale_dumps)
+    end
     if #res.orders > 0 then
         msg = msg .. ' Standing orders turned on: ' .. table.concat(res.orders, ', ') .. '.'
     end
@@ -851,12 +931,17 @@ end
 TargetOverlay = defclass(TargetOverlay, overlay.OverlayWidget)
 TargetOverlay.ATTRS{
     desc = 'move-items: click the spot to move things to.',
-    default_pos = {x = -33, y = 6},
+    -- LEFT of the map, not the right-hand strip: a panel over there is laid out correctly
+    -- and then painted over by DF every frame -- it has a frame_rect and draws nothing
+    default_pos = {x = 2, y = 6},
     default_enabled = true,
     -- plain `dwarfmode`, not /Default: with a designation tool selected the focus is
     -- dwarfmode/Designate/DIG_DIG, and this is opened from the Dig tool
     viewscreens = 'dwarfmode',
-    frame = {w = 32, h = 4},
+    frame = {w = 34, h = 5},
+    frame_style = gui.FRAME_MEDIUM,
+    frame_title = 'Move items',
+    frame_background = dfhack.pen.parse{ch = ' ', fg = COLOR_BLACK, bg = COLOR_BLACK},
     overlay_onupdate_max_freq_seconds = 0,
     -- the supported way to hide an overlay: a `visible` predicate. Overriding `render` to
     -- return early instead leaves the framework's frame state unset under a widget the C++
@@ -868,16 +953,10 @@ TargetOverlay.ATTRS{
 function TargetOverlay:init()
     self.lbut, self.rbut = 0, 0
     self:addviews{
-        widgets.Panel{
-            frame_style = gui.FRAME_MEDIUM,
-            frame_background = gui.CLEAR_PEN,
-            subviews = {
-                widgets.Label{frame = {t = 0, l = 0}, text = {
-                    'Click the spot to move things to.', NEWLINE,
-                    {text = 'Right-click cancels.', pen = COLOR_GRAY},
-                }},
-            },
-        },
+        widgets.Label{frame = {t = 0, l = 0}, text = {
+            'Click the spot to move', NEWLINE, 'things to.', NEWLINE,
+            {text = 'Right-click cancels.', pen = COLOR_GRAY},
+        }},
     }
 end
 
@@ -944,16 +1023,22 @@ end
 function show()
     local st = status()
     if st then
+        -- not a refusal: picking a new destination is how you change your mind. The running
+        -- delivery is cancelled when the new one is applied, not now -- back out of the picker
+        -- and the one in flight carries on.
         dfhack.gui.showAnnouncement(
-            ('move-items: a delivery is already running -- %d of %d item(s) still on the way. '
-             .. '`move-items cancel` calls it off.'):format(st.pending, st.total),
-            COLOR_YELLOW, true)
-        return
+            ('move-items: %d of %d item(s) are still on their way; starting a new delivery '
+             .. 'will call that off.'):format(st.pending, st.total), COLOR_YELLOW, false)
     end
     start_targeting()
 end
 
 OVERLAY_WIDGETS = {watch = WatchOverlay, target = TargetOverlay}
+
+register_notification()
+dfhack.onStateChange[NOTIFY_NAME] = function(ev)
+    if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then register_notification() end
+end
 
 if dfhack_flags.module then
     return
