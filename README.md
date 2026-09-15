@@ -909,8 +909,18 @@ bridge moves.
 
 It does **not** touch the plate's ranges. A plate set to fire between 1 and 3 units of water will
 not fire under 7/7 however the flag is set, and rewriting the range to make the button "work"
-would be quietly redesigning the trap; the announcement says the depth and the range instead, so a
-plate that will not move says why.
+would be quietly redesigning the trap. `fort/better-bridges` on the command line prints the depth
+and the range instead, so a plate that will not move says why.
+
+**Clicking it is not announced**, and nothing about the click is throttled or queued: the flag is
+written there and then — measured at 0 ms — and the button repaints on the same frame, because DF
+only redraws when it believes something changed and a flag written from outside its own input
+handling is not something it knows about. What is *not* instant is DF acting on it. The plate has
+to be evaluated and the bridge has to move, and neither happens while the game is **paused** — on
+a paused fort the flag is set and nothing visibly follows until time runs again. The click also
+hit-tests against the rows a button was actually painted on rather than re-deriving them from the
+screen, since DF suppresses that panel under some of its own tooltips and a click landing in that
+gap used to be dropped.
 
 Where the row is comes from DF's own drawing. There is no vector behind that list — DF builds it
 from the building's mechanisms as it paints — so the rows are found by reading back the

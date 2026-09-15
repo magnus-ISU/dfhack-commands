@@ -58,10 +58,18 @@ that this bridge is wired to that lever, and shows you a list of mechanisms inst
    button occupies and nowhere else. The button draws twelve columns to the LEFT of that
    anchor, so it never covers the text it navigates by.
 
+   THE CLICK IS THE WHOLE OF IT. The flag is written there and then -- nothing in this is
+   throttled or queued -- and the button repaints on the same frame, because DF only redraws
+   when it believes something changed and a flag written from outside its input handling is
+   not something it knows about. What is NOT instant is DF acting on it: the plate has to be
+   evaluated and the bridge has to move, and neither of those happens while the game is
+   PAUSED. Pressing the button on a paused fort sets the flag and nothing visibly follows
+   until time runs again.
+
    IT DOES NOT TOUCH THE PLATE'S RANGES. A plate configured to fire between 1 and 3 units
    of water will not fire under 7/7 however the flag is set, and rewriting the range to
-   make the button "work" would be quietly redesigning the trap. Instead the announcement
-   says the depth and the range, so a plate that will not move says why.
+   make the button "work" would be quietly redesigning the trap. `fort/better-bridges` on the
+   command line prints the depth and the range, so a plate that will not move says why.
 
 Both are overlays, registered automatically; nothing to enable.
 
@@ -151,31 +159,22 @@ function plate_condition(bld)
 end
 
 -- Flip whether that condition fires the plate, and say what it means. Returns the new state.
+-- NO ANNOUNCEMENT. The button is its own feedback -- it goes green the frame the flag goes on
+-- -- and a line in the announcement log for a button you just pressed is noise you have to
+-- scroll past later. The one thing an announcement was worth saying (the plate's range not
+-- covering what is on it) is on the plate's own tab and in `fort/better-bridges` on the
+-- command line.
 function flip_trigger(bld)
-    local cond, level = plate_condition(bld)
+    local cond = plate_condition(bld)
     if not cond then return nil end
     local info = bld.plate_info
     local now = not info.flags[cond.flag]
     info.flags[cond.flag] = now
-
-    local lo, hi = info[cond.min], info[cond.max]
-    local name = dfhack.buildings.getName(bld)
-    local parts = {('better-bridges: %s %s triggering on %s.')
-        :format(name, now and 'now' or 'no longer', cond.key)}
-    -- A plate whose range excludes what is sitting on it will not move whatever the flag
-    -- says, and that is a fact about the trap, not something to "fix" behind the player.
-    if now and level and (level < lo or level > hi) then
-        parts[#parts + 1] = (' There is %d%s on it but this plate fires between %d and %d,'
-            .. ' so it will not go until you widen that on its %s tab.')
-            :format(level, cond.unit, lo, hi, cond.key:gsub('^%l', string.upper))
-    end
-    local links = linked_buildings(bld)
-    if #links > 0 then
-        local names = {}
-        for _, b in ipairs(links) do names[#names + 1] = dfhack.buildings.getName(b) end
-        parts[#parts + 1] = (' Linked to %s.'):format(table.concat(names, ', '))
-    end
-    dfhack.gui.showAnnouncement(table.concat(parts), now and COLOR_GREEN or COLOR_YELLOW, false)
+    -- REDRAW THIS FRAME. DF only repaints when it thinks something changed, and a flag written
+    -- from outside its own input handling is not something it knows about -- so the button
+    -- could sit on its old colour until the next thing that happened to force a repaint, which
+    -- reads exactly like a button that did not work.
+    df.global.gps.force_full_display_count = 1
     return now
 end
 
@@ -311,7 +310,12 @@ function TriggerOverlay:onRenderBody(dc)
     -- one verb for the whole list: every row on it is linked to the same building, the one
     -- whose sheet is open
     local word = bridge_verb(sheet_building()) or 'Trigger'
-    for _, row in ipairs(self:button_rows()) do
+    -- kept for the click: the rows a button was actually PAINTED on are exactly the rows that
+    -- should answer to one. Working the geometry out again at input time re-reads a screen
+    -- that may have been drawn without this list on it at all -- DF suppresses the panel under
+    -- some of its own tooltips -- and a click that lands in that gap is silently dropped.
+    self.drawn_rows = self:button_rows()
+    for _, row in ipairs(self.drawn_rows) do
         local cond = plate_condition(row.bld)
         local on = cond and row.bld.plate_info.flags[cond.flag]
         dc:seek(0, row.dy):pen(on and COLOR_GREEN or COLOR_WHITE):string(button_text(word))
@@ -322,7 +326,7 @@ function TriggerOverlay:onInput(keys)
     if not keys._MOUSE_L then return false end
     local x, y = self:getMousePos()
     if not x then return false end
-    for _, row in ipairs(self:button_rows()) do
+    for _, row in ipairs(self.drawn_rows or self:button_rows()) do
         if y == row.dy then
             flip_trigger(row.bld)
             return true
