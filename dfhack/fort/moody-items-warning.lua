@@ -26,6 +26,10 @@ BASE MATERIAL, chosen by the skill the moody dwarf claims:
     glassmaking                                          raw glass
     bone carving                                         bones, or shells if they prefer one
 
+BONES AND SHELLS ARE COUNTED BY THE ITEM, NOT THE MATERIAL. A severed hand is made of bone
+and is not a bone; only the item's own `corpse_flags.bone` / `.shell` says whether a mood or
+a bone carver can spend it.
+
 DECORATION MATERIALS, up to seven more, each an even roll over: logs, metal bars, cut gems,
 blocks, rough gems, boulders, bones, leather, cloth (plant/silk/yarn) and raw glass. A
 decoration is never the same item type as the base material.
@@ -45,8 +49,10 @@ stressed dwarves. So the remains/bones section only appears when at least one ci
 actually stressed, and it is a warning about your ability to feed such a mood, not a
 suggestion to stock up on friends.
 
-    * a MACABRE mood wants remains, bones or skulls, and swaps roughly half its decorations
-      for more of the same;
+    * a MACABRE mood picks 1-3 of VERMIN REMAINS, stacks of BONES or SKULLS, and swaps
+      roughly half its decorations for more remains or bones. Remains and bones are
+      counted; SKULLS are not -- no ordinary mood can ask for one, so the fort's last skull
+      is not worth a line. A corpse is the FELL mood's material and is not counted either;
     * a FELL mood wants a fresh corpse and gets it by murdering someone. Nothing you can
       stockpile, so nothing is claimed here about it.
 
@@ -128,8 +134,26 @@ local function cloth_of(flagname)
     end
 end
 
-local function bone(item) return matflag(item, 'BONE') end
-local function shell(item) return matflag(item, 'SHELL') end
+-- A BONE ITEM, not "an item whose material happens to be bone". The distinction is the whole
+-- bug: a severed hand or a head is made of bone as far as the MATERIAL is concerned, and this
+-- fort had 34 of them -- crundle right hands, troglodyte heads -- counted as bones a mood
+-- could spend. It cannot: no mood and no bone carver can use a troglodyte head. DF's own bit
+-- for "this is a bone" is on the ITEM, not the material, and the same goes for a shell.
+--
+-- It was wrong in both directions. Of 243 corpse pieces here the material test found 114
+-- "bones" where there are 75, and it MISSED four real ones whose material carries no BONE
+-- flag at all. A fort whose only bone-material items are severed limbs would have been told
+-- it had bones for a mood when it had none, which is the one thing this tool exists to catch.
+local function corpse_flag(item, name)
+    local ok, v = pcall(function() return item.corpse_flags[name] end)
+    return ok and v == true
+end
+
+local function bone(item) return corpse_flag(item, 'bone') end
+local function shell(item) return corpse_flag(item, 'shell') end
+-- unused: see the macabre section for why skulls are not counted. Kept because it is the
+-- other half of the bone/shell pair and the next person to ask "why not skulls?" wants it.
+local function skull(item) return corpse_flag(item, 'skull') end
 
 -- ---- who could actually ask for a shell? -------------------------------------
 --
@@ -298,7 +322,19 @@ local function survey()
     local stressed = stressed_citizens()
     local grim, grim_missing, grim_low = {}, {}, {}
     if #stressed > 0 then
-        for label, n in pairs{remains = count('REMAINS'), bones = count('CORPSEPIECE', bone)} do
+        -- REMAINS AND BONES, NOT SKULLS. The wiki says a macabre mood picks "1-3 vermin
+        -- remains, stacks of bones, or skulls", which would make three things to count --
+        -- but skulls are deliberately left out: they are not in the decoration list any
+        -- ordinary mood draws from, so the only way one is ever asked for is a macabre mood
+        -- specifically rolling it, and warning about the fort's last skull is noise on a
+        -- line whose whole value is that everything on it matters. Add `skulls =
+        -- count('CORPSEPIECE', skull)` here to put it back.
+        --
+        -- CORPSES ARE NOT ON THE LIST either. A corpse is the FELL mood's material, and a
+        -- fell dwarf gets one by murdering somebody -- nothing to stock up on and nothing to
+        -- warn about, which is what the note at the top of this file says.
+        for label, n in pairs{remains = count('REMAINS'),
+                              bones   = count('CORPSEPIECE', bone)} do
             grim[#grim + 1] = {label = label, n = n}
             if n == 0 then grim_missing[#grim_missing + 1] = label
             elseif n < MOOD_WANTS then grim_low[#grim_low + 1] = {label = label, n = n} end
@@ -336,13 +372,19 @@ function message()   -- module-level: the notification resolves it live, see reg
     -- problem: nothing to go and find, just not enough of it yet. So the two are separate
     -- clauses rather than one list, and the count is named -- "2 bones" tells you how far off
     -- you are in a way "low on bones" never does.
+    -- "only 1 skulls" reads like a typo and undercuts the warning, so one of a thing is named
+    -- in the singular. Trailing -s comes off, EXCEPT where it is not a plural: `remains` is
+    -- the item's own name and `raw green glass` ends in -ss.
+    local function one_of(label)
+        if label == 'remains' or label:sub(-2) == 'ss' then return label end
+        return (label:gsub('s$', ''))
+    end
     local short = {}
-    for _, m in ipairs(s.low or {}) do
-        short[#short + 1] = ('%d %s'):format(m.n, m.label)
+    local function note_short(m)
+        short[#short + 1] = ('%d %s'):format(m.n, m.n == 1 and one_of(m.label) or m.label)
     end
-    for _, m in ipairs(s.grim_low or {}) do
-        short[#short + 1] = ('%d %s'):format(m.n, m.label)
-    end
+    for _, m in ipairs(s.low or {}) do note_short(m) end
+    for _, m in ipairs(s.grim_low or {}) do note_short(m) end
 
     if #gone == 0 and #short == 0 then return end
     local parts = {}
