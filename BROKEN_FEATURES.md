@@ -1,8 +1,8 @@
 # Broken features
 
-Everything here still ships and still runs exactly as it always did — nothing has been
-changed, disabled or removed. These are grouped out of the feature lists so the main README
-only advertises things that work.
+Everything here still ships. These are grouped out of the feature lists so the main README
+only advertises things that work; most still run exactly as they always did, and the ones
+that have been switched off say so in their own entry.
 
 Four groups, most urgent first:
 
@@ -378,6 +378,23 @@ slot → root cause → action mapping, with the screen as the easy half on top.
 # Broken
 
 No fix planned, or not yet decided whether they are worth keeping.
+
+### **`fort/stockpile-place`**
+Drag to create a stockpile, expand a selected one, or erase tiles from any pile — a
+dig-shapes-style drag replacing DF's native click handling on the stockpile placement view.
+**Switched off**: `default_enabled` is now false and `magnus-scripts` no longer carries a row
+for it, so nothing turns it on for you. The script is still in the tree and
+`overlay enable fort/stockpile-place.watcher` still brings it back.
+
+**The failure mode is not recorded here** — it was switched off on request without one being
+given, so this entry says what it did rather than what it does wrong. Worth knowing when
+someone comes back to it: it does not go through `df.global.selection_rect` (only the Dig tool
+does), it polls `enabler.mouse_lbut_down` / `mouse_rbut_down` every frame in `overlay_onupdate`
+and swallows the press in `onInput` so DF's native handling never fires, then re-dispatches a
+plain click to DF. Taking mouse presses away from DF on a screen DF is also driving is the part
+most likely to be at fault.
+
+![fort/stockpile-place demo](demos/stockpile-place.gif)
 
 ### **`fort/attack-invaders`**
 Meant to order every squad to kill all invaders on the map. **Superseded and non-functional:**

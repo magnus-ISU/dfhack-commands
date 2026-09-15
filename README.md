@@ -329,11 +329,6 @@ copies sit edge-to-edge.
 
 A building DF places over a hole rather than on a floor — a well, which goes on open space or a ramp top — is placed by the same drag: the tile the mouse goes down on is one DF has already accepted, so its shape is what the rest of the grid is measured against.
 
-### **`fort/stockpile-place`**
-Drag to create a stockpile, expand a selected one, or erase tiles from any pile.
-
-![fort/stockpile-place demo](demos/stockpile-place.gif)
-
 ### **`fort/binnable-stockpile`**
 Stockpiles can be toggled on/off with one click, set to all meltables, binnables, food, or
 drink, and easily set allowed quality. The meltables pile only accepts the metals your civ

@@ -36,8 +36,10 @@ the tool -- a graceful back-out with no exit-then-reopen flicker.
 Tiles with no storable floor (walls, open space, other buildings) are dropped from a new or
 expanded pile automatically, matching native placement.
 
-Registered as overlay `stockpile-place.watcher`. Joins the other stockpile helpers
-(binnable-stockpile).
+DISABLED BY DEFAULT -- see BROKEN_FEATURES.md. The overlay
+(`stockpile-place.watcher`) still exists and can be turned on by hand with
+`overlay enable fort/stockpile-place.watcher`, but nothing switches it on for you and
+`magnus-scripts` no longer carries a row for it.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -305,7 +307,9 @@ StockpilePlace = defclass(StockpilePlace, overlay.OverlayWidget)
 StockpilePlace.ATTRS{
     desc = 'Stockpile view: left-drag creates/expands piles (unselected), right-drag erases them.',
     default_pos = {x = 1, y = 1},
-    default_enabled = true,
+    -- SWITCHED OFF. Kept in the tree but no longer registered on by default; it is written
+    -- up under "Broken" in BROKEN_FEATURES.md rather than in the feature list.
+    default_enabled = false,
     viewscreens = 'dwarfmode/Stockpile',
     frame = {w = 1, h = 1},
     overlay_onupdate_max_freq_seconds = 0,

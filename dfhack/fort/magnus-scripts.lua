@@ -337,9 +337,6 @@ local COLUMNS = {
          enable = script('fort/agitated-animals-notification'),
          disable = notify_off({'agitated_typed'}, {'agitated_count', 'hostile_count'})},
         -- ---- rows below reconcile the registry with FORTRESS_MODE_FEATURES ----
-        {key = 'stockpile-place', label = 'stockpile-place',
-         enable = overlay_set('enable', 'fort/stockpile-place.watcher'),
-         disable = overlay_set('disable', 'fort/stockpile-place.watcher')},
         {key = 'binnable-stockpile', label = 'binnable-stockpile',
          enable = function()
             dfhack.run_command('overlay', 'enable', 'fort/binnable-stockpile.button')
