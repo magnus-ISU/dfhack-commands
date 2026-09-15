@@ -827,6 +827,25 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/better-track-stops`**
+A track stop's sheet tells you its friction and its dump direction and nothing about the thing
+that makes it work. This adds a panel with the cart on it: the route, the cart assigned to it,
+what is in it, and where it has got to — *at the stop*, *18 tiles away*, or *carried by Bim
+Azuzmeng, 25 tiles away*, since a cart in a dwarf's arms reports **their** position, which is the
+honest answer to "where is my minecart". Click the line and the map goes there.
+
+The panel sits directly above DFHack's own `Ctrl+x` / `Ctrl+f` track stop buttons and is the same
+width as DF's window, both measured off the screen rather than guessed.
+
+**`Assign: [Lava] [Water] [Empty]`** — one button per kind of cart, each shown only while the fort
+has one that can actually reach this stop, using DF's own walkability groups, so a cart in a sealed
+magma pit is never offered. **`[Make a quantum stockpile]`** turns the stop into one in a single
+click when exactly one stockpile touches it: it links that pile to the route
+stop as its source, places a 1×1 catch-all pile on the tile the stop dumps into, and assigns an
+empty cart. It refuses when the adjacency is ambiguous rather than guessing which pile you meant,
+and it checks the dump tile can hold a stockpile *before* changing anything — the first stop tried
+had a ramp top under its dump shift, which is walkable, looks clear, and cannot hold a pile.
+
 ### **`fort/improve-minecart-selector`**
 *Choose a vehicle for Route 9* lists every minecart in the fort as `gabbro minecart`, over and
 over, with nothing to tell them apart but a footnote about which route already has one. This
