@@ -50,9 +50,8 @@ actually stressed, and it is a warning about your ability to feed such a mood, n
 suggestion to stock up on friends.
 
     * a MACABRE mood picks 1-3 of VERMIN REMAINS, stacks of BONES or SKULLS, and swaps
-      roughly half its decorations for more remains or bones. Remains and bones are
-      counted; SKULLS are not -- no ordinary mood can ask for one, so the fort's last skull
-      is not worth a line. A corpse is the FELL mood's material and is not counted either;
+      roughly half its decorations for more remains or bones. All three are counted. A
+      corpse is the FELL mood's material -- got by murder -- and is not counted;
     * a FELL mood wants a fresh corpse and gets it by murdering someone. Nothing you can
       stockpile, so nothing is claimed here about it.
 
@@ -151,8 +150,6 @@ end
 
 local function bone(item) return corpse_flag(item, 'bone') end
 local function shell(item) return corpse_flag(item, 'shell') end
--- unused: see the macabre section for why skulls are not counted. Kept because it is the
--- other half of the bone/shell pair and the next person to ask "why not skulls?" wants it.
 local function skull(item) return corpse_flag(item, 'skull') end
 
 -- ---- who could actually ask for a shell? -------------------------------------
@@ -322,19 +319,18 @@ local function survey()
     local stressed = stressed_citizens()
     local grim, grim_missing, grim_low = {}, {}, {}
     if #stressed > 0 then
-        -- REMAINS AND BONES, NOT SKULLS. The wiki says a macabre mood picks "1-3 vermin
-        -- remains, stacks of bones, or skulls", which would make three things to count --
-        -- but skulls are deliberately left out: they are not in the decoration list any
-        -- ordinary mood draws from, so the only way one is ever asked for is a macabre mood
-        -- specifically rolling it, and warning about the fort's last skull is noise on a
-        -- line whose whole value is that everything on it matters. Add `skulls =
-        -- count('CORPSEPIECE', skull)` here to put it back.
+        -- ALL THREE THINGS A MACABRE MOOD PICKS FROM. The wiki is explicit: "dwarves in
+        -- macabre moods will select 1-3 vermin remains, stacks of bones, or skulls". Skulls
+        -- were never counted, so a fort down to its last one heard nothing about it -- and
+        -- a skull is not something you can quickly go and make, since butchering yields one
+        -- only from a creature that had a head to begin with.
         --
-        -- CORPSES ARE NOT ON THE LIST either. A corpse is the FELL mood's material, and a
-        -- fell dwarf gets one by murdering somebody -- nothing to stock up on and nothing to
-        -- warn about, which is what the note at the top of this file says.
+        -- CORPSES ARE NOT ON THE LIST. A corpse is the FELL mood's material, and a fell
+        -- dwarf gets one by murdering somebody -- nothing to stock up on and nothing to warn
+        -- about, which is what the note at the top of this file says.
         for label, n in pairs{remains = count('REMAINS'),
-                              bones   = count('CORPSEPIECE', bone)} do
+                              bones   = count('CORPSEPIECE', bone),
+                              skulls  = count('CORPSEPIECE', skull)} do
             grim[#grim + 1] = {label = label, n = n}
             if n == 0 then grim_missing[#grim_missing + 1] = label
             elseif n < MOOD_WANTS then grim_low[#grim_low + 1] = {label = label, n = n} end
