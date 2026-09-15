@@ -574,11 +574,37 @@ local function filter_tags(ji)
 end
 
 -- a readable name for a requirement, since DF's filter is only numbers and bits
+-- DF's word for "any inorganic" (mat_type 0 with no index) is not one word. The generic
+-- inorganic material decodes as "rock", which is right for a boulder and wrong for a bar: the
+-- game's own mood requirement reads "metal bars", and a forge mood asking for "rock bar" sent
+-- the player looking in the wrong stockpile. An inorganic bar is metal -- coke, charcoal, soap
+-- and ash bars are not inorganic at all -- so the item type settles it. The job_item's own
+-- metal/stone bits are honoured first for the jobs that do set them; a mood requirement does not.
+local INORGANIC_WORD = {[df.item_type.BAR] = 'metal'}
+
+-- ...and the noun DF pairs it with is plural: the requirement reads "metal bars", never
+-- "metal bar", because a mood asks for bars by the stack. Only where DF's own word differs from
+-- the item type's lowercased name -- everything else ("rock boulder", "wood") reads as it does.
+local REQUIREMENT_NOUN = {[df.item_type.BAR] = 'bars'}
+
+local function inorganic_word(ji)
+    local metal, stone = false, false
+    pcall(function() metal, stone = ji.flags3.metal, ji.flags3.stone end)
+    if metal then return 'metal' end
+    if stone then return 'rock' end
+    return INORGANIC_WORD[ji.item_type]
+end
+
 function requirement_name(ji)   -- module-level so it can be checked from the command line
     local parts = {}
     if ji.mat_type >= 0 then
-        local ok, info = pcall(dfhack.matinfo.decode, ji.mat_type, ji.mat_index)
-        if ok and info then parts[#parts + 1] = info:toString() end
+        local word = (ji.mat_type == 0 and ji.mat_index < 0) and inorganic_word(ji) or nil
+        if word then
+            parts[#parts + 1] = word
+        else
+            local ok, info = pcall(dfhack.matinfo.decode, ji.mat_type, ji.mat_index)
+            if ok and info then parts[#parts + 1] = info:toString() end
+        end
     end
     for _, tag in ipairs(filter_tags(ji)) do
         parts[#parts + 1] = tag:gsub('_', ' ')
@@ -606,7 +632,8 @@ function requirement_name(ji)   -- module-level so it can be checked from the co
         return table.concat(kept, ' ')
     end
     local t = df.item_type[ji.item_type]
-    parts[#parts + 1] = t and t:lower():gsub('_', ' ') or 'item'
+    parts[#parts + 1] = REQUIREMENT_NOUN[ji.item_type]
+        or (t and t:lower():gsub('_', ' ')) or 'item'
     if ji.item_subtype >= 0 then parts[#parts + 1] = ('subtype %d'):format(ji.item_subtype) end
     return table.concat(parts, ' ')
 end
