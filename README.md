@@ -457,7 +457,7 @@ true throne, and the rest stays raw — counts the adamantine you have set *asid
 order gated on a condition cannot see a forbidden wafer, so it would extract more to replace
 what was merely reserved. One rung at a time, and only what that rung asks for. **Silk webs**
 are the third: it gathers three cobwebs at a time, but only ones hanging inside your emergency
-(civilian alert) burrow, and only while you hold under ten silk thread — *your* thread, not the
+(civilian alert) burrow, and only while you hold under thirty silk thread — *your* thread, not the
 webs, which DF files as silk thread too and so reads as stock you already have. Each job names
 the web it is for, because a plain collect-webs order is gated on that same lying count and
 sends the weaver to whichever web is nearest, cavern included.

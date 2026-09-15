@@ -53,10 +53,11 @@ order has done its work, and two chain orders in different metals never hold eac
 offers an UNTYPED choice alongside the metals -- a bench takes a rope or a chain, and pinning
 no material lets DF weave or forge whichever it has.
 
-The FIBRE CLOTH CHAINS (yarn and silk) offer one weave order PER KIND of thread (each
-creature's wool and each spider's silk is its own material): Daily x1 WeaveCloth pinned to that
-material, keeping 5 cloth of it, running only while more than 3 of that thread is on hand --
-and only offered once that thread passes 3. One at a time so a batch never drains the fibre.
+The FIBRE CLOTH CHAINS (yarn and silk) offer weave orders PER KIND of thread (each creature's
+wool and each spider's silk is its own material), keeping 5 cloth of it and only offered once
+that thread passes 3. Two orders per kind, since a manager order's amount is fixed when it is
+made and the right batch size is not: Daily x5 WeaveCloth while you hold 10 or more of that
+thread, Daily x1 while you hold 4 to 9, so a lean stock is never swallowed by one batch.
 
 Separately, the PIG-TAIL CLOTH CHAIN offers orders that specifically target pig tails (via
 their conditions): "Pig tail thread" (Daily x5 ProcessPlants while pig tail plants > 8) and
@@ -105,7 +106,7 @@ accepting creates it (all conditioned so they only run when sensible):
     gated on a condition cannot see one, so it would extract more to replace what is merely
     reserved. Say yes once and the whole ladder is managed for you thereafter.
   - Silk webs: gathers 3 cobwebs at a time, but ONLY ones hanging inside the fort's emergency
-    (civilian alert) burrow, and only while you hold under 10 silk thread -- counting the
+    (civilian alert) burrow, and only while you hold under 30 silk thread -- counting the
     thread on your looms and NOT the uncollected webs, which DF files as silk thread too and
     therefore reads as stock. Also posted as JOBS, and each job NAMES the web it is for: a
     plain collect-webs order is gated on that same lying count and sends the weaver to whatever
@@ -536,6 +537,9 @@ end
 -- Counts sum stack_size, which is what a manager-order condition measures.
 local FIBRE_MIN = 3          -- offer/run only while MORE than this much of that thread is held
 local FIBRE_CLOTH_CAP = 5    -- keep this many cloth of each thread material
+local FIBRE_BATCH = 5        -- weave this many at a time while the thread is plentiful...
+local FIBRE_BATCH_MIN = 10   -- ...meaning this much of it or more. Below that, one at a time, so
+                             -- a lean stock is not swallowed by a single batch.
 
 local FIBRE_FAMILIES = {
     {name = 'Yarn cloth', flag = df.material_flags.YARN, label = 'yarn (wool/hair)'},
@@ -1090,6 +1094,38 @@ end
 -- general manager-order builder. p: job_type, [reaction_name], [item_subtype], [mat_type,
 -- mat_index, wood], amount, [frequency], [cond={compare,val,item_type,item_subtype}] and/or
 -- [conds={C(...), ...}] for several conditions.
+-- Add one condition (as built by C()) to a manager order. Split out of add_order because an
+-- order already in the fort sometimes needs a condition it was created without.
+local function insert_cond(o, c)
+    o.item_conditions:insert('#', {new = df.manager_order_condition_item,
+        compare_type = c.compare, compare_val = c.val,
+        item_type = c.item_type or -1, item_subtype = c.item_subtype or -1,
+        mat_type = c.mat_type or -1, mat_index = c.mat_index or -1,
+        reaction_class = c.reaction_class or '', metal_ore = c.metal_ore or -1})
+    -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
+    if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
+    -- flags1 item-state match (unrotten / millable / processable_to_barrel / cookable /
+    -- solid ...): counts only items in that state, the way DF's own hand-made orders do
+    -- ("more than 100 cookable solid unrotten ingredients", "an unrotten millable plant")
+    if c.flags1 then
+        local cond = o.item_conditions[#o.item_conditions - 1]
+        for _, fl in ipairs(c.flags1) do cond.flags1[fl] = true end
+    end
+    -- flags2 material-class match (yarn / hair_wool / silk / plant): count only items of that
+    -- fibre class, so a "yarn cloth" order counts wool/hair cloth across every creature at once
+    if c.flags2 then
+        local cond = o.item_conditions[#o.item_conditions - 1]
+        for _, fl in ipairs(c.flags2) do cond.flags2[fl] = true end
+    end
+    -- flags3 item-state match. `on_ground` is the one that matters here: it counts only
+    -- items lying loose (a stockpile counts, a fitting bolted into a building does not),
+    -- which is the difference between "3 chains in stock" and "3 chains already spent".
+    if c.flags3 then
+        local cond = o.item_conditions[#o.item_conditions - 1]
+        for _, fl in ipairs(c.flags3) do cond.flags3[fl] = true end
+    end
+end
+
 local function add_order(p)
     local mo = df.global.world.manager_orders
     local o = df.manager_order:new()
@@ -1109,35 +1145,8 @@ local function add_order(p)
     o.workshop_id = -1
     o.status.validated, o.status.active = true, true
     local conds = p.conds or (p.cond and {p.cond}) or {}
-    for _, c in ipairs(conds) do
-        o.item_conditions:insert('#', {new = df.manager_order_condition_item,
-            compare_type = c.compare, compare_val = c.val,
-            item_type = c.item_type or -1, item_subtype = c.item_subtype or -1,
-            mat_type = c.mat_type or -1, mat_index = c.mat_index or -1,
-            reaction_class = c.reaction_class or '', metal_ore = c.metal_ore or -1})
-        -- `empty` counts only EMPTY items (e.g. keep N empty barrels/bins, not N total)
-        if c.empty then o.item_conditions[#o.item_conditions - 1].flags1.empty = true end
-        -- flags1 item-state match (unrotten / millable / processable_to_barrel / cookable /
-        -- solid ...): counts only items in that state, the way DF's own hand-made orders do
-        -- ("more than 100 cookable solid unrotten ingredients", "an unrotten millable plant")
-        if c.flags1 then
-            local cond = o.item_conditions[#o.item_conditions - 1]
-            for _, fl in ipairs(c.flags1) do cond.flags1[fl] = true end
-        end
-        -- flags2 material-class match (yarn / hair_wool / silk / plant): count only items of that
-        -- fibre class, so a "yarn cloth" order counts wool/hair cloth across every creature at once
-        if c.flags2 then
-            local cond = o.item_conditions[#o.item_conditions - 1]
-            for _, fl in ipairs(c.flags2) do cond.flags2[fl] = true end
-        end
-        -- flags3 item-state match. `on_ground` is the one that matters here: it counts only
-        -- items lying loose (a stockpile counts, a fitting bolted into a building does not),
-        -- which is the difference between "3 chains in stock" and "3 chains already spent".
-        if c.flags3 then
-            local cond = o.item_conditions[#o.item_conditions - 1]
-            for _, fl in ipairs(c.flags3) do cond.flags3[fl] = true end
-        end
-    end
+    for _, c in ipairs(conds) do insert_cond(o, c) end
+
     mo.all:insert('#', o)       -- actually add it to the manager order list
     return o
 end
@@ -1406,6 +1415,41 @@ local function order_exists_mat(job_type, mt, mi)
     return false
 end
 
+-- The pair of weave orders a fibre material gets, keyed 'batch' / 'single'.
+--
+-- A manager order's amount is fixed when it is created, so "5 at a time while the thread is
+-- plentiful, 1 at a time when it is not" cannot be one order. It is two, split on the same
+-- threshold and each gated to run only on its own side of it: the batch while at least
+-- FIBRE_BATCH_MIN of that thread is on hand, the single while there is less.
+local function fibre_weave_orders(mt, mi)
+    local all, out = df.global.world.manager_orders.all, {}
+    for i = 0, #all - 1 do
+        local o = all[i]
+        if o.job_type == df.job_type.WeaveCloth and o.mat_type == mt and o.mat_index == mi then
+            out[o.amount_total == FIBRE_BATCH and 'batch' or 'single'] = o
+        end
+    end
+    return out
+end
+
+-- Does this single-cloth order stop where the batch order starts? A fort that accepted the
+-- weave ask before the batch existed has an unbounded single order, which would go on trickling
+-- alongside the batch and weave six a day instead of five. The ceiling is what it is missing.
+local function has_thread_ceiling(o)
+    for _, c in ipairs(o.item_conditions) do
+        if c.item_type == df.item_type.THREAD
+            and c.compare_type == df.logic_condition_type.LessThan then return true end
+    end
+    return false
+end
+
+-- is anything still to do for this fibre material -- either order missing, or the single one
+-- left over from before the batch and still uncapped?
+local function fibre_weave_todo(mt, mi)
+    local cur = fibre_weave_orders(mt, mi)
+    return not cur.batch or not cur.single or not has_thread_ceiling(cur.single)
+end
+
 local function melt_count()
     local n = 0
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do if it.flags.melt then n = n + 1 end end
@@ -1546,7 +1590,7 @@ local ADAM_BATCH = 1       -- ...one job at a time, so an order reads 1/1, not 3
 
 -- SILK WEBS. Gathered in small batches, by hand, and only from webs hanging inside the fort's
 -- emergency (civilian alert) burrow -- the cavern ones are somebody else's problem.
-local SILK_THREAD_KEEP = 10   -- stop once this much silk THREAD is in stock (webs NOT counted)
+local SILK_THREAD_KEEP = 30   -- stop once this much silk THREAD is in stock (webs NOT counted)
 local SILK_WEB_MIN = 3        -- ...and only while at least this many silk webs hang inside it
 local SILK_BATCH = 3          -- webs gathered per round, one job each
 
@@ -1800,33 +1844,53 @@ STANDING = {
         for _, fam in ipairs(FIBRE_FAMILIES) do
             local todo = {}
             for _, y in ipairs(fibre_threads(fam.flag)) do
-                -- only once that fibre is actually accumulating: below the gate the order
-                -- could never run anyway, and offering it would just be noise
-                if y.n > FIBRE_MIN
-                    and not order_exists_mat(df.job_type.WeaveCloth, y.type, y.index) then
+                -- only once that fibre is actually accumulating: below the gate the orders
+                -- could never run anyway, and offering them would just be noise
+                if y.n > FIBRE_MIN and fibre_weave_todo(y.type, y.index) then
                     todo[#todo + 1] = y
                 end
             end
             if #todo > 0 then
                 local lines = {}
                 for _, y in ipairs(todo) do
-                    lines[#lines + 1] = ('  * Weave %s thread -> cloth, Daily x1, while under %d %s cloth\n    and more than %d of that thread (you have %d).')
-                        :format(y.name, FIBRE_CLOTH_CAP, y.name, FIBRE_MIN, y.n)
+                    lines[#lines + 1] = ('  * Weave %s thread -> cloth, while under %d %s cloth:\n    Daily x%d while you hold %d or more of that thread, Daily x1 while you\n    hold between %d and %d of it (you have %d).')
+                        :format(y.name, FIBRE_CLOTH_CAP, y.name, FIBRE_BATCH, FIBRE_BATCH_MIN,
+                                FIBRE_MIN + 1, FIBRE_BATCH_MIN - 1, y.n)
                 end
                 asks[#asks + 1] = {name = fam.name, shops = {'WeaveCloth'},
                     note = ('Weaves %s thread into cloth at a Loom -- one order per KIND, since every\n'):format(fam.label)
                         .. 'source has its own material and a single class-wide order would let the loom\n'
                         .. 'keep re-weaving whichever fibre happened to be most abundant while a scarcer\n'
                         .. 'one sat untouched.\n\n'
-                        .. 'Each runs ONE AT A TIME, so a batch never drains the thread you were saving,\n'
-                        .. 'and only while that thread is above ' .. FIBRE_MIN .. '.\n\n'
+                        .. ('Each kind gets TWO orders, because a manager order\'s amount is fixed when it\n')
+                        .. ('is made and the right batch size is not: x%d while you hold %d or more of that\n'):format(FIBRE_BATCH, FIBRE_BATCH_MIN)
+                        .. ('thread, x1 below that, so a lean stock is never swallowed by one batch. Neither\n')
+                        .. ('runs while that thread is at ' .. FIBRE_MIN .. ' or under.\n\n')
                         .. 'Creates (each only if missing):\n' .. table.concat(lines, '\n'),
                     build = function()
                         for _, y in ipairs(todo) do
-                            add_order{job_type = df.job_type.WeaveCloth,
-                                mat_type = y.type, mat_index = y.index, amount = 1, frequency = Daily,
-                                conds = {C('LessThan', FIBRE_CLOTH_CAP, df.item_type.CLOTH, y.type, y.index),
-                                         C('GreaterThan', FIBRE_MIN, df.item_type.THREAD, y.type, y.index)}}
+                            local cur = fibre_weave_orders(y.type, y.index)
+                            local under_cap = C('LessThan', FIBRE_CLOTH_CAP, df.item_type.CLOTH, y.type, y.index)
+                            -- plentiful: the batch. GreaterThan is strict, so the bound is one
+                            -- below the threshold to mean "FIBRE_BATCH_MIN or more".
+                            if not cur.batch then
+                                add_order{job_type = df.job_type.WeaveCloth,
+                                    mat_type = y.type, mat_index = y.index,
+                                    amount = FIBRE_BATCH, frequency = Daily,
+                                    conds = {under_cap,
+                                             C('GreaterThan', FIBRE_BATCH_MIN - 1, df.item_type.THREAD, y.type, y.index)}}
+                            end
+                            -- lean: one at a time, and only below where the batch takes over
+                            local lean = C('LessThan', FIBRE_BATCH_MIN, df.item_type.THREAD, y.type, y.index)
+                            if not cur.single then
+                                add_order{job_type = df.job_type.WeaveCloth,
+                                    mat_type = y.type, mat_index = y.index, amount = 1, frequency = Daily,
+                                    conds = {under_cap,
+                                             C('GreaterThan', FIBRE_MIN, df.item_type.THREAD, y.type, y.index),
+                                             lean}}
+                            elseif not has_thread_ceiling(cur.single) then
+                                insert_cond(cur.single, lean)   -- an order made before the batch
+                            end
                         end
                         return missing_shops({'WeaveCloth'})
                     end}
