@@ -982,6 +982,18 @@ Adds search to the huge Announcements settings list.
 ### **`fort/agitated-animals-notification`**
 Names the agitated animals by species instead of a bare count; shift-click attacks them all.
 
+**Giant cave spiders get a segment of their own**, first on the line and in their own colour,
+and are counted whether or not they are agitated or classed as a danger. A GCS carries **none**
+of the megabeast flags — to DF it is ordinary cave wildlife — so otherwise it is either pooled
+into "N hostiles" and named only when it happens to be the most numerous kind there, or *not
+counted at all*, because one that is neither agitated nor a "danger" matches no list this line
+draws from. For the thing that webs a squad in place and kills it one at a time, "sometimes
+mentioned" is not good enough. Caged, chained, tame and dead ones do not count, and a hidden one
+is not announced — the stock lines do not reveal what you have not found either. Clicking the
+segment cycle-zooms the spiders and shift-clicking sets selected squads on them, like every other
+segment. Race indexes are per world, so the creature is looked up by its raw id and the cached
+index is re-checked against that id before it is trusted.
+
 ### **`fort/enemies-inside-notification`**
 Warns of enemies inside the alert burrow; shift-click sends selected squads to attack.
 

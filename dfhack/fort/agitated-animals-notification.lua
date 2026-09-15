@@ -9,8 +9,16 @@ DFHack's built-in notify panel shows a bland "N agitated animals" and a separate
 registers one replacement (`agitated_typed`) that names what you're actually dealing
 with, in up to four segments (each omitted when empty):
 
-    N agitated animals with A giant elephants; B megabeasts with C forgotten beasts;
-    D beasts with E cyclopes; F hostiles with G weres
+    H giant cave spiders; N agitated animals with A giant elephants;
+    B megabeasts with C forgotten beasts; D beasts with E cyclopes; F hostiles with G weres
+
+    * GIANT CAVE SPIDERS come first, in their own colour, and are counted whether or not
+      they are agitated or classed as a danger. A GCS carries none of the megabeast flags
+      -- to DF it is ordinary cave wildlife -- so otherwise it is either pooled into
+      "N hostiles" and named only when it happens to be the most numerous kind there, or
+      not counted at all. For the thing that webs a squad in place and kills it one at a
+      time, "sometimes mentioned" is not good enough. Caged, chained, tame and dead ones
+      do not count, and a hidden one is not announced.
 
     * agitated: the named species is that of the LARGEST agitated animal by body size
       (giant elephants are the biggest in the game); A = how many of that species are
@@ -58,14 +66,56 @@ local function is_hostile(u)
         and dfhack.units.isDanger(u)
 end
 
--- one pass over active units -> the agitated list + the hostiles list
+-- ---- giant cave spiders, on their own ---------------------------------------
+--
+-- A GCS carries NONE of the megabeast flags -- to DF it is ordinary cave wildlife -- so
+-- without this it is either pooled into "N hostiles" and named only when it happens to be
+-- the most numerous kind there, or not counted at all, because one that is neither agitated
+-- nor classed as a danger matches no list on this line. For the thing that webs a squad in
+-- place and kills it one at a time, "sometimes mentioned" is not good enough, so it gets a
+-- segment of its own and is taken out of whatever bucket it would otherwise have fallen in.
+local GCS_CREATURE = 'SPIDER_CAVE_GIANT'
+local gcs_race
+
+-- RACE INDEXES ARE PER WORLD -- this one is 615 here and will be something else in the next
+-- world -- so the cached index is checked against the id it was looked up by before it is
+-- trusted, which costs one string compare and needs no load hook to invalidate it.
+local function gcs_race_id()
+    local all = df.global.world.raws.creatures.all
+    if gcs_race then
+        local cr = all[gcs_race]
+        if cr and cr.creature_id == GCS_CREATURE then return gcs_race end
+        gcs_race = nil
+    end
+    for i, cr in ipairs(all) do
+        if cr.creature_id == GCS_CREATURE then gcs_race = i; return i end
+    end
+    return nil
+end
+
+-- Counted whether or not it is agitated or "a danger": a wild one minding its own business
+-- in the caverns is still the reason to keep the squad out of there. Caged, chained, tame
+-- and dead ones are not, and a hidden one is not announced -- the stock lines do not reveal
+-- what you have not found either.
+local function is_gcs(u, race)
+    return u.race == race
+        and not dfhack.units.isDead(u) and dfhack.units.isActive(u)
+        and not u.flags1.caged and not u.flags1.chained
+        and not dfhack.units.isFortControlled(u)
+        and not dfhack.units.isHidden(u)
+end
+
+-- one pass over active units -> the agitated list, the hostiles list, the spiders
 local function list_targets()
-    local agitated, hostile = {}, {}
+    local agitated, hostile, gcs = {}, {}, {}
+    local race = gcs_race_id()
     for _, u in ipairs(df.global.world.units.active) do
-        if is_agitated(u) then agitated[#agitated + 1] = u
+        -- spiders first: they come out of the other two rather than being counted twice
+        if race and is_gcs(u, race) then gcs[#gcs + 1] = u
+        elseif is_agitated(u) then agitated[#agitated + 1] = u
         elseif is_hostile(u) then hostile[#hostile + 1] = u end
     end
-    return agitated, hostile
+    return agitated, hostile, gcs
 end
 
 -- creature name: index 0 singular, 1 plural (df creature_raw.name = {sing, plural, adj})
@@ -150,7 +200,7 @@ local segments = {}
 
 local function message()
     if not dfhack.world.isFortressMode() then return end
-    local agitated, hostile = list_targets()
+    local agitated, hostile, gcs = list_targets()
     local tokens = {}
     segments = {}
     local col = 0
@@ -158,6 +208,14 @@ local function message()
         tokens[#tokens + 1] = {text = text, pen = pen}
         segments[#segments + 1] = {s = col + 1, e = col + #text, kind = kind}
         col = col + #text
+    end
+
+    -- SPIDERS FIRST, and in their own colour: the point of breaking them out is that they
+    -- are the line's worst news, and last place behind three other segments is not where the
+    -- worst news goes.
+    if #gcs > 0 then
+        add(('%d %s'):format(#gcs, creature_name(gcs[1].race, #gcs > 1)),
+            COLOR_LIGHTMAGENTA, 'gcs')
     end
 
     -- agitated segment: named species = that of the largest individual by body size
@@ -221,10 +279,12 @@ end
 
 -- the units behind one segment (or ALL listed units for kind=nil)
 local function units_for(kind)
-    local agitated, hostile = list_targets()
+    local agitated, hostile, gcs = list_targets()
+    if kind == 'gcs' then return gcs end
     if kind == 'agitated' then return agitated end
     if not kind then
         for _, u in ipairs(hostile) do agitated[#agitated + 1] = u end
+        for _, u in ipairs(gcs) do agitated[#agitated + 1] = u end
         return agitated
     end
     local out = {}
@@ -277,7 +337,7 @@ local function register()
         table.insert(n.NOTIFICATIONS_BY_IDX, entry)
         n.NOTIFICATIONS_BY_NAME[NAME] = entry
     end
-    entry.desc = 'Agitated wildlife + non-invader hostiles (megabeasts/beasts/others), named by kind. Shift-click with squads selected to attack them all.'
+    entry.desc = 'Giant cave spiders + agitated wildlife + non-invader hostiles (megabeasts/beasts/others), named by kind. Shift-click with squads selected to attack them all.'
     entry.dwarf_fn = message
     entry.on_click = on_click
     if n.config and n.config.data and not n.config.data[NAME] then
