@@ -8,10 +8,13 @@ carries its own icon, the green check DF draws for a claimed task -- and then re
 who. The one question that icon raises is the one the screen will not answer: WHICH dwarf is
 doing this, and where are they?
 
-  * CLICK THE ROW -- the green check, the job's name, the space around them -- and that
-    dwarf's sheet opens with the camera following them. The same pair of actions
-    `clickable-noble-names`, `clickable-squad-members` and `clickable-broker` do for their
-    rows.
+  * CLICK THE JOB'S NAME, OR ITS GREEN CHECK, and that dwarf's sheet opens with the camera
+    following them. The same pair of actions `clickable-noble-names`,
+    `clickable-squad-members` and `clickable-broker` do for their rows.
+
+    Those two spans and nothing else: DF's own row buttons sit between them, and
+    `fort/workshop-tools` puts a `+` near the panel's right edge. Taking the whole row --
+    which this did at first -- swallowed clicks meant for both.
 
     The building's sheet closes on the way out, because a camera following a dwarf behind a
     full-screen sheet is not much of a view. A worker who has left the map (a hauler on a
@@ -106,6 +109,70 @@ function job_on_line(bld, y)
     return nth and matches[math.min(nth, #matches)].job or matches[1].job
 end
 
+-- ---- what part of the row is OURS ---------------------------------------------
+--
+-- THE NAME AND THE CHECK, and nothing else. Taking the whole row was greedy and wrong: DF's
+-- own per-row buttons sit in the middle of it, and `fort/workshop-tools` puts a `+` (queue
+-- another one of these) near the right edge -- a click this tool swallowed before its owner
+-- ever saw it. Measured on a Stoneworker's list: the name runs from column 96, DF's row
+-- buttons are at 131-151, the `+` is at 153 just inside the panel border at 154, and the
+-- green check is at 163-166, outside the panel entirely.
+--
+-- So the region is two spans, read off the render: the run of text that is the job's name,
+-- and the icon beyond the panel's edge. Everything between them belongs to somebody else.
+
+-- the name: printable characters from the first one, ending at the first gap of two or more
+-- blanks, so a `+` parked further along the line is not swallowed with it
+local function name_span(y)
+    local x1, x2 = panel_band()
+    local first, last, gap = nil, nil, 0
+    for x = x1, x2 do
+        local p = dfhack.screen.readTile(x, y)
+        local ch = p and p.ch or 0
+        if ch > 32 and ch < 127 then
+            if not first then first = x end
+            last, gap = x, 0
+        elseif first then
+            gap = gap + 1
+            if gap >= 2 then break end
+        end
+    end
+    return first, last
+end
+
+-- the worker icon: the first run of drawn tiles PAST the panel's right border. The border is
+-- where the sheet stops and the map begins (tile 0), and the check is drawn out there on its
+-- own -- which is also why it only appears on rows that have a worker.
+local function check_span(y, from_x)
+    local w = dfhack.screen.getWindowSize()
+    local x, seen_gap = from_x or 0, false
+    while x < w do
+        local p = dfhack.screen.readTile(x, y)
+        local t = p and p.tile or 0
+        if t == 0 then
+            seen_gap = true
+        elseif seen_gap then
+            local x1 = x
+            while x + 1 < w do
+                local q = dfhack.screen.readTile(x + 1, y)
+                if not q or (q.tile or 0) == 0 then break end
+                x = x + 1
+            end
+            return x1, x
+        end
+        x = x + 1
+    end
+end
+
+-- is this click on the job's own name, or on its worker icon?
+local function on_row_content(x, y, name_y)
+    local n1, n2 = name_span(name_y)
+    if n1 and x >= n1 and x <= n2 then return true end
+    local c1, c2 = check_span(y, n2 or 0)
+    if c1 and x >= c1 and x <= c2 then return true end
+    return false
+end
+
 -- ---- the action --------------------------------------------------------------
 
 local SHEET_TAB_OVERVIEW = 0
@@ -161,15 +228,16 @@ function JobWorkerClickOverlay:onInput(keys)
     if not bld or #bld.jobs == 0 then return false end
 
     -- the icon is drawn down all three lines of a row; the name is on the middle one
-    local job
-    for _, name_y in ipairs({y, y - 1, y + 1}) do
-        job = job_on_line(bld, name_y)
-        if job then break end
+    local job, name_y
+    for _, try_y in ipairs({y, y - 1, y + 1}) do
+        job = job_on_line(bld, try_y)
+        if job then name_y = try_y; break end
     end
     if not job then return false end
 
     local unit = job_worker(job)
     if not unit then return false end          -- nobody on it: the row is DF's business
+    if not on_row_content(x, y, name_y) then return false end   -- somebody else's column
 
     goto_worker(unit)
     return true
