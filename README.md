@@ -216,13 +216,26 @@ per click, so you can see where each has got to (an item being carried shows you
 The announcement when the delivery lands is a zoom announcement, so clicking *that* recentres
 the map on the finished pile.
 
+**Calling it off.** Hover that line and it reads **"Moving N items (Shift+click to cancel)"**;
+shift-clicking it does exactly that — the dump marks come off everything that has not moved, the
+zone goes, and whatever already landed is unforbidden where it lies. The `fort/dig-building` row
+renames itself to **Cancel move** while a delivery is in flight and does the same thing, so the
+place you started it from is the place you stop it. `fort/move-items cancel` is the same call
+from the console.
+
+The hover text is a token *function* rather than a string, because the notification panel only
+rebuilds its rows every five seconds and hover has to answer now — a token's text is re-read on
+every render. What that cannot do is widen the panel, which is measured at rebuild time, so the
+watcher overlay catches the hover transition on the frame it happens and asks the panel to lay
+out again; without that the hint is drawn into a frame too narrow for it and comes out clipped.
+
 Starting a delivery **unmarks everything else the fort had marked for dumping** and **cancels any
 delivery already in flight** (it says how many of each). Both for the same reason it deletes the
 other dump zones: a dumped item goes to whatever dump zone is going, so old marks would arrive
 mixed in with what you asked for. On one live fort that first sweep cleared 361 stray dump
 designations. When the last item arrives it removes the zone and
 **unforbids everything it moved** — dumped goods land forbidden, and a pile of forbidden goods is
-not a delivery. The job survives a save and reload, and `move-items cancel` calls it off.
+not a delivery. The job survives a save and reload.
 
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.

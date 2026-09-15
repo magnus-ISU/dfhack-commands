@@ -267,12 +267,28 @@ local CUSTOM_ENTRIES = {
       focus = 'dfhack/lua/dig-replace-walls',
       active = function() return reqscript('fort/dig-replace-walls').painting end,
       run = function() reqscript('fort/dig-replace-walls').show() end}},
+    -- The one row in this band that is two buttons depending on the fort's state: with a
+    -- delivery in flight the useful thing to do from here is stop it, so `label` renames the
+    -- row and `run` follows the name. `e[1]` stays "Move items" -- it is the entry's identity
+    -- for search and indexing, not what is drawn.
     {'Move items', {'Move items'},
-     {custom = true, alias = {'move', 'haul', 'dump', 'bring', 'fetch'},
+     {custom = true, alias = {'move', 'haul', 'dump', 'bring', 'fetch', 'cancel move'},
       focus = 'dfhack/lua/move-items',
+      label = function()
+          return reqscript('fort/move-items').in_flight() and 'Cancel move' or 'Move items'
+      end,
       active = function() return reqscript('fort/move-items').active() end,
-      run = function() reqscript('fort/move-items').show() end}},
+      run = function()
+          local m = reqscript('fort/move-items')
+          if m.in_flight() then m.cancel_delivery() else m.show() end
+      end}},
 }
+
+-- what a row is DRAWN as: an entry may rename itself for the fort's current state
+local function entry_label(e)
+    local f = e[3] and e[3].label
+    return f and f() or e[1]
+end
 local CUSTOM_ROWS = #CUSTOM_ENTRIES + 1   -- the entries plus the rule above them
 
 -- one flat index space over both lists, so search can rank and pick either. Indices
@@ -745,7 +761,7 @@ function DigBuilding:onRenderBody(dc)
     dc:seek(1, band_top):pen(COLOR_DARKGREY):string(string.rep(string.char(196), w - 2))
     for i, e in ipairs(CUSTOM_ENTRIES) do
         dc:seek(1, band_top + i):pen(entry_pen(self.search, #ENTRIES + i, mset, mbest))
-            :string(e[1]:sub(1, w - 2))
+            :string(entry_label(e):sub(1, w - 2))
     end
 end
 

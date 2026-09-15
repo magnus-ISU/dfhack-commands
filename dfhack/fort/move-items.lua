@@ -22,7 +22,11 @@ custom-tool band beside Replace wall), it runs the whole errand:
   4. It marks them for dumping, sets the three standing orders the haulers need, and gets
      out of the way -- and reports "Moving N items" in DFHack's notification panel for as
      long as the haul takes. Clicking that line walks the items still on their way, one per
-     click, so you can see where each has got to.
+     click, so you can see where each has got to. Hover it and it says
+     "Moving N items (Shift+click to cancel)"; SHIFT+CLICK calls the whole delivery off --
+     the marks come off what has not moved, the zone goes, and whatever already landed is
+     unforbidden. The picker's own row says `Cancel move` instead of `Move items` while a
+     delivery is running, and does that.
 
      Anything you mark for dumping yourself while it runs JOINS the delivery: with one dump
      zone in the fort it was going to that spot anyway, and joining is what gets it counted,
@@ -54,6 +58,7 @@ every time, and says so.
     fort/move-items            open the picker (or the status of a move in progress)
     fort/move-items status     what is still being moved
     fort/move-items cancel     stop: unmark what has not moved yet, clean up, unforbid
+                               (the same thing as shift-clicking the notification line)
 
 The job survives a save and reload: what was marked, where it is going and what to put back
 afterwards is persisted with the fort.
@@ -406,6 +411,30 @@ function cancel()
     return true
 end
 
+-- Cancel AND say what happened, which is the form every button wants. Kept beside `cancel`
+-- rather than inside it so the internal callers (a new delivery replacing an old one) stay
+-- silent: that one already has its own sentence to say.
+function cancel_delivery()
+    local st = status()
+    if not st then return false end
+    cancel()
+    moving_count = 0
+    local landed = st.total - st.pending
+    dfhack.gui.showAnnouncement(
+        ('move-items: delivery cancelled -- %d item(s) unmarked before they moved, %d already '
+         .. 'delivered and unforbidden, dump zone removed.'):format(st.pending, landed),
+        COLOR_YELLOW, false)
+    return true
+end
+
+-- Is a delivery in flight? The CHEAP question, for callers that ask every frame -- the
+-- dig-building row renames itself from this. `status()` answers the same thing but walks every
+-- item in the delivery to count what is still moving, which is right once and wrong sixty
+-- times a second.
+function in_flight()
+    return load_state() ~= nil
+end
+
 function status()
     local s = load_state()
     if not s then return nil end
@@ -520,6 +549,36 @@ end
 -- the notification line: "Moving 7 items", and clicking it shows you where they are going
 local NOTIFY_NAME = 'move_items_progress'
 
+-- The panel this line lives in is DFHack's own `gui/notify` overlay. We need a handle on it
+-- for two things below -- reading which row the mouse is over, and telling it to re-measure
+-- when our row's text changes length -- and the overlay registry is where live widget
+-- instances can be found by name.
+local function notify_panel()
+    local ok, st = pcall(overlay.get_state)
+    if not ok or type(st) ~= 'table' or type(st.db) ~= 'table' then return nil end
+    local entry = st.db['gui/notify.panel']
+    local w = entry and entry.widget
+    if w and w.visible and w.subviews and w.subviews.list then return w end
+    return nil
+end
+
+-- Is the mouse over OUR row, as opposed to one of the fort's other notices? The list knows
+-- which row is under the cursor; the row knows which notification drew it.
+local function notify_hovered()
+    local w = notify_panel()
+    if not w then return false end
+    local ok, idx = pcall(w.subviews.list.getIdxUnderMouse, w.subviews.list)
+    if not ok or not idx then return false end
+    local choice = w.subviews.list.choices and w.subviews.list.choices[idx]
+    return choice ~= nil and choice.data ~= nil and choice.data.name == NOTIFY_NAME
+end
+
+local CANCEL_HINT = ' (Shift+click to cancel)'
+
+-- The text is a FUNCTION, not a string, because the panel only rebuilds its rows every five
+-- seconds and hover has to answer now: a token's text is re-read on every render, so the hint
+-- appears the frame the mouse arrives. What it can't do from here is widen the panel -- that
+-- is measured at rebuild time -- so `WatchOverlay:render` re-measures on the way in and out.
 local function notify_message()
     if not dfhack.world.isFortressMode() then return end
     local s = load_state()
@@ -527,7 +586,14 @@ local function notify_message()
     local left = #still_pending(s.items or {})
     if left == 0 then return end
     moving_count = left
-    return {{text = ('Moving %d item%s'):format(left, left == 1 and '' or 's'), pen = COLOR_WHITE}}
+    return {{
+        text = function()
+            local n = moving_count
+            return ('Moving %d item%s%s'):format(n, n == 1 and '' or 's',
+                notify_hovered() and CANCEL_HINT or '')
+        end,
+        pen = COLOR_WHITE,
+    }}
 end
 
 -- Clicking the line walks the items that have not arrived yet, one per click -- the same
@@ -536,7 +602,15 @@ end
 -- reports the hauler's position, since that is where it is.
 local notify_cycle = 0
 
-local function notify_click()
+-- SHIFT+CLICK CALLS THE WHOLE THING OFF. The notification panel hands the click's secondary
+-- flag straight through (its list fires `on_submit2` when shift is down), so the one line
+-- that reports the delivery is also the one that stops it -- no command to remember and no
+-- screen to reopen. A plain click still walks the items.
+local function notify_click(_, shift)
+    if shift then
+        cancel_delivery()
+        return
+    end
     local s = load_state()
     if not s then return end
     local pending = still_pending(s.items or {})
@@ -560,6 +634,24 @@ local function notify_click()
             return
         end
     end
+end
+
+-- Our row grows by the width of the hint when the mouse lands on it, and the notification
+-- panel sizes itself from its widest row only when it rebuilds -- every five seconds. So the
+-- transition is caught here, on the frame it happens, and the panel is asked to lay out again:
+-- without this the hint is drawn into a frame too narrow for it and comes out clipped.
+function WatchOverlay:render(dc)
+    if moving_count > 0 then
+        local hovered = notify_hovered()
+        if hovered ~= self.was_hovered then
+            self.was_hovered = hovered
+            local w = notify_panel()
+            if w then pcall(w.updateLayout, w) end
+        end
+    elseif self.was_hovered then
+        self.was_hovered = false
+    end
+    WatchOverlay.super.render(self, dc)
 end
 
 local function register_notification()
