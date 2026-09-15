@@ -577,6 +577,40 @@ it), and `[Caged?]` cycles separately through *cages don't matter* → `[No Cage
 `[Caged!]`, so Hostile + `[Caged!]` is your prisoner list. The categories are DF's own,
 read out of the `Cat` column it already draws rather than guessed again from unit flags.
 
+**What goes where.** `Friendly` and `Hostile` are not the only friends and enemies on that
+tab, and taking them for the whole answer is what made the buttons look broken: a fort with a
+caravan in and a tavern full of visitors had **not one row** saying either word — the list was
+guests, a merchant's camel, ravens and a bronze colossus — so every row fell through to
+"unknown" and no filter moved anything.
+
+| Button | DF's words |
+|---|---|
+| Friendly | `Friendly`, `Merchant`, `Guest` (drawn as `Guest / Listen to Story`), `Caged Guest` |
+| Hostile | `Hostile`, `Uninvited Guest`, `Caged Prisoner` |
+| Wildlife | `Wild Animal`, including `Wild Animal (Caged)` |
+
+Merchants and guests are people you let in; an *uninvited* guest is DF's word for the thing
+that walked in without being asked — the bronze colossus, on the fort this was measured on —
+and it belongs with the enemies. A cage says where somebody is, not whose side they are on.
+
+**`[Caged?]` is on all three tabs** — Residents and Pets/Livestock as well as Other — and shows
+**only where the list you are looking at actually has something caged in it**, the same rule on
+every tab. A tab with nothing caged is never offered a filter whose only possible effect is to
+empty it. The cage state is kept when you step onto a tab that has none, so stepping back finds
+it as you left it. The category buttons stay on Other, the only tab with a `Cat` column.
+
+Three things that tab has to teach you. **Residents' focus string has no tail** — Pets is
+`…/CREATURES/PET` and Other is `…/CREATURES/OTHER`, but Residents is just
+`dwarfmode/Info/CREATURES`, so registering for `…/CITIZEN` (what the mode enum calls it) matches
+nothing and the buttons never appear there. **The tabs are not shaped alike**: Dead/Missing *is*
+the unit list and Other is a stack holding one, but Residents and Pets wrap theirs in a
+`widget_container` one level further down — a one-level scan finds nothing, with no error, and
+the sweep just quietly does nothing on those two tabs. And **`[Caged?]` is pushed out to column
+88**, well right of the other three, to clear DFHack's own `logistics.autoretrain` panel at
+columns 50–85 over rows 59–63, which is exactly the row this uses; Dead/Missing is left out
+altogether because `sort.deathcause_button` and `fort/needs-tomb-notification` already have that
+row.
+
 ### **`fort/animal-training`**
 Assigns a trainer to many caged animals at once.
 
