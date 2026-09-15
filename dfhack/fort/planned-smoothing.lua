@@ -265,6 +265,35 @@ end
 -- Walks the plan a slice at a time, resuming where it left off, so a big plan
 -- costs the same per frame as a small one -- it just takes more passes to come
 -- round again. Returns how many tiles it designated.
+
+-- SMOOTHING GOES TO THE BACK OF THE QUEUE, at priority 7.
+--
+-- A smoothing designation and a mining designation are the same queue to a dwarf: drop a
+-- room's worth of smoothing on a half-dug fort and the miners stop digging to go and polish
+-- walls. Priority is what DF has for saying "eventually": 1 is drop-everything, 4 is the
+-- default, 7 is last.
+--
+-- It lives in a BLOCK SQUARE EVENT rather than the tile -- `block_square_event_designation_
+-- priorityst`, one per block, holding a 16x16 grid of priority * 1000 -- so a block that has
+-- never had a priority set has no event at all and one has to be made. This is the same path
+-- quickfort's dig mode takes.
+local SMOOTH_PRIORITY = 7
+
+local function set_tile_priority(block, bx, by, priority)
+    local pbse
+    for _, ev in ipairs(block.block_events) do
+        if ev:getType() == df.block_square_event_type.designation_priority then
+            pbse = ev
+            break
+        end
+    end
+    if not pbse then
+        block.block_events:insert('#', {new = df.block_square_event_designation_priorityst})
+        pbse = block.block_events[#block.block_events - 1]
+    end
+    pbse.priority[bx][by] = priority * 1000
+end
+
 local function pass(all)
     local keys = {}
     for k in pairs(plan) do keys[#keys + 1] = k end
@@ -297,6 +326,7 @@ local function pass(all)
                 local v = verdict(block, bx, by, k, i)
                 if v == 'go' then
                     block.designation[bx][by].smooth = 1
+                    set_tile_priority(block, bx, by, SMOOTH_PRIORITY)
                     touched = true
                     plan_drop(k, i)
                     done = done + 1

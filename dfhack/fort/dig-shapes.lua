@@ -246,6 +246,35 @@ local SMOOTHABLE = {}
 for _, n in ipairs({'STONE', 'MINERAL', 'LAVA_STONE', 'FEATURE'}) do
     if TM[n] then SMOOTHABLE[TM[n]] = true end
 end
+
+-- SMOOTHING GOES TO THE BACK OF THE QUEUE, at priority 7.
+--
+-- A smoothing designation and a mining designation are the same queue to a dwarf: drop a
+-- room's worth of smoothing on a half-dug fort and the miners stop digging to go and polish
+-- walls. Priority is what DF has for saying "eventually": 1 is drop-everything, 4 is the
+-- default, 7 is last.
+--
+-- It lives in a BLOCK SQUARE EVENT rather than the tile -- `block_square_event_designation_
+-- priorityst`, one per block, holding a 16x16 grid of priority * 1000 -- so a block that has
+-- never had a priority set has no event at all and one has to be made. This is the same path
+-- quickfort's dig mode takes.
+local SMOOTH_PRIORITY = 7
+
+local function set_tile_priority(block, bx, by, priority)
+    local pbse
+    for _, ev in ipairs(block.block_events) do
+        if ev:getType() == df.block_square_event_type.designation_priority then
+            pbse = ev
+            break
+        end
+    end
+    if not pbse then
+        block.block_events:insert('#', {new = df.block_square_event_designation_priorityst})
+        pbse = block.block_events[#block.block_events - 1]
+    end
+    pbse.priority[bx][by] = priority * 1000
+end
+
 -- designate smoothing on a natural-stone tile (ignored on soil/air/constructions). dig+smooth
 -- coexist, so an interior tile being mined smooths itself into a smooth floor after it's dug.
 -- CRITICAL: skip tiles that are ALREADY smooth -- smooth=1 on an already-smooth wall carves a
@@ -256,6 +285,7 @@ local function designate_smooth(pos)
     if tt and df.tiletype.attrs[tt].special == df.tiletype_special.SMOOTH then return end
     local blk = block_of(pos); if not blk then return end
     blk.designation[pos.x % 16][pos.y % 16].smooth = 1
+    set_tile_priority(blk, pos.x % 16, pos.y % 16, SMOOTH_PRIORITY)
     blk.flags.designated = true
 end
 

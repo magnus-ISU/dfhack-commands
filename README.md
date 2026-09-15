@@ -100,6 +100,11 @@ leaves it alone.
 `fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
 immediately. Enabled by `magnus-scripts`.
 
+Every tile it designates goes in at **priority 7**, the back of the queue: a smoothing
+designation and a mining designation are the same queue to a dwarf, so a room's worth of
+smoothing dropped on a half-dug fort stops the miners to go and polish walls. `fort/dig-shapes`
+does the same with the smoothing it lays alongside its digging.
+
 ### **`fort/builder-burrow`**
 Turn a burrow into a district. Pick a burrow (only those on a single z-level are listed, under
 the name DF shows them by; the burrow is deleted once its blueprints start), a preset (hovels, 2x2 or 3x3 housing, luxury
