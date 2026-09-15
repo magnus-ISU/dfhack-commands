@@ -23,12 +23,24 @@ that this bridge is wired to that lever, and shows you a list of mechanisms inst
    a mechanism sitting in its `contained_items` whose refs point back. So both are read,
    and a bridge driven by two controls lists both of them.
 
-2. [Trigger /] ON A PRESSURE PLATE, in that same list. DF already draws a `[Pull    /]`
+2. [Open /] / [Close /] ON A PRESSURE PLATE, in that same list. DF already draws a `[Pull    /]`
    on the LEVER rows of the linked-buildings list -- open the bridge, see its lever, pull it
    from there without going to find it. A pressure plate gets no such button, because a
    plate is fired by the world rather than by a dwarf. But when the world has already put
-   something on it, there IS something to fire -- so `[Trigger /]` goes in the same column
-   as `[Pull    /]`, on the plate's row, and flips whether that thing counts:
+   something on it, there IS something to fire -- so the button goes in the same column as
+   `[Pull    /]`, on the plate's row, and flips whether that thing counts:
+
+   IT SAYS WHAT THE CLICK WILL DO. Looking at a BRIDGE, the button reads `[Open    /]` or
+   `[Close    /]` rather than `[Trigger /]`, because from there the answer is knowable: a
+   raised drawbridge is a wall and a lowered one is a floor, so raised is closed. Either way
+   the click toggles the bridge -- turning the plate's sense on fires it, turning the sense
+   off lets it reset, and DF moves the bridge on both edges -- so the word is simply the
+   opposite of where the bridge is now, and a bridge caught mid-movement is judged on where
+   it is heading. Anything else at the other end still reads `[Trigger /]`, since "open" is
+   not a thing this can promise about a lever or a hatch it has not been taught.
+
+   All three words are built to DF's own stencil, eleven columns with the `/` pushed to the
+   end, so the button never changes width as the bridge moves:
 
      * WATER or MAGMA standing on the plate's tile, or a MINECART parked on it. Nothing on
        the plate, no button: there would be nothing for it to do.
@@ -220,7 +232,27 @@ end
 local UNLINK = '[Unlink]'          -- DF's own anchor, at the end of every row of that list
 local UNLINK_DX = 12               -- how far right of our button DF draws it
 local ROW_PITCH = 3                -- rows per entry in that list
-local BUTTON = '[Trigger /]'
+
+-- DF's own button on a lever row is `[Pull    /]` -- eleven columns, the word left-aligned in
+-- eight and the `/` pushed to the end -- so ours is built to the same stencil whatever word it
+-- is carrying. A button that changed width as the bridge moved would jitter under the pointer.
+local BUTTON_W = 11
+local function button_text(word) return ('[%-8s/]'):format(word) end
+
+-- SAY WHAT THE CLICK WILL DO, when the thing at the other end is a bridge and the answer is
+-- therefore knowable. A raised drawbridge is a wall and a lowered one is a floor, so raised is
+-- CLOSED and lowered is OPEN.
+--
+-- Either way the click TOGGLES the bridge: turning the plate's sense on fires it, turning the
+-- sense off lets it reset, and DF moves the bridge on both edges. So what the click will do is
+-- simply the opposite of where the bridge is now -- no need to reason about which way the flag
+-- is going. A bridge caught mid-movement is judged on where it is heading, not where it is.
+local function bridge_verb(bld)
+    if not bld or bld:getType() ~= df.building_type.Bridge then return nil end
+    local g = bld.gate_flags
+    local going_up = g.raising or (g.raised and not g.lowering)
+    return going_up and 'Open' or 'Close'
+end
 
 -- is DF's [Unlink] drawn starting at this screen cell?
 local function unlink_at(x, y)
@@ -237,7 +269,7 @@ TriggerOverlay.ATTRS{
     default_pos = {x = -56, y = 46},
     default_enabled = true,
     viewscreens = 'dwarfmode',
-    frame = {w = #BUTTON, h = 21},
+    frame = {w = BUTTON_W, h = 21},
     version = 1,
 }
 
@@ -276,10 +308,13 @@ function TriggerOverlay:button_rows()
 end
 
 function TriggerOverlay:onRenderBody(dc)
+    -- one verb for the whole list: every row on it is linked to the same building, the one
+    -- whose sheet is open
+    local word = bridge_verb(sheet_building()) or 'Trigger'
     for _, row in ipairs(self:button_rows()) do
         local cond = plate_condition(row.bld)
         local on = cond and row.bld.plate_info.flags[cond.flag]
-        dc:seek(0, row.dy):pen(on and COLOR_GREEN or COLOR_WHITE):string(BUTTON)
+        dc:seek(0, row.dy):pen(on and COLOR_GREEN or COLOR_WHITE):string(button_text(word))
     end
 end
 

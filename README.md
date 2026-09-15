@@ -880,7 +880,7 @@ sitting in its `contained_items` whose refs point back. Reading only one end get
 knows its bridge and a bridge that knows nothing. Read both and a bridge driven by two controls
 lists both of them, which is exactly what the test fort had: one bridge, a lever and a plate.
 
-**`[Trigger /]` on a pressure plate**, in that same list. DF already draws a `[Pull    /]` on the
+**`[Open /]` / `[Close /]` on a pressure plate**, in that same list. DF already draws a `[Pull    /]` on the
 **lever** rows of the linked-buildings list — open the bridge, see its lever, pull it from there
 without going to find it. A plate gets no such button, because a plate is fired by the world
 rather than by a dwarf. But when the world has already put something on it, there *is* something
@@ -895,6 +895,17 @@ to fire, so `[Trigger /]` goes in the same column on the plate's row:
 * A plate can have more than one of them on it at once. The button aims at the **first** of water,
   magma, minecart that is there — a liquid beats a cart — so it is one button with one meaning
   rather than a row of them.
+
+**It says what the click will do.** Looking at a **bridge**, the button reads `[Open    /]` or
+`[Close    /]` rather than `[Trigger /]`, because from there the answer is knowable: a raised
+drawbridge is a wall and a lowered one is a floor, so raised is *closed*. Either way the click
+toggles the bridge — turning the plate's sense on fires it, turning the sense off lets it reset,
+and DF moves the bridge on both edges — so the word is simply the opposite of where the bridge is
+now, and a bridge caught mid-movement is judged on where it is heading. Anything else at the
+other end still reads `[Trigger /]`; "open" is not something this can promise about a lever or a
+hatch it has not been taught. All three are built to DF's own stencil — eleven columns with the
+`/` pushed to the end, exactly like `[Pull    /]` — so the button never changes width as the
+bridge moves.
 
 It does **not** touch the plate's ranges. A plate set to fire between 1 and 3 units of water will
 not fire under 7/7 however the flag is set, and rewriting the range to make the button "work"
