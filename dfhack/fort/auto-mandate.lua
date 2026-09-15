@@ -7,7 +7,10 @@ cheapest / most renewable material the item can be made from:
 
     * craft / jewelry items (amulet, ring, ...) -> copper (else any metal, else wood)
     * furniture & wooden goods                  -> wood
-    * metal gear (weapons, armor, ...)          -> copper
+    * metal gear (weapons, greaves, mail shirts) -> copper
+    * GARMENTS (trousers, socks, robes)         -> a cloth or leather category, never metal:
+                                                   one item_type covers both the armoury and
+                                                   the wardrobe and only the subtype says which
     * coins (minted from a metal bar)           -> copper (else any metal bar)
     * cages                                     -> copper (else any metal bar, else wood):
                                                    a metal cage is worth far more to the
@@ -56,6 +59,10 @@ local CYCLE_DAYS = 1
 -- will not burn, but a fort with no bars must still be able to fulfil the mandate, and an
 -- unmade mandate is a punished mandate.
 local W, C, A, S, CW = 'wood', 'copper', 'any', 'stone', 'copper_else_wood'
+-- G = GEAR: the material is decided by the mandated SUBTYPE, not the item type. Metal-capable
+-- pieces (greaves, high boots, mail shirts) take the copper policy; garments (trousers, socks,
+-- robes) are left unpinned so the clothier or the leather works can take the job.
+local G = 'gear'
 local RAW = {
     -- jewelry/craft goods: use the SPECIFIC make-job (NOT generic "make crafts",
     -- which makes a random item and would not satisfy the mandate)
@@ -78,9 +85,12 @@ local RAW = {
     {'ARMORSTAND', 'ConstructArmorStand', W, 'fixed'}, {'WEAPONRACK', 'ConstructWeaponRack', W, 'fixed'},
     {'BIN', 'ConstructBin', W, 'fixed'}, {'HATCH_COVER', 'ConstructHatchCover', W, 'fixed'},
     {'BLOCKS', 'ConstructBlocks', W, 'fixed'},
-    {'WEAPON', 'MakeWeapon', C, 'sub'}, {'ARMOR', 'MakeArmor', C, 'sub'},
-    {'HELM', 'MakeHelm', C, 'sub'}, {'PANTS', 'MakePants', C, 'sub'},
-    {'GLOVES', 'MakeGloves', C, 'sub'}, {'SHOES', 'MakeShoes', C, 'sub'},
+    {'WEAPON', 'MakeWeapon', C, 'sub'},
+    -- ARMOR / HELM / PANTS / GLOVES / SHOES each span the armoury AND the wardrobe, so the
+    -- SUBTYPE picks the material, not the item type -- see metal_capable.
+    {'ARMOR', 'MakeArmor', G, 'sub'},
+    {'HELM', 'MakeHelm', G, 'sub'}, {'PANTS', 'MakePants', G, 'sub'},
+    {'GLOVES', 'MakeGloves', G, 'sub'}, {'SHOES', 'MakeShoes', G, 'sub'},
     {'TRAPCOMP', 'MakeTrapComponent', C, 'sub'}, {'CHAIN', 'MakeChain', C, 'fixed'},
     -- coins: the MintCoins job strikes a stack from a metal bar (item implied -> 'fixed'); a
     -- coin mandate rarely names a metal, so default to the cheap-metal policy (copper, else any bar)
@@ -297,6 +307,83 @@ local function has_fulfillable_order(job, it, sub)
     return false
 end
 
+-- item_type -> the itemdef vector holding its subtype names, so a forge order reads
+-- "3 mail shirts" rather than "3 armor". (fort/mandate-notification keeps its own copy of
+-- this map to describe the MANDATE; here it describes the ORDER, which is not always the
+-- same thing -- see order_label.)
+local SUBTYPE_VEC = {
+    [df.item_type.WEAPON]   = 'weapons',
+    [df.item_type.ARMOR]    = 'armor',
+    [df.item_type.SHOES]    = 'shoes',
+    [df.item_type.GLOVES]   = 'gloves',
+    [df.item_type.HELM]     = 'helms',
+    [df.item_type.PANTS]    = 'pants',
+    [df.item_type.SHIELD]   = 'shields',
+    [df.item_type.AMMO]     = 'ammo',
+    [df.item_type.TRAPCOMP] = 'trapcomps',
+    [df.item_type.TOY]      = 'toys',
+}
+
+-- The itemdef behind a mandate's subtype, or nil when the mandate named no subtype.
+local function subtype_def(m)
+    local vec = SUBTYPE_VEC[m.item_type]
+    if not vec or not m.item_subtype or m.item_subtype < 0 then return nil end
+    return df.global.world.raws.itemdefs[vec][m.item_subtype]
+end
+
+-- CAN THIS PIECE OF GEAR BE MADE OF METAL AT ALL? One item_type covers both the armoury and
+-- the wardrobe -- PANTS is greaves AND trousers, SHOES is high boots AND socks, ARMOR is a
+-- mail shirt AND a robe -- and only the SUBTYPE says which. The raws answer it outright: a
+-- metal-capable piece carries the METAL flag (greaves: HARD, METAL, BARRED, SHAPED) and a
+-- garment does not (trousers: SOFT, LEATHER, WOVEN_THREAD).
+--
+-- Pinning copper to a garment is the bug this exists to stop, and NOT because the order is
+-- impossible -- DF takes it. The forge makes the trousers out of copper and hands the noble a
+-- metal garment: this fort had SIX copper trousers in it, quality 4 and 5, made by three of
+-- its own dwarves, with bars spent on clothing a clothier would have woven for free.
+local function metal_capable(m)
+    local def = subtype_def(m)
+    if not def then return false end
+    local ok, metal = pcall(function() return def.props.flags.METAL end)
+    return ok and metal == true
+end
+
+-- what a garment may be made of, from its own raws: SOFT means it can be woven, LEATHER means
+-- it can be cut from a hide. Trousers are both; a sock is only SOFT.
+local function garment_categories(def)
+    local out = {}
+    local ok = pcall(function()
+        if def.props.flags.LEATHER then out[#out + 1] = 'leather' end
+        if def.props.flags.SOFT then
+            out[#out + 1] = 'plant'; out[#out + 1] = 'yarn'; out[#out + 1] = 'silk'
+        end
+    end)
+    if not ok or #out == 0 then out = {'plant', 'yarn', 'silk', 'leather'} end
+    return out
+end
+
+-- Usable stock per garment category. Same rule as the metal and wood counts above: what is
+-- forbidden, claimed by a job, owned, rotten or an artifact is not stock.
+local function garment_stocks()
+    local function usable(it)
+        return not it.flags.forbid and not it.flags.dump and not it.flags.in_job
+            and not it.flags.rotten and not it.flags.owned and not it.flags.artifact
+    end
+    local n = {plant = 0, silk = 0, yarn = 0, leather = 0}
+    for _, it in ipairs(df.global.world.items.other.CLOTH or {}) do
+        if usable(it) then
+            local mi = dfhack.matinfo.decode(it)
+            local f = mi and mi.material and mi.material.flags
+            local c = f and (f.SILK and 'silk' or f.YARN and 'yarn' or 'plant') or 'plant'
+            n[c] = n[c] + (it.stack_size or 1)
+        end
+    end
+    for _, it in ipairs(df.global.world.items.other.SKIN_TANNED or {}) do
+        if usable(it) then n.leather = n.leather + (it.stack_size or 1) end
+    end
+    return n
+end
+
 -- pick a material the order can actually be made from. Returns a description, or
 -- nil if it cannot be fulfilled at all (so the caller skips it).
 -- Pick a material the order can actually be made from, IN THE AMOUNT THE MANDATE ASKS FOR.
@@ -317,7 +404,38 @@ function choose_material(o, policy, m, amount)
         local mi = dfhack.matinfo.decode(m.mat_type, m.mat_index)
         return mi and mi:toString() or 'specified material'
     end
-    if policy == W then
+    if policy == G then
+        if metal_capable(m) then
+            local mt, mi, name = pick_metal(amount)
+            if mt then
+                o.mat_type, o.mat_index = mt, mi
+                return name
+            end
+            return nil   -- metal gear and no metal: cannot fulfil
+        end
+        -- A GARMENT. Leaving the material open is NOT enough -- the forge can take an
+        -- unpinned MakePants and hand back copper trousers, which is how six of them got
+        -- made here -- so the order is pinned to a material CATEGORY instead, which no metal
+        -- belongs to. One category, not several: every order blueprint DFHack ships sets
+        -- exactly one, and a combination is unproven.
+        local def = subtype_def(m)
+        if not def then return 'any material (mandate named no subtype)' end
+        local stocks = garment_stocks()
+        local allowed = garment_categories(def)
+        local pick, pickn
+        for _, c in ipairs(allowed) do            -- enough for the whole mandate, most first
+            local have = stocks[c] or 0
+            if have >= amount and (not pick or have > pickn) then pick, pickn = c, have end
+        end
+        if not pick then                          -- short everywhere: take the deepest pile
+            for _, c in ipairs(allowed) do
+                local have = stocks[c] or 0
+                if not pick or have > pickn then pick, pickn = c, have end
+            end
+        end
+        o.material_category[pick] = true
+        return ('%s (%d in stock)'):format(pick, pickn or 0)
+    elseif policy == W then
         if wood_logs() >= amount then
             o.material_category.wood = true
             return 'wood'
@@ -381,23 +499,6 @@ local function item_label(m)
 end
 
 -- ---- naming the order for the announcement --------------------------------
-
--- item_type -> the itemdef vector holding its subtype names, so a forge order reads
--- "3 mail shirts" rather than "3 armor". (fort/mandate-notification keeps its own copy of
--- this map to describe the MANDATE; here it describes the ORDER, which is not always the
--- same thing -- see order_label.)
-local SUBTYPE_VEC = {
-    [df.item_type.WEAPON]   = 'weapons',
-    [df.item_type.ARMOR]    = 'armor',
-    [df.item_type.SHOES]    = 'shoes',
-    [df.item_type.GLOVES]   = 'gloves',
-    [df.item_type.HELM]     = 'helms',
-    [df.item_type.PANTS]    = 'pants',
-    [df.item_type.SHIELD]   = 'shields',
-    [df.item_type.AMMO]     = 'ammo',
-    [df.item_type.TRAPCOMP] = 'trapcomps',
-    [df.item_type.TOY]      = 'toys',
-}
 
 -- Names what the ORDER will make, count-correct. Only 'sub' orders carry a subtype: a
 -- 'fixed' job makes whatever the workshop offers (a TOY mandate names one toy, but

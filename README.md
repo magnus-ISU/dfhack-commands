@@ -510,7 +510,12 @@ numbers them instead (Aulus II, Aulus III, …).
 
 ### **`fort/dwarf-rts`**
 Command squads like an RTS: pick with number keys, click to move or attack, drag a box to
-order a group.
+order a group, shift-click to grow a patrol route out of where a squad is standing. A
+patrol walks its route once and holds at the far end, unless you close the route back on
+its own start, which keeps it cycling. The dotted trail DF paints between route waypoints
+is kept off the map -- the waypoint banners stay, and the trail comes back while you have
+the patrol-route screen open. Clicks on any UI -- or in the three-tile band
+around the screen border -- are always left to the game.
 
 ### **`fort/military-labor`**
 Keeps the "Military" work detail matched to your standing squads.
@@ -732,6 +737,23 @@ Soldiers whose squad is under orders are left to those orders.
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.
+
+**Garments are never metal.** One `item_type` covers both the armoury and the wardrobe — `PANTS`
+is greaves *and* trousers, `SHOES` is high boots *and* socks, `ARMOR` is a mail shirt *and* a
+robe — and only the **subtype** says which. Pinning the copper policy by item type queued
+"3 copper trousers", and the trap is that DF *takes* that order: the forge makes them and hands
+the noble a metal garment. This fort had **six copper trousers** in it, quality 4 and 5, made by
+three of its own dwarves, with bars spent on clothing a clothier would have woven for free.
+
+So the subtype decides. The raws say it outright — a metal-capable piece carries the `METAL`
+flag (greaves: `HARD, METAL, BARRED, SHAPED`) and a garment does not (trousers: `SOFT, LEATHER,
+WOVEN_THREAD`). Metal-capable pieces keep the copper policy; garments are pinned to a material
+**category** instead, chosen from what their own raws allow — `SOFT` means it can be woven,
+`LEATHER` means it can be cut from a hide, so trousers may be either and a sock only woven — and
+within that, the category the fort has the deepest usable pile of. Leaving the material merely
+*unpinned* is not enough: a forge will take an unpinned `MakePants` and make it out of copper
+again. One category is set, never a combination, because every order blueprint DFHack ships sets
+exactly one and a combination is unproven.
 
 **Jewelry is metal, not wood**: a wooden earring is legal and worthless, so amulets, rings,
 bracelets, earrings, crowns and scepters follow the cage rule — copper if there is any, then
