@@ -30,6 +30,18 @@ do by hand:
     which pile you meant, and it will not overwrite a building already standing on the dump
     tile.
 
+REMOVING THE STOP REMOVES ITS ROUTE. DF leaves the hauling route behind when a track stop
+is deconstructed: a stop pointing at an empty tile, a cart still being sent to it, and a
+Hauling screen filling with dead entries that look exactly like live ones. So a removal
+ordered on a stop this tool can see is remembered, and when the building actually goes the
+stop goes with it -- and the whole route too, if that was its last stop. A route with other
+stops keeps them: a two-stop route minus one stop still works, and deleting it would throw
+away work nobody asked to lose.
+
+It waits for the building rather than acting on the click, because clicking Remove only
+queues a deconstruct job and a change of mind cancels it; the route stays until the stop
+really is gone, and a cancelled removal drops the note with it.
+
 WHAT IT DOES NOT DO is invent a route. A stop that DF has not put on a route yet has nothing to
 assign a cart to, and saying so is more use than quietly creating one behind your back; the
 quantum button does create the route it needs, because that is the point of pressing it.
@@ -209,6 +221,171 @@ local function make_route_for(bld)
     return route, stop
 end
 
+-- ---- taking a route down with its stop -----------------------------------------
+--
+-- DF does not clean up after a deconstructed track stop: the hauling route keeps a stop
+-- pointing at a tile with nothing on it, the cart keeps being routed to it, and the Hauling
+-- screen fills with dead entries that look exactly like live ones. So when a track stop this
+-- tool can see is removed, the stop goes with it, and the route too if that was its last stop.
+--
+-- A MULTI-STOP ROUTE IS NOT DELETED, only the stop that stood on the removed building. A
+-- two-stop route minus one stop is still a working route, and throwing it away would destroy
+-- work nobody asked to lose. The common case -- the one-stop route the quantum button makes
+-- -- loses its last stop and so loses the route, which is the point.
+
+local hauling_info = function() return df.global.plotinfo.hauling end
+
+-- DF's Hauling screen keeps RAW POINTERS to routes and stops in `view_routes` / `view_stops`,
+-- built when the screen is drawn and never invalidated. Freeing a route while they hold it is
+-- a dangling pointer of exactly the kind the stockpile customize panel crashes on, so they are
+-- emptied here; DF fills them again the next time the screen opens. The half-finished edit
+-- states beside them (adding a stop, typing a nickname) are cleared for the same reason: they
+-- are route and stop ids that may no longer exist.
+local function drop_hauling_view()
+    local h = hauling_info()
+    h.view_routes:resize(0)
+    h.view_stops:resize(0)
+    h.view_bad:resize(0)
+    h.scroll_position, h.scrolling = 0, false
+    h.in_stop, h.adding_stop_route_id = false, -1
+    h.entering_nickname = false
+    h.nickname_route_id, h.nickname_stop_id = -1, -1
+end
+
+-- a stop owns its departure conditions and its stockpile links; both are vectors of pointers
+local function free_stop(stop)
+    for i = #stop.conditions - 1, 0, -1 do
+        local c = stop.conditions[i]; stop.conditions:erase(i); c:delete()
+    end
+    for i = #stop.stockpiles - 1, 0, -1 do
+        local l = stop.stockpiles[i]; stop.stockpiles:erase(i); l:delete()
+    end
+    stop:delete()
+end
+
+local function free_route(route)
+    -- a cart still pointing at a route that no longer exists is a cart DF keeps trying to
+    -- route; cutting it loose is what makes it an ordinary minecart again
+    for _, vid in ipairs(route.vehicle_ids) do
+        local v = vehicle_by_id(vid)
+        if v then v.route_id = -1 end
+    end
+    for i = #route.stops - 1, 0, -1 do
+        local st = route.stops[i]; route.stops:erase(i); free_stop(st)
+    end
+    local routes = hauling_info().routes
+    for i = #routes - 1, 0, -1 do
+        if routes[i] == route then routes:erase(i); break end
+    end
+    route:delete()
+end
+
+-- Drop one stop out of a route, or the whole route when that was the last stop.
+-- Returns 'route' or 'stop' to say which happened.
+local function drop_stop(route, idx)
+    if #route.stops <= 1 then
+        free_route(route)
+        return 'route'
+    end
+    local st = route.stops[idx]
+    route.stops:erase(idx)
+    free_stop(st)
+    -- `vehicle_stops` is parallel to `vehicle_ids` and holds an INDEX into `stops`, so every
+    -- index past the one just removed has shifted down by one, and a cart that was heading
+    -- for the removed stop is sent to the first one instead.
+    for i = 0, #route.vehicle_stops - 1 do
+        local at = route.vehicle_stops[i]
+        if at > idx then route.vehicle_stops[i] = at - 1
+        elseif at == idx then route.vehicle_stops[i] = 0 end
+    end
+    return 'stop'
+end
+
+-- Every route stop standing on this tile. A tile can carry a stop on more than one route,
+-- and all of them die with the building.
+local function stops_on(pos)
+    local out = {}
+    for _, r in ipairs(hauling_info().routes) do
+        for i = #r.stops - 1, 0, -1 do
+            local st = r.stops[i]
+            if st.pos.x == pos.x and st.pos.y == pos.y and st.pos.z == pos.z then
+                out[#out + 1] = {route = r, idx = i}
+            end
+        end
+    end
+    return out
+end
+
+-- Take every route stop off this tile. Returns how many stops and how many whole routes went.
+function clear_stops_at(pos)
+    local found = stops_on(pos)
+    if #found == 0 then return 0, 0 end
+    drop_hauling_view()
+    local stops, routes = 0, 0
+    for _, e in ipairs(found) do
+        if drop_stop(e.route, e.idx) == 'route' then routes = routes + 1 end
+        stops = stops + 1
+    end
+    return stops, routes
+end
+
+-- ---- watching for the removal ---------------------------------------------------
+--
+-- WHEN. Not when you click Remove -- when the stop is actually gone. Clicking Remove only
+-- queues a deconstruct job; a dwarf has to walk over and do it, and until then the stop is
+-- still working and the removal can still be cancelled. Tearing the route down at click time
+-- would throw it away on a change of mind, so the click is only REMEMBERED, and the route
+-- follows the building out. Cancel the removal and the note is dropped with it.
+--
+-- The note lives with the site, because that walk can outlast a save and reload, and a
+-- forgotten note is exactly the orphan route this is here to prevent.
+
+local PENDING_KEY = 'better-track-stops/pending'
+local pending = nil
+
+local function load_pending()
+    if not pending then
+        local d = dfhack.persistent.getSiteData(PENDING_KEY, {})
+        pending = type(d) == 'table' and d or {}
+    end
+    return pending
+end
+
+local function save_pending() pcall(dfhack.persistent.saveSiteData, PENDING_KEY, pending) end
+
+-- Called while the stop's sheet is open, which is where the Remove button is.
+local function watch_removal(bld)
+    local p = load_pending()
+    local key = tostring(bld.id)
+    local marked = dfhack.buildings.markedForRemoval(bld)
+    if marked and not p[key] then
+        -- only worth noting if there is actually a route on it to lose
+        if #stops_on(xyz2pos(bld.centerx, bld.centery, bld.z)) > 0 then
+            p[key] = {x = bld.centerx, y = bld.centery, z = bld.z}
+            save_pending()
+        end
+    elseif p[key] and not marked then
+        p[key] = nil                 -- removal called off
+        save_pending()
+    end
+end
+
+-- Finish the job for any watched stop whose building has actually gone.
+local function sweep_removed()
+    local p = load_pending()
+    local dirty, stops, routes = false, 0, 0
+    for key, pos in pairs(p) do
+        if not df.building.find(tonumber(key)) then
+            local ns, nr = clear_stops_at(xyz2pos(pos.x, pos.y, pos.z))
+            stops, routes = stops + ns, routes + nr
+            p[key], dirty = nil, true
+        end
+    end
+    if dirty then save_pending() end
+    if stops == 0 then return end
+    return stops, routes
+end
+
 local function link_feeder(stop, pile)
     for _, l in ipairs(stop.stockpiles) do
         if l.building_id == pile.id then return false end     -- already linked
@@ -326,8 +503,24 @@ function TrackStopPanel:say(text, pen)
 end
 
 function TrackStopPanel:overlay_onupdate()
+    -- This runs on every dwarfmode update, not only while the panel is on screen -- the
+    -- framework gates `overlay_onupdate` on the viewscreen, not on `visible` -- which is what
+    -- lets a route be cleaned up long after the sheet was closed and the dwarf finally got
+    -- round to pulling the stop out.
+    if dfhack.world.isFortressMode() then
+        local stops, routes = sweep_removed()
+        if stops then
+            dfhack.gui.showAnnouncement(
+                ('better-track-stops: track stop removed -- %d hauling stop%s dropped%s.')
+                    :format(stops, stops == 1 and '' or 's',
+                            routes > 0 and (', %d route%s with it'):format(
+                                routes, routes == 1 and '' or 's') or ''),
+                COLOR_YELLOW, false)
+        end
+    end
     local bld = sheet_building()
     if not bld then return end
+    watch_removal(bld)
     local route, stop = stop_of(bld)
     self.bld, self.route, self.stop, self.cart_pos = bld, route, stop, nil
     -- the best cart of each kind within reach, for the Assign buttons
@@ -440,6 +633,10 @@ function TrackStopPanel:quantum()
     self:say(('Quantum: %s feeds it, dumping to %d,%d%s.'):format(
         feeder.name ~= '' and feeder.name or ('stockpile ' .. feeder.id),
         dpos.x, dpos.y, best and ', cart assigned' or ' -- no free cart to assign'), COLOR_GREEN)
+end
+
+dfhack.onStateChange['better-track-stops'] = function(sc)
+    if sc == SC_MAP_LOADED or sc == SC_MAP_UNLOADED then pending = nil end
 end
 
 OVERLAY_WIDGETS = {panel = TrackStopPanel}
