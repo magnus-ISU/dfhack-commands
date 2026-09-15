@@ -12,6 +12,10 @@ cheapest / most renewable material the item can be made from:
                                                    one item_type covers both the armoury and
                                                    the wardrobe and only the subtype says which
     * coins (minted from a metal bar)           -> copper (else any metal bar)
+    * siege equipment: catapult/ballista parts  -> unconstrained (the siege workshop cuts
+                                                   them from a log; there is no metal one)
+      a ballista arrow head                     -> copper (it is forged from a bar)
+      a ballista arrow                          -> unconstrained (assembled from a head)
     * cages                                     -> copper (else any metal bar, else wood):
                                                    a metal cage is worth far more to the
                                                    noble and cannot burn, but a fort with
@@ -92,6 +96,18 @@ local RAW = {
     {'HELM', 'MakeHelm', G, 'sub'}, {'PANTS', 'MakePants', G, 'sub'},
     {'GLOVES', 'MakeGloves', G, 'sub'}, {'SHOES', 'MakeShoes', G, 'sub'},
     {'TRAPCOMP', 'MakeTrapComponent', C, 'sub'}, {'CHAIN', 'MakeChain', C, 'fixed'},
+    -- SIEGE EQUIPMENT. Catapult and ballista parts are cut from a log at the siege workshop
+    -- and there is no metal version, so they are left UNCONSTRAINED rather than given the
+    -- wood policy: that one falls back to metal when the fort is short of logs, which here
+    -- would queue a forge order no forge can take. The job already restricts the material to
+    -- what the siege workshop will accept, so there is no choice left to make.
+    -- A ballista arrow head is the one that IS forged, from a metal bar, so it takes the
+    -- cheap-metal policy. The arrow itself is assembled from a head and a log, and pinning a
+    -- material to that order would pin the wrong half of it.
+    {'CATAPULTPARTS', 'ConstructCatapultParts', A, 'fixed'},
+    {'BALLISTAPARTS', 'ConstructBallistaParts', A, 'fixed'},
+    {'BALLISTAARROWHEAD', 'MakeBallistaArrowHead', C, 'fixed'},
+    {'SIEGEAMMO', 'AssembleSiegeAmmo', A, 'fixed'},
     -- coins: the MintCoins job strikes a stack from a metal bar (item implied -> 'fixed'); a
     -- coin mandate rarely names a metal, so default to the cheap-metal policy (copper, else any bar)
     {'COIN', 'MintCoins', C, 'fixed'},
@@ -493,7 +509,20 @@ function choose_material(o, policy, m, amount)
     return 'any material'   -- A: unconstrained (uses any available stone/etc.)
 end
 
+-- DF's own words for item types whose token does not survive lower-casing. CATAPULTPARTS
+-- would otherwise be announced as "catapultparts", and SIEGEAMMO is not a word at all --
+-- DF calls the thing a ballista arrow. Singular forms only: the caller adds the -s, and
+-- the two that are already plural ("catapult parts") end in one so it leaves them alone.
+local ITEM_WORDS = {
+    [df.item_type.CATAPULTPARTS]     = 'catapult parts',
+    [df.item_type.BALLISTAPARTS]     = 'ballista parts',
+    [df.item_type.BALLISTAARROWHEAD] = 'ballista arrow head',
+    [df.item_type.SIEGEAMMO]         = 'ballista arrow',
+}
+
 local function item_label(m)
+    local word = ITEM_WORDS[m.item_type]
+    if word then return word end
     local tok = df.item_type[m.item_type]
     return tok and tok:lower():gsub('_', ' ') or 'goods'
 end

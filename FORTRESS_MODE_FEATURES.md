@@ -25,6 +25,13 @@ with tiles nobody can reach; when none of it can be reached yet, `status` says s
 blaming the shape. Priority 1 designations are never touched, and
 `fort/channel-safely why <x> <y> <z>` explains any tile's verdict. Enabled by `magnus-scripts`.
 
+Finding the designations costs almost nothing when there are none. The sweep walks every map
+block in the fort, so it runs once a second only while there is a reason to look — a designation
+tool is up, tiles are being held, or the last sweep found channel work — and once every ten
+seconds otherwise. Nothing is missed: a designation DF has turned into a job, the case that
+actually races a miner, is caught the instant it happens by the job hook rather than by the
+sweep. That took it from 8.2% of frame time to 1.3%.
+
 ![fort/channel-safely demo](demos/fort-channel-safely.gif)
 
 When a pass can prove **nothing** safe to dig, that now raises a line in DFHack's notification
@@ -57,6 +64,13 @@ Engrave designations keep DF's own graphic. `art off` puts DF's own designation 
 leaves it alone.
 `fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
 immediately. Enabled by `magnus-scripts`.
+
+It draws nothing at all: designation art is DF's own, and a planned tile — not designated
+yet — shows what it always showed, which is the rock. It used to paint a gray corner triangle
+over every smooth designation in view, which meant walking the viewport's map blocks on every
+rendered frame, and it went idle completely when no plan is outstanding instead of re-reading
+the fort's job list four times a second. Together that was 6.7% of frame time on a live fort,
+now effectively nothing.
 
 Every tile it designates goes in at **priority 7**, the back of the queue: a smoothing
 designation and a mining designation are the same queue to a dwarf, so a room's worth of
@@ -191,9 +205,10 @@ Starting a delivery **unmarks everything else the fort had marked for dumping** 
 delivery already in flight** (it says how many of each). Both for the same reason it deletes the
 other dump zones: a dumped item goes to whatever dump zone is going, so old marks would arrive
 mixed in with what you asked for. On one live fort that first sweep cleared 361 stray dump
-designations. When the last item arrives it removes the zone and
-**unforbids everything it moved** — dumped goods land forbidden, and a pile of forbidden goods is
-not a delivery. The job survives a save and reload.
+designations. **Each item is unforbidden as it lands**, not all at once at the end — dumped goods
+are put down forbidden, and a pile of forbidden goods is not a delivery, so a long haul is usable
+while the rest of it is still walking. The zone goes when the last one is in. The job survives a
+save and reload.
 
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
@@ -695,6 +710,14 @@ Soldiers whose squad is under orders are left to those orders.
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.
+
+**Siege equipment** is queued too: catapult parts, ballista parts, a ballista arrow head and a
+ballista arrow (DF's `SIEGEAMMO`). Parts and arrows are left **unconstrained** rather than given
+the wood policy — that one falls back to metal when the fort is short of logs, which here would
+queue a forge order no forge can take, and the siege workshop already restricts the material to
+what it will accept. The arrow *head* is the one thing that is genuinely forged, from a bar, so it
+takes the cheap-metal policy. These also get DF's own words: the item tokens lower-case to
+"catapultparts" and "siegeammo", which is not what the announcement should say.
 
 **Garments are never metal.** One `item_type` covers both the armoury and the wardrobe — `PANTS`
 is greaves *and* trousers, `SHOES` is high boots *and* socks, `ARMOR` is a mail shirt *and* a
