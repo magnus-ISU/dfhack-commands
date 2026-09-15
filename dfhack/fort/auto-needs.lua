@@ -10,7 +10,7 @@ there is. Some of those needs have a LABOR that answers them, and this hands tha
 out to the dwarves who need it -- then takes it back once they have had their fill, so
 the fort's job assignments are not quietly rewritten forever by a mood that has passed.
 
-TODAY IT KNOWS ONE NEED:
+TODAY IT KNOWS ONE LABOR AND ONE POST:
 
   WANDER -> FISHING. "Wander" is satisfied by being outside the fortress, and fishing is
   the reliable way a dwarf takes themselves out there and stays a while. Given the labor,
@@ -19,6 +19,12 @@ TODAY IT KNOWS ONE NEED:
   The dwarf must be BOTH short on the need and carrying stress -- the need alone is
   ordinary (half a fort is a little short of wandering at any time) and the stress alone
   says nothing about which need is doing it.
+
+  THINK ABSTRACTLY / SELF-EXAMINATION -> A SCHOLAR'S POST AT THE PUBLIC LIBRARY. Both of
+  those needs are drained by the same act -- reading or writing something -- and the
+  scholar occupation at a library is how a dwarf gets sent to do it. Mark one library
+  [Public Library] and the neediest dwarves are posted there, and taken off again once
+  they have read their fill. This half is described under THE PUBLIC LIBRARY below.
 
 HOW A LABOR IS ACTUALLY GIVEN
 
@@ -47,26 +53,61 @@ WHAT IT GIVES BACK
     enable fort/auto-needs      run a pass a few times a day
     fort/auto-needs -n          a pass that changes nothing (with `once`)
 
-THE THRESHOLDS
+THE PUBLIC LIBRARY
 
-  A need's `focus_level` goes NEGATIVE as it goes unmet -- badly unmet reads in the
-  thousands below zero -- and `personality.stress` is DF's own running total, where higher
-  is worse and a negative total is a dwarf in credit. The bars here are deliberately LOW:
-  the point is to catch a dwarf on the way down rather than after the tantrum, and the
-  worst that a false positive costs is a dwarf who goes fishing for a while.
+  Open a zone belonging to a library and a [Public Library] button sits on its panel, the
+  same place `training-barracks` puts [Basic training] on a barracks. Pressing it marks
+  THAT LIBRARY -- the location, not the zone, so any of the zones that make it up will do
+  -- as the one this tool staffs, and starts the background pass. Pressing it again stops
+  staffing it; everyone this tool posted there is taken off on the way out.
+
+  Each pass, EVERY citizen short past the bar is given a SCHOLAR post at that library.
+  There is no limit and no queue: they read, the need drains, and a pass or two later the
+  post is handed back, so the library staffs itself up and down with the fort's mood the
+  way `autotraining` and `idle-crafting` do. The post is a loan, not a career.
+
+  NOBODY IS PASSED OVER FOR BEING BUSY -- a soldier, a tavern keeper, a doctor all get one
+  the moment they are short, because it costs them a few hours of reading. Two things still
+  rule a dwarf out and neither is a policy: no historical figure (an occupation record is
+  keyed by `histfig_id`, so there is nothing to write) and already being a scholar here.
+  Children never come up; DF has no child occupations. A post this tool did NOT make is
+  filled and then emptied, never deleted, so a library set up by hand keeps its shape.
+
+  HOW A POST IS ACTUALLY GIVEN. An occupation has three owners and DF reads all three: the
+  location's `occupations` list, the unit's, and `world.occupations.all`. Posting a dwarf
+  writes `unit_id` and `histfig_id` on the record and adds it to the unit; taking them off
+  clears both and removes it again. Scholar SLOTS beyond the ones the fort already has are
+  created (and removed again when empty), which is a resize of the location's vector --
+  never done while the location details panel is open on that library, because that panel
+  holds raw pointers into it and resizing under it crashes DF.
+
+THE THRESHOLD
+
+  ONE BAR, SHARED BY EVERY RULE HERE AND EVERY RULE ADDED LATER: -750. A need's
+  `focus_level` goes negative as it goes unmet, and -750 is far enough down to catch a dwarf
+  before the need starts distracting them or handing them bad thoughts, without tripping on
+  the ordinary shortfall half the fort carries at any moment. The loan is handed back at
+  zero, so there is a gap between the two bars and nobody flickers in and out on a point of
+  focus.
+
+  Stress is not part of the test. An earlier version demanded it as well, which meant
+  waiting for the damage to show before answering the need that was causing it.
 ]]
 
 local GLOBAL_KEY = 'auto-needs'
 
--- How far a need has to have slipped, and how much stress has to be riding on it. BOTH BARS
--- ARE AS LOW AS THEY GO: any shortfall at all on the need, any stress at all on the dwarf.
--- Waiting for a badly unmet need (the focus levels run into the thousands below zero) means
--- waiting for a dwarf who is already in trouble -- measured here, the fort had nine stressed
--- citizens and eleven who want to wander, and not one of them was past -1000 yet. The one this
--- catches, a chief medical dwarf at 16,224 stress and -594 focus, is exactly the case: short of
--- wandering, plainly suffering, and a long way from the tantrum that would make it obvious.
-local FOCUS_UNMET = -1        -- focus_level below zero at all = the need is going short
-local STRESS_MIN = 1          -- any stress at all; a dwarf in credit is left alone
+-- ONE BAR FOR EVERY RULE IN THIS FILE, and every rule added later. A need's `focus_level`
+-- goes negative as it goes unmet, and -750 is where it stops being background noise and
+-- starts costing the dwarf: far enough down to be worth acting on, not so shallow that half
+-- the fort trips it every pass. Measured here, 85 of 95 citizens carry an unmet thinking or
+-- introspection need at any moment and most sit a couple of hundred below zero -- ordinary
+-- life, and not something to reassign anybody over.
+--
+-- The bar is the WHOLE test. An earlier version also demanded stress before lending anything,
+-- which meant waiting for the damage to show before answering the need that was doing it;
+-- -750 catches the dwarf on the way down instead, which is the point of the tool.
+local FOCUS_UNMET = -750      -- how far a need has to have slipped before this tool acts
+local FOCUS_MET = 0           -- and where it is back above water, so the loan can end
 local SCAN_FRAMES = 1200      -- a pass every game day or so
 
 -- need -> the labor that answers it. One entry today; the shape is the point.
@@ -74,6 +115,11 @@ local RULES = {
     {need = df.need_type.Wander, labor = df.unit_labor.FISH,
      why = 'wander', gives = 'fishing'},
 }
+
+-- The two needs a scholar's post answers. DF drains both of them with the same act --
+-- reading or writing written content -- which is exactly what a library scholar does.
+local SCHOLAR_NEEDS = {df.need_type.ThinkAbstractly, df.need_type.SelfExamination}
+
 
 -- ---- state: the labors WE lent, per site ------------------------------------
 
@@ -84,6 +130,11 @@ local function load_state()
         if state.enabled == nil then state.enabled = false end
         state.lent = state.lent or {}      -- ["unit_id/labor"] = true
         state.lent = type(state.lent) == 'table' and state.lent or {}
+        -- the public library: the LOCATION we staff, who we posted there, and which of
+        -- those posts we had to create (so only those are ever deleted again)
+        if state.library_id == nil then state.library_id = -1 end
+        state.posted = type(state.posted) == 'table' and state.posted or {}   -- ["unit_id"] = occupation id
+        state.our_slots = type(state.our_slots) == 'table' and state.our_slots or {}  -- ["occupation id"] = true
     end
     return state
 end
@@ -143,11 +194,18 @@ local function stress_of(unit)
     return soul and soul.personality.stress or 0
 end
 
--- does this dwarf want the labor right now?
+-- does this dwarf want the labor right now? The shared bar is the whole test; the loan is
+-- given back at FOCUS_MET, so there is a gap between the two and nobody flickers in and out
+-- of a labor on a single point of focus.
 local function qualifies(unit, rule)
     local focus = need_focus(unit, rule.need)
-    if not focus or focus > FOCUS_UNMET then return false end
-    return stress_of(unit) >= STRESS_MIN
+    return focus ~= nil and focus <= FOCUS_UNMET
+end
+
+-- and is the loan finished? (kept apart from `qualifies` so the two bars can differ)
+local function finished(unit, rule)
+    local focus = need_focus(unit, rule.need)
+    return focus == nil or focus >= FOCUS_MET
 end
 
 local function citizens()
@@ -191,8 +249,11 @@ function scan(dry)
                     else
                         given[#given + 1] = {unit = unit, rule = rule}
                     end
+                elseif ours and not finished(unit, rule) then
+                    -- climbing back but not there yet: leave the loan where it is
+                    kept = kept + 1
                 elseif ours then
-                    -- had their fill (or the stress went): give the labor back
+                    -- had their fill: give the labor back
                     if not dry then
                         for i = #detail.assigned_units - 1, 0, -1 do
                             if detail.assigned_units[i] == unit.id then
@@ -219,18 +280,264 @@ function scan(dry)
     return given, taken, kept, missing
 end
 
+-- ---- the public library ------------------------------------------------------
+
+-- The abstract building (the LOCATION) behind an id, if this fort owns it and it is a
+-- library. Zones come and go; the location is the thing worth remembering.
+local function find_library(id)
+    if not id or id < 0 then return nil end
+    local site = df.world_site.find(df.global.plotinfo.site_id)
+    if not site then return nil end
+    for _, b in ipairs(site.buildings) do
+        if b.id == id and b:getType() == df.abstract_building_type.LIBRARY then return b end
+    end
+end
+
+-- the library a zone belongs to, or nil. A library is made of MeetingHall civzones that
+-- carry its `location_id`, and there can be several of them; any one identifies it.
+local function library_of_zone(zone)
+    if not zone or not df.building_civzonest:is_instance(zone) then return nil end
+    return find_library(zone.location_id)
+end
+
+-- Is DF's location details panel sitting open on this library? Its `loc_occupation` vector
+-- holds RAW POINTERS into the location's occupation list, so growing or shrinking that list
+-- underneath it is a crash. Reading and writing the records in place is fine.
+local function details_open_on(lib)
+    local ld = df.global.game.main_interface.location_details
+    return ld and ld.open and ld.selected_ab == lib
+end
+
+-- how short this dwarf is on the scholar needs: the deepest shortfall of the ones they have,
+-- or nil when they have neither. Used both to rank candidates and to decide who is finished.
+local function scholar_shortfall(unit)
+    local worst
+    for _, need in ipairs(SCHOLAR_NEEDS) do
+        local focus = need_focus(unit, need)
+        if focus and (not worst or focus < worst) then worst = focus end
+    end
+    return worst
+end
+
+-- every SCHOLAR post at this library, and how many of them are standing empty
+local function scholar_posts(lib)
+    local posts = {}
+    for _, o in ipairs(lib.occupations) do
+        if o.type == df.occupation_type.SCHOLAR then posts[#posts + 1] = o end
+    end
+    return posts
+end
+
+-- Open one more scholar's post. Three owners have to know about an occupation and two of
+-- them are lists: the world's and the location's. Ids are unique across the world, so a new
+-- one is the highest in use plus one.
+local function open_post(lib, s)
+    local all = df.global.world.occupations.all
+    local max_id = -1
+    for _, o in ipairs(all) do if o.id > max_id then max_id = o.id end end
+    local o = df.occupation:new()
+    o.id = max_id + 1
+    o.type = df.occupation_type.SCHOLAR
+    o.histfig_id, o.unit_id = -1, -1
+    o.location_id = lib.id
+    o.site_id = lib.site_id
+    o.group_id = -1
+    all:insert('#', o)
+    lib.occupations:insert('#', o)
+    s.our_slots[tostring(o.id)] = true
+    return o
+end
+
+-- Close a post we opened, once it is empty again. A post the fort made by hand is never
+-- closed -- filling and emptying it is a loan, deleting it would be redecorating.
+local function close_post(lib, o, s)
+    for i = #lib.occupations - 1, 0, -1 do
+        if lib.occupations[i] == o then lib.occupations:erase(i) end
+    end
+    local all = df.global.world.occupations.all
+    for i = #all - 1, 0, -1 do
+        if all[i] == o then all:erase(i); break end
+    end
+    s.our_slots[tostring(o.id)] = nil
+    o:delete()
+end
+
+local function post_dwarf(o, unit)
+    o.unit_id = unit.id
+    o.histfig_id = unit.hist_figure_id
+    unit.occupations:insert('#', o)
+end
+
+local function unpost_dwarf(o)
+    local u = o.unit_id >= 0 and df.unit.find(o.unit_id)
+    if u then
+        for i = #u.occupations - 1, 0, -1 do
+            if u.occupations[i] == o then u.occupations:erase(i) end
+        end
+    end
+    o.unit_id, o.histfig_id = -1, -1
+end
+
+-- Could this dwarf be posted at all? NOBODY is passed over for being busy: a soldier, a
+-- tavern keeper, a doctor all get a post the moment they are short, because the post is a
+-- few hours of reading and step 1 takes it back again. Two things still rule a dwarf out,
+-- and neither is a policy:
+--   * no historical figure -- an occupation record is keyed by `histfig_id` and DF's own
+--     picker only ever offers figures, so there is nothing to write;
+--   * already a scholar at this library -- one post each, not two.
+-- (Children never reach here: `citizens()` is adults only, and DF has no child occupations.)
+--
+-- Holding a SECOND occupation alongside an existing one is off DF's own beaten path -- 286
+-- filled posts in this world and not one figure holds two -- so it was tried before it was
+-- shipped: a tavern keeper given a scholar's post kept both records and kept working, and
+-- the game ran on. It is still the one thing here DF never does by itself.
+local function can_be_posted(unit)
+    if unit.hist_figure_id < 0 then return false end
+    for _, o in ipairs(unit.occupations) do
+        if o.type == df.occupation_type.SCHOLAR then return false end
+    end
+    return true
+end
+
+-- One library pass. Returns who was posted, who was released, and how many are still reading.
+-- `dry` reports without touching anything.
+function scan_library(dry)
+    local s = load_state()
+    local posted, released, holding = {}, {}, 0
+    local lib = find_library(s.library_id)
+    if not lib then
+        -- the library was deleted: forget it, and forget the people we had there
+        if s.library_id >= 0 and not dry then
+            s.library_id, s.posted, s.our_slots = -1, {}, {}
+            save_state()
+        end
+        return posted, released, holding, nil
+    end
+
+    local frozen = details_open_on(lib)     -- no resizing the occupation list under the panel
+    local posts = scholar_posts(lib)
+    local by_id = {}
+    for _, o in ipairs(posts) do by_id[tostring(o.id)] = o end
+
+    -- 1. who is finished? Every scholar we posted whose needs are back above water -- or who
+    --    died, left, or had their post taken away by hand.
+    for key, occ_id in pairs(s.posted) do
+        local unit = df.unit.find(tonumber(key))
+        local o = by_id[tostring(occ_id)]
+        local done = true
+        if unit and o and o.unit_id == unit.id and dfhack.units.isCitizen(unit)
+                and not dfhack.units.isDead(unit) then
+            local worst = scholar_shortfall(unit)
+            done = not worst or worst >= FOCUS_MET
+        end
+        if done then
+            -- only ever empty the post if it is still OUR dwarf standing in it: somebody
+            -- re-assigned by hand in the meantime is not this tool's to move
+            if not dry then
+                if o and (o.unit_id < 0 or o.unit_id == tonumber(key)) then unpost_dwarf(o) end
+                s.posted[key] = nil
+            end
+            released[#released + 1] = {unit = unit, id = tonumber(key)}
+        else
+            holding = holding + 1
+        end
+    end
+
+    -- 2. who is short? EVERYBODY past the bar gets a post -- there is no limit and no
+    --    queue. A scholar reads, the need drains, and step 1 hands the post back a pass or
+    --    two later, so the library staffs itself up and down with the fort's mood instead of
+    --    rationing a few seats to the worst-off. Neediest first only so that a pass cut
+    --    short by the details panel does the most useful work it can.
+    local want = {}
+    for _, unit in ipairs(citizens()) do
+        if not s.posted[tostring(unit.id)] and can_be_posted(unit) then
+            local worst = scholar_shortfall(unit)
+            if worst and worst <= FOCUS_UNMET then
+                want[#want + 1] = {unit = unit, shortfall = worst}
+            end
+        end
+    end
+    table.sort(want, function(a, b)
+        if a.shortfall ~= b.shortfall then return a.shortfall < b.shortfall end
+        return a.unit.id < b.unit.id
+    end)
+
+    -- 3. fill the empty posts, opening as many more as it takes
+    local empty = {}
+    for _, o in ipairs(posts) do
+        if o.unit_id < 0 and o.histfig_id < 0 then empty[#empty + 1] = o end
+    end
+    for _, cand in ipairs(want) do
+        local o = table.remove(empty, 1)
+        if not o and not frozen and not dry then o = open_post(lib, s) end
+        if not o and dry then o = true end          -- the dry run only needs to say "this one"
+        if not o then break end                     -- panel open and nothing free: wait a pass
+        if not dry then
+            post_dwarf(o, cand.unit)
+            s.posted[tostring(cand.unit.id)] = o.id
+        end
+        posted[#posted + 1] = cand
+        holding = holding + 1
+    end
+
+    -- 4. tidy: close the posts we opened that nobody is standing in any more, so a library
+    --    this tool has finished with looks the way the fort left it
+    if not dry and not frozen then
+        for _, o in ipairs(scholar_posts(lib)) do
+            if s.our_slots[tostring(o.id)] and o.unit_id < 0 and o.histfig_id < 0 then
+                close_post(lib, o, s)
+            end
+        end
+    end
+
+    if not dry then save_state() end
+    return posted, released, holding, lib
+end
+
+-- Take everybody off and close every post we opened. Used when the library is un-marked.
+local function clear_library()
+    local s = load_state()
+    local lib = find_library(s.library_id)
+    if lib and not details_open_on(lib) then
+        for _, o in ipairs(scholar_posts(lib)) do
+            local ours_post = false
+            for key, occ_id in pairs(s.posted) do
+                if occ_id == o.id then ours_post = true; s.posted[key] = nil end
+            end
+            if ours_post then unpost_dwarf(o) end
+        end
+        for _, o in ipairs(scholar_posts(lib)) do
+            if s.our_slots[tostring(o.id)] and o.unit_id < 0 and o.histfig_id < 0 then
+                close_post(lib, o, s)
+            end
+        end
+    end
+    s.posted, s.our_slots = {}, {}
+end
+
 -- ---- heartbeat --------------------------------------------------------------
 
 local function hb_gen(set)
     if set ~= nil then dfhack.internal.auto_needs_hb_gen = set end
     return dfhack.internal.auto_needs_hb_gen or 0
 end
+
+-- The pass runs for either half on its own: `enable fort/auto-needs` lends labors, marking a
+-- [Public Library] staffs it, and neither switches the other one on behind your back.
+local function library_marked() return load_state().library_id >= 0 end
+local function service_wanted() return isEnabled() or library_marked() end
+
+local function one_pass()
+    if isEnabled() then pcall(scan) end
+    if library_marked() then pcall(scan_library) end
+end
+
 local function start_heartbeat()
     local my = hb_gen() + 1
     hb_gen(my)
     local function hb()
-        if not isEnabled() or my ~= hb_gen() then return end
-        pcall(scan)
+        if not service_wanted() or my ~= hb_gen() then return end
+        one_pass()
         dfhack.timeout(SCAN_FRAMES, 'frames', hb)
     end
     hb()
@@ -241,17 +548,77 @@ local function set_enabled(v)
     load_state()
     state.enabled = v
     save_state()
-    if v then start_heartbeat(); pcall(scan) else stop_heartbeat() end
+    if service_wanted() then start_heartbeat() else stop_heartbeat() end
+    if v then pcall(scan) end
+end
+
+-- mark (or un-mark) the library this tool staffs; the pass starts itself on the way in
+function set_library(loc_id)
+    local s = load_state()
+    if s.library_id == loc_id then
+        clear_library()
+        s.library_id = -1
+        save_state()
+        if not service_wanted() then stop_heartbeat() end
+    else
+        if s.library_id >= 0 then clear_library() end
+        s.library_id = loc_id
+        save_state()
+        start_heartbeat()
+        pcall(scan_library)
+    end
 end
 
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
-        if dfhack.world.isFortressMode() and isEnabled() then start_heartbeat() end
+        if dfhack.world.isFortressMode() and service_wanted() then start_heartbeat() end
     elseif sc == SC_MAP_UNLOADED then
         stop_heartbeat(); state = nil
     end
 end
+
+-- ---- the [Public Library] button ---------------------------------------------
+
+local overlay = require('plugins.overlay')
+local widgets = require('gui.widgets')
+
+-- the library behind the zone whose panel is open, or nil
+local function cur_library()
+    local civzone = df.global.game.main_interface.civzone
+    return library_of_zone(civzone and civzone.cur_bld)
+end
+
+PublicLibraryOverlay = defclass(PublicLibraryOverlay, overlay.OverlayWidget)
+PublicLibraryOverlay.ATTRS{
+    desc = 'Adds a public-library toggle to the zone screen of a library.',
+    default_pos = {x = 7, y = 14},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/Zone/Some/MeetingHall',
+    frame = {w = 16, h = 1},
+    version = 1,
+}
+
+function PublicLibraryOverlay:init()
+    self:addviews{
+        widgets.HotkeyLabel{
+            frame = {t = 0, l = 0, w = 16},    -- '[Public Library]'
+            label = '[Public Library]',
+            -- a meeting hall that is not a library gets no button at all
+            visible = function() return cur_library() ~= nil end,
+            text_pen = function()
+                local lib = cur_library()
+                return (lib and load_state().library_id == lib.id) and COLOR_GREEN or COLOR_WHITE
+            end,
+            on_activate = function()
+                local lib = cur_library()
+                if lib then set_library(lib.id) end
+            end,
+        },
+    }
+end
+
+OVERLAY_WIDGETS = {library = PublicLibraryOverlay}
 
 -- ---- entry point ------------------------------------------------------------
 
@@ -271,14 +638,19 @@ local dry = false
 for _, a in ipairs(args) do
     if a == '-n' or a == '--dry-run' then dry = true end
 end
+
 local once = args[1] == 'once' or (args[1] == nil and false)
 
 local given, taken, kept, missing = scan(dry or not once)
-local function name(e) return dfhack.units.getReadableName(e.unit) end
+local posted, released, reading, lib = scan_library(dry or not once)
+local function name(e)
+    return e.unit and dfhack.units.getReadableName(e.unit) or ('unit #' .. tostring(e.id))
+end
 
 if not once then
     print('auto-needs: ' .. (isEnabled() and 'enabled' or 'disabled')
-        .. ' -- one need known: an unmet WANDER gets the FISHING labor.')
+        .. ' -- an unmet WANDER gets the FISHING labor. Every bar here is '
+        .. FOCUS_UNMET .. ', handed back at ' .. FOCUS_MET .. '.')
 end
 local tag = (dry or not once) and '[dry] ' or ''
 if #given > 0 then
@@ -299,4 +671,30 @@ for _, rule in ipairs(missing or {}) do
     print(('  NOTHING TO LEND: no work detail carries %s, so the %s need cannot be answered.')
         :format(rule.gives, rule.why))
     print('  Make a work detail with that labor (any name) and this will use it.')
+end
+
+-- ---- the library half -------------------------------------------------------
+
+print()
+if not lib then
+    print('No public library marked. Open a zone belonging to a library and press'
+        .. ' [Public Library] on its panel.')
+else
+    print(('Public library: %s -- everybody past the bar gets a post.'):format(
+        dfhack.translation.translateName(lib.name, true)))
+    if #posted > 0 then
+        print(('%s%d posted as scholar%s:'):format(tag, #posted, #posted == 1 and '' or 's'))
+        for _, e in ipairs(posted) do
+            print(('    %s (short %d on abstract thinking / self-examination)')
+                :format(dfhack.units.getReadableName(e.unit), e.shortfall))
+        end
+    end
+    if #released > 0 then
+        print(('%s%d taken off again, having read their fill:'):format(tag, #released))
+        for _, e in ipairs(released) do print('    ' .. name(e)) end
+    end
+    if reading > 0 then print(('  %d still reading there.'):format(reading)) end
+    if #posted == 0 and #released == 0 and reading == 0 then
+        print('  nobody is short enough on abstract thinking or self-examination to post.')
+    end
 end

@@ -332,7 +332,8 @@ clicked — can only be answered during that visit, so the build is gated on the
 than on effort.
 
 ### **`fort/auto-needs` — three more needs**
-Extend the existing tool past its one need (WANDER → fishing): **eat the highest-value food**,
+Extend the existing tool past the two needs it answers (WANDER → fishing, abstract thinking /
+self-examination → a scholar's post at the public library): **eat the highest-value food**,
 **pray when the stress is coming from prayer**, and **acquire something** when that is the need
 doing the damage.
 

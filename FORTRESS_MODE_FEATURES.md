@@ -589,12 +589,16 @@ Marks a wild animal for taming, so it's trained the moment it's caught.
 Lends a dwarf whose unmet need is wearing them down a labor that answers it, and takes it back
 after.
 
-Today it knows one need: **wander → fishing**. "Wander" is satisfied by being outside the
+The first need it knows is **wander → fishing**. "Wander" is satisfied by being outside the
 fortress, and fishing is the reliable way a dwarf takes themselves out there and stays a while.
-A dwarf qualifies when they are short on the need **and** carrying stress — the need alone is
-ordinary, and the stress alone says nothing about which need is causing it. Both bars are as low
-as they go, deliberately: the point is to catch someone on the way down rather than after the
-tantrum, and the worst a false positive costs is a dwarf who goes fishing for a while.
+
+**One bar, shared by every rule here and every rule added later: −750.** A need's `focus_level`
+goes negative as it goes unmet, and −750 is far enough down to catch a dwarf before the need
+starts distracting them or handing them bad thoughts, without tripping on the ordinary shortfall
+half the fort carries at any moment. The loan is handed back at **zero**, so there is a gap
+between the two bars and nobody flickers in and out on a point of focus. Stress is not part of
+the test: an earlier version demanded it as well, which meant waiting for the damage to show
+before answering the need that was causing it.
 
 A labor it turned on is remembered and turned off again once the dwarf no longer qualifies. A
 labor the dwarf **already had** is never recorded and never removed, so a fisherdwarf who was
@@ -606,6 +610,46 @@ that carries it, putting that detail into *only the selected do this* if the for
 *nobody does this*, and calling `setAutomaticProfessions` — writing `unit.status.labors` directly
 does nothing that lasts, since the details are recomputed over the top of it. The detail's mode is
 put back the way it was found once the tool has nobody assigned there.
+
+**The public library.** The second need it answers is *thinking abstractly* / *self-examination*
+— two needs DF drains with the same act, reading or writing written content — and the lever is a
+**scholar's post at a library**. Open a zone belonging to a library and a **`[Public Library]`**
+button sits on its panel, the same place `training-barracks` puts `[Basic training]` on a
+barracks. Pressing it marks that **location** (not the zone, so any of the zones making it up will
+do) as the library this tool staffs.
+
+Each pass, **every** citizen past the bar is given a scholar post there — no limit, no queue.
+They read, the need drains, and a pass or two later the post is handed back, so the library staffs
+itself up and down with the fort's mood the way `autotraining` and `idle-crafting` do. On a
+95-dwarf fort that came to 26 scholars at once, and the same 26 the count said were past the bar.
+
+**Nobody is passed over for being busy** — a soldier, a tavern keeper, a doctor all get one the
+moment they are short, because it costs them a few hours of reading. Two things still rule a dwarf
+out and neither is a policy: no historical figure (an occupation record is keyed by `histfig_id`,
+so there is nothing to write) and already being a scholar here. Children never come up; DF has no
+child occupations. A post the tool did **not** create is filled and emptied but never deleted, so
+a library set up by hand keeps its shape; posts it created are closed again once nobody is
+standing in them. Un-marking the library takes everyone off on the way out.
+
+Stacking a second occupation on a dwarf who already holds one is off DF's own beaten path — 286
+filled posts in this world and not one figure holds two — so it was tried before it was shipped: a
+tavern keeper given a scholar's post kept both records and kept working, and the game ran on.
+
+Measured on a live fort: 26 posted, DF answered with its own `PonderTopic` and `Research`
+activities, and within half a game day two of them had climbed from −3130 and −777 to **+374** and
+**+384** and been handed their posts back. The rest were still on their way. A library with
+nothing in it to read is the one thing that stalls this — the need is drained by reading or
+writing written content, so keep books, scrolls and blank quires in there.
+
+It gives a post the way DF reads one: an occupation has three owners — the location's list, the
+unit's, and `world.occupations.all` — so posting writes `unit_id` and `histfig_id` on the record
+and adds it to the unit, and taking someone off clears both and removes it again. Extra scholar
+slots are created and destroyed as needed, which resizes the location's occupation vector — never
+done while DF's location details panel is open on that library, because that panel holds raw
+pointers into it.
+
+The two halves run independently: `enable fort/auto-needs` lends labors, `[Public Library]` staffs
+the library, and neither switches the other on behind your back.
 
 `fort/auto-needs` previews without changing anything, `fort/auto-needs once` runs a pass, and
 `enable fort/auto-needs` runs one about once a game day. `magnus-scripts` has a row for it.
