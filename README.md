@@ -892,6 +892,26 @@ empty cart. It refuses when the adjacency is ambiguous rather than guessing whic
 and it checks the dump tile can hold a stockpile *before* changing anything — the first stop tried
 had a ramp top under its dump shift, which is walkable, looks clear, and cannot hold a pile.
 
+**Removing the stop removes its route.** DF leaves the hauling route behind when a track stop is
+deconstructed: a stop pointing at an empty tile, a cart still being sent to it, and a Hauling
+screen filling with dead entries that look exactly like live ones. So a removal ordered on a stop
+this tool can see is remembered, and when the building actually goes the stop goes with it — and
+the whole route too, if that was its last stop. A route with **other** stops keeps them: a
+two-stop route minus one stop still works, and deleting it would throw away work nobody asked to
+lose.
+
+It waits for the building rather than acting on the click, because clicking *Remove* only queues a
+deconstruct job and a change of mind cancels it. The route stays until the stop really is gone,
+and a cancelled removal drops the note with it. The note is kept with the site, since that walk
+can outlast a save and reload.
+
+Tearing a route down means freeing what it owns — the stop's departure conditions and stockpile
+links, the stops, the route — and cutting its cart loose (`vehicle.route_id`), or DF keeps routing
+a minecart to a route that is not there. DF's Hauling screen also caches **raw pointers** to
+routes and stops in `view_routes` / `view_stops`, built when the screen draws and never
+invalidated — this fort held ten of them against five live routes — so those are emptied first and
+DF rebuilds them when the screen next opens.
+
 ### **`fort/improve-minecart-selector`**
 *Choose a vehicle for Route 9* lists every minecart in the fort as `gabbro minecart`, over and
 over, with nothing to tell them apart but a footnote about which route already has one. This
