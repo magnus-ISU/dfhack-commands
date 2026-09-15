@@ -827,6 +827,52 @@ and follow them, or click one of the office/bedroom/dining/tomb icons to jump to
 room. DF's own assign and symbol buttons still work — the row is measured from the
 render, so those blocks are handed straight back to DF.
 
+### **`fort/better-bridges`**
+Two fixes to the building sheet, both about the same blind spot: DF knows perfectly well that
+this bridge is wired to that lever, and shows you a list of mechanisms instead.
+
+**Linked buildings is the default panel when there are any.** A building sheet has two panels at
+its foot — *Show linked buildings* and *Show items* — and DF always opens on Show items. For a
+bridge, a door, a hatch, a floodgate, a lever or a pressure plate, "items" means *the two
+mechanisms inside it*, which is a fact about the masonry; the question you opened the sheet to ask
+is **what is this wired to**. So when the building has a link, the sheet opens on the links; when
+it has none the panel is left alone, because then items is all there is. Only the *first* look at
+a building is redirected — click *Show items* afterwards and it stays there for as long as that
+sheet is open.
+
+A link is found from **both ends**. A lever or a plate keeps the far end's mechanism in its own
+`linked_mechanisms`; the bridge at the other end keeps nothing at all — it just has a mechanism
+sitting in its `contained_items` whose refs point back. Reading only one end gets you a lever that
+knows its bridge and a bridge that knows nothing. Read both and a bridge driven by two controls
+lists both of them, which is exactly what the test fort had: one bridge, a lever and a plate.
+
+**`[Trigger /]` on a pressure plate**, in that same list. DF already draws a `[Pull    /]` on the
+**lever** rows of the linked-buildings list — open the bridge, see its lever, pull it from there
+without going to find it. A plate gets no such button, because a plate is fired by the world
+rather than by a dwarf. But when the world has already put something on it, there *is* something
+to fire, so `[Trigger /]` goes in the same column on the plate's row:
+
+* It appears only when **water, magma or a minecart** is actually on the plate's tile. Nothing on
+  the plate, no button — there would be nothing for it to do.
+* Clicking flips the plate's sense flag for that condition, and the button is **green** while the
+  plate is already sensing it. Turn it on with water sitting there and the plate fires and the
+  bridge moves; turn it off and the plate stops sensing and the bridge goes back. DF keeps that
+  same On/Off on its Water / Magma / Track tabs, three clicks away.
+* A plate can have more than one of them on it at once. The button aims at the **first** of water,
+  magma, minecart that is there — a liquid beats a cart — so it is one button with one meaning
+  rather than a row of them.
+
+It does **not** touch the plate's ranges. A plate set to fire between 1 and 3 units of water will
+not fire under 7/7 however the flag is set, and rewriting the range to make the button "work"
+would be quietly redesigning the trap; the announcement says the depth and the range instead, so a
+plate that will not move says why.
+
+Where the row is comes from DF's own drawing. There is no vector behind that list — DF builds it
+from the building's mechanisms as it paints — so the rows are found by reading back the
+`[Unlink]` that DF puts at the end of every one of them, within the band the button occupies and
+nowhere else. The button draws twelve columns to the **left** of that anchor, so it never covers
+the text it navigates by.
+
 ### **`fort/better-track-stops`**
 A track stop's sheet tells you its friction and its dump direction and nothing about the thing
 that makes it work. This adds a panel with the cart on it: the route, the cart assigned to it,
