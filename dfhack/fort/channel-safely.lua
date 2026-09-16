@@ -268,6 +268,26 @@ local CANDIDATES_PER_PASS = 24
 -- and a pass does not start every frame either
 local PASS_INTERVAL_MS = 1000
 
+-- A sweep walks EVERY map block in the fort, and idle -- no channel designations
+-- anywhere, nothing held -- there is nothing in all of that for it to find. Measured on
+-- a live fort it was 8.2% of frame time doing exactly that, once a second, forever: the
+-- most expensive overlay in the pack, and all of it spent looking at an empty map.
+--
+-- So a sweep runs at PASS_INTERVAL_MS only while there is a REASON to look -- a
+-- designation tool is up (or was in the last few seconds), we are holding tiles, or the
+-- last sweep found channel work -- and drops to IDLE_INTERVAL_MS otherwise.
+--
+-- Nothing is missed by waiting. The case that actually races a miner is a designation DF
+-- has turned into a JOB, and that is caught the instant it happens by the onJobInitiated
+-- hook (see reclaim_job), never by the sweep. A channel designation drawn with no tool
+-- and no job -- a script, a blueprint -- is simply picked up by the next idle sweep, and
+-- it is not going anywhere in the meantime.
+local IDLE_INTERVAL_MS = 10000
+local ACTIVE_LINGER_MS = 5000   -- stay fast this long after the designation tool closes
+
+-- when the fast cadence expires (a tick count, like next_pass_at)
+active_until = active_until or 0
+
 -- where the last pass stopped weighing candidates. Deliberately NOT in the
 -- persisted state: it is progress through one pass, not a decision about the
 -- fort, and writing it to the save every second would be noise.
@@ -932,17 +952,32 @@ local scan = nil
 -- So every block this tool has ever seen channel work in is remembered, and
 -- those are always read in full. The flag is still used as the cheap way to
 -- notice work in blocks it has never looked at.
+-- Block id for the scan's "is this one of ours" test. A NUMBER, not the "x,y,z" string
+-- the persisted state uses: this is looked up once per map block on every sweep, and
+-- building three strings per block to do it cost more than the rest of the sweep put
+-- together. The persisted keys stay strings -- they are saved with the fort.
+local function block_id(bx, by, z) return (bx * 1024 + by) * 1024 + z end
+
+-- returns the set, and whether it holds anything (an empty set means the per-block
+-- lookup can be skipped entirely, which is the common case)
 local function watched_blocks()
     local s = get_state()
-    local set = {}
-    for k in pairs(s.watch) do set[k] = true end
+    local set, any = {}, false
+    for k in pairs(s.watch) do
+        local bx, by, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
+        if bx then
+            set[block_id(tonumber(bx), tonumber(by), tonumber(z))] = true
+            any = true
+        end
+    end
     for k in pairs(s.marks) do
         local x, y, z = k:match('^(-?%d+),(-?%d+),(-?%d+)$')
         if x then
-            set[(tonumber(x) // 16) .. ',' .. (tonumber(y) // 16) .. ',' .. z] = true
+            set[block_id(tonumber(x) // 16, tonumber(y) // 16, tonumber(z))] = true
+            any = true
         end
     end
-    return set
+    return set, any
 end
 
 local function block_key(pos)
@@ -950,8 +985,9 @@ local function block_key(pos)
 end
 
 local function start_scan()
+    local marked, any = watched_blocks()
     scan = {i = 0, blocks = df.global.world.map.map_blocks, found = {}, top = nil,
-            marked = watched_blocks(), seen = {}}
+            marked = marked, has_marked = any, seen = {}}
 end
 
 -- returns true when the scan finished this call
@@ -971,9 +1007,9 @@ local function step_scan()
         -- marker-mode channel designations reported designated = false. So the
         -- blocks holding our own marks are always examined too.
         local wanted = block and block.flags.designated
-        if block and not wanted then
-            wanted = scan.marked[(block.map_pos.x // 16) .. ',' ..
-                                 (block.map_pos.y // 16) .. ',' .. block.map_pos.z]
+        if block and not wanted and scan.has_marked then
+            local mp = block.map_pos
+            wanted = scan.marked[block_id(mp.x // 16, mp.y // 16, mp.z)]
         end
         if wanted then
             for bx = 0, 15 do
@@ -1672,6 +1708,7 @@ local function reclaim_job(job)
     local s = get_state()
     if not s.enabled then return end
     if job.job_type ~= df.job_type.DigChannel then return end
+    active_until = dfhack.getTickCount() + ACTIVE_LINGER_MS   -- there are channels about
     local pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}
     if s.allowed[key(pos)] then return end            -- already judged safe
     if priority_of(pos) <= EXEMPT_PRIORITY then return end
@@ -1790,9 +1827,19 @@ function tick()
     -- A pass already in progress (scan ~= nil) keeps stepping so it finishes
     -- promptly; only STARTING a new one waits for the interval.
     local now = dfhack.getTickCount()
+    -- a designation tool being up (mining, channelling, the dig helpers) means tiles may
+    -- be getting drawn right now: sweep fast through it and for a few seconds after
+    if df.global.game.main_interface.main_designation_selected ~= df.main_designation_type.NONE then
+        active_until = now + ACTIVE_LINGER_MS
+    end
+    local busy = now < active_until
+        or next(get_state().marks) ~= nil            -- holding tiles: they need re-examining
+        or (last_pass and (last_pass.channels or 0) > 0)
     if scan or now >= next_pass_at then
         pcall(pump)
-        if not scan then next_pass_at = dfhack.getTickCount() + PASS_INTERVAL_MS end
+        if not scan then
+            next_pass_at = dfhack.getTickCount() + (busy and PASS_INTERVAL_MS or IDLE_INTERVAL_MS)
+        end
     end
 end
 
