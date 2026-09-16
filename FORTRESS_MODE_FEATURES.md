@@ -1110,7 +1110,15 @@ mentions it: its announcement names the mood and stops. Magma forges and magma g
 count, and a craft with no rule for it says nothing rather than guessing. While they are fetching it keeps the mood's own line and counts what has arrived —
 *"Thåkut withdraws from society... Claimed 3 items."* When they are stuck it names what they
 are short of the way DF would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
-days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
+days: *"Thåkut has sketched rock blocks for 7 days"*. A possessed dwarf's line is DF's own,
+whole — the artifact names itself, in dwarven: *"Libadlitast Mostod Akam needs bones... yes..."*.
+
+**The requirement it names is the one nothing can fill**, not the first one still open. DF does
+not work through its own list in order — it takes whatever it finds that fits an open slot — so
+naming the first unfilled requirement sends you to a stockpile that is not the problem. One fort's
+possessed weaponsmith, one of his two bars in and no bone in reach, was reported as wanting metal
+bars with fifty-five of them in the stockpile while DF's own line said bones. Unreachable stock does
+not count as stock: a bone at the bottom of a cavern stalls a mood exactly as an absent one does. Clicking follows them with the camera,
 clicking again opens the planner. Turning it off in `magnus-scripts`
 puts DFHack's own line back rather than leaving a gap.
 
@@ -1143,7 +1151,12 @@ plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and
 any type you have produced. A mood asks the moment it starts, so a gap found afterwards is a
 berserk dwarf. With stressed dwarves in the fort it also checks remains and bones, which a
 macabre mood wants. The list is taken from DFHack's `strangemood` plugin and cross-checked
-against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have. It
+against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have — but **unbutchered pieces and
+unreachable stock do not**. A corpse nobody has butchered is a pile of body parts, every one of
+them carrying the `bone` bit because there is bone inside it, and what a mood wants is butchery
+output; a bone at the bottom of a cavern or sealed in a tomb is not stock either. One fort read as
+having bones on the strength of 66 unbutchered pieces and five bones it could not reach, and said
+nothing while a possessed weaponsmith waited thirty days for one. It
 warns at **fewer than three** rather than at none, since three is the most of one thing a mood
 asks for and one bar of the metal it settles on is the same dead end as none, found a day
 later: *"No shells; only 2 tanned leather for a mood"*.

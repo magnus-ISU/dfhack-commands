@@ -1042,6 +1042,86 @@ local function current_step(job, picks)
     end
 end
 
+-- WHICH REQUIREMENT IS ACTUALLY HOLDING THE MOOD UP, which is not the same question as
+-- which one the dwarf fills next. DF does not walk its own list in order -- it takes
+-- whatever it finds that fits an open slot, which is why the hauled items have to be dealt
+-- out rather than read off their indices -- so "the first one nothing has arrived for" is a
+-- guess about a dwarf who may be waiting on something else entirely.
+--
+-- Measured on this fort: a possessed weaponsmith with one of his two metal bars in, no bone
+-- in the fort he could reach, and fifty-five bars in the stockpile. The notification said
+-- "requires metal bars" -- the requirement that was first, not the one that was stuck -- and
+-- sent the player to a full bar stockpile while DF's own line said bones.
+--
+-- So the requirement worth naming is the first OPEN one with nothing in the fort to fill it:
+-- unreachable stock does not count, since a bone across a chasm stalls the mood exactly as
+-- an absent one does. One pass over the item list answers it for every open requirement at
+-- once, and it is cached and only asked for while the mood is stuck.
+-- THE RIGHT LIST TO LOOK IN, which is what makes this cheap enough to ask from a
+-- notification. Walking `IN_PLAY` -- every item in the fort, 32,000 of them here -- and
+-- testing each against the open requirements took 277ms a pass, a visible hitch. Every
+-- requirement names either an item type or a category that IS an item type (`body_part` is
+-- a CORPSEPIECE), and DF already keeps a vector per type, so the search is the few hundred
+-- items that could possibly match. Anything unrecognised falls back to the full list rather
+-- than answering wrongly.
+local function filter_vector(ji)
+    local name
+    if ji.item_type >= 0 then name = df.item_type[ji.item_type] end
+    if not name then
+        for bit, itype in pairs(ITEM_CATEGORY) do
+            local on = false
+            pcall(function() on = ji.flags2[bit] end)
+            if on then name = df.item_type[itype]; break end
+        end
+    end
+    local v
+    if name then pcall(function() v = df.global.world.items.other[name] end) end
+    return v or df.global.world.items.other.IN_PLAY
+end
+
+-- is there ANYTHING in the fort this requirement could take? The first one found answers it,
+-- so a requirement the fort can supply costs a handful of comparisons.
+local function can_fill(ji, group, from)
+    for _, item in ipairs(filter_vector(ji)) do
+        if filter_matches(ji, item) and usable(item) and reachable(item, group, from) then
+            return true
+        end
+    end
+    return false
+end
+
+local blocked_cache = {job = nil, n = -1, at = 0, idx = nil}
+local BLOCKED_CACHE_MS = 10000
+
+local function blocked_step(job, unit)
+    local now = dfhack.getTickCount()
+    if blocked_cache.job == job.id and blocked_cache.n == #job.items
+        and now - blocked_cache.at < BLOCKED_CACHE_MS then
+        local idx = blocked_cache.idx
+        return idx, idx and job.job_items.elements[idx] or nil
+    end
+
+    local group = unit_group(unit)
+    local from = unit and xyz2pos(dfhack.units.getPosition(unit)) or nil
+    local best
+    for idx, ji in ipairs(job.job_items.elements) do
+        if needed(ji) > #claimed_items(job, idx) and not can_fill(ji, group, from) then
+            best = idx
+            break
+        end
+    end
+    blocked_cache = {job = job.id, n = #job.items, at = now, idx = best}
+    return best, best and job.job_items.elements[best] or nil
+end
+
+-- what to NAME when the mood is stuck: the requirement nothing can fill if there is one,
+-- otherwise the step the dwarf is on
+local function demand_step(job, unit)
+    local idx, ji = blocked_step(job, unit)
+    if ji then return idx, ji end
+    return current_step(job, {})
+end
+
 -- Items made AFTER the sweep. A mood is not instant: stone gets mined, bones get butchered,
 -- cloth comes off the loom while the dwarf is still walking, and every one of those arrives
 -- unforbidden and is fair game for the job. So each tick looks for items the sweep has not
@@ -1692,7 +1772,7 @@ local MOOD = {
                                 demand = 'sketches pictures of %s.'},
     [df.mood_type.Possessed] = {begun = 'has been possessed!',
                                 working = 'keeps muttering...',
-                                demand = 'mutters, "%s requires %s"'},
+                                demand = '%s needs %s yes...'},
     [df.mood_type.Macabre]   = {begun = 'begins to stalk and brood...',
                                 working = 'works, darkly brooding...',
                                 demand = 'broods, "Yes. I need %s."'},
@@ -1818,8 +1898,8 @@ local function stall_days(unit, job)
 end
 
 -- what the dwarf is short of, in DF's own item words
-local function wanted_now(job)
-    local idx, ji = current_step(job, {})
+local function wanted_now(job, unit)
+    local _, ji = demand_step(job, unit)
     if not ji then return nil end
     return requirement_name(ji)
 end
@@ -1851,6 +1931,25 @@ spoken_noun('THREAD', 'thread')
 spoken_noun('REMAINS', 'remains')
 spoken_noun('CORPSEPIECE', 'bones')
 spoken_noun('SHELL', 'shells')
+
+-- A REQUIREMENT WITH NO ITEM TYPE IS A CATEGORY, and the category is the word. The bone a
+-- mood asks for is `item_type NONE` with the `bone` bit on -- there is no item type to look
+-- a noun up by -- so the spoken line fell through to the requirement name, "any bone", which
+-- is nobody's words. DF says "bones...". Ordered, because `bone` and `body_part` are both
+-- set on the same requirement and only the first is worth saying.
+local SPOKEN_CATEGORY = {
+    {'bone', 'bones'}, {'shell', 'shells'}, {'totemable', 'skulls'},
+    {'leather', 'leather'}, {'silk', 'silk cloth'}, {'yarn', 'yarn cloth'},
+    {'body_part', 'body parts'},
+}
+
+local function spoken_category(ji)
+    for _, pair in ipairs(SPOKEN_CATEGORY) do
+        local on = false
+        pcall(function() on = ji.flags2[pair[1]] end)
+        if on then return pair[2] end
+    end
+end
 
 -- the CLASS of a specific material, in the words a dwarf uses
 local function spoken_class(ji)
@@ -1927,25 +2026,31 @@ function sketch_demand(ji)
     return SKETCH_ITEM[ji.item_type]
 end
 
-local function spoken_demand(job, mood)
-    local _, ji = current_step(job, {})
+local function spoken_demand(job, unit, mood)
+    local _, ji = demand_step(job, unit)
     if not ji then return nil end
     if mood == df.mood_type.Secretive then
         local drawn = sketch_demand(ji)
         if drawn then return drawn end
     end
     local class = spoken_class(ji)
-    local noun = SPOKEN_NOUN[ji.item_type]
+    local noun = SPOKEN_NOUN[ji.item_type] or spoken_category(ji)
     if class and noun then return ('%s... %s...'):format(noun, class) end
     if class then return ('%s...'):format(class) end
+    if noun then return ('%s...'):format(noun) end
     return requirement_name(ji)
 end
 
--- the name DF gave the artifact the moment the mood took hold. Possessed dwarves say it; the
+-- The name DF gave the artifact the moment the mood took hold. Possessed dwarves say it; the
 -- others do not have one to say.
+--
+-- IN DWARVEN, not in translation. A possessed dwarf is not talking to you -- the muttering is
+-- the thing speaking through them naming itself, and DF prints that name the way the dwarf
+-- says it: "Libadlitast Mostod Akam", not "Praisetorch the Shame of Fortune". The English
+-- reading belongs on the artifact once it exists.
 local function artifact_name(unit)
     local n
-    pcall(function() n = dfhack.translation.translateName(unit.status.artifact_name, true) end)
+    pcall(function() n = dfhack.translation.translateName(unit.status.artifact_name, false) end)
     if n and n ~= '' then return n end
     return nil
 end
@@ -1981,13 +2086,15 @@ function moody_message()
     end
 
     -- stuck: name the thing, and once it has gone on long enough, say how long
-    local want = wanted_now(job) or 'something'
+    local want = wanted_now(job, unit) or 'something'
     local days = stall_days(unit, job)
-    local spoken = spoken_demand(job, unit.mood) or want
+    local spoken = spoken_demand(job, unit, unit.mood) or want
     local said
     if unit.mood == df.mood_type.Possessed then
-        -- DF names the artifact in this one: "The Flighty Shrine requires bars... metal..."
-        said = ('%s %s'):format(name, words.demand:format(artifact_name(unit) or 'It', spoken))
+        -- DF's own line, whole: the artifact names itself and asks, and the dwarf's own name
+        -- is not in it -- "Libadlitast Mostod Akam needs bones... yes...". Clicking the
+        -- notification goes to the dwarf, which is the part of "who" that you can act on.
+        said = words.demand:format(artifact_name(unit) or 'It', spoken)
     else
         said = ('%s %s'):format(name, words.demand:format(spoken))
     end

@@ -148,9 +148,66 @@ local function corpse_flag(item, name)
     return ok and v == true
 end
 
-local function bone(item) return corpse_flag(item, 'bone') end
-local function shell(item) return corpse_flag(item, 'shell') end
-local function skull(item) return corpse_flag(item, 'skull') end
+-- AND IT HAS TO HAVE BEEN BUTCHERED. The second half of the same bug: a corpse that nobody
+-- has butchered yet is a pile of body parts, and every one of them carries the `bone` bit
+-- because there is bone inside it. What a mood wants is butchery OUTPUT -- a stack named
+-- "horse bone [14]" -- and DF's own mood filter refuses an unbutchered piece outright
+-- (fort/help-mood tests the same bit for the same reason). This fort had 66 unbutchered
+-- pieces and 5 real bones, so the warning stayed silent while a possessed weaponsmith waited
+-- for a bone.
+local function butchered(item) return not corpse_flag(item, 'unbutchered') end
+
+local function bone(item) return corpse_flag(item, 'bone') and butchered(item) end
+local function shell(item) return corpse_flag(item, 'shell') and butchered(item) end
+local function skull(item) return corpse_flag(item, 'skull') and butchered(item) end
+
+-- ---- can anybody get to it? --------------------------------------------------
+--
+-- AN ITEM NOBODY CAN WALK TO IS NOT STOCK. Forbidden is not missing -- you would unforbid it
+-- -- but a bone at the bottom of a cavern is not something you unforbid, it is something the
+-- fort does not have. The five bones left here once the unbutchered pieces were out were a
+-- buried dwarf's leg in a sealed tomb and four cavern bones, none of them reachable, and a
+-- mood that asks for a bone dies of it just the same as if there were none at all.
+--
+-- DF numbers connected regions of the map and keeps each item's on `walkable_id`, so this is
+-- an integer compare. A group of 0 is not "unknown" -- it means the item's own tile is one
+-- nobody can stand on -- so it falls through to the real check rather than being trusted.
+-- Anything genuinely unanswerable counts as stock: this must not hide things over a guess.
+local fort_group, fort_from = nil, nil
+
+local function walk_group(pos)
+    local g
+    pcall(function() g = dfhack.maps.getWalkableGroup(pos) end)
+    return g
+end
+
+-- one reference point per survey: where the fort's own dwarves stand
+local function set_fort_origin()
+    fort_group, fort_from = nil, nil
+    for _, u in ipairs(df.global.world.units.active) do
+        if dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) then
+            fort_from = xyz2pos(dfhack.units.getPosition(u))
+            fort_group = walk_group(fort_from)
+            if fort_group and fort_group ~= 0 then return end
+        end
+    end
+end
+
+local function reachable(item)
+    if not fort_group or fort_group == 0 then return true end
+    local g
+    pcall(function() g = item.walkable_id end)
+    local ipos
+    if g == nil or g == 0 then
+        ipos = xyz2pos(dfhack.items.getPosition(item))
+        g = walk_group(ipos)
+    end
+    if g ~= nil and g ~= 0 then return g == fort_group end
+    if not fort_from then return true end
+    ipos = ipos or xyz2pos(dfhack.items.getPosition(item))
+    local ok, can = pcall(dfhack.maps.canWalkBetween, fort_from, ipos)
+    return not ok or can
+end
 
 -- ---- who could actually ask for a shell? -------------------------------------
 --
@@ -198,7 +255,8 @@ local function count(vec_name, test)
     if not items then return 0 end
     local n = 0
     for _, item in ipairs(items) do
-        if usable(item) and (not test or test(item)) then n = n + 1 end
+        -- reachability last: it is the only test that can touch the map
+        if usable(item) and (not test or test(item)) and reachable(item) then n = n + 1 end
     end
     return n
 end
@@ -292,6 +350,8 @@ local function survey()
     local now = dfhack.getTickCount()
     if cache and now - cache_at < CACHE_MS then return cache end
 
+    set_fort_origin()
+
     local have, missing, low = {}, {}, {}
     -- A mood asks for up to three of a thing. Having ONE bar of the metal it settles on is
     -- the same dead end as having none, found a day later, so the warning starts at the
@@ -360,9 +420,17 @@ function message()   -- module-level: the notification resolves it live, see reg
     -- lost a mood to that, because the one that mattered was raw crystal glass and the line
     -- did not say so. A count tells you nothing you can act on; the names are the whole
     -- point, and this is the only thing in the fort that says them out loud.
-    local gone = {}
-    for _, m in ipairs(s.missing) do gone[#gone + 1] = m end
-    for _, m in ipairs(s.grim_missing) do gone[#gone + 1] = m end
+    -- BONES ARE ON BOTH LISTS -- a bone carver's base material and a macabre mood's -- so a
+    -- fort out of them read "No bones, shells, bones, remains". Named once, in the order the
+    -- two lists come in.
+    local gone, said = {}, {}
+    local function name_once(label)
+        if said[label] then return end
+        said[label] = true
+        gone[#gone + 1] = label
+    end
+    for _, m in ipairs(s.missing) do name_once(m) end
+    for _, m in ipairs(s.grim_missing) do name_once(m) end
 
     -- "one shell" is not a supply, it is a near miss, and it reads as a different kind of
     -- problem: nothing to go and find, just not enough of it yet. So the two are separate
@@ -375,8 +443,10 @@ function message()   -- module-level: the notification resolves it live, see reg
         if label == 'remains' or label:sub(-2) == 'ss' then return label end
         return (label:gsub('s$', ''))
     end
-    local short = {}
+    local short, counted = {}, {}
     local function note_short(m)
+        if counted[m.label] or said[m.label] then return end     -- named once, as above
+        counted[m.label] = true
         short[#short + 1] = ('%d %s'):format(m.n, m.n == 1 and one_of(m.label) or m.label)
     end
     for _, m in ipairs(s.low or {}) do note_short(m) end
