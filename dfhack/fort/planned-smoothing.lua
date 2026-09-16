@@ -54,37 +54,20 @@ WHEN A PLANNED TILE IS DESIGNATED
 
 WHAT IT LOOKS LIKE
 
-  Both planned and real smooth designations are drawn as a small triangle in the
-  bottom-left corner of the tile, in place of DF's full-tile designation wash --
-  the same shape DFHack marks damp dig tiles with, in gray. A room designated
-  for smoothing then reads as what is under it, with a marker, instead of a
-  solid block of designation colour you cannot see the floor through.
+  Exactly what DF draws, and nothing else. A real smooth designation gets DF's own
+  designation art; a PLANNED tile is not designated yet, so DF draws nothing for it
+  and neither do we -- `fort/planned-smoothing` on the command line says how many are
+  waiting and on which z-levels.
 
-  Bright gray is designated for real -- including once the designation has become
-  a job, which DF stops drawing as a designation at all because it clears the
-  tile's flag when it posts the work. Dark gray is planned and waiting on the
-  rock. A job somebody has PICKED UP is left to DF, flashing: that is the one
-  state worth keeping, since it says a dwarf is on the way. Engrave designations
-  keep DF's own graphic too. Hidden tiles are never drawn on -- undiscovered
-  blackness is supposed to tell you nothing, and a marker on one breaks that.
+  This tool used to paint a gray corner triangle over every smooth designation in
+  view and blank DF's wash underneath it. That meant walking the viewport's map
+  blocks on every rendered frame, which measured at 6.7% of frame time on a live
+  fort -- the second most expensive overlay in the pack -- so the drawing is gone
+  and the designation art is DF's alone. (`fort/planned-smoothing art` went with it.)
 
-  The wash is taken away only when smoothing is the ONLY thing designated on the
-  tile. A tile also marked for mining keeps DF's art untouched and just gets the
-  triangle drawn over it -- hiding the miner's marking to say "this will also be
-  smoothed" would bury the more urgent of the two.
-
-  Drawing is `paintTile` on the map grid, so the triangle keeps its own colours.
-  Writing the sprite into `screentexpos_designation` instead does draw, but that
-  layer is SHADED with DF's designation colour, which turned a gray triangle
-  ruddy brown. The triangle is generated in code rather than shipped as an image.
-
-  `fort/planned-smoothing art off` puts DF's own art back and leaves it alone.
-  Worth knowing about: taking the wash away means zeroing DF's render layers, so
-  if the marker ever fails to draw over the hole it leaves, a designated tile
-  looks like nothing was designated at all.
-
-Loaded as two overlays: `planned-smoothing.capture` (the designation screens)
-and `planned-smoothing.paint` (the map). Auto-enabled on `overlay rescan`.
+Loaded as two overlays: `planned-smoothing.capture` (the designation screens) and
+`planned-smoothing.paint` (the pass driver -- it draws nothing; the key is kept so an
+existing setting still finds it). Auto-enabled on `overlay rescan`.
 ]]
 
 local overlay = require('plugins.overlay')
@@ -550,85 +533,20 @@ function Capture:onRenderFrame(dc, rect)
 end
 
 -- ---------------------------------------------------------------------------
--- the marker
+-- the pass driver
 -- ---------------------------------------------------------------------------
 --
--- Drawn in code, not shipped as an image: it is nine rows of a right triangle in
--- three shades, and a generated texture keeps the colours in the file that
--- explains them. The shape mirrors DFHack's damp-dig marker -- bottom-left
--- corner, inset a pixel, lightest along the hypotenuse -- so it reads as the
--- same kind of annotation rather than as part of the map.
-
--- Whether DF's own designation art is taken away under our marker. Off leaves
--- every designation looking exactly as DF draws it, with the triangle painted on
--- top -- the safe setting if the marker ever fails to draw, since a suppressed
--- wash with no marker over it makes a designated tile look undesignated.
-art_suppress = art_suppress
-if art_suppress == nil then art_suppress = true end
-
-local TILE_PX = 32
-
--- {hypotenuse, shade, fill}, packed 0xRRGGBBAA
-local SHADES = {
-    designated = {0xC4C4C4FF, 0x5F5F5FFF, 0x8A8A8AFF},
-    planned    = {0x8A8A8AFF, 0x3C3C3CFF, 0x5A5A5AFF},
-}
-
--- Row 22 down to row 30, starting one pixel in from the left edge. Read off
--- DFHack's own damp marker rather than derived, antialiasing and all: A is the
--- lit hypotenuse, B the shading behind it, C the body.
-local PATTERN = {
-    'A',
-    'BA',
-    'CBA',
-    'CBBA',
-    'CCBBA',
-    'CCCCBA',
-    'CCCCBBA',
-    'CCCCCBBA',
-    'CCCCCCCBA',
-}
-local SHADE_INDEX = {A = 1, B = 2, C = 3}
-
-local function tile_pixels(shades, out)
-    for row, line in ipairs(PATTERN) do
-        local y = 21 + row
-        for col = 1, #line do
-            out[y * TILE_PX + col + 1] = shades[SHADE_INDEX[line:sub(col, col)]]
-        end
-    end
-end
-
-local function make_tileset()
-    local px = {}
-    for i = 1, TILE_PX * TILE_PX * 2 do px[i] = 0 end
-    local top, bottom = {}, {}
-    for i = 1, TILE_PX * TILE_PX do top[i] = 0; bottom[i] = 0 end
-    tile_pixels(SHADES.designated, top)
-    tile_pixels(SHADES.planned, bottom)
-    for i = 1, TILE_PX * TILE_PX do
-        px[i] = top[i]
-        px[TILE_PX * TILE_PX + i] = bottom[i]
-    end
-    -- one column, two rows: sliced row-major, tile 1 is designated, 2 is planned
-    return dfhack.textures.createTileset(px, TILE_PX, TILE_PX * 2, TILE_PX, TILE_PX, true)
-end
-
-textures = textures or make_tileset()
-
-local function texpos(i)
-    local h = textures and textures[i]
-    if not h then return 0 end
-    return dfhack.textures.getTexposByHandle(h) or 0
-end
-
--- ---------------------------------------------------------------------------
--- paint: the map overlay
--- ---------------------------------------------------------------------------
+-- This widget draws NOTHING. It once painted a corner triangle over every
+-- smooth designation in the viewport and blanked DF's own art underneath, which
+-- meant walking the viewport's blocks on every rendered frame -- measured at
+-- 6.7% of frame time on a live fort, the second most expensive overlay in the
+-- pack. Designations are DF's to draw; this only runs the pass. The widget keeps
+-- its `paint` key so an existing enabled/disabled setting (and fort/magnus-scripts'
+-- switch) still finds it.
 
 Paint = defclass(Paint, overlay.OverlayWidget)
 Paint.ATTRS{
-    desc = 'Draws smooth designations as a corner triangle and applies planned ones (fort/planned-smoothing).',
+    desc = 'Applies planned smoothing as the rock is dug (fort/planned-smoothing).',
     default_enabled = true,
     viewscreens = 'dwarfmode',
     overlay_onupdate_max_freq_seconds = 0,
@@ -639,6 +557,12 @@ Paint.ATTRS{
 -- working while the game is paused -- which is exactly when a player draws a
 -- plan and then wonders why nothing happened.
 function Paint:overlay_onupdate()
+    -- Nothing planned means there is no work here AT ALL, and this is the usual state of
+    -- a fort. refresh_marks walks the whole job list and builds two keys per job; it
+    -- exists to feed the pass, and with no plan there is no pass -- so doing it anyway
+    -- was pure overhead. Measured with an empty plan it was 8.9% of frame time, the most
+    -- expensive overlay in the pack, all of it spent answering a question nobody asked.
+    if plan_tiles == 0 then return end
     local now = dfhack.getTickCount()
     if now < last_pass_at + PASS_INTERVAL_MS then return end
     last_pass_at = now
@@ -646,97 +570,7 @@ function Paint:overlay_onupdate()
     -- fort is busy, and the answer only changes when a job is posted, picked up
     -- or finished.
     refresh_marks()
-    if plan_tiles > 0 then pass(false) end
-end
-
--- carve_track_* read back as a boolean or as a 0/1 depending on how it was last
--- written, and 0 is TRUTHY in lua -- so neither `if v` nor `v ~= 0` is right on
--- its own
-local function set(v) return v ~= nil and v ~= false and v ~= 0 end
-
--- Pens, not raw layer writes. Writing the sprite into `screentexpos_designation`
--- does draw it, but that layer is SHADED by the renderer with DF's designation
--- colour, so a gray triangle came out ruddy brown. Painting the map grid keeps
--- the sprite's own colours and draws OVER the tile rather than in place of it.
--- `keep_lower` leaves the map underneath alone; `tile_color` is deliberately
--- unset, since setting it would shade the sprite with the pen's fg.
-local function marker_pen(i, ch, fg)
-    return dfhack.pen.parse{ch = ch, fg = fg, keep_lower = true, tile = texpos(i)}
-end
-
-function Paint:onRenderFrame(dc, rect)
-    Paint.super.onRenderFrame(self, dc, rect)
-    if not dfhack.world.isFortressMode() then return end
-    local vp = guidm.Viewport.get()
-    if not vp then return end
-    local gvp = df.global.gps.main_viewport
-    local dimx, dimy = gvp.dim_x, gvp.dim_y
-    if dimx <= 0 or dimy <= 0 then return end
-    -- DF draws a designated tile in two layers: `screentexpos_background_two` is
-    -- the full-tile wash (and the flashing), `screentexpos_designation` the
-    -- marking over it.
-    local layer, layer_old = gvp.screentexpos_designation, gvp.screentexpos_designation_old
-    local wash, wash_old = gvp.screentexpos_background_two, gvp.screentexpos_background_two_old
-    local t_des, t_plan = texpos(1), texpos(2)
-    if t_des == 0 and t_plan == 0 then return end
-    local pen_des = marker_pen(1, 250, COLOR_GREY)
-    local pen_plan = marker_pen(2, 250, COLOR_DARKGREY)
-    local z = vp.z
-
-    local function suppress(x, y)
-        local vx, vy = x - vp.x1, y - vp.y1
-        if vx < 0 or vy < 0 or vx >= dimx or vy >= dimy then return end
-        local at = vx * dimy + vy
-        -- Only ever ZEROED, never given a texpos of ours, so a cell left behind
-        -- when the view scrolls is simply "nothing here" -- which is what an
-        -- undesignated cell should hold anyway. That is why this needs no
-        -- bookkeeping to undo itself.
-        layer[at], layer_old[at] = 0, 0
-        wash[at], wash_old[at] = 0, 0
-    end
-
-    for bx = math.max(0, vp.x1 // 16), vp.x2 // 16 do
-        for by = math.max(0, vp.y1 // 16), vp.y2 // 16 do
-            local block = dfhack.maps.getTileBlock({x = bx * 16, y = by * 16, z = z})
-            if block then
-                local k = bx .. ',' .. by .. ',' .. z
-                local planned, queued, digging = plan[k], job_marks[k], dig_marks[k]
-                for x = math.max(vp.x1, bx * 16), math.min(vp.x2, bx * 16 + 15) do
-                    for y = math.max(vp.y1, by * 16), math.min(vp.y2, by * 16 + 15) do
-                        local lx, ly = x % 16, y % 16
-                        local i = lx * 16 + ly
-                        local des = block.designation[lx][ly]
-                        local pen
-                        -- Undiscovered tiles are left exactly as DF draws them.
-                        -- A marker on one breaks what that blackness means -- it
-                        -- is the one part of the map that is supposed to tell
-                        -- you nothing -- and a plan is only ever waiting on rock
-                        -- there anyway.
-                        if des.hidden then pen = nil
-                        elseif des.smooth == 1 or (queued and queued[i]) then
-                            -- designated and queued look the same on purpose:
-                            -- the tile is going to be smoothed either way
-                            pen = pen_des
-                        elseif planned and planned[i] then
-                            pen = pen_plan
-                        end
-                        if pen then
-                            local occ = block.occupancy[lx][ly]
-                            -- A tile also marked for mining keeps DF's art: the
-                            -- triangle goes over it rather than instead of it.
-                            local other = des.dig ~= df.tile_dig_designation.No
-                                or (digging ~= nil and digging[i] ~= nil)
-                                or set(occ.carve_track_north) or set(occ.carve_track_east)
-                                or set(occ.carve_track_south) or set(occ.carve_track_west)
-                            if art_suppress and not other then suppress(x, y) end
-                            local sp = vp:tileToScreen({x = x, y = y, z = z})
-                            dfhack.screen.paintTile(pen, sp.x, sp.y, nil, nil, true)
-                        end
-                    end
-                end
-            end
-        end
-    end
+    pass(false)
 end
 
 OVERLAY_WIDGETS = {capture = Capture, paint = Paint}
@@ -782,11 +616,6 @@ local arg = ({...})[1]
 if arg == 'clear' then
     local n = plan_clear()
     print(('fort/planned-smoothing: forgot %d planned tile%s'):format(n, n == 1 and '' or 's'))
-elseif arg == 'art' then
-    local on = ({...})[2]
-    if on == 'on' or on == 'off' then art_suppress = (on == 'on') end
-    print(('fort/planned-smoothing: replacing DF\'s designation art is %s')
-        :format(art_suppress and 'ON' or 'OFF'))
 elseif arg == 'now' then
     local n = pass(true)
     print(('fort/planned-smoothing: designated %d tile%s, %d still planned')

@@ -52,25 +52,15 @@ held forever. The eraser takes plans back the same
 way it takes designations back. Plans live in memory only and do not survive a reload, by
 design: a box you dragged a minute ago is not a standing preference.
 
-Smooth designations are also redrawn — DF's full-tile wash is replaced by a small triangle in
-the corner of the tile, the shape DFHack marks damp digs with, in gray: bright for designated,
-dark for planned and still waiting on the rock. A tile keeps that marker once its designation
-becomes a job, which DF otherwise redraws its own way (it clears the tile's designation flag the
-moment it posts the job), so a room looks the same from the drag until a dwarf takes the work —
-at which point DF's flashing takes over and says somebody is on the way. The wash is only taken
-away when smoothing is the one thing designated on the tile: a tile also marked for mining keeps
-DF's art and just gets the triangle drawn over it, and hidden tiles are never drawn on at all.
-Engrave designations keep DF's own graphic. `art off` puts DF's own designation art back and
-leaves it alone.
 `fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
 immediately. Enabled by `magnus-scripts`.
 
-It draws nothing at all: designation art is DF's own, and a planned tile — not designated
-yet — shows what it always showed, which is the rock. It used to paint a gray corner triangle
-over every smooth designation in view, which meant walking the viewport's map blocks on every
-rendered frame, and it went idle completely when no plan is outstanding instead of re-reading
-the fort's job list four times a second. Together that was 6.7% of frame time on a live fort,
-now effectively nothing.
+It draws nothing: designation art is DF's own, and a planned tile — not designated yet — shows
+what it always showed, which is the rock. It used to paint a gray corner triangle over every
+smooth designation in view, which meant walking the viewport's map blocks on every rendered
+frame; it also now goes idle completely when nothing is planned, instead of re-reading the
+fort's job list four times a second. Together that was 6.7% of frame time on a live fort, now
+effectively nothing.
 
 Every tile it designates goes in at **priority 7**, the back of the queue: a smoothing
 designation and a mining designation are the same queue to a dwarf, so a room's worth of
