@@ -200,6 +200,15 @@ are put down forbidden, and a pile of forbidden goods is not a delivery, so a lo
 while the rest of it is still walking. The zone goes when the last one is in. The job survives a
 save and reload.
 
+
+**It never raises a DF notification.** Progress lines — *"3 newly dumped item(s) joined the
+delivery"*, *"delivery finished"*, the prompt to click a spot — used to go into DF's own
+announcement log and alert strip, where the game puts sieges, artifacts and dead dwarves; a
+delivery reporting on itself does not belong in that company, and items joining a run mid-way
+raise that line over and over. Everything the tool has to say now goes to the DFHack console
+instead, and the finished-delivery line names the destination's coordinates in its text rather
+than being a clickable zoom announcement.
+
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
 

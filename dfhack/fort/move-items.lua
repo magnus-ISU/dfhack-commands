@@ -73,6 +73,21 @@ local overlay = require('plugins.overlay')
 
 local STATE_KEY = 'move-items/state'
 
+-- ---- saying things ----------------------------------------------------------
+--
+-- NOT THROUGH DF'S ANNOUNCEMENTS. Every line this tool used to raise -- "3 newly dumped
+-- item(s) joined the delivery", "delivery finished", the prompt to click a spot -- went into
+-- DF's own announcement log and its alert strip, which is where the game puts sieges,
+-- artifacts and dead dwarves. A delivery reporting its own progress does not belong in that
+-- company, and items that join a run mid-way raise that line again and again.
+--
+-- So everything this tool has to say goes to the DFHack console. Nothing here creates a
+-- native notification; the zoom line that used to recentre the map on the finished pile names
+-- the coordinates in its text instead.
+local function notify(text)
+    print(text)
+end
+
 -- ---- persisted state ---------------------------------------------------------
 --
 -- A move outlives the screen that started it and has to outlive the SESSION too: the items
@@ -404,12 +419,10 @@ function finish(quiet)
         -- A ZOOM announcement, so the line recentres the map on the pile when you click it (or
         -- press the recentre key). "It arrived" is not much use without "and it is over there":
         -- the whole point of the delivery was a place, and this is the one message that names it.
-        local ok = false
         if target then
-            ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.CANCEL_JOB,
-                       xyz2pos(target.x, target.y, target.z), text, COLOR_GREEN, true)
+            text = ('%s (at %d,%d,%d)'):format(text, target.x, target.y, target.z)
         end
-        if not ok then pcall(dfhack.gui.showAnnouncement, text, COLOR_GREEN, true) end
+        notify(text)
     end
     return true
 end
@@ -437,10 +450,8 @@ function cancel_delivery()
     cancel()
     moving_count = 0
     local landed = st.total - st.pending
-    dfhack.gui.showAnnouncement(
-        ('move-items: delivery cancelled -- %d item(s) unmarked before they moved, %d already '
-         .. 'delivered and unforbidden, dump zone removed.'):format(st.pending, landed),
-        COLOR_YELLOW, false)
+    notify(('move-items: delivery cancelled -- %d item(s) unmarked before they moved, %d '
+            .. 'already delivered and unforbidden, dump zone removed.'):format(st.pending, landed))
     return true
 end
 
@@ -543,9 +554,7 @@ local function adopt_new_dumps(s)
     end
     if added > 0 then
         save_state(s)
-        dfhack.gui.showAnnouncement(
-            ('move-items: %d newly dumped item(s) joined the delivery.'):format(added),
-            COLOR_WHITE, false)
+        notify(('move-items: %d newly dumped item(s) joined the delivery.'):format(added))
     end
     return added
 end
@@ -1042,15 +1051,14 @@ function PickerScreen:apply()
         end
     end
     if #ids == 0 then
-        dfhack.gui.showAnnouncement('move-items: nothing selected -- nothing done.',
-            COLOR_YELLOW, false)
+        notify('move-items: nothing selected -- nothing done.')
         self:dismiss()
         return
     end
     local res, err = begin_move(self.target, ids)
     self:dismiss()
     if not res then
-        dfhack.gui.showAnnouncement('move-items: ' .. tostring(err), COLOR_RED, true)
+        notify('move-items: ' .. tostring(err))
         return
     end
     local msg = ('move-items: %d item(s) marked, %d other dump zone(s) removed.')
@@ -1062,7 +1070,7 @@ function PickerScreen:apply()
     if #res.orders > 0 then
         msg = msg .. ' Standing orders turned on: ' .. table.concat(res.orders, ', ') .. '.'
     end
-    dfhack.gui.showAnnouncement(msg, COLOR_GREEN, true)
+    notify(msg)
 end
 
 -- ---- picking the spot -------------------------------------------------------------
@@ -1101,8 +1109,7 @@ local function start_targeting()
     mi.main_designation_selected = df.main_designation_type.NONE
     armed = false
     targeting = true
-    dfhack.gui.showAnnouncement('move-items: click the spot to move things to ' ..
-                                '(right-click cancels).', COLOR_WHITE, false)
+    notify('move-items: click the spot to move things to (right-click cancels).')
 end
 
 local function stop_targeting()
@@ -1169,8 +1176,7 @@ function TargetOverlay:overlay_onupdate()
     -- A tile nobody can stand on is a MISS, not an answer: stay up and let them click again,
     -- rather than closing with a one-line complaint.
     if not walk_group(pos) then
-        dfhack.gui.showAnnouncement(
-            'move-items: nothing could stand there -- pick a floor tile.', COLOR_YELLOW, false)
+        notify('move-items: nothing could stand there -- pick a floor tile.')
         return
     end
     stop_targeting()
@@ -1182,12 +1188,11 @@ end
 function open_picker(target)
     local groups, err = scan_items(target)
     if not groups then
-        dfhack.gui.showAnnouncement('move-items: ' .. tostring(err), COLOR_YELLOW, true)
+        notify('move-items: ' .. tostring(err))
         return
     end
     if #groups == 0 then
-        dfhack.gui.showAnnouncement(
-            'move-items: nothing that can reach that spot is anywhere else.', COLOR_YELLOW, true)
+        notify('move-items: nothing that can reach that spot is anywhere else.')
         return
     end
     PickerScreen{target = target, groups = groups}:show()
@@ -1211,9 +1216,8 @@ function show()
         -- not a refusal: picking a new destination is how you change your mind. The running
         -- delivery is cancelled when the new one is applied, not now -- back out of the picker
         -- and the one in flight carries on.
-        dfhack.gui.showAnnouncement(
-            ('move-items: %d of %d item(s) are still on their way; starting a new delivery '
-             .. 'will call that off.'):format(st.pending, st.total), COLOR_YELLOW, false)
+        notify(('move-items: %d of %d item(s) are still on their way; starting a new '
+                .. 'delivery will call that off.'):format(st.pending, st.total))
     end
     start_targeting()
 end
