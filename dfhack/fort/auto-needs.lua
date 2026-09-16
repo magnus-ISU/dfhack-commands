@@ -10,7 +10,7 @@ there is. Some of those needs have a LABOR that answers them, and this hands tha
 out to the dwarves who need it -- then takes it back once they have had their fill, so
 the fort's job assignments are not quietly rewritten forever by a mood that has passed.
 
-TODAY IT KNOWS ONE LABOR AND ONE POST:
+TODAY IT KNOWS ONE LABOR, ONE POST AND ONE JOB:
 
   WANDER -> FISHING. "Wander" is satisfied by being outside the fortress, and fishing is
   the reliable way a dwarf takes themselves out there and stays a while. Given the labor,
@@ -19,6 +19,13 @@ TODAY IT KNOWS ONE LABOR AND ONE POST:
   The dwarf must be BOTH short on the need and carrying stress -- the need alone is
   ordinary (half a fort is a little short of wandering at any time) and the stress alone
   says nothing about which need is doing it.
+
+  NOTHING CREATIVE -> A STATUE. A dwarf short on being creative is handed a statue to
+  carve at a free mason's workshop -- obsidian if the fort has any, otherwise a stone with
+  no economic use, so art never eats the flux or the ores. It is offered ONLY when carving
+  cannot change the dwarf's highest moodable skill: masonry is moodable, and a strange mood
+  claims the highest, so an armorer handed a statue can quietly end up making furniture
+  instead of an artifact suit. See NOTHING CREATIVE below.
 
   THINK ABSTRACTLY / SELF-EXAMINATION -> A SCHOLAR'S POST AT THE PUBLIC LIBRARY. Both of
   those needs are drained by the same act -- reading or writing something -- and the
