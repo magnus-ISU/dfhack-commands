@@ -484,7 +484,16 @@ around the screen border -- are always left to the game.
 Keeps the "Military" work detail matched to your standing squads.
 
 ### **`fort/training-barracks`**
-Marks one barracks as the fort's training barracks and assigns every squad to train there.
+Marks one barracks as the fort's training barracks and assigns the squads with nowhere to
+drill to train there.
+
+A squad that **already trains at another barracks is passed over**, and one that picks up a
+barracks of its own later is **released from this one** on the next pass. That squad has been
+given a training ground deliberately, a second training room would only split its drill
+between the two, and an assignment that outlives its reason is one you untick in the zone UI
+and watch come straight back. Only the *train* use counts: a squad that merely sleeps or
+keeps its equipment in another barracks has no training ground, so it still gets the basic
+one — and releasing a squad clears only *train*, leaving those other uses alone.
 
 ### **`fix/assigned-equipment`**
 Frees gear the squad equipment lists refuse to offer.
