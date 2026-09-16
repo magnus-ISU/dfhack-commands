@@ -55,11 +55,24 @@ local widgets = require('gui.widgets')
 
 -- ---- the stop, its route, its cart -------------------------------------------
 
+-- A TRACK STOP THAT IS NOT BUILT YET IS NOT A TRACK STOP. While it is still a construction
+-- site its sheet is up and DF will happily show it, but there is nothing to assign a minecart
+-- to and no route to hang a hauling stop on -- every button on the panel would be acting on a
+-- building that does not exist yet.
+local function finished(bld)
+    local ok, done = pcall(function()
+        return bld:getBuildStage() >= bld:getMaxBuildStage()
+    end)
+    return not ok or done
+end
+
 local function sheet_building()
     local vs = df.global.game.main_interface.view_sheets
     if not vs.open or vs.active_sheet ~= df.view_sheet_type.BUILDING then return nil end
     local b = df.building.find(vs.viewing_bldid)
-    if b and b:getType() == df.building_type.Trap and b.trap_type == df.trap_type.TrackStop then
+    if b and b:getType() == df.building_type.Trap and b.trap_type == df.trap_type.TrackStop
+        and finished(b)
+    then
         return b
     end
 end
