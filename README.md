@@ -94,25 +94,15 @@ held forever. The eraser takes plans back the same
 way it takes designations back. Plans live in memory only and do not survive a reload, by
 design: a box you dragged a minute ago is not a standing preference.
 
-Smooth designations are also redrawn — DF's full-tile wash is replaced by a small triangle in
-the corner of the tile, the shape DFHack marks damp digs with, in gray: bright for designated,
-dark for planned and still waiting on the rock. A tile keeps that marker once its designation
-becomes a job, which DF otherwise redraws its own way (it clears the tile's designation flag the
-moment it posts the job), so a room looks the same from the drag until a dwarf takes the work —
-at which point DF's flashing takes over and says somebody is on the way. The wash is only taken
-away when smoothing is the one thing designated on the tile: a tile also marked for mining keeps
-DF's art and just gets the triangle drawn over it, and hidden tiles are never drawn on at all.
-Engrave designations keep DF's own graphic. `art off` puts DF's own designation art back and
-leaves it alone.
 `fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
 immediately. Enabled by `magnus-scripts`.
 
-It draws nothing at all: designation art is DF's own, and a planned tile — not designated
-yet — shows what it always showed, which is the rock. It used to paint a gray corner triangle
-over every smooth designation in view, which meant walking the viewport's map blocks on every
-rendered frame, and it went idle completely when no plan is outstanding instead of re-reading
-the fort's job list four times a second. Together that was 6.7% of frame time on a live fort,
-now effectively nothing.
+It draws nothing: designation art is DF's own, and a planned tile — not designated yet — shows
+what it always showed, which is the rock. It used to paint a gray corner triangle over every
+smooth designation in view, which meant walking the viewport's map blocks on every rendered
+frame; it also now goes idle completely when nothing is planned, instead of re-reading the
+fort's job list four times a second. Together that was 6.7% of frame time on a live fort, now
+effectively nothing.
 
 Every tile it designates goes in at **priority 7**, the back of the queue: a smoothing
 designation and a mining designation are the same queue to a dwarf, so a room's worth of
@@ -536,7 +526,16 @@ around the screen border -- are always left to the game.
 Keeps the "Military" work detail matched to your standing squads.
 
 ### **`fort/training-barracks`**
-Marks one barracks as the fort's training barracks and assigns every squad to train there.
+Marks one barracks as the fort's training barracks and assigns the squads with nowhere to
+drill to train there.
+
+A squad that **already trains at another barracks is passed over**, and one that picks up a
+barracks of its own later is **released from this one** on the next pass. That squad has been
+given a training ground deliberately, a second training room would only split its drill
+between the two, and an assignment that outlives its reason is one you untick in the zone UI
+and watch come straight back. Only the *train* use counts: a squad that merely sleeps or
+keeps its equipment in another barracks has no training ground, so it still gets the basic
+one — and releasing a squad clears only *train*, leaving those other uses alone.
 
 ### **`fix/assigned-equipment`**
 Frees gear the squad equipment lists refuse to offer.
@@ -1023,6 +1022,34 @@ a path search; checked row for row against DF's own *Inaccessible from first sto
 list. The sort reorders DF's display list itself, so clicking a row still picks the cart that row
 shows.
 
+### **`fort/interrogate-all`**
+Two bulk actions on the justice screen's interrogation tab, lined up with DFHack's filter
+panel and sitting above it — plain text, no border: **`[interrogate all]`** and
+**`[interrogate all visitors]`**. The tab schedules one unit per click, and the question you
+are actually asking ("has anything walked in here that shouldn't have?") is asked of everybody
+at once.
+
+**It presses the keys you would press.** The two pieces of state DF changes on a click — the
+bit in `justice.crimeflag` and the entry in the list's `selected` set — are both unwritable
+from Lua (the map is exposed as a sequence with no unit keys, the set refuses `insert`), and
+DF's widget lists ignore synthetic mouse clicks. What works is DF's own keyboard path: put the
+list cursor on a row and feed Enter. Three things had to be right for that: `cursor_idx` is a
+**display** index (the order the rows are drawn in, *not* the order of `entry_list`, which
+names a different unit at every position); the cursor has to be set from inside the frame; and
+one key lands per frame on a row that is on screen. A row already scheduled is **never
+pressed** — Enter is a toggle, so pressing one would switch it off — and each press is checked
+back by identity, not by watching the selection count. A full pass is a frame per unit taken:
+111 units scheduled out of 273 rows in 280 frames, with nothing switched off.
+
+`[interrogate all]` means what **`F: Show`** means — set it to *Risky visitors* and the button
+takes the risky visitors. DFHack's own filter function is called rather than reimplemented, so
+the two cannot drift. With no filter set (*Show: All*) it still leaves out what you cannot
+question: the deceased and missing, animals and wildlife, and megabeasts, semi-megabeasts,
+titans, forgotten beasts and demons — tested per creature, because `Others` holds a human
+axeman next to a forgotten beast. `[interrogate all visitors]` ignores the `Show` filter and
+takes every visitor, under the same rules. Both respect **`Interviewed: Exclude`**, and both
+line themselves up with DFHack's panel wherever it is dragged to.
+
 ### **`fort/clickable-job-worker`**
 A building's Tasks list tells you somebody is on a job — the row carries the green check DF
 draws for a claimed task — and then refuses to say who. Click the job's **name** or its **green check** and the
@@ -1031,8 +1058,15 @@ DF's own row buttons sit between them and `fort/workshop-tools` puts its `+` nea
 right edge. Only
 rows that actually have a worker are taken; a job nobody has picked up is left to DF entirely,
 which is every row on a quiet workshop. Rows are identified by reading the line — `job.getName`
-returns exactly the string DF drew — so a scrolled list still hands back the right dwarf, and
+usually returns exactly the string DF drew — so a scrolled list still hands back the right dwarf, and
 two rows with the same name are matched to those jobs in order.
+
+Where the two disagree the row is matched by the longest run of **whole words** the line shares
+with a job's name. A butcher's shop draws *"Slaughter Stray Yak Bull (Tame)"* for a job named
+*"Slaughter animal"* — DF names the beast, the job name does not — and matching on the name
+alone left every row on a butcher's shop unclickable. A short run is not agreement (*"Make"*
+opens every other row on a craftsdwarf's shop), so it takes at least six characters, and ties
+fall to the same in-order rule as rows that read identically.
 
 ### **`fort/clickable-broker`**
 The Trade Depot's sheet names your broker, says what they are doing and whether they can even
@@ -1146,7 +1180,15 @@ mentions it: its announcement names the mood and stops. Magma forges and magma g
 count, and a craft with no rule for it says nothing rather than guessing. While they are fetching it keeps the mood's own line and counts what has arrived —
 *"Thåkut withdraws from society... Claimed 3 items."* When they are stuck it names what they
 are short of the way DF would, and a secretive dwarf *sketches* it rather than demanding it; past a week it counts the
-days: *"Thåkut has sketched rock blocks for 7 days"*. Clicking follows them with the camera,
+days: *"Thåkut has sketched rock blocks for 7 days"*. A possessed dwarf's line is DF's own,
+whole — the artifact names itself, in dwarven: *"Libadlitast Mostod Akam needs bones... yes..."*.
+
+**The requirement it names is the one nothing can fill**, not the first one still open. DF does
+not work through its own list in order — it takes whatever it finds that fits an open slot — so
+naming the first unfilled requirement sends you to a stockpile that is not the problem. One fort's
+possessed weaponsmith, one of his two bars in and no bone in reach, was reported as wanting metal
+bars with fifty-five of them in the stockpile while DF's own line said bones. Unreachable stock does
+not count as stock: a bone at the bottom of a cavern stalls a mood exactly as an absent one does. Clicking follows them with the camera,
 clicking again opens the planner. Turning it off in `magnus-scripts`
 puts DFHack's own line back rather than leaving a gap.
 
@@ -1179,7 +1221,12 @@ plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and
 any type you have produced. A mood asks the moment it starts, so a gap found afterwards is a
 berserk dwarf. With stressed dwarves in the fort it also checks remains and bones, which a
 macabre mood wants. The list is taken from DFHack's `strangemood` plugin and cross-checked
-against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have. It
+against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have — but **unbutchered pieces and
+unreachable stock do not**. A corpse nobody has butchered is a pile of body parts, every one of
+them carrying the `bone` bit because there is bone inside it, and what a mood wants is butchery
+output; a bone at the bottom of a cavern or sealed in a tomb is not stock either. One fort read as
+having bones on the strength of 66 unbutchered pieces and five bones it could not reach, and said
+nothing while a possessed weaponsmith waited thirty days for one. It
 warns at **fewer than three** rather than at none, since three is the most of one thing a mood
 asks for and one bar of the metal it settles on is the same dead end as none, found a day
 later: *"No shells; only 2 tanned leather for a mood"*.
