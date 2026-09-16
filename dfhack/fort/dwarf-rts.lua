@@ -23,11 +23,17 @@ dwarf-rts -- on the Squads screen:
         boxing from a tile/z-level with no allies in it.
       - A PLAIN CLICK (no tile change between press and release) depends on selection:
         with a squad/member SELECTED it commands -- ATTACKS a hostile on that tile (Shift
-        appends), else SELECTS your own dwarf under the cursor, else MOVES there. With
-        NOTHING selected it is forwarded to the game as a normal click, so you can select
-        squads/units/UI exactly as without the overlay.
+        appends), else SELECTS your own dwarf under the cursor, else MOVES there (Shift
+        PATROLS -- see below). With NOTHING selected it is forwarded to the game as a normal
+        click, so you can select squads/units/UI exactly as without the overlay.
     Clicks and box-attacks act on the highlighted MEMBERS when one squad is expanded
     into its member view (per-position orders), otherwise on the selected squads.
+    In the MEMBER VIEW the selection is the highlighted members and nothing else: with
+    none highlighted that screen behaves exactly like the squad list with nothing
+    selected -- every click falls through to DF, so a door still opens its own menu.
+    A click on any UI, or anywhere in the 3-tile band around the screen border (where
+    the notification icons, banners, toolbars and side windows live, and where DF
+    edge-scrolls), is never captured: it does whatever it would with the overlay off.
     A live box with a WxH readout tracks the drag, its corners marked with a CURSORS
     graphic for what it will do: attack cursor over enemies, friendly cursor over your
     own dwarves, empty cursor over nothing. Selected members are marked the same way.
@@ -36,6 +42,16 @@ dwarf-rts -- on the Squads screen:
     banners can never command squads. While a squad is selected these map clicks are
     also swallowed, so DF doesn't open a stockpile/pedestal/building menu under the
     cursor mid-command; with nothing selected, clicks fall through to DF as usual.
+  * SHIFT-CLICK open ground to PATROL. A stationed selection gets a route from where it
+    stands to the clicked tile; one already patrolling gets the tile appended to the END of
+    its route. (With no standing order to grow a route from, a shift-click just stations
+    them -- which is the first half of the next patrol.) The squads walk the route once and
+    HOLD at the far end, unless the last waypoint is within 1 tile of the first, which reads
+    as a deliberate circuit and keeps cycling the way DF's own patrol does. The routes are
+    real DF routes ("RTS Patrol N" in the patrol-route list) and are binned again once
+    nothing is walking them. DF's dotted '+' trail between waypoint banners is kept off the
+    map (the banners stay); it comes back inside the patrol-route interface, where it's the
+    editing feedback. See `patrol_from_click` / `patrol_watch` / `hide_route_trails`.
   * Left-clicking a unit's portrait (any "View ... sheet" button -- the squad
     leader's image or a member's) works in two stages, like the close-guard: the
     first click starts the camera following that unit and immediately closes the
@@ -279,7 +295,22 @@ local function over_notification_area(mx, my)
     return mx < 2 or (mx < 4 and my < 4)
 end
 
+-- The outer band of the screen is never ours. Every border carries UI -- the notification
+-- icons and alert banners down the left, the top bar, the bottom toolbar, the right-side
+-- windows -- and DF also edge-scrolls the map there, so a command aimed at the frame is
+-- always a misfire. Three tiles deep on all four sides: a click inside that band is passed
+-- straight through to DF and does exactly what it would with the overlay unloaded.
+local EDGE_MARGIN = 3
+local function near_screen_edge(mx, my)
+    return mx < EDGE_MARGIN or my < EDGE_MARGIN
+        or mx >= df.global.gps.dimx - EDGE_MARGIN
+        or my >= df.global.gps.dimy - EDGE_MARGIN
+end
+
 local function map_pos_if_clear(mx, my)
+    if near_screen_edge(mx, my) then return nil end    -- the 3-tile border band: DF's.
+                                                      -- checked first: two comparisons, and
+                                                      -- it short-circuits the rest
     local pos = dfhack.gui.getMousePos()               -- strict: nil over any UI
     if not pos then return nil end
     local m = df.global.game.main_interface
@@ -491,6 +522,259 @@ local function move_selected(ui, pos)
     end
 end
 
+-- ---- patrol routes ---------------------------------------------------------------
+-- Shift-clicking open ground turns a standing order into a PATROL. DF's patrol order is
+-- just a reference to a named route in plotinfo.waypoints: a routest holding a list of
+-- point ids, each a pointst with a map position. We mint both ourselves.
+--   * the selection is STATIONED (a move order)  -> a new route [station tile, clicked tile]
+--   * the selection is already walking one of OUR routes -> the clicked tile is appended
+--     to its end, and the order re-issued (DF only re-reads a route when the order is
+--     newly given, exactly as with kill lists)
+--   * neither -> no patrol; the caller stations them on the clicked tile instead, so the
+--     next shift-click has a station to grow a route from
+-- DF's own patrol loops forever. Ours walks the route once and then HOLDS at the far end
+-- (patrol_watch swaps the order for a station there) -- unless the route closes back on
+-- itself, its last waypoint within 1 tile of its first, which reads as a deliberate
+-- circuit and is left cycling.
+local PATROL_PREFIX = 'RTS Patrol '
+local patrol_state = {}    -- order-holder key -> {route_id = id, visited = {[i] = true}}
+
+local function waypoints() return df.global.plotinfo.waypoints end
+
+local function find_route(rid)
+    for _, r in ipairs(waypoints().routes) do if r.id == rid then return r end end
+end
+
+local function point_pos(pid)
+    for _, p in ipairs(waypoints().points) do if p.id == pid then return p.pos end end
+end
+
+-- id -> position for every waypoint on the map. point_pos is a linear scan, and the
+-- watcher below touches every waypoint of every route it follows on every sweep, so it
+-- builds this once per sweep instead.
+local function point_index()
+    local idx = {}
+    for _, p in ipairs(waypoints().points) do idx[p.id] = p.pos end
+    return idx
+end
+
+-- a fresh waypoint at `pos`, drawn like DF's own ('X' in white); returns its id
+local function new_point(pos)
+    local w = waypoints()
+    local id = w.next_point_id
+    w.next_point_id = id + 1
+    local p = df.pointst:new()
+    p.id, p.tile, p.fg_color, p.bg_color = id, 88, COLOR_GREY, COLOR_BLACK
+    p.pos.x, p.pos.y, p.pos.z = pos.x, pos.y, pos.z
+    w.points:insert('#', p)
+    return id
+end
+
+-- a fresh route through `tiles` (a list of map positions), named so we can tell ours apart
+local function new_route(tiles)
+    local w = waypoints()
+    local id = w.next_route_id
+    w.next_route_id = id + 1
+    local r = df.routest:new()
+    r.id = id
+    r.name = PATROL_PREFIX .. (id + 1)
+    for _, t in ipairs(tiles) do r.points:insert('#', new_point(t)) end
+    w.routes:insert('#', r)
+    return r
+end
+
+-- is any squad order (squad-level or per-member) still walking this route?
+local function route_referenced(rid)
+    local function scan(orders)
+        for _, o in ipairs(orders) do
+            if df.squad_order_patrol_routest:is_instance(o) and o.route_id == rid then return true end
+        end
+        return false
+    end
+    local ent = df.historical_entity.find(df.global.plotinfo.group_id)
+    for _, sid in ipairs(ent and ent.squads or {}) do
+        local s = df.squad.find(sid)
+        if s then
+            if scan(s.orders) then return true end
+            for p = 0, #s.positions - 1 do if scan(s.positions[p].orders) then return true end end
+        end
+    end
+    return false
+end
+
+-- drop every route WE minted that no order points at any more, and its waypoints with it,
+-- so finished patrols don't pile up in DF's route list. Routes the player made by hand
+-- (any name without our prefix) are never touched.
+local function prune_routes()
+    local w = waypoints()
+    for i = #w.routes - 1, 0, -1 do
+        local r = w.routes[i]
+        if tostring(r.name):sub(1, #PATROL_PREFIX) == PATROL_PREFIX and not route_referenced(r.id) then
+            local dead = {}
+            for _, pid in ipairs(r.points) do dead[pid] = true end
+            for j = #w.points - 1, 0, -1 do
+                if dead[w.points[j].id] then
+                    local p = w.points[j]
+                    w.points:erase(j)
+                    p:delete()
+                end
+            end
+            w.routes:erase(i)
+            r:delete()
+        end
+    end
+end
+
+local function patrol_order_new(issuer, rid)
+    local o = df.squad_order_patrol_routest:new()
+    o.issuer_hf, o.recipient_hf = issuer, -1
+    o.year, o.year_tick = df.global.cur_year, df.global.cur_year_tick
+    o.route_id = rid
+    return o
+end
+
+-- Give one order list (`orders` -- a squad's own, or a single member's position orders) a
+-- patrol built from the order it is carrying now plus the clicked tile, and remember it
+-- under `key` so patrol_watch can stop it at the far end. Returns the route, or nil when
+-- there is nothing to grow a patrol from (the caller then just stations them).
+local function patrol_from_click(orders, issuer, key, pos)
+    local last = #orders > 0 and orders[#orders - 1] or nil
+    local route
+    if last and df.squad_order_patrol_routest:is_instance(last) then
+        route = find_route(last.route_id)
+        if not route then return nil end
+        route.points:insert('#', new_point(pos))       -- append to the end of the patrol
+    elseif last and df.squad_order_movest:is_instance(last) then
+        route = new_route({copyall(last.pos), pos})    -- station + clicked tile = a 2-point patrol
+    else
+        return nil
+    end
+    for i = #orders - 1, 0, -1 do orders:erase(i) end  -- re-issue so DF re-reads the route
+    orders:insert('#', patrol_order_new(issuer, route.id))
+    patrol_state[key] = {route_id = route.id, visited = {}}
+    return route
+end
+
+-- shift-click with whole squads selected: turn each selected squad's station into a patrol,
+-- or extend the patrol it's already walking. Returns true if any squad took one.
+local function patrol_selected(ui, pos)
+    local any = false
+    for i = 0, #ui.squad_selected - 1 do
+        if ui.squad_selected[i] then
+            local s = df.squad.find(ui.squad_id[i])
+            if s and patrol_from_click(s.orders, leader_hf(s), 's' .. s.id, pos) then
+                clear_member_orders(s)      -- a squad-wide order supersedes member orders
+                any = true
+            end
+        end
+    end
+    return any
+end
+
+local ARRIVE = 1    -- tiles: how close counts as standing "at" a waypoint
+
+local function near_tile(a, b, d)
+    return a.z == b.z and math.abs(a.x - b.x) <= d and math.abs(a.y - b.y) <= d
+end
+
+-- a route whose last waypoint sits within 1 tile of its first closes back on itself: that
+-- is a deliberate circuit, so leave DF cycling it forever. Anything else is a one-way sweep.
+local function route_is_loop(r, pts)
+    if #r.points < 2 then return true end
+    local a, b = pts[r.points[0]], pts[r.points[#r.points - 1]]
+    return not a or not b or near_tile(a, b, 1)
+end
+
+-- resolve a patrol_state key back to the order list it was given on, the units walking it,
+-- and the issuer to reuse: 's<squad id>' is a squad's own orders, 'm<histfig id>' one
+-- member's position orders.
+local function patrol_holder(key)
+    local id = tonumber(key:sub(2))
+    if key:sub(1, 1) == 's' then
+        local s = df.squad.find(id)
+        if not s then return nil end
+        local units = {}
+        for p = 0, #s.positions - 1 do
+            local hf = df.historical_figure.find(s.positions[p].occupant)
+            local u = hf and df.unit.find(hf.unit_id)
+            if u and not dfhack.units.isDead(u) then units[#units + 1] = u end
+        end
+        return s.orders, units, leader_hf(s)
+    end
+    local hf = df.historical_figure.find(id)
+    local u = hf and df.unit.find(hf.unit_id)
+    if not u or dfhack.units.isDead(u) then return nil end
+    local s = df.squad.find(u.military.squad_id)
+    local idx = u.military.squad_position
+    if not s or idx < 0 or idx >= #s.positions then return nil end
+    return s.positions[idx].orders, {u}, -1
+end
+
+-- Walk the routes we handed out: tick off the waypoints the patrol has actually reached,
+-- and once a one-way route has been covered end to end, replace the patrol order with a
+-- station on its LAST waypoint -- so they hold there instead of turning round and walking
+-- it again. (Ticking every waypoint, not just the last, is what keeps a squad that happens
+-- to start next to the far end from "finishing" before it has patrolled anything.) Watching
+-- stops as soon as the order is gone, the route is a closed loop, or the hold is placed.
+-- DF paints a dotted trail of '+' glyphs across the map between the waypoint banners of
+-- every patrol route -- ours and any the player made by hand. It is drawn from a cached
+-- point list (patrol_routes.route_line) that DF only rebuilds when a route is created or
+-- edited, so emptying those lists clears the trail for good; we re-empty them on the
+-- watcher's tick to catch the rebuilds. The waypoint banners themselves are untouched --
+-- they're how you see where a patrol turns. Skipped while the patrol-route interface is
+-- open, where that trail IS the editing feedback and must stay.
+local function hide_route_trails()
+    local pr = df.global.game.main_interface.patrol_routes
+    if pr.open then return end
+    for i = 0, #pr.route_line - 1 do
+        local l = pr.route_line[i]
+        if #l.x > 0 then l.x:resize(0); l.y:resize(0); l.z:resize(0) end
+    end
+end
+
+local function patrol_watch()
+    hide_route_trails()
+    if next(patrol_state) == nil then return end       -- nothing patrolling: one comparison
+    local pts = point_index()
+    for key, st in pairs(patrol_state) do
+        local drop = true
+        local orders, units, issuer = patrol_holder(key)
+        local last = orders and #orders > 0 and orders[#orders - 1] or nil
+        if last and df.squad_order_patrol_routest:is_instance(last) and last.route_id == st.route_id then
+            local r = find_route(st.route_id)
+            if r and not route_is_loop(r, pts) then
+                drop = false
+                local n = #r.points
+                for i = 0, n - 1 do
+                    local wp = pts[r.points[i]]
+                    if wp then
+                        for _, u in ipairs(units) do
+                            if near_tile(u.pos, wp, ARRIVE) then st.visited[i] = true end
+                        end
+                    end
+                end
+                local done = true
+                for i = 0, n - 1 do if not st.visited[i] then done = false; break end end
+                local endp = done and pts[r.points[n - 1]] or nil
+                if endp then
+                    for i = #orders - 1, 0, -1 do orders:erase(i) end
+                    local mo = df.squad_order_movest:new()
+                    mo.issuer_hf, mo.recipient_hf = issuer, -1
+                    mo.year, mo.year_tick = df.global.cur_year, df.global.cur_year_tick
+                    mo.pos.x, mo.pos.y, mo.pos.z = endp.x, endp.y, endp.z
+                    mo.point_id = -1
+                    orders:insert('#', mo)
+                    drop = true             -- the patrol is over: they hold at the end
+                end
+            end
+        end
+        if drop then
+            patrol_state[key] = nil
+            prune_routes()
+        end
+    end
+end
+
 -- ---- notification group-kill: shift-click a vanilla "N invaders/hostiles/agitated animals" --
 --
 -- DFHack's gui/notify list (internal/notify/notifications) shows "N agitated animals", "N
@@ -612,14 +896,22 @@ local function register_notification_kills()
     if not ok or type(n) ~= 'table' or not n.NOTIFICATIONS_BY_NAME then return end
     for name, pred in pairs(NOTIFY_PREDS) do
         local entry = n.NOTIFICATIONS_BY_NAME[name]
-        if entry and not entry.rts_group_kill then
-            entry.rts_group_kill = true
-            local orig = entry.on_click
+        if entry then
+            -- Remember the VANILLA handler on the entry, and always re-wrap that, so
+            -- re-registering (world load, script reload) replaces our wrapper instead of
+            -- stacking another one on top of it.
+            local orig = entry.rts_orig or entry.on_click
+            entry.rts_orig = orig
             entry.on_click = function(state, shift)
-                if shift and #effective_selected_squad_ids() > 0 then
+                -- Route through the same entry point our own notify scripts use, so the
+                -- INDIVIDUAL-member case is handled identically: with members highlighted the
+                -- kill order belongs on their own squad_position slots. Gating this on
+                -- whole-SQUAD selection (what it used to do) meant a shift-click with only
+                -- individual members picked matched nothing, fell through to the vanilla
+                -- zoom, and set no targets at all.
+                if shift then
                     local ids = group_unit_ids(pred)
-                    if #ids > 0 then order_selected_kill_group(ids) end
-                    return state   -- consumed: command the selected squads instead of zooming
+                    if dfhack.internal.dwarf_rts_group_kill(ids) then return state end
                 end
                 return orig and orig(state, shift) or state
             end
@@ -647,9 +939,17 @@ local function single_command(ui, pos, shift)
     end
     local sel = box_select(ui, pos, pos)        -- own dwarf under the cursor -> select it
     if sel then return sel end
+    -- Shift on open ground PATROLS: a stationed selection gets a route from where it
+    -- stands to the clicked tile, one already patrolling gets the tile appended to the end
+    -- of its route. With nothing to grow a route from it's an ordinary station, which is
+    -- exactly the first half of the next patrol.
     if has_indiv_selection(ui) then
-        for _, p in ipairs(selected_positions(ui)) do pos_move(p, pos) end
-    else
+        for _, p in ipairs(selected_positions(ui)) do
+            if not (shift and patrol_from_click(p.orders, -1, 'm' .. p.occupant, pos)) then
+                pos_move(p, pos)
+            end
+        end
+    elseif not (shift and patrol_selected(ui, pos)) then
         move_selected(ui, pos)
     end
 end
@@ -665,11 +965,25 @@ local function clear_all_orders(sq)
             clear_member_orders(s)      -- and every member's individual orders
         end
     end
+    for k in pairs(patrol_state) do patrol_state[k] = nil end
+    prune_routes()                      -- and bin the routes those patrols were walking
 end
 
 local function has_selection(ui)
     for i = 0, #ui.squad_selected - 1 do if ui.squad_selected[i] then return true end end
     return false
+end
+
+-- Is there a selection that map clicks should COMMAND? Inside the member view (a squad
+-- expanded into its individual dwarves) the selection is the HIGHLIGHTED MEMBERS and
+-- nothing else: with none highlighted that screen behaves exactly like the squad list
+-- with nothing selected -- clicks fall through to DF, so clicking a door still opens the
+-- door's own menu. Without this the squad selection left over from the list (the screen
+-- opens with everything selected) went on commanding whole squads from inside the member
+-- view, where the player had deliberately picked nobody.
+local function has_command_selection(ui)
+    if ui.viewing_squad_index >= 0 then return has_indiv_selection(ui) end
+    return has_selection(ui)
 end
 
 -- list index of the SINGLE selected squad (nil if zero, several, or in member view) --
@@ -709,7 +1023,7 @@ local function box_attack(ui, p1, p2, append)
     if #ids == 0 then return 0 end          -- nothing in the box: keep the prior order
     if has_indiv_selection(ui) then
         for _, p in ipairs(selected_positions(ui)) do pos_kill(p, ids, append) end
-    else
+    elseif ui.viewing_squad_index < 0 then      -- member view with nobody highlighted: nothing acts
         for i = 0, #ui.squad_selected - 1 do
             if ui.squad_selected[i] then
                 local s = df.squad.find(ui.squad_id[i])
@@ -1081,6 +1395,13 @@ function DwarfRtsClickMove:overlay_onupdate()
         self.notif_shield = self.notif_shield - 1
     end
 
+    -- patrol upkeep: tick the routes we handed out, stopping each squad at the far end of a
+    -- one-way route, and keep DF's dotted route trails off the map. Runs whatever else is on
+    -- screen (a patrol walks on while you're in the equipment editor), but a few times a
+    -- second is plenty -- so not every frame.
+    self.patrol_tick = ((self.patrol_tick or 0) + 1) % 10
+    if self.patrol_tick == 0 then patrol_watch() end
+
     -- a portrait was clicked last frame: DF has now set the sheet's active unit, so
     -- follow it (DF's own follow mechanism; manual scrolling releases it natively).
     -- The info page the click opened stays open.
@@ -1232,7 +1553,7 @@ function DwarfRtsClickMove:overlay_onupdate()
                 -- a plain click (no drag). If a squad/member is selected, it's a command;
                 -- if nothing is selected, forward it to the game as a normal click so you
                 -- can select squads/units (the press was swallowed; re-dispatch on up).
-                if has_selection(sq) or has_indiv_selection(sq) then
+                if has_command_selection(sq) then
                     acted = single_command(sq, rel, shift)
                 else
                     self.passthrough = true
@@ -1487,7 +1808,7 @@ local function selected_units(ui)
     end
     if has_indiv_selection(ui) then
         for _, pos in ipairs(selected_positions(ui)) do add(pos.occupant) end
-    else
+    elseif ui.viewing_squad_index < 0 then   -- member view, nobody highlighted: nothing is selected
         for i = 0, #ui.squad_selected - 1 do
             if ui.squad_selected[i] then
                 local s = df.squad.find(ui.squad_id[i])
