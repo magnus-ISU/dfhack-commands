@@ -75,17 +75,24 @@ local STATE_KEY = 'move-items/state'
 
 -- ---- saying things ----------------------------------------------------------
 --
--- NOT THROUGH DF'S ANNOUNCEMENTS. Every line this tool used to raise -- "3 newly dumped
--- item(s) joined the delivery", "delivery finished", the prompt to click a spot -- went into
--- DF's own announcement log and its alert strip, which is where the game puts sieges,
--- artifacts and dead dwarves. A delivery reporting its own progress does not belong in that
--- company, and items that join a run mid-way raise that line again and again.
+-- TWO KINDS OF MESSAGE, AND ONLY ONE OF THEM IS A NOTIFICATION.
 --
--- So everything this tool has to say goes to the DFHack console. Nothing here creates a
--- native notification; the zoom line that used to recentre the map on the finished pile names
--- the coordinates in its text instead.
-local function notify(text)
+-- `log` is the delivery talking about itself -- "3 newly dumped item(s) joined the delivery",
+-- "delivery finished". Those used to go into DF's announcement log and alert strip, where the
+-- game puts sieges, artifacts and dead dwarves, and items joining a run mid-way raised that
+-- line again and again. They go to the DFHack console now and nowhere else.
+--
+-- `say` is an answer to something you just did -- a refusal, an error, the count of what a
+-- click marked. That belongs on screen where you are looking, so it stays a DF announcement.
+-- The one message that went both ways was the prompt to click a spot, and the picker overlay
+-- already says it in its own panel, so it is gone from here entirely.
+local function log(text)
     print(text)
+end
+
+local function say(text, color)
+    print(text)
+    pcall(dfhack.gui.showAnnouncement, text, color or COLOR_WHITE, false)
 end
 
 -- ---- persisted state ---------------------------------------------------------
@@ -422,7 +429,7 @@ function finish(quiet)
         if target then
             text = ('%s (at %d,%d,%d)'):format(text, target.x, target.y, target.z)
         end
-        notify(text)
+        log(text)
     end
     return true
 end
@@ -450,8 +457,9 @@ function cancel_delivery()
     cancel()
     moving_count = 0
     local landed = st.total - st.pending
-    notify(('move-items: delivery cancelled -- %d item(s) unmarked before they moved, %d '
-            .. 'already delivered and unforbidden, dump zone removed.'):format(st.pending, landed))
+    say(('move-items: delivery cancelled -- %d item(s) unmarked before they moved, %d '
+         .. 'already delivered and unforbidden, dump zone removed.'):format(st.pending, landed),
+        COLOR_YELLOW)
     return true
 end
 
@@ -554,7 +562,7 @@ local function adopt_new_dumps(s)
     end
     if added > 0 then
         save_state(s)
-        notify(('move-items: %d newly dumped item(s) joined the delivery.'):format(added))
+        log(('move-items: %d newly dumped item(s) joined the delivery.'):format(added))
     end
     return added
 end
@@ -1051,14 +1059,14 @@ function PickerScreen:apply()
         end
     end
     if #ids == 0 then
-        notify('move-items: nothing selected -- nothing done.')
+        say('move-items: nothing selected -- nothing done.', COLOR_YELLOW)
         self:dismiss()
         return
     end
     local res, err = begin_move(self.target, ids)
     self:dismiss()
     if not res then
-        notify('move-items: ' .. tostring(err))
+        say('move-items: ' .. tostring(err), COLOR_RED)
         return
     end
     local msg = ('move-items: %d item(s) marked, %d other dump zone(s) removed.')
@@ -1070,7 +1078,7 @@ function PickerScreen:apply()
     if #res.orders > 0 then
         msg = msg .. ' Standing orders turned on: ' .. table.concat(res.orders, ', ') .. '.'
     end
-    notify(msg)
+    say(msg, COLOR_GREEN)
 end
 
 -- ---- picking the spot -------------------------------------------------------------
@@ -1109,7 +1117,6 @@ local function start_targeting()
     mi.main_designation_selected = df.main_designation_type.NONE
     armed = false
     targeting = true
-    notify('move-items: click the spot to move things to (right-click cancels).')
 end
 
 local function stop_targeting()
@@ -1176,7 +1183,7 @@ function TargetOverlay:overlay_onupdate()
     -- A tile nobody can stand on is a MISS, not an answer: stay up and let them click again,
     -- rather than closing with a one-line complaint.
     if not walk_group(pos) then
-        notify('move-items: nothing could stand there -- pick a floor tile.')
+        say('move-items: nothing could stand there -- pick a floor tile.', COLOR_YELLOW)
         return
     end
     stop_targeting()
@@ -1188,11 +1195,11 @@ end
 function open_picker(target)
     local groups, err = scan_items(target)
     if not groups then
-        notify('move-items: ' .. tostring(err))
+        say('move-items: ' .. tostring(err), COLOR_YELLOW)
         return
     end
     if #groups == 0 then
-        notify('move-items: nothing that can reach that spot is anywhere else.')
+        say('move-items: nothing that can reach that spot is anywhere else.', COLOR_YELLOW)
         return
     end
     PickerScreen{target = target, groups = groups}:show()
@@ -1216,8 +1223,8 @@ function show()
         -- not a refusal: picking a new destination is how you change your mind. The running
         -- delivery is cancelled when the new one is applied, not now -- back out of the picker
         -- and the one in flight carries on.
-        notify(('move-items: %d of %d item(s) are still on their way; starting a new '
-                .. 'delivery will call that off.'):format(st.pending, st.total))
+        log(('move-items: %d of %d item(s) are still on their way; starting a new '
+            .. 'delivery will call that off.'):format(st.pending, st.total))
     end
     start_targeting()
 end

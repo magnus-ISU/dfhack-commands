@@ -201,13 +201,14 @@ while the rest of it is still walking. The zone goes when the last one is in. Th
 save and reload.
 
 
-**It never raises a DF notification.** Progress lines — *"3 newly dumped item(s) joined the
-delivery"*, *"delivery finished"*, the prompt to click a spot — used to go into DF's own
-announcement log and alert strip, where the game puts sieges, artifacts and dead dwarves; a
-delivery reporting on itself does not belong in that company, and items joining a run mid-way
-raise that line over and over. Everything the tool has to say now goes to the DFHack console
-instead, and the finished-delivery line names the destination's coordinates in its text rather
-than being a clickable zoom announcement.
+**The delivery does not narrate itself.** *"3 newly dumped item(s) joined the delivery"* and
+*"delivery finished"* used to go into DF's announcement log and alert strip, where the game puts
+sieges, artifacts and dead dwarves — and items joining a run mid-way raise that line again and
+again. Those go to the DFHack console now, and the finished line names the destination's
+coordinates in its text rather than being a clickable zoom announcement. **Answers to something
+you just did stay on screen**: refusals (*"nothing could stand there — pick a floor tile"*),
+errors, and the count of what a click marked. The prompt to click a spot is gone from the log
+because the picker's own panel already says it.
 
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
