@@ -28,6 +28,12 @@ and object are matched against what you have already added, so they can be short
 `<` and `>` are never typed: they are DF's z-level keys, and they also drop focus so the
 plain movement keys reach the game again. Click the box to type again.
 
+SPACE ON AN EMPTY BOX PAUSES, as it would anywhere else in the fort. The box is on screen for
+as long as the Engrave tool is, so a space that typed a space would take the fort's pause key
+away for the whole time the tool is open -- and no image name begins with a space, so a leading
+one is never what was meant. Once there is something in the box, space is a word break and
+types: "adamantine shield".
+
 Leaving the Engrave tool cancels the image -- typing, elements, relations and all. Tiles you
 already designated keep theirs: those are carvings already decided.
 
@@ -1080,6 +1086,18 @@ function BetterEngraving:onInput(keys)
     if self.unfocused then return false end
     if keys._STRING == 0 then
         self.search = self.search:sub(1, -2); self:refresh(); return true
+    elseif keys._STRING == 32 and self.search == '' then
+        -- SPACE WITH NOTHING TYPED IS STILL DF'S PAUSE KEY. No image name starts with a space,
+        -- so a leading one is never what was meant -- but the box is always on screen while the
+        -- Engrave tool is up, so without this the tool quietly takes the fort's pause key away
+        -- for as long as it is open. Once there IS text, space is a word break and types
+        -- normally ("adamantine shield"). Handing the event on is the honest way to pause: the
+        -- key carries DF's own binding, so a rebound pause key keeps working. If it arrives
+        -- without one (space is not bound to pause for this player) we still refuse to type it
+        -- and toggle the pause ourselves, since the leading space is the thing to avoid.
+        if keys.D_PAUSE then return false end
+        df.global.pause_state = not df.global.pause_state
+        return true
     elseif keys._STRING and keys._STRING >= 32 then
         self.search = self.search .. string.char(keys._STRING); self:refresh(); return true
     end
