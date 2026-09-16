@@ -979,8 +979,15 @@ DF's own row buttons sit between them and `fort/workshop-tools` puts its `+` nea
 right edge. Only
 rows that actually have a worker are taken; a job nobody has picked up is left to DF entirely,
 which is every row on a quiet workshop. Rows are identified by reading the line — `job.getName`
-returns exactly the string DF drew — so a scrolled list still hands back the right dwarf, and
+usually returns exactly the string DF drew — so a scrolled list still hands back the right dwarf, and
 two rows with the same name are matched to those jobs in order.
+
+Where the two disagree the row is matched by the longest run of **whole words** the line shares
+with a job's name. A butcher's shop draws *"Slaughter Stray Yak Bull (Tame)"* for a job named
+*"Slaughter animal"* — DF names the beast, the job name does not — and matching on the name
+alone left every row on a butcher's shop unclickable. A short run is not agreement (*"Make"*
+opens every other row on a craftsdwarf's shop), so it takes at least six characters, and ties
+fall to the same in-order rule as rows that read identically.
 
 ### **`fort/clickable-broker`**
 The Trade Depot's sheet names your broker, says what they are doing and whether they can even

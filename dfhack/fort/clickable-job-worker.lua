@@ -24,6 +24,11 @@ ONLY A ROW WITH A WORKER ON IT IS TAKEN. A job nobody has picked up has no dwarf
 its row is left to DF entirely -- which is every row on a quiet workshop. The rows that do get
 taken are the ones carrying the check, and what the check means is exactly what this answers.
 
+WHERE DF'S ROW TEXT AND THE JOB'S NAME DISAGREE, the longest run of whole words they share
+decides the row. A butcher's shop draws "Slaughter Stray Yak Bull (Tame)" for a job named
+"Slaughter animal" -- DF names the beast, the job name does not -- so matching on the name
+alone left every row on a butcher's shop unclickable.
+
 HOW A ROW IS IDENTIFIED, and why not by counting rows. The list scrolls and the rows are three
 lines tall, so arithmetic on the click's y hands back the wrong job as soon as anything is
 scrolled -- on a screen whose buttons cancel work, that is not a mistake worth risking.
@@ -83,6 +88,49 @@ local function probe_of(job)
     return name:sub(1, PROBE)
 end
 
+-- DF'S ROW TEXT IS NOT ALWAYS THE JOB'S NAME. A butcher's shop draws "Slaughter Stray Yak
+-- Bull (Tame)" for a job `dfhack.job.getName` calls "Slaughter animal": DF names the beast
+-- and the job name does not, so the probe appeared on no line and NO row on a butcher's shop
+-- could be clicked at all. The same split turns up wherever DF names the target rather than
+-- the work.
+--
+-- So where no job's name is on the line, the row is matched by the longest run of WHOLE WORDS
+-- it shares with one. "Slaughter" is nine characters of agreement and nothing else in a
+-- butcher's list comes near it. A short agreement is not agreement -- "Make" opens every
+-- other row on a craftsdwarf's shop -- so the run must reach MIN_PREFIX characters, and a run
+-- that stops mid-word does not count as sharing that word. Jobs that tie fall to the same
+-- in-order rule as jobs that read identically.
+local MIN_PREFIX = 6
+
+local function shared_head(line, name)
+    local n = 0
+    local a, b = line:lower(), name:lower()
+    while n < #a and n < #b and a:sub(n + 1, n + 1) == b:sub(n + 1, n + 1) do n = n + 1 end
+    local pre = line:sub(1, n)
+    -- diverged inside a word: back off to the last whole one
+    if n < #line and n < #name and not line:sub(n + 1, n + 1):match('%s') then
+        pre = pre:match('^(.*)%s%S*$') or ''
+    end
+    return (pre:gsub('%s+$', ''))
+end
+
+-- the jobs whose name shares the longest leading words with this line, kept in the original
+-- case so the shared run is still a literal substring of what DF drew
+local function prefix_matches(bld, text)
+    local head = text:match('^%s*(.-)%s*$')
+    if head == '' then return {} end
+    local best, out = MIN_PREFIX - 1, {}
+    for _, j in ipairs(bld.jobs) do
+        local ok, name = pcall(dfhack.job.getName, j)
+        if ok and name and name ~= '' then
+            local pre = shared_head(head, name)
+            if #pre > best then best, out = #pre, {{job = j, probe = pre}}
+            elseif #pre == best then out[#out + 1] = {job = j, probe = pre} end
+        end
+    end
+    return out
+end
+
 -- Which job DF drew on this line. Jobs that share a name are matched to the lines carrying it
 -- IN ORDER -- the first such line is the first such job -- which is the only thing that can be
 -- said about two rows that read identically.
@@ -93,6 +141,7 @@ function job_on_line(bld, y)
         local probe = probe_of(j)
         if probe and text:find(probe, 1, true) then matches[#matches + 1] = {job = j, probe = probe} end
     end
+    if #matches == 0 then matches = prefix_matches(bld, text) end
     if #matches == 0 then return nil end
     if #matches == 1 then return matches[1].job end
 
