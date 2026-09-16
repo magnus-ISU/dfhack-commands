@@ -33,6 +33,11 @@ with, in up to four segments (each omitted when empty):
         - anything else hostile: most numerous kind named.
       Each segment collapses to just "N <kind>" when it is all one kind.
 
+A CREATURE YOU HAVE TITLED IS NOT COUNTED. A custom profession -- "the Skinless", "the
+Bronze Colossus" -- is the player's own label, never DF's, and it means this one is known
+and dealt with: caged, tamed, walled off, or simply old news. The line reports what has
+turned up that you have NOT handled, so titled creatures are left out of every segment.
+
 Clicking is PER SEGMENT: a click on a segment's text cycle-zooms through only that
 segment's units (each segment keeps its own cycle position), and SHIFT-clicking (with
 squads selected via the dwarf-rts overlay) orders those squads to attack only that
@@ -48,10 +53,24 @@ local NAME = 'agitated_typed'
 local STOCK = 'agitated_count'          -- built-in lines we hide and replace
 local STOCK_HOSTILE = 'hostile_count'
 
+-- A TITLE MEANS YOU HAVE DEALT WITH IT. Giving a creature a custom profession -- "the
+-- Skinless", "the Bronze Colossus" -- is the player saying this one is known and accounted
+-- for: captured, tamed, walled in, or simply not news any more. This line exists to say what
+-- has turned up that you have not dealt with, so titled creatures are left out of every part
+-- of it, and "3 megabeasts including a bronze colossus" becomes the one forgotten beast still
+-- wandering about untitled.
+--
+-- It is the player's own label: DF never sets `custom_profession` by itself.
+local function titled(u)
+    local ok, name = pcall(function() return u.custom_profession end)
+    return ok and name ~= nil and name ~= ''
+end
+
 -- living, on-map, agitated wildlife that isn't caged/chained (mirrors the stock iterator)
 local function is_agitated(u)
     return not dfhack.units.isDead(u) and dfhack.units.isActive(u)
-        and not u.flags1.caged and not u.flags1.chained and dfhack.units.isAgitated(u)
+        and not u.flags1.caged and not u.flags1.chained and not titled(u)
+        and dfhack.units.isAgitated(u)
 end
 
 -- the stock "N hostiles" set (mirrors notify's for_hostile): non-invader, non-fort,
@@ -63,6 +82,7 @@ local function is_hostile(u)
         and not dfhack.units.isFortControlled(u)
         and not dfhack.units.isHidden(u)
         and not dfhack.units.isAgitated(u)
+        and not titled(u)
         and dfhack.units.isDanger(u)
 end
 
@@ -100,7 +120,7 @@ end
 local function is_gcs(u, race)
     return u.race == race
         and not dfhack.units.isDead(u) and dfhack.units.isActive(u)
-        and not u.flags1.caged and not u.flags1.chained
+        and not u.flags1.caged and not u.flags1.chained and not titled(u)
         and not dfhack.units.isFortControlled(u)
         and not dfhack.units.isHidden(u)
 end

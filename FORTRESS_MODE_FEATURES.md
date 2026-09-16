@@ -1113,6 +1113,14 @@ segment cycle-zooms the spiders and shift-clicking sets selected squads on them,
 segment. Race indexes are per world, so the creature is looked up by its raw id and the cached
 index is re-checked against that id before it is trusted.
 
+
+**A creature you have titled is not counted.** A custom profession — *"the Skinless"*, *"the
+Bronze Colossus"* — is the player's own label, never DF's, and it means that one is known and
+dealt with: caged, tamed, walled off, or simply old news. The line reports what has turned up
+that you have **not** handled, so titled creatures are left out of every segment. One fort's
+*"3 megabeasts including a bronze colossus"* became *"1 forgotten beast"* — the only one still
+wandering about untitled.
+
 ### **`fort/enemies-inside-notification`**
 Warns of enemies inside the alert burrow; shift-click sends selected squads to attack.
 
