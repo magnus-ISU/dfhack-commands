@@ -205,10 +205,12 @@ save and reload.
 *"delivery finished"* used to go into DF's announcement log and alert strip, where the game puts
 sieges, artifacts and dead dwarves — and items joining a run mid-way raise that line again and
 again. Those go to the DFHack console now, and the finished line names the destination's
-coordinates in its text rather than being a clickable zoom announcement. **Answers to something
-you just did stay on screen**: refusals (*"nothing could stand there — pick a floor tile"*),
-errors, and the count of what a click marked. The prompt to click a spot is gone from the log
-because the picker's own panel already says it.
+coordinates in its text rather than being a clickable zoom announcement. **Refusals and errors stay on
+screen**: *"nothing could stand there — pick a floor tile"*, *"nothing that can reach that spot
+is anywhere else"*, and anything that went wrong marking items. Everything about a delivery that
+went well — including the count of what a click marked — is the delivery describing itself and
+goes to the console. The prompt to click a spot is gone because the picker's own panel already
+says it, and "nothing selected" is gone because the window closing is the whole answer.
 
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.

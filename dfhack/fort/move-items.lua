@@ -82,10 +82,12 @@ local STATE_KEY = 'move-items/state'
 -- game puts sieges, artifacts and dead dwarves, and items joining a run mid-way raised that
 -- line again and again. They go to the DFHack console now and nowhere else.
 --
--- `say` is an answer to something you just did -- a refusal, an error, the count of what a
--- click marked. That belongs on screen where you are looking, so it stays a DF announcement.
--- The one message that went both ways was the prompt to click a spot, and the picker overlay
--- already says it in its own panel, so it is gone from here entirely.
+-- `say` is a REFUSAL or an ERROR -- the click could not do what you asked. That belongs on
+-- screen where you are looking, so it stays a DF announcement. Everything else about a
+-- delivery that went well, including the count of what a click marked, is the delivery
+-- describing itself and goes to `log`. Two messages went entirely: the prompt to click a spot
+-- (the picker overlay already says it in its own panel) and "nothing selected" (the window
+-- closing is the whole answer).
 local function log(text)
     print(text)
 end
@@ -1058,8 +1060,9 @@ function PickerScreen:apply()
             for i = 1, g.sel do ids[#ids + 1] = g.items[i].id end
         end
     end
+    -- Nothing selected: the window closes and that is the whole answer. A dwarf-sized
+    -- announcement for "you picked nothing" is noise about a non-event.
     if #ids == 0 then
-        say('move-items: nothing selected -- nothing done.', COLOR_YELLOW)
         self:dismiss()
         return
     end
@@ -1078,7 +1081,8 @@ function PickerScreen:apply()
     if #res.orders > 0 then
         msg = msg .. ' Standing orders turned on: ' .. table.concat(res.orders, ', ') .. '.'
     end
-    say(msg, COLOR_GREEN)
+    -- what was marked is the delivery describing itself, not a refusal: console only
+    log(msg)
 end
 
 -- ---- picking the spot -------------------------------------------------------------
