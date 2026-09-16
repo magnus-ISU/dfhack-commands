@@ -50,6 +50,29 @@ DFHack exposes an RPC on **`localhost:5000`** while DF runs. Talk to it with `df
   edits over live pokes when you can.
 - Check DF is up first: `ss -ltn | grep 5000` (listening = running).
 
+## Don't crash the game
+
+A crash costs the fort everything since its last save, and every rule here was learned by
+causing one. When in doubt, read; do not write.
+
+- **Never `df.reinterpret_cast` an address read out of a container** — an `unordered_map`
+  key, a raw pointer field. Turning a bad pointer into a virtual class segfaults inside
+  `virtual_identity::get`. Index the container by the object instead.
+- **Never resize or erase a vector something live is holding pointers into**: stockpile
+  settings with the Customize panel open, `job.items` mid-job, a unit's `current_job`,
+  `entity_territory.map[i]`.
+- **Do not open DF's own panels by writing fields** without clearing the caches DF fills when
+  it opens them itself (`view_sheets.ent_vect`/`ep_vect`), and never recurse a viewscreen.
+- **Bound every scan.** `units.active`, one building, one z-level — never `units.all`,
+  `map_blocks`, or a whole-`IN_PLAY` sweep from anything that runs per frame.
+- **Never `cp -f` onto a loaded plugin `.so`** — rename into place; it loads next launch.
+- **Probing the live game is the user's fort, not a sandbox.** One read-only call at a time,
+  and no exploratory writes to UI state while they are playing.
+- If a call kills the RPC (`I/O error in receive header`), DF is gone: `pgrep -x dwarfort`,
+  then read the newest file in `$DF/crashlog/` before doing anything else. The binary is
+  stripped but non-PIE, so `objdump -d --start-address=<addr>` reads the crash site straight
+  out of `dwarfort`.
+
 ## Check mod versions
 
 Worldgen reads from `$DF/mods/`. Each mod's version is in its `info.txt`:
