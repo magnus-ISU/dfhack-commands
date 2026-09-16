@@ -30,13 +30,16 @@ custom-tool band beside Replace wall), it runs the whole errand:
 
      Anything you mark for dumping yourself while it runs JOINS the delivery: with one dump
      zone in the fort it was going to that spot anyway, and joining is what gets it counted,
-     waited for, and unforbidden with the rest.
+     waited for, and unforbidden as it lands like the rest.
      Starting a delivery first UNMARKS everything else the fort had marked for dumping, and
      cancels any delivery already in flight: there is one dump zone and one set of marks, so
      two deliveries at once would land in each other's pile.
-  5. When the last one has arrived it deletes the zone and UNFORBIDS everything it moved --
-     dumped items land forbidden, and a pile of forbidden goods is not a delivery. That last
-     announcement carries the destination, so clicking it recentres the map on the pile.
+  5. EACH ITEM IS UNFORBIDDEN AS IT LANDS. Dumped items are put down forbidden (DF's own
+     rule), and a pile of forbidden goods is not a delivery -- so the watcher hands each one
+     back to the fort on the first tick after it arrives, rather than the whole pile at the
+     end. A delivery of two hundred stones is usable while the rest of it is still walking.
+     When the last one is in, the zone goes. That last announcement carries the destination,
+     so clicking it recentres the map on the pile.
 
 Nothing is done at all unless you pick both a place and at least one item.
 
@@ -345,14 +348,24 @@ local function mark_items(ids)
     return marked
 end
 
--- the ids still waiting: DF clears `dump` when the item is put down in the zone
-local function still_pending(ids)
-    local out = {}
+-- Split the job into what is still walking and what has landed. DF clears `dump` when the
+-- item is put down in the zone, so a cleared flag IS the arrival -- which is what lets the
+-- watcher hand each item back to the fort as it comes in.
+local function partition_pending(ids)
+    local pending, arrived = {}, {}
     for _, id in ipairs(ids) do
         local it = df.item.find(id)
-        if it and it.flags.dump then out[#out + 1] = id end
+        if it then
+            if it.flags.dump then pending[#pending + 1] = id
+            else arrived[#arrived + 1] = id end
+        end
     end
-    return out
+    return pending, arrived
+end
+
+-- the ids still waiting
+local function still_pending(ids)
+    return (partition_pending(ids))
 end
 
 -- what a finished move leaves behind: forbidden goods in a heap. Dumped items are forbidden
@@ -378,11 +391,15 @@ function finish(quiet)
     local s = load_state()
     if not s then return false end
     remove_zone(s.zone_id)
-    local n = unforbid(s.items or {})
+    -- The watcher unforbids each item as it lands, so this is only the last few -- the ones
+    -- that arrived between its final tick and now. Kept because finish() is also reached by
+    -- paths the watcher never ran for (a cancel, a delivery replaced by a new one).
+    unforbid(s.items or {})
+    local n = #(s.items or {})
     local target = s.target
     clear_state()
     if not quiet then
-        local text = ('move-items: delivery finished -- %d item(s) unforbidden, dump zone removed.')
+        local text = ('move-items: delivery finished -- %d item(s) delivered, dump zone removed.')
             :format(n)
         -- A ZOOM announcement, so the line recentres the map on the pile when you click it (or
         -- press the recentre key). "It arrived" is not much use without "and it is over there":
@@ -510,8 +527,8 @@ WatchOverlay.ATTRS{
 -- While a delivery is running there is exactly one dump zone in the fort -- this tool deleted
 -- the others -- so an item marked by hand IS going to the same spot whether we adopt it or
 -- not. Adopting it is what makes the rest true: it is counted in "Moving N items", the
--- delivery is not declared finished while it is still walking, and it is unforbidden with
--- everything else when it lands. Left unadopted it would arrive forbidden, on a pile the tool
+-- delivery is not declared finished while it is still walking, and it is unforbidden when it
+-- lands like everything else. Left unadopted it would arrive forbidden, on a pile the tool
 -- had already cleaned up and forgotten.
 local function adopt_new_dumps(s)
     local known = {}
@@ -537,13 +554,19 @@ function WatchOverlay:overlay_onupdate()
     local s = load_state()
     if not s then moving_count = 0; return end
     adopt_new_dumps(s)
-    local left = #still_pending(s.items or {})
-    if left == 0 then
+    local pending, arrived = partition_pending(s.items or {})
+    -- HANDED BACK AS THEY LAND, not in one go at the end. An item is unforbidden on the first
+    -- tick after it is put down, so a long delivery is usable while the rest of it is still
+    -- walking -- what has arrived is yours, instead of the whole pile staying out of the
+    -- fort's reach until the last hauler gets there. Costs nothing: these are the same ids
+    -- the pending count already walked, and unforbid only writes to items still forbidden.
+    unforbid(arrived)
+    if #pending == 0 then
         moving_count = 0
         finish()
         return
     end
-    moving_count = left
+    moving_count = #pending
 end
 
 -- the notification line: "Moving 7 items", and clicking it shows you where they are going
