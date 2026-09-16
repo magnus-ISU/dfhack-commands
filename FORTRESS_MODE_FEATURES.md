@@ -980,6 +980,34 @@ a path search; checked row for row against DF's own *Inaccessible from first sto
 list. The sort reorders DF's display list itself, so clicking a row still picks the cart that row
 shows.
 
+### **`fort/interrogate-all`**
+Two bulk actions on the justice screen's interrogation tab, lined up with DFHack's filter
+panel and sitting above it — plain text, no border: **`[interrogate all]`** and
+**`[interrogate all visitors]`**. The tab schedules one unit per click, and the question you
+are actually asking ("has anything walked in here that shouldn't have?") is asked of everybody
+at once.
+
+**It presses the keys you would press.** The two pieces of state DF changes on a click — the
+bit in `justice.crimeflag` and the entry in the list's `selected` set — are both unwritable
+from Lua (the map is exposed as a sequence with no unit keys, the set refuses `insert`), and
+DF's widget lists ignore synthetic mouse clicks. What works is DF's own keyboard path: put the
+list cursor on a row and feed Enter. Three things had to be right for that: `cursor_idx` is a
+**display** index (the order the rows are drawn in, *not* the order of `entry_list`, which
+names a different unit at every position); the cursor has to be set from inside the frame; and
+one key lands per frame on a row that is on screen. A row already scheduled is **never
+pressed** — Enter is a toggle, so pressing one would switch it off — and each press is checked
+back by identity, not by watching the selection count. A full pass is a frame per unit taken:
+111 units scheduled out of 273 rows in 280 frames, with nothing switched off.
+
+`[interrogate all]` means what **`F: Show`** means — set it to *Risky visitors* and the button
+takes the risky visitors. DFHack's own filter function is called rather than reimplemented, so
+the two cannot drift. With no filter set (*Show: All*) it still leaves out what you cannot
+question: the deceased and missing, animals and wildlife, and megabeasts, semi-megabeasts,
+titans, forgotten beasts and demons — tested per creature, because `Others` holds a human
+axeman next to a forgotten beast. `[interrogate all visitors]` ignores the `Show` filter and
+takes every visitor, under the same rules. Both respect **`Interviewed: Exclude`**, and both
+line themselves up with DFHack's panel wherever it is dragged to.
+
 ### **`fort/clickable-job-worker`**
 A building's Tasks list tells you somebody is on a job — the row carries the green check DF
 draws for a claimed task — and then refuses to say who. Click the job's **name** or its **green check** and the

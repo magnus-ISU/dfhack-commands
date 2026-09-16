@@ -183,6 +183,9 @@ local COLUMNS = {
         {key = 'item-description', label = 'item-description',
          enable = overlay_set('enable', 'fort/item-description.expand'),
          disable = overlay_set('disable', 'fort/item-description.expand')},
+        {key = 'interrogate-all', label = 'interrogate-all',
+         enable = overlay_set('enable', 'fort/interrogate-all.buttons'),
+         disable = overlay_set('disable', 'fort/interrogate-all.buttons')},
         {key = 'dwarf-rts', label = 'dwarf-rts',
          enable = function()
             dfhack.run_command('fort/dwarf-rts')
