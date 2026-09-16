@@ -104,7 +104,7 @@ THE THRESHOLD
 local GLOBAL_KEY = 'auto-needs'
 
 -- ONE BAR FOR EVERY RULE IN THIS FILE, and every rule added later. A need's `focus_level`
--- goes negative as it goes unmet, and -750 is where it stops being background noise and
+-- goes negative as it goes unmet, and -500 is where it stops being background noise and
 -- starts costing the dwarf: far enough down to be worth acting on, not so shallow that half
 -- the fort trips it every pass. Measured here, 85 of 95 citizens carry an unmet thinking or
 -- introspection need at any moment and most sit a couple of hundred below zero -- ordinary
@@ -112,8 +112,8 @@ local GLOBAL_KEY = 'auto-needs'
 --
 -- The bar is the WHOLE test. An earlier version also demanded stress before lending anything,
 -- which meant waiting for the damage to show before answering the need that was doing it;
--- -750 catches the dwarf on the way down instead, which is the point of the tool.
-local FOCUS_UNMET = -750      -- how far a need has to have slipped before this tool acts
+-- -500 catches the dwarf on the way down instead, which is the point of the tool.
+local FOCUS_UNMET = -500      -- how far a need has to have slipped before this tool acts
 local FOCUS_MET = 0           -- and where it is back above water, so the loan can end
 local SCAN_FRAMES = 1200      -- a pass every game day or so
 
@@ -201,35 +201,18 @@ local function stress_of(unit)
     return soul and soul.personality.stress or 0
 end
 
--- STRESS OPENS THE BAR EARLY. -750 is where an unmet need stops being background noise for
--- an ordinary dwarf, but a dwarf who is already breaking does not have the slack to wait for
--- it: the fort's angriest citizen sat at 70,754 stress with abstract thinking at -614 -- a
--- need she genuinely was not getting, just not far enough down to be noticed -- and was
--- passed over pass after pass while calmer dwarves were posted.
+-- THE BAR IS A FLAT ONE, THE SAME FOR EVERY DWARF. It used to sit at -750, which is where an
+-- unmet need stops being background noise for a dwarf with slack to spare -- and that let the
+-- fort's angriest citizen be passed over pass after pass with abstract thinking at -614: a
+-- need she genuinely was not getting, just not deep enough to be noticed.
 --
--- So anything unmet at all counts once DF's own stress categories call the dwarf stressed.
---
--- THE CATEGORY SCALE RUNS DOWNWARDS: 0 is Miserable and 6 is Ecstatic, the opposite of what
--- the name suggests. Measured here -- the dwarf at 70,714 stress reports category 0, the ones
--- at -100,000 report 6 -- so "stressed" is `<=`, and a `>=` test silently selects the
--- HAPPIEST dwarves in the fort. Category 2 is about 10,000 stress and up.
-local STRESSED_AT = 2
-
-local function badly_stressed(unit)
-    local ok, cat = pcall(dfhack.units.getStressCategory, unit)
-    return ok and cat and cat <= STRESSED_AT or false
-end
-
--- is this dwarf short enough on `focus` for the tool to act?
+-- Stress is not the answer to that. A dwarf who is already breaking is the LAST one to help
+-- cheaply, and a stress clause would only reach them once the damage was done. So the bar
+-- itself moved down instead: -500 for everybody, for every need this tool tracks.
 local function past_the_bar(unit, focus)
-    if not focus then return false end
-    if focus <= FOCUS_UNMET then return true end
-    return focus < 0 and badly_stressed(unit)
+    return focus ~= nil and focus <= FOCUS_UNMET
 end
 
--- does this dwarf want the labor right now? The shared bar is the whole test; the loan is
--- given back at FOCUS_MET, so there is a gap between the two and nobody flickers in and out
--- of a labor on a single point of focus.
 local function qualifies(unit, rule)
     return past_the_bar(unit, need_focus(unit, rule.need))
 end

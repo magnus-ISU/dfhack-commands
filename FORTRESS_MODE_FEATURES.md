@@ -713,12 +713,12 @@ can quietly turn their next artifact from a suit of armour into a piece of furni
 masonry is already their highest moodable skill *alone*, or sits a full level below it — a tie
 at the top counts as unsafe.
 
-**Stress opens the bar early.** −750 is where an unmet need stops being background noise for an
-ordinary dwarf, but a dwarf who is already breaking has no slack to wait for it: this fort's
-angriest citizen sat at 70,754 stress with abstract thinking at −614 and was passed over pass
-after pass while calmer dwarves were posted to the library. Any unmet need now counts once DF's
-own stress categories call the dwarf stressed. (Those categories run **downwards** — 0 is
-Miserable, 6 is Ecstatic — so the test is `<=`; a `>=` test picks the fort's *happiest* dwarves.)
+**The bar is flat: −500, the same for every dwarf, for every need tracked.** It sat at −750,
+which is where an unmet need stops being background noise for a dwarf with slack to spare — and
+that let this fort's angriest citizen be passed over pass after pass with abstract thinking at
+−614, a need she genuinely was not getting and just not deep enough to notice. Stress is not the
+answer to that: a dwarf who is already breaking is the last one a cheap loan reaches in time, so
+the bar moved down rather than growing a second, stress-shaped test.
 
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
