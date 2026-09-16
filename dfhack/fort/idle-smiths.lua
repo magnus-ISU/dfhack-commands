@@ -55,6 +55,9 @@ Requires the stock idle-crafting script (present in any standard DFHack install)
 need-measuring helpers are reused.
 ]]
 
+-- a game day: the rescan that clears `failing` and rebuilds the queues
+local MAIN_INTERVAL_TICKS = 1200
+
 local overlay = require('plugins.overlay')
 local widgets = require('gui.widgets')
 local repeatutil = require('repeat-util')
@@ -76,7 +79,7 @@ function isEnabled() return enabled end
 
 allowed = allowed or {}     -- forge id -> frame of last scheduled job (-1 = none this round)
 failing = failing or {}     -- forge id -> true (skip until next main loop)
-watched = watched or {}     -- threshold idx -> set of unit ids
+watched = watched or {}     -- threshold idx -> ORDERED list of unit ids, angriest first
 thresholds = thresholds or {10000, 1000, 500}
 
 local function persist_state()
@@ -396,6 +399,20 @@ local function under_military_order(unit)
     return false
 end
 
+-- how close this dwarf is to breaking, which is what decides who gets the next forge
+local function stress_of(unit)
+    local soul = unit.status.current_soul
+    return soul and soul.personality.stress or 0
+end
+
+local function drop_watched(idx, unit_id)
+    local list = watched[idx]
+    if not list then return end
+    for i, id in ipairs(list) do
+        if id == unit_id then table.remove(list, i); return end
+    end
+end
+
 -- ---- scheduling loops (mirroring idle-crafting) ------------------------------
 
 local function stop()
@@ -412,7 +429,7 @@ local function processUnit(forge, idx, unit_id)
     local unit = df.unit.find(unit_id)
     if not unit or unit.flags1.caged or unit.flags1.chained
         or idle.getCraftingNeed(unit, -1) < 0 then
-        watched[idx][unit_id] = nil
+        drop_watched(idx, unit_id)
         return false
     elseif not idle.canAccessWorkshop(unit, forge) then
         return false
@@ -434,7 +451,7 @@ local function processUnit(forge, idx, unit_id)
     if success then
         print(('idle-smiths: assigned %s to %s'):format(df.job_type[job_type],
             dfhack.df2console(dfhack.units.getReadableName(unit))))
-        watched[idx][unit_id] = nil
+        drop_watched(idx, unit_id)
         allowed[forge.id] = df.global.world.frame_counter
     end
     return true
@@ -455,14 +472,17 @@ local function unit_loop()
             goto next_forge
         end
         for idx in ipairs(thresholds) do
-            for unit_id in pairs(watched[idx] or {}) do
+            -- a COPY, because processUnit drops from the live list as it goes
+            local queue = {}
+            for _, unit_id in ipairs(watched[idx] or {}) do queue[#queue + 1] = unit_id end
+            for _, unit_id in ipairs(queue) do
                 if processUnit(forge, idx, unit_id) then goto next_forge end
             end
         end
         ::next_forge::
     end
     local any = false
-    for _, set in pairs(watched) do if next(set) then any = true break end end
+    for _, list in pairs(watched) do if #list > 0 then any = true break end end
     if not any then repeatutil.cancel(GLOBAL_KEY .. 'unit') end
     checkForForge()
     persist_state()
@@ -484,12 +504,27 @@ local function main_loop()
         if need then
             for idx, threshold in ipairs(thresholds) do
                 if need > threshold then
-                    watched[idx][unit.id] = true
+                    table.insert(watched[idx], {id = unit.id, stress = stress_of(unit), need = need})
                     watching = true
                     break
                 end
             end
         end
+    end
+    -- ANGRIEST FIRST. A bucket used to be a hash set, so whoever the iteration happened to
+    -- reach was served and the same few dwarves kept winning -- with 28 in the top bucket and
+    -- three forges, a given dwarf could wait months. Stress is the fort's own measure of who
+    -- is closest to breaking, so the queue is ordered by it, with the deeper need breaking
+    -- ties.
+    for idx, list in pairs(watched) do
+        table.sort(list, function(a, b)
+            if a.stress ~= b.stress then return a.stress > b.stress end
+            if a.need ~= b.need then return a.need > b.need end
+            return a.id < b.id
+        end)
+        local ids = {}
+        for _, e in ipairs(list) do ids[#ids + 1] = e.id end
+        watched[idx] = ids
     end
     if watching then
         repeatutil.scheduleUnlessAlreadyScheduled(GLOBAL_KEY .. 'unit', 53, 'ticks', unit_loop)
@@ -499,7 +534,12 @@ end
 local function start(enable)
     enabled = enable or enabled
     if enabled then
-        repeatutil.scheduleUnlessAlreadyScheduled(GLOBAL_KEY .. 'main', 8419, 'ticks', main_loop)
+        -- ONCE A GAME DAY. Upstream idle-crafting rescans every 8419 ticks -- seven days --
+        -- and since a forge is marked `failing` for the rest of a cycle the moment it takes a
+        -- job, that capped the whole fort at one job per forge per week. A fort with a
+        -- hundred dwarves short of crafting never catches up at that rate.
+        repeatutil.scheduleUnlessAlreadyScheduled(GLOBAL_KEY .. 'main', MAIN_INTERVAL_TICKS,
+            'ticks', main_loop)
     end
 end
 
