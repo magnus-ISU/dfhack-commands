@@ -217,20 +217,33 @@ local function dump_pos(bld)
     return xyz2pos(bld.centerx + info.dump_x_shift, bld.centery + info.dump_y_shift, bld.z)
 end
 
-local function make_route_for(bld)
+-- defined below, beside the rest of the hauling-view handling
+local drop_hauling_view
+
+-- A ROUTE WITH THIS STOP ON IT. `take_everything` is the quantum dumper's want, not every
+-- caller's: a cart assigned to a plain stop is for hauling whatever you set it to carry, and
+-- silently selecting every item in the fort would be a decision nobody asked for.
+--
+-- Inserting into `hauling.routes` can move the vector, and DF's Hauling screen holds RAW
+-- POINTERS into it (see `drop_hauling_view`), so the view is dropped here for the same reason
+-- it is dropped when a route is freed.
+local function make_route_for(bld, opts)
+    opts = opts or {}
     local hauling = df.global.plotinfo.hauling
-    hauling.routes:insert('#', {new = df.hauling_route, id = hauling.next_id,
-                                name = ('Quantum %d'):format(hauling.next_id)})
+    local name = opts.name or ('Route %d'):format(hauling.next_id)
+    hauling.routes:insert('#', {new = df.hauling_route, id = hauling.next_id, name = name})
     hauling.next_id = hauling.next_id + 1
     local route = hauling.routes[#hauling.routes - 1]
     route.stops:insert('#', {new = df.hauling_stop, id = 1,
                              pos = xyz2pos(bld.centerx, bld.centery, bld.z)})
     local stop = route.stops[0]
-    -- the stop takes everything, which is what a quantum dumper is for
-    pcall(function()
-        require('plugins.stockpiles').import_settings('library/everything',
-            {route_id = route.id, stop_id = stop.id, mode = 'set'})
-    end)
+    if opts.take_everything then
+        pcall(function()
+            require('plugins.stockpiles').import_settings('library/everything',
+                {route_id = route.id, stop_id = stop.id, mode = 'set'})
+        end)
+    end
+    drop_hauling_view()
     return route, stop
 end
 
@@ -254,7 +267,7 @@ local hauling_info = function() return df.global.plotinfo.hauling end
 -- emptied here; DF fills them again the next time the screen opens. The half-finished edit
 -- states beside them (adding a stop, typing a nickname) are cleared for the same reason: they
 -- are route and stop ids that may no longer exist.
-local function drop_hauling_view()
+function drop_hauling_view()
     local h = hauling_info()
     h.view_routes:resize(0)
     h.view_stops:resize(0)
@@ -584,20 +597,31 @@ end
 -- NOT `assign`: that is a reserved method name in DFHack's class system, and defining it
 -- aborts the whole script load -- silently, since the previously cached module env is what
 -- reqscript hands back. The overlay simply never registers and nothing says why.
+-- ASSIGNING A CART MAKES THE ROUTE IF THERE ISN'T ONE. A minecart is assigned to a hauling
+-- ROUTE, not to a track stop, so a stop that is on no route has nothing to assign to -- and
+-- saying "this stop is not on a hauling route yet" left the player to go and build one in the
+-- Hauling screen by hand, which is the work the button exists to save. So the route is made,
+-- this stop is its first stop, and the cart goes on it. What the stop CARRIES is left alone:
+-- that is the one part of a hauling route only you can decide.
 function TrackStopPanel:assign_kind(kind)
-    local route = self.route
-    if not route then
-        self:say('This stop is not on a hauling route yet.', COLOR_YELLOW)
-        return
-    end
     local pick = self.available and self.available[kind]
     if not pick then
         self:say(('No %s cart can reach this stop.'):format(kind), COLOR_LIGHTRED)
         return
     end
+    local route, made = self.route, false
+    if not route then
+        local bld = self.bld or sheet_building()
+        if not bld then return end
+        local stop
+        route, stop = make_route_for(bld)
+        self.route, self.stop, made = route, stop, true
+    end
     assign_cart(route, pick.vehicle)
-    self:say(('Assigned %s%s.'):format(dfhack.items.getDescription(pick.item, 0),
-                                       pick.liquid and (' (' .. pick.liquid .. ')') or ''),
+    self:say(('Assigned %s%s%s.'):format(dfhack.items.getDescription(pick.item, 0),
+                                        pick.liquid and (' (' .. pick.liquid .. ')') or '',
+                                        made and (' -- new route "' .. route.name ..
+                                            '"; set what it carries in Hauling') or ''),
              COLOR_GREEN)
 end
 
@@ -628,7 +652,10 @@ function TrackStopPanel:quantum()
         return
     end
     local route, stop = self.route, self.stop
-    if not route then route, stop = make_route_for(bld) end
+    if not route then
+        route, stop = make_route_for(bld, {take_everything = true,
+                                           name = ('Quantum %d'):format(bld.id)})
+    end
     link_feeder(stop, feeder)
     local ok, err = place_quantum_pile(dpos, name .. ' quantum')
     if not ok then

@@ -937,7 +937,14 @@ width as DF's window, both measured off the screen rather than guessed.
 
 **`Assign: [Lava] [Water] [Empty]`** — one button per kind of cart, each shown only while the fort
 has one that can actually reach this stop, using DF's own walkability groups, so a cart in a sealed
-magma pit is never offered. **`[Make a quantum stockpile]`** turns the stop into one in a single
+magma pit is never offered. A cart is assigned to a hauling **route**, not to a stop, so if this
+stop is on no route the button **makes one** with this stop as its first stop and puts the cart on
+that — it used to say "this stop is not on a hauling route yet" and leave you to go and build one
+by hand, which is the work the button exists to save. What the stop *carries* is left alone and
+named in the status line: that is the one part of a route only you can decide.
+
+**The panel stays hidden on a track stop that is not built yet.** While it is a construction site
+DF will still show its sheet, but there is no route to hang a stop on and no cart to assign. **`[Make a quantum stockpile]`** turns the stop into one in a single
 click when exactly one stockpile touches it: it links that pile to the route
 stop as its source, places a 1×1 catch-all pile on the tile the stop dumps into, and assigns an
 empty cart. It refuses when the adjacency is ambiguous rather than guessing which pile you meant,
