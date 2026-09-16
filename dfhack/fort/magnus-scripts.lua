@@ -546,21 +546,47 @@ local COLUMNS = {
         {key = 'hide-tutorials', label = 'hide-tutorials', mode = 'any',
          enable = cmd('enable', 'hide-tutorials'), disable = cmd('disable', 'hide-tutorials')},
         -- 3rd-party C++ plugin (notliad's upstream, v0.5; vendored as a submodule, prebuilt by
-        -- `make install-plugin` or compiled by `make build`). Every flag is turned on: `all on`
-        -- covers sprite flipping, linear movement and hauled-item icons, and the free camera is
-        -- opted into separately because upstream leaves it out of `all` while it is WIP.
+        -- `make install-plugin` or compiled by `make build`). `all on` covers sprite flipping,
+        -- linear movement and hauled-item icons. The free CAMERA is not turned on: it is the
+        -- one flag upstream leaves out of `all` while it is WIP, and it is left to whoever
+        -- wants it (`smooth-movement camera on`).
         -- (The old `slide` line went with the fork: no build ever shipped that command.)
         {key = 'smooth-movement', label = 'smooth-movement', mode = 'any',
          enable = function()
             pcall(dfhack.run_command, 'load', 'smooth-movement')
             dfhack.run_command('enable', 'smooth-movement')
             dfhack.run_command('smooth-movement', 'all', 'on')
-            dfhack.run_command('smooth-movement', 'camera', 'on')
          end,
          disable = cmd('disable', 'smooth-movement')},
         -- fort/autobutcher REPLACES the stock plugin: one adult limit per species
         -- instead of four numbers, and the cull rules the plugin hardcodes are
         -- settings. Enabling it turns the plugin off (they would fight over marks).
+        -- keeps the livestock work orders (shearing, milking, egg collection) matched to the
+        -- animals the fort actually has
+        {key = 'husbandry', label = 'husbandry', mode = 'fort',
+         enable = cmd('enable', 'husbandry'), disable = cmd('disable', 'husbandry')},
+        -- A ONE-SHOT, not a service: `ban-cooking all` marks every class it knows (booze,
+        -- seeds, tallow, honey, milk, thread, dye, oil...) as forbidden for cooking, so a cook
+        -- cannot boil away the fort's drink supply or its next crop. Switching the row off
+        -- unbans the same classes; anything you banned by hand and is not in a class here is
+        -- not touched either way.
+        --
+        -- RUN ONCE PER FORT, remembered with the site. The stock script is not idempotent:
+        -- 26 of its entries fail to match what it reads back out of `plotinfo.kitchen`, so
+        -- every re-run appends those 26 exclusions again (1856 entries became 1882 on a second
+        -- pass). The bans themselves are raws-wide, so once is all a world needs.
+        {key = 'ban-cooking', label = 'ban-cooking (all)', mode = 'fort',
+         enable = function()
+            if not dfhack.isMapLoaded() then return end
+            local KEY = 'magnus-scripts/ban-cooking'
+            if (dfhack.persistent.getSiteData(KEY) or {}).done then return end
+            dfhack.run_command('ban-cooking', 'all')
+            pcall(dfhack.persistent.saveSiteData, KEY, {done = true})
+         end,
+         disable = function()
+            dfhack.run_command('ban-cooking', '--unban', 'all')
+            pcall(dfhack.persistent.saveSiteData, 'magnus-scripts/ban-cooking', {done = false})
+         end},
         {key = 'autobutcher', label = 'autobutcher (+embark prot.)', mode = 'fort',
          enable = function()
             local ab = reqscript('fort/autobutcher')
