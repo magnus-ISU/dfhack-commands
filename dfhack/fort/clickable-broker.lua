@@ -171,8 +171,27 @@ local function close_sheet()
     df.global.game.main_interface.view_sheets.open = false
 end
 
+-- CLEAR THE POSITION CACHES BEFORE OPENING. DF's Overview tab draws a dwarf's noble
+-- positions by taking its COUNT from `ent_vect` and its pointers from `ep_vect`, with no
+-- bounds check on the second -- so the two have to agree. DF fills them in its own sheet
+-- update, which has not run yet on the frame a sheet is opened by writing these fields, and
+-- the pair left behind by an earlier sheet can disagree: a non-empty `ent_vect` over an
+-- emptied `ep_vect` reads a freed entity_position, and DF aborts building a std::string
+-- from its null name -- SIGABRT inside render, no lua error at all
+-- (crashlog/crash_2026-09-15-22-46-37.txt). Emptied together they agree at zero, and
+-- `last_tick_update` tells DF the caches are stale so it refills them on its next update.
+local function clear_sheet_caches(vs)
+    pcall(function()
+        vs.ent_vect:resize(0)
+        vs.ep_vect:resize(0)
+        vs.ep_vect_spouse:resize(0)
+        vs.last_tick_update = 0
+    end)
+end
+
 local function open_sheet(unit)
     local vs = df.global.game.main_interface.view_sheets
+    clear_sheet_caches(vs)
     vs.active_sheet = df.view_sheet_type.UNIT
     vs.active_id = unit.id
     vs.active_sub_tab = SHEET_TAB_OVERVIEW   -- written only as the sheet is opened
