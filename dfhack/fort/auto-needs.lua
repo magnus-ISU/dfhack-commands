@@ -194,12 +194,37 @@ local function stress_of(unit)
     return soul and soul.personality.stress or 0
 end
 
+-- STRESS OPENS THE BAR EARLY. -750 is where an unmet need stops being background noise for
+-- an ordinary dwarf, but a dwarf who is already breaking does not have the slack to wait for
+-- it: the fort's angriest citizen sat at 70,754 stress with abstract thinking at -614 -- a
+-- need she genuinely was not getting, just not far enough down to be noticed -- and was
+-- passed over pass after pass while calmer dwarves were posted.
+--
+-- So anything unmet at all counts once DF's own stress categories call the dwarf stressed.
+--
+-- THE CATEGORY SCALE RUNS DOWNWARDS: 0 is Miserable and 6 is Ecstatic, the opposite of what
+-- the name suggests. Measured here -- the dwarf at 70,714 stress reports category 0, the ones
+-- at -100,000 report 6 -- so "stressed" is `<=`, and a `>=` test silently selects the
+-- HAPPIEST dwarves in the fort. Category 2 is about 10,000 stress and up.
+local STRESSED_AT = 2
+
+local function badly_stressed(unit)
+    local ok, cat = pcall(dfhack.units.getStressCategory, unit)
+    return ok and cat and cat <= STRESSED_AT or false
+end
+
+-- is this dwarf short enough on `focus` for the tool to act?
+local function past_the_bar(unit, focus)
+    if not focus then return false end
+    if focus <= FOCUS_UNMET then return true end
+    return focus < 0 and badly_stressed(unit)
+end
+
 -- does this dwarf want the labor right now? The shared bar is the whole test; the loan is
 -- given back at FOCUS_MET, so there is a gap between the two and nobody flickers in and out
 -- of a labor on a single point of focus.
 local function qualifies(unit, rule)
-    local focus = need_focus(unit, rule.need)
-    return focus ~= nil and focus <= FOCUS_UNMET
+    return past_the_bar(unit, need_focus(unit, rule.need))
 end
 
 -- and is the loan finished? (kept apart from `qualifies` so the two bars can differ)
@@ -452,7 +477,7 @@ function scan_library(dry)
     for _, unit in ipairs(citizens()) do
         if not s.posted[tostring(unit.id)] and can_be_posted(unit) then
             local worst = scholar_shortfall(unit)
-            if worst and worst <= FOCUS_UNMET then
+            if past_the_bar(unit, worst) then
                 want[#want + 1] = {unit = unit, shortfall = worst}
             end
         end
@@ -527,8 +552,159 @@ end
 local function library_marked() return load_state().library_id >= 0 end
 local function service_wanted() return isEnabled() or library_marked() end
 
+-- ---- NOTHING CREATIVE -> A STATUE -------------------------------------------
+--
+-- "Has been unable to be creative lately" is answered by MAKING something, and a statue is
+-- the cheapest thing in the fort that counts: one boulder, one mason's workshop, no chain of
+-- industries behind it. The job is handed to the dwarf directly (a worker reference on the
+-- job), the way `fort/idle-smiths` hands out forge work, so it does not wait on labors or on
+-- whoever happens to be nearest.
+--
+-- THE STONE: OBSIDIAN FIRST, then any NON-ECONOMIC stone. Obsidian is worth nothing to
+-- anything else and looks the part; after that, a stone with no economic use -- no ore, no
+-- thread metal, nothing on its `economic_uses` list -- so making art never eats the flux,
+-- the gypsum or the ores the fort is keeping for something.
+--
+-- AND ONLY IF IT DOES NOT CHANGE WHAT A MOOD WOULD CLAIM. A statue trains MASONRY, which is
+-- a moodable skill, and a strange mood takes the dwarf's highest moodable skill -- so
+-- handing an armorer a statue can quietly turn their next artifact from a suit of armour
+-- into a piece of furniture. So it is offered only when masonry ALREADY is their highest
+-- moodable skill (nothing can change), or sits at least a full level below it (one statue
+-- cannot close a level). A tie at the top counts as unsafe.
+local CREATIVE_NEED = df.need_type.BeCreative
+local STATUE_SKILL = df.job_skill.MASONRY
+
+-- the skills a strange mood can claim -- the same set `fort/help-mood` maps to workshops
+local MOODABLE = {
+    df.job_skill.MASONRY, df.job_skill.CARPENTRY, df.job_skill.WEAVING,
+    df.job_skill.CLOTHESMAKING, df.job_skill.LEATHERWORK, df.job_skill.BOWYER,
+    df.job_skill.MECHANICS, df.job_skill.SIEGECRAFT, df.job_skill.CUTGEM,
+    df.job_skill.ENCRUSTGEM, df.job_skill.WOODCRAFT, df.job_skill.STONECRAFT,
+    df.job_skill.BONECARVE, df.job_skill.EXTRACT_STRAND, df.job_skill.METALCRAFT,
+    df.job_skill.FORGE_WEAPON, df.job_skill.FORGE_ARMOR, df.job_skill.FORGE_FURNITURE,
+    df.job_skill.GLASSMAKER,
+}
+
+local function skill_level(unit, skill)
+    local ok, v = pcall(dfhack.units.getNominalSkill, unit, skill, true)
+    return (ok and v) or 0
+end
+
+-- would a statue change the skill a mood would claim from this dwarf?
+local function statue_is_safe(unit)
+    local mine = skill_level(unit, STATUE_SKILL)
+    local best, best_count = -1, 0
+    for _, skill in ipairs(MOODABLE) do
+        local lvl = skill_level(unit, skill)
+        if lvl > best then best, best_count = lvl, 1
+        elseif lvl == best then best_count = best_count + 1 end
+    end
+    if mine == best and best_count == 1 then return true end   -- already theirs alone
+    return mine < best                                          -- a level of room to spare
+end
+
+-- a stone that is nobody's raw material: no ore, no thread metal, no economic use
+local function plain_stone(mat_index)
+    local ir = df.global.world.raws.inorganics.all[mat_index]
+    if not ir then return false end
+    local ok, stone = pcall(function() return ir.material.flags.IS_STONE end)
+    if not ok or not stone then return false end
+    if ir.flags.SOIL then return false end
+    return #ir.economic_uses == 0 and #ir.metal_ore.mat_index == 0
+        and #ir.thread_metal.mat_index == 0
+end
+
+-- the stone to carve: obsidian if the fort has any, else the most plentiful plain stone
+local function statue_stone()
+    local counts, obsidian = {}, nil
+    for _, it in ipairs(df.global.world.items.other.BOULDER) do
+        if it.mat_type == 0 and not it.flags.forbid and not it.flags.artifact
+            and not it.flags.dump and not it.flags.in_job and plain_stone(it.mat_index)
+        then
+            counts[it.mat_index] = (counts[it.mat_index] or 0) + 1
+            local ir = df.global.world.raws.inorganics.all[it.mat_index]
+            if ir and ir.id == 'OBSIDIAN' then obsidian = it.mat_index end
+        end
+    end
+    if obsidian then return obsidian end
+    local best, best_n = nil, 0
+    for idx, n in pairs(counts) do
+        if n > best_n then best, best_n = idx, n end
+    end
+    return best
+end
+
+-- a finished mason's workshop with nothing queued and no master assigned
+local function free_masons_shop()
+    for _, b in ipairs(df.global.world.buildings.all) do
+        if b:getType() == df.building_type.Workshop
+            and b:getSubtype() == df.workshop_type.Masons
+            and b:getBuildStage() >= b:getMaxBuildStage()
+            and #b.jobs == 0
+            and (not b.profile or b.profile.max_general_orders > 0)
+        then
+            return b
+        end
+    end
+end
+
+local function statue_job(unit, shop, mat_index)
+    local job = dfhack.job.createLinked()
+    job.job_type = df.job_type.ConstructStatue
+    job.mat_type = 0
+    job.mat_index = mat_index
+
+    local jitem = df.job_item:new()
+    jitem.item_type = df.item_type.BOULDER
+    jitem.mat_type = 0
+    jitem.mat_index = mat_index
+    jitem.quantity = 1
+    jitem.vector_id = df.job_item_vector_id.BOULDER
+    job.job_items.elements:insert('#', jitem)
+
+    dfhack.job.assignToWorkshop(job, shop)
+    return dfhack.job.addWorker(job, unit)
+end
+
+-- One creative pass: the neediest dwarf a statue is safe for, per free workshop.
+function scan_creative(dry)
+    local made, skipped = {}, 0
+    local mat = statue_stone()
+    if not mat then return made, skipped, 'no obsidian or non-economic stone' end
+
+    local want = {}
+    for _, unit in ipairs(citizens()) do
+        local focus = need_focus(unit, CREATIVE_NEED)
+        if past_the_bar(unit, focus) and dfhack.units.isJobAvailable(unit) then
+            if statue_is_safe(unit) then
+                want[#want + 1] = {unit = unit, focus = focus, stress = stress_of(unit)}
+            else
+                skipped = skipped + 1
+            end
+        end
+    end
+    -- angriest first, then the deepest need: the same order fort/idle-smiths serves
+    table.sort(want, function(a, b)
+        if a.stress ~= b.stress then return a.stress > b.stress end
+        if a.focus ~= b.focus then return a.focus < b.focus end
+        return a.unit.id < b.unit.id
+    end)
+
+    for _, cand in ipairs(want) do
+        local shop = free_masons_shop()
+        if not shop then break end
+        if dry then
+            made[#made + 1] = cand.unit
+        elseif statue_job(cand.unit, shop, mat) then
+            made[#made + 1] = cand.unit
+        end
+    end
+    return made, skipped, nil
+end
+
 local function one_pass()
     if isEnabled() then pcall(scan) end
+    if isEnabled() then pcall(scan_creative) end
     if library_marked() then pcall(scan_library) end
 end
 

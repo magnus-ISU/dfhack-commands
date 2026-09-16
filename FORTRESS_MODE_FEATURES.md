@@ -702,9 +702,35 @@ the library, and neither switches the other on behind your back.
 `fort/auto-needs` previews without changing anything, `fort/auto-needs once` runs a pass, and
 `enable fort/auto-needs` runs one about once a game day. `magnus-scripts` has a row for it.
 
+
+**Nothing creative → a statue.** A dwarf short on being creative is handed a statue to carve at
+a free mason's workshop, assigned to them by name the way `idle-smiths` hands out forge work.
+The stone is **obsidian first**, then any stone with **no economic use** — no ore, no thread
+metal, nothing on its `economic_uses` list — so making art never eats the flux, the gypsum or
+the ores. It is offered **only when carving cannot change what a strange mood would claim**:
+masonry is a moodable skill and a mood takes the dwarf's highest, so an armorer given a statue
+can quietly turn their next artifact from a suit of armour into a piece of furniture. Safe means
+masonry is already their highest moodable skill *alone*, or sits a full level below it — a tie
+at the top counts as unsafe.
+
+**Stress opens the bar early.** −750 is where an unmet need stops being background noise for an
+ordinary dwarf, but a dwarf who is already breaking has no slack to wait for it: this fort's
+angriest citizen sat at 70,754 stress with abstract thinking at −614 and was passed over pass
+after pass while calmer dwarves were posted to the library. Any unmet need now counts once DF's
+own stress categories call the dwarf stressed. (Those categories run **downwards** — 0 is
+Miserable, 6 is Ecstatic — so the test is `<=`; a `>=` test picks the fort's *happiest* dwarves.)
+
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
 Soldiers whose squad is under orders are left to those orders.
+
+
+**Angriest first, and a pass a day.** A need bucket used to be a hash set, so whichever dwarf
+the iteration reached first was served and the same few kept winning — with 28 dwarves in the
+top bucket and three forges, a given dwarf could wait months. The queue is now ordered by
+stress, deepest need breaking ties. And the rescan runs **once a game day** rather than
+upstream's 8419 ticks (seven days): since a forge is marked failing for the rest of a cycle the
+moment it takes a job, that cadence capped the whole fort at one job per forge per week.
 
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.

@@ -329,16 +329,21 @@ end
 
 -- ---- stress ------------------------------------------------------------------
 
--- Fell and macabre moods go to unhappy dwarves, so the corpse section is only relevant
--- once somebody is miserable. getStressCategory runs 0 (ecstatic) .. 6 (miserable).
-local STRESSED_AT = 4
+-- Fell and macabre moods go to unhappy dwarves, so the corpse section is only relevant once
+-- somebody is miserable.
+--
+-- THE CATEGORY SCALE RUNS DOWNWARDS -- 0 is Miserable, 6 is Ecstatic -- which is the opposite
+-- of what this file used to say, and the `>=` test that went with it counted the fort's
+-- HAPPIEST dwarves as its most stressed: 84 of 95 "stressed" citizens here were the content
+-- ones. Measured: 70,714 stress reports category 0, -100,000 reports 6.
+local STRESSED_AT = 2
 
 local function stressed_citizens()
     local out = {}
     for _, u in ipairs(df.global.world.units.active) do
         if dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) and not dfhack.units.isBaby(u) then
             local ok, cat = pcall(dfhack.units.getStressCategory, u)
-            if ok and cat and cat >= STRESSED_AT then out[#out + 1] = u end
+            if ok and cat and cat <= STRESSED_AT then out[#out + 1] = u end
         end
     end
     return out
