@@ -14,7 +14,8 @@ clicking it (with squads selected via the dwarf-rts overlay) orders those squads
 enemies that got inside -- same as shift-clicking "N invaders" / "N hostiles".
 
 Enemy test: dfhack.units.isDanger (invaders / hostiles / crazed / undead / megabeasts) OR
-isAgitated (agitated wildlife), and NOT isHidden and NOT caged -- an undetected ambusher/sneaker
+isAgitated (agitated wildlife) OR plain WILDLIFE that the fort does not own (a crundle loose in
+the safe burrow is an intruder, whatever DF thinks of its temper), and NOT isHidden and NOT caged -- an undetected ambusher/sneaker
 you haven't spotted, or an enemy already captured in a cage, is not counted. "Inside" uses
 dfhack.burrows.isAssignedTile, same as the
 civilian-outside check. Run `enemies-inside-notification` to register (idempotent);
@@ -45,11 +46,18 @@ end
 -- an on-map living threat: an invader / dangerous creature / agitated animal (not fort-controlled).
 -- HIDDEN units (undetected ambushers / sneakers you haven't spotted) are excluded -- the warning
 -- reflects only threats you can actually see inside the burrow, not ones the game hasn't revealed.
+-- WILD ANIMALS COUNT TOO. A crundle that wanders into the safe burrow is neither `isDanger`
+-- nor agitated -- to DF it is ordinary cave wildlife -- but it is loose inside the room the
+-- civilians were told to shelter in, which is the whole thing this line watches. Seventeen of
+-- them were wandering one fort while this said the burrow was clear. Tame animals and pets are
+-- not wildlife, and anything the fort controls is already excluded, so nothing you own trips it.
 local function is_enemy(u)
     if not dfhack.units.isActive(u) or dfhack.units.isDead(u) or u.pos.x < 0 then return false end
     if dfhack.units.isFortControlled(u) or dfhack.units.isHidden(u) then return false end
     if u.flags1.caged then return false end   -- a captured enemy in a cage isn't a live threat
-    return dfhack.units.isDanger(u) or dfhack.units.isAgitated(u)
+    if dfhack.units.isDanger(u) or dfhack.units.isAgitated(u) then return true end
+    return dfhack.units.isWildlife(u)
+        and not dfhack.units.isTame(u) and not dfhack.units.isPet(u)
 end
 
 -- enemies whose tile is inside any alert burrow

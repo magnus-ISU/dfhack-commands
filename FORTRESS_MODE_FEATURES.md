@@ -212,6 +212,20 @@ went well — including the count of what a click marked — is the delivery des
 goes to the console. The prompt to click a spot is gone because the picker's own panel already
 says it, and "nothing selected" is gone because the window closing is the whole answer.
 
+
+**The item window names the burrow** each piece is standing in, when it is in one. A burrow is
+how a fort says *"this pile is the hospital's"* or *"that is the forge's stock"*, and two
+identical bins read identically in the list until you know which room each is in — at which
+point the choice is obvious. `isAssignedTile` costs ~50µs, so the answer is cached per tile: a
+16,845-item scan with 16,155 of them inside a burrow takes 211 ms.
+
+**Wool and hair are not remains.** DF files shorn wool as a CORPSEPIECE — it comes off an
+animal, so it shares an item type with a severed arm — but a bin of alpaca wool is thread
+waiting for a loom, not a corpse, and burying it in the *"Refuse corpses and body parts"* row is
+how it ends up in a refuse pile. Those rows are ordinary item rows now, one per kind: a body
+part reports no material at all (camel hair, yak hair and alpaca wool all key as `46:-1:-1:-1`),
+so the description joins the group key to keep them apart.
+
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
 
@@ -1132,6 +1146,13 @@ wandering about untitled.
 
 ### **`fort/enemies-inside-notification`**
 Warns of enemies inside the alert burrow; shift-click sends selected squads to attack.
+
+
+**Wildlife counts as an intruder.** A crundle that wanders into the safe burrow is neither
+`isDanger` nor agitated — to DF it is ordinary cave wildlife — but it is loose in the room the
+civilians were told to shelter in, which is the whole thing this line watches; seventeen of them
+were wandering one fort while this reported the burrow clear. Anything the fort owns is already
+excluded, and tame animals and pets are not wildlife, so nothing of yours trips it.
 
 ### **`fort/trade-again`**
 DFHack's "Move goods to/from depot" screen opens with nothing selected, so every caravan starts with the

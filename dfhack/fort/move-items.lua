@@ -156,6 +156,9 @@ end
 
 -- ---- corpses ------------------------------------------------------------------
 --
+-- (Wool and hair are excluded: DF files them as corpse pieces because they come off an
+-- animal, but they are cloth stock, not remains. See corpse_category.)
+--
 -- Three rows, because a pile of corpses is three different chores wearing one word. What
 -- DF calls them all is "refuse".
 
@@ -206,6 +209,13 @@ end
 local function corpse_category(it)
     local t = it:getType()
     if t ~= df.item_type.CORPSE and t ~= df.item_type.CORPSEPIECE then return nil end
+    -- WOOL AND HAIR ARE NOT REMAINS. DF files shorn wool as a CORPSEPIECE -- it comes off an
+    -- animal, so it shares the item type with a severed arm -- but nobody thinks of a bin of
+    -- alpaca wool as a corpse: it is thread waiting for a loom, and burying it with the
+    -- butchery leftovers is how it ends up in a refuse pile. `corpse_flags.hair_wool` is DF's
+    -- own bit for it, and the yarn ones carry `yarn` on top.
+    local ok, wool = pcall(function() return it.corpse_flags.hair_wool end)
+    if ok and wool then return nil end
     if is_own_dead(it) then return CORPSE_OWN end
     -- a whole, unrotten body of an animal is meat on legs; anything else is refuse. A
     -- severed hand is a body PART however fresh it is, and a sentient corpse is never
@@ -219,6 +229,33 @@ local function corpse_category(it)
     return CORPSE_REFUSE
 end
 
+-- WHICH BURROW IS IT STANDING IN? A burrow is how a fort says "this pile is the hospital's"
+-- or "that is the magma forge's stock", and two identical bins read identically in the list
+-- until you know which room each is in -- at which point the choice of what to move is
+-- obvious. So the item window names it.
+--
+-- `isAssignedTile` is about 50us a call, so this asks once per TILE and remembers the answer:
+-- the scan walks stockpiles, where a hundred items share a handful of tiles.
+local burrow_cache
+local function burrow_at(pos)
+    if not pos then return nil end
+    local key = ('%d,%d,%d'):format(pos.x, pos.y, pos.z)
+    burrow_cache = burrow_cache or {}
+    local hit = burrow_cache[key]
+    if hit ~= nil then return hit or nil end
+    local names = {}
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+        local ok, inside = pcall(dfhack.burrows.isAssignedTile, b, pos)
+        if ok and inside then
+            local name = b.name
+            names[#names + 1] = (name ~= '' and name) or ('burrow ' .. b.id)
+        end
+    end
+    local out = #names > 0 and table.concat(names, ', ') or false
+    burrow_cache[key] = out
+    return out or nil
+end
+
 -- ---- the candidate scan --------------------------------------------------------
 --
 -- ONE PASS over every item in play, and it is not cheap (a fort with 27k items takes about a
@@ -227,6 +264,7 @@ end
 -- lookup is cached because items pile up: 14k items sat on 2.1k distinct tiles here.
 
 function scan_items(target)
+    burrow_cache = nil                     -- fresh burrow answers per scan
     local tgroup = walk_group(target)
     if not tgroup then return nil, 'that tile is not somewhere a dwarf can stand' end
 
@@ -249,13 +287,18 @@ function scan_items(target)
                         if cat then
                             gkey, label = cat, CORPSE_LABEL[cat]
                         else
-                            gkey = ('%d:%d:%d:%d'):format(it:getType(), it:getSubtype(),
-                                                          it:getMaterial(), it:getMaterialIndex())
                             -- DF appends a stack marker (" <#8>") to a stacked item's
                             -- description; the row is the KIND, so the one item's count has
                             -- no business in its name
                             label = dfhack.items.getDescription(it, 0, false)
                                         :gsub('%s*<#%d+>%s*$', '')
+                            gkey = ('%d:%d:%d:%d'):format(it:getType(), it:getSubtype(),
+                                                          it:getMaterial(), it:getMaterialIndex())
+                            -- A BODY PART REPORTS NO MATERIAL: camel hair, yak hair and alpaca
+                            -- wool all key as 46:-1:-1:-1, so they collapsed into one row named
+                            -- after whichever arrived first. The description is the only thing
+                            -- that tells them apart, so it joins the key for those.
+                            if it:getMaterial() < 0 then gkey = gkey .. ':' .. label end
                         end
                         local grp = groups[gkey]
                         if not grp then
@@ -270,6 +313,7 @@ function scan_items(target)
                             value = dfhack.items.getValue(it),
                             quality = it:getQuality(), wear = it.wear,
                             forbidden = it.flags.forbid,
+                            burrow = burrow_at(pos),
                         }
                         total = total + 1
                     end
@@ -758,10 +802,11 @@ function SpecificScreen:choices()
     local out = {}
     for i, e in ipairs(self.group.items) do
         local mark = self.chosen[e.id] and string.char(251) or ' '   -- a checkmark if we have one
-        out[#out + 1] = {
-            text = ('%-8d [%s] %s'):format(e.dist, mark, e.desc),
-            idx = i,
-        }
+        local row = {{text = ('%-8d [%s] %s'):format(e.dist, mark, e.desc)}}
+        if e.burrow then
+            row[#row + 1] = {gap = 1, text = ('(%s)'):format(e.burrow), pen = COLOR_GRAY}
+        end
+        out[#out + 1] = {text = row, idx = i}
     end
     return out
 end
