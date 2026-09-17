@@ -17,7 +17,9 @@ with TWO windows, side by side:
 
 Each is a whole trade window in its own right -- its own search, sort, filters, sliders and
 selections, all of DFHack's own -- just locked to one side of the trade instead of sharing a tab
-bar. The tab bar is hidden and the window title says which side it is.
+bar. The tab bar is hidden and the window title says which side it is -- AND WHAT IS MARKED ON
+IT: "Fort goods -- 1,240 marked" against "Caravan goods -- 980 marked". DFHack prices each row
+and never sums them; the total is the one number a trade turns on.
 
 THE SIZE IS THE POINT AS MUCH AS THE SPLIT. The pair opens against the edges of the screen: four
 rows of margin at the top, three columns at the left, three rows at the bottom, and on the right
@@ -47,6 +49,7 @@ local gui = require('gui')
 local widgets = require('gui.widgets')
 
 local trademod = reqscript('internal/caravan/trade')
+local common = reqscript('internal/caravan/common')
 
 -- ---- where the windows go ----------------------------------------------------
 
@@ -102,8 +105,53 @@ BetterTrade.ATTRS{
     page = 1,       -- 1 = the caravan's goods, 2 = the fort's
 }
 
+-- ---- the marked value ----------------------------------------------------------
+--
+-- WHAT IS MARKED, ADDED UP, ON BOTH SIDES. DFHack's window prices each row but never sums
+-- them, so the one number a trade turns on -- what you are giving against what you are getting
+-- -- was yours to add up by eye across two lists. Each window's title carries its side's total
+-- now: "Fort goods -- 1,240 marked" against "Caravan goods -- 980 marked".
+--
+-- The sum is of the items DF has marked (`goodflag.selected`), priced the way the window
+-- prices its rows -- `get_perceived_value`, which is the caravan's view of the item including
+-- its contents, so a bin of goods counts as the bin plus everything in it -- and shown through
+-- the same broker-skill obfuscation each row gets, so the total is exactly as sure as the
+-- numbers beside it. A CONTAINED item whose container is also marked is counted once, in the
+-- container: DF trades the bin as a unit, and the bin's price already includes its contents.
+local function marked_value(list_idx)
+    local trade = df.global.game.main_interface.trade
+    local goods, flags = trade.good[list_idx], trade.goodflag[list_idx]
+    if not goods or not flags then return 0 end
+    local total, parent_marked = 0, false
+    for i, item in ipairs(goods) do
+        local f = flags[i]
+        if f then
+            if not f.contained then parent_marked = f.selected end
+            if f.selected and not (f.contained and parent_marked) then
+                local ok, v = pcall(common.get_perceived_value, item, trade.mer)
+                total = total + ((ok and v) or 0)
+            end
+        end
+    end
+    return total
+end
+
+function BetterTrade:title()
+    local side = self.page == 1 and 'Caravan goods' or 'Fort goods'
+    local ok, total = pcall(marked_value, self.page - 1)
+    if not ok or not total or total == 0 then return side end
+    local ok2, shown = pcall(common.obfuscate_value, total)
+    return ('%s -- %s marked'):format(side, ok2 and shown or dfhack.formatInt(total))
+end
+
+-- the title is re-read every frame so it follows each click without hooking DFHack's toggles
+function BetterTrade:onRenderFrame(dc, rect)
+    self.frame_title = self:title()
+    BetterTrade.super.onRenderFrame(self, dc, rect)
+end
+
 function BetterTrade:init()
-    self.frame_title = self.page == 1 and 'Caravan goods' or 'Fort goods'
+    self.frame_title = self:title()
     -- Hide the tab bar. It is the one widget in there with a `get_cur_page`, which is a surer
     -- way to find it than a position: the layout above it is fixed, so nothing moves and the
     -- two rows it leaves are the gap under the sort and bins controls.

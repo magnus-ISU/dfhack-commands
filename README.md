@@ -1281,6 +1281,14 @@ It works by swapping the class DFHack's own *DFHack trade UI* button builds, so 
 the banner button, the keybinding — opens this instead, and turning it off in `magnus-scripts`
 puts DFHack's own window straight back.
 
+
+**Each window's title carries its side's marked total** — *"Fort goods — 1,240 marked"* against
+*"Caravan goods — 980 marked"*. DFHack prices every row and never sums them, so the one number a
+trade turns on was yours to add up by eye across two lists. The sum is of what DF has marked,
+priced the way the rows are (the caravan's view, container plus contents, counted once per
+marked bin) and shown through the same broker-skill obfuscation, so the total is exactly as sure
+as the numbers beside it. It follows each click.
+
 ### **`fort/help-mood` notices**
 Replaces DFHack's *"moody dwarf is claiming a workshop / can't find needed item"* with the
 game's own words: **"Thåkut withdraws from society..."**, *"...works furiously!"*,
