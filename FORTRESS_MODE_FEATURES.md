@@ -744,6 +744,15 @@ stress, deepest need breaking ties. And the rescan runs **once a game day** rath
 upstream's 8419 ticks (seven days): since a forge is marked failing for the rest of a cycle the
 moment it takes a job, that cadence capped the whole fort at one job per forge per week.
 
+
+**The practice pieces are melted again.** A dwarf forging to settle a craving turns a bar into
+a helm nobody asked for; left alone they pile up and the metal is gone. Each piece these jobs
+produce is designated for melting as it comes off the forge — except a **masterwork** (the
+dwarf's best work, and melting it is the one certain way to make them miserable) and a **silver
+war hammer** (silver is worthless as armour and makes the best blunt weapon in the game). Only
+this tool's own jobs are followed, by item-id watermark, so a piece from an order you queued at
+the same forge is never touched.
+
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.

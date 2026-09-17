@@ -46,6 +46,13 @@ workshop master assigned cannot be used. Job scheduling mirrors idle-crafting: a
 buckets dwarves by how badly they need to craft (same 500/1000/10000 thresholds), a fast
 loop pairs the neediest available dwarf with a free toggled forge.
 
+WHAT IT MAKES IS MELTED AGAIN. A dwarf forging to settle a craving turns a bar into a helm
+nobody asked for, and left alone those pile up while the metal is gone. So every piece these
+jobs produce is designated for melting as it comes off the forge -- except a MASTERWORK (the
+dwarf's best work; melting it is the one certain way to make them miserable) and a SILVER WAR
+HAMMER (silver is worthless as armour and the best blunt weapon in the game). Only this tool's
+own jobs are followed: a piece from an order the player queued at the same forge is left alone.
+
 Usage:
     idle-smiths [status]        statistics + configured forges
     idle-smiths thresholds <list>  need thresholds (default 500,1000,10000)
@@ -224,6 +231,59 @@ local FURNITURE = {
 ---create a forging job and hand it to the unit. Mirrors idle-crafting's job creation;
 ---the job_item shape matches a real manager-dispatched forge job (BAR, quantity 150
 ---per bar, min_dimension 150).
+-- ---- melting the practice pieces ---------------------------------------------
+--
+-- WHAT THIS MAKES IS EXERCISE, NOT EQUIPMENT. A dwarf forging to settle a craving turns a bar
+-- into a helm nobody asked for; left alone those pile up and the metal is gone. So each piece
+-- this tool's jobs produce is designated for melting as it is made, and the bar comes back.
+--
+-- TWO THINGS ARE KEPT. A MASTERWORK is the dwarf's best work -- melting it is the one thing
+-- guaranteed to make them miserable -- and a SILVER WAR HAMMER is a real weapon: silver is
+-- worthless as armour but its weight makes the best blunt weapon in the game, so those go to
+-- the armoury instead of the crucible.
+--
+-- Only OUR OWN jobs are followed. The forge is the player's too, and a piece from an order
+-- they queued at the same building is nothing to do with this.
+local ours = ours or {}                 -- job id -> {bld = building id, mark = item id floor}
+local KEEP_QUALITY = df.item_quality.Masterful
+
+local function war_hammer_subtype()
+    for i, d in ipairs(df.global.world.raws.itemdefs.weapons) do
+        if d.id == 'ITEM_WEAPON_HAMMER_WAR' then return i end
+    end
+    return -1
+end
+
+local function keep_forever(item)
+    if item.flags.artifact then return true end
+    if item:getQuality() >= KEEP_QUALITY then return true end
+    -- a silver war hammer: the one thing silver is genuinely the best metal for
+    if item:getType() == df.item_type.WEAPON and item:getSubtype() == war_hammer_subtype() then
+        local ok, mi = pcall(dfhack.matinfo.decode, item)
+        if ok and mi and mi.inorganic and mi.inorganic.id == 'SILVER' then return true end
+    end
+    return false
+end
+
+-- everything this job made, marked for melting as it comes off the forge
+function melt_products(job)
+    local rec = ours[job.id]
+    if not rec then return 0 end
+    ours[job.id] = nil
+    local bld = df.building.find(rec.bld)
+    if not bld then return 0 end
+    local n = 0
+    for _, contained in ipairs(bld.contained_items) do
+        local item = contained.item
+        if item and item.id >= rec.mark and not keep_forever(item)
+            and dfhack.items.canMelt(item) and not item.flags.melt
+        then
+            if dfhack.items.markForMelting(item) then n = n + 1 end
+        end
+    end
+    return n
+end
+
 local function forge_job(unit, forge, job_type, subtype, mat_index, bars)
     local job = dfhack.job.createLinked()
     job.job_type = job_type
@@ -241,7 +301,13 @@ local function forge_job(unit, forge, job_type, subtype, mat_index, bars)
     job.job_items.elements:insert('#', jitem)
 
     dfhack.job.assignToWorkshop(job, forge)
-    return dfhack.job.addWorker(job, unit)
+    local added = dfhack.job.addWorker(job, unit)
+    if added then
+        -- the id floor tells the melt pass which items came out of THIS job rather than
+        -- something the player had queued at the same forge earlier
+        ours[job.id] = {bld = forge.id, mark = df.global.item_next_id}
+    end
+    return added
 end
 
 local TRAPPER = df.unit_labor.TRAPPER
@@ -415,10 +481,14 @@ end
 
 -- ---- scheduling loops (mirroring idle-crafting) ------------------------------
 
+-- defined below, next to the eventful hook they drive
+local watch_completions, stop_watching_completions
+
 local function stop()
     enabled = false
     repeatutil.cancel(GLOBAL_KEY .. 'main')
     repeatutil.cancel(GLOBAL_KEY .. 'unit')
+    pcall(stop_watching_completions)
 end
 
 local function checkForForge()
@@ -531,9 +601,30 @@ local function main_loop()
     end
 end
 
+-- THE COMPLETION HOOK. eventful's JOB_COMPLETED fires after DF has made the product and put
+-- it in the workshop, which is exactly when the piece can be designated. Registered under our
+-- own key, so a reload replaces the handler rather than stacking another one.
+local eventful = require('plugins.eventful')
+
+function watch_completions()
+    eventful.enableEvent(eventful.eventType.JOB_COMPLETED, 5)
+    eventful.onJobCompleted[GLOBAL_KEY] = function(job)
+        local ok, n = pcall(melt_products, job)
+        if ok and n and n > 0 then
+            print(('idle-smiths: %d practice piece%s marked for melting'):format(
+                n, n == 1 and '' or 's'))
+        end
+    end
+end
+
+function stop_watching_completions()
+    eventful.onJobCompleted[GLOBAL_KEY] = nil
+end
+
 local function start(enable)
     enabled = enable or enabled
     if enabled then
+        pcall(watch_completions)
         -- ONCE A GAME DAY. Upstream idle-crafting rescans every 8419 ticks -- seven days --
         -- and since a forge is marked `failing` for the rest of a cycle the moment it takes a
         -- job, that capped the whole fort at one job per forge per week. A fort with a
