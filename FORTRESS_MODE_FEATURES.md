@@ -1114,6 +1114,13 @@ alone left every row on a butcher's shop unclickable. A short run is not agreeme
 opens every other row on a craftsdwarf's shop), so it takes at least six characters, and ties
 fall to the same in-order rule as rows that read identically.
 
+
+**The "Add new task" menu is left alone.** It draws over the same rows with job *names*, so a
+click on *"Make pair of silk gloves"* there looked exactly like a click on a queued job sharing
+those words, and the worker's sheet opened instead of the task being added. While that menu is up
+(`main_interface.building.button` is non-empty — DF empties it the instant the menu closes)
+nothing here takes a click.
+
 ### **`fort/clickable-broker`**
 The Trade Depot's sheet names your broker, says what they are doing and whether they can even
 reach the depot — and then does nothing with any of it. This makes that block live: click the

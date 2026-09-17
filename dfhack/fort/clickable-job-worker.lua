@@ -20,6 +20,11 @@ doing this, and where are they?
     full-screen sheet is not much of a view. A worker who has left the map (a hauler on a
     raid, a corpse already carted off) gets the sheet alone.
 
+THE "ADD NEW TASK" MENU IS LEFT ALONE. It draws over the same rows with job names, so a
+click on "Make pair of silk gloves" there looked like a click on a queued job with the same
+words; while that menu is open (`main_interface.building.button` is non-empty) nothing here
+takes a click.
+
 ONLY A ROW WITH A WORKER ON IT IS TAKEN. A job nobody has picked up has no dwarf to show, so
 its row is left to DF entirely -- which is every row on a quiet workshop. The rows that do get
 taken are the ones carrying the check, and what the check means is exactly what this answers.
@@ -288,8 +293,20 @@ JobWorkerClickOverlay.ATTRS{
     version = 1,
 }
 
+-- THE "ADD NEW TASK" MENU IS NOT THE TASKS LIST. It draws in the same panel, on the same
+-- rows, and its entries are job NAMES -- "Make pair of silk gloves" -- so a click on one of
+-- them looks exactly like a click on a queued job that shares those words, and this opened
+-- the worker's sheet instead of adding the task. DF fills `main_interface.building.button`
+-- only while that menu is up (it is emptied the instant it closes), which is the one safe
+-- test for it; see fort/workshop-tools, which sorts the same list.
+local function add_task_menu_open()
+    local ok, n = pcall(function() return #df.global.game.main_interface.building.button end)
+    return ok and n > 0
+end
+
 function JobWorkerClickOverlay:onInput(keys)
     if not keys._MOUSE_L then return false end
+    if add_task_menu_open() then return false end
     local x, y = dfhack.screen.getMousePos()
     if not x or not y then return false end
     local bld = sheet_building()
