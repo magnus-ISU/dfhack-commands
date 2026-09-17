@@ -171,7 +171,19 @@ end
 -- A press always starts a fresh pass. Refusing while `pump` is set looks tidy and is a trap:
 -- a pass that ended without clearing it (a screen left mid-way, say) leaves the buttons dead
 -- with no way back short of a reload.
+local SCREEN = 'dwarfmode/Info/JUSTICE/Interrogating'
+
 local function start(which, wanted)
+    -- ONLY FROM THE SCREEN ITSELF. A pass started while the interrogation tab is not up --
+    -- which a button click cannot do, but a script call can -- has nowhere to run: the pump
+    -- only ticks while the overlay is on screen, so the pass sat dormant in `pump` and fired
+    -- the next time the player opened the tab, days later, scheduling fifteen visitors they
+    -- had not asked for. Refused outright rather than queued.
+    if not dfhack.gui.matchFocusString(SCREEN) then
+        dfhack.gui.showAnnouncement('interrogate-all: open the interrogation tab first.',
+            COLOR_LIGHTRED, false)
+        return
+    end
     local list = unit_list()
     if not list then
         dfhack.gui.showAnnouncement('interrogate-all: the interrogation list is not open.',
@@ -244,6 +256,18 @@ end
 local function pump_tick()
     local p = pump
     if not p then return end
+    -- LEAVING THE SCREEN ABANDONS THE PASS, for real. The overlay stops ticking the moment
+    -- the tab closes, so without this a half-done pass simply waited in `pump` and carried on
+    -- from the same row whenever the tab was next opened -- possibly days later, on a list
+    -- that had changed under it. A gap in the frame counter is what "the screen was closed"
+    -- looks like from in here.
+    local frame = df.global.world.frame_counter
+    if p.last_frame and frame - p.last_frame > 3 then
+        pump = nil
+        last_result = ('%s: abandoned (screen closed) after %d added'):format(p.which, p.added)
+        return
+    end
+    p.last_frame = frame
     local list, table_w, rows = row_widgets()
     if not list or not rows then return stop() end
     p.ticks = p.ticks + 1

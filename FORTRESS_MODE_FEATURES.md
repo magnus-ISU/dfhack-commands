@@ -1085,7 +1085,9 @@ names a different unit at every position); the cursor has to be set from inside 
 one key lands per frame on a row that is on screen. A row already scheduled is **never
 pressed** — Enter is a toggle, so pressing one would switch it off — and each press is checked
 back by identity, not by watching the selection count. A full pass is a frame per unit taken:
-111 units scheduled out of 273 rows in 280 frames, with nothing switched off.
+111 units scheduled out of 273 rows in 280 frames, with nothing switched off. A pass can only
+be started from the tab itself, and **closing the tab abandons it** — it does not sit waiting and
+carry on from the same row when the tab is next opened.
 
 `[interrogate all]` means what **`F: Show`** means — set it to *Risky visitors* and the button
 takes the risky visitors. DFHack's own filter function is called rather than reimplemented, so
