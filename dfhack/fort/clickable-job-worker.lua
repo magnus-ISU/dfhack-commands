@@ -69,10 +69,19 @@ end
 
 -- The building whose sheet is open. `viewing_bldid` is the field DF builds its own focus
 -- string from, so it is also the honest answer to "what am I looking at".
+-- NOT THE TRADE DEPOT. A depot has jobs -- "Trade at depot", held by the broker, "Bring item
+-- to depot" held by whoever is hauling -- but no Tasks list: nobody queued them and the sheet
+-- draws no worker check beside them. What the depot sheet DOES draw is the broker's name with
+-- her current job under it, and when that job is "Trade at depot" it reads exactly like a
+-- Tasks row for a job whose worker is the broker. So a click landing there -- or on DF's own
+-- Trade button, which shares the word -- opened the broker's sheet and closed the depot, with
+-- the trade never started. The depot is fort/clickable-broker's, and it is skipped here.
 local function sheet_building()
     local vs = df.global.game.main_interface.view_sheets
     if not vs.open or vs.active_sheet ~= df.view_sheet_type.BUILDING then return nil end
-    return df.building.find(vs.viewing_bldid)
+    local bld = df.building.find(vs.viewing_bldid)
+    if bld and df.building_tradedepotst:is_instance(bld) then return nil end
+    return bld
 end
 
 local function job_worker(job)
@@ -268,6 +277,13 @@ end
 -- timers do not.
 pending_sheet_id = pending_sheet_id or nil
 
+hit_log = hit_log or {}
+local HIT_LOG_MAX = 8
+local function record_hit(text)
+    table.insert(hit_log, ('%d/%d %s'):format(df.global.cur_year, df.global.cur_year_tick, text))
+    while #hit_log > HIT_LOG_MAX do table.remove(hit_log, 1) end
+end
+
 local function goto_worker(unit)
     local x, y, z = dfhack.units.getPosition(unit)
     close_sheet()
@@ -324,6 +340,9 @@ function JobWorkerClickOverlay:onInput(keys)
     if not unit then return false end          -- nobody on it: the row is DF's business
     if not on_row_content(x, y, name_y) then return false end   -- somebody else's column
 
+    record_hit(('click %d,%d bld=%d job=%q line=%q -> %s'):format(x, y, bld.id,
+        dfhack.job.getName(job), (line_text(name_y):gsub('^%s+', ''):gsub('%s+$', '')),
+        dfhack.units.getReadableName(unit)))
     goto_worker(unit)
     return true
 end
@@ -352,6 +371,13 @@ end
 OVERLAY_WIDGETS = {click = JobWorkerClickOverlay, sheet = PendingSheetOverlay}
 
 if dfhack_flags.module then
+    return
+end
+
+if ({...})[1] == 'log' then
+    print(('clickable-job-worker: %d hit%s recorded (newest last)'):format(#hit_log, #hit_log == 1 and '' or 's'))
+    for _, line in ipairs(hit_log) do print('  ' .. dfhack.df2console(line)) end
+    if #hit_log == 0 then print('  nothing yet') end
     return
 end
 

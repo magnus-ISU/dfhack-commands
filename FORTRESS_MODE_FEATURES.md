@@ -1123,6 +1123,15 @@ those words, and the worker's sheet opened instead of the task being added. Whil
 (`main_interface.building.button` is non-empty — DF empties it the instant the menu closes)
 nothing here takes a click.
 
+
+**The Trade Depot is left to `clickable-broker`.** A depot has jobs — *"Trade at depot"* held by
+the broker, *"Bring item to depot"* by whoever is hauling — but no Tasks list: nobody queued them
+and no worker check is drawn. What the depot sheet does draw is the broker's name with her current
+job under it, and when that job is *"Trade at depot"* it reads exactly like a Tasks row whose
+worker is the broker, so a click there — or on DF's own *Trade* button, which shares the word —
+opened her sheet and closed the depot with the trade never started. `fort/clickable-job-worker
+log` prints the last eight hits, for the next time something looks wrong.
+
 ### **`fort/clickable-broker`**
 The Trade Depot's sheet names your broker, says what they are doing and whether they can even
 reach the depot — and then does nothing with any of it. This makes that block live: click the
