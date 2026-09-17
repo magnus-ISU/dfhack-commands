@@ -96,16 +96,24 @@ local RAW = {
     {'HELM', 'MakeHelm', G, 'sub'}, {'PANTS', 'MakePants', G, 'sub'},
     {'GLOVES', 'MakeGloves', G, 'sub'}, {'SHOES', 'MakeShoes', G, 'sub'},
     {'TRAPCOMP', 'MakeTrapComponent', C, 'sub'}, {'CHAIN', 'MakeChain', C, 'fixed'},
-    -- SIEGE EQUIPMENT. Catapult and ballista parts are cut from a log at the siege workshop
-    -- and there is no metal version, so they are left UNCONSTRAINED rather than given the
-    -- wood policy: that one falls back to metal when the fort is short of logs, which here
-    -- would queue a forge order no forge can take. The job already restricts the material to
-    -- what the siege workshop will accept, so there is no choice left to make.
+    -- SIEGE EQUIPMENT. Catapult, ballista and bolt thrower parts are cut from a LOG at the
+    -- siege workshop, and they take the wood policy for it.
+    --
+    -- They were left unconstrained on the theory that the job restricts the material itself.
+    -- It does not: a manager order with no material and no material category produces a job
+    -- DF names "Make UNKNOWN MATERIAL catapult parts", carrying no ingredient filter at all,
+    -- which no dwarf can ever take -- seen live beside a hand-added "Make catapult parts"
+    -- that had its WOOD job item and worked. An unconstrained order is only safe where the
+    -- reaction names its own inputs; here the order has to say wood.
     -- A ballista arrow head is the one that IS forged, from a metal bar, so it takes the
     -- cheap-metal policy. The arrow itself is assembled from a head and a log, and pinning a
     -- material to that order would pin the wrong half of it.
-    {'CATAPULTPARTS', 'ConstructCatapultParts', A, 'fixed'},
-    {'BALLISTAPARTS', 'ConstructBallistaParts', A, 'fixed'},
+    {'CATAPULTPARTS', 'ConstructCatapultParts', W, 'fixed'},
+    {'BALLISTAPARTS', 'ConstructBallistaParts', W, 'fixed'},
+    -- this DF has BOTH: BALLISTAPARTS (64) and BOLT_THROWER_PARTS (92), with a job each. The
+    -- second was missing here, so a bolt-thrower mandate raised no order at all and ran down
+    -- to the punishment.
+    {'BOLT_THROWER_PARTS', 'ConstructBoltThrowerParts', W, 'fixed'},
     {'BALLISTAARROWHEAD', 'MakeBallistaArrowHead', C, 'fixed'},
     {'SIEGEAMMO', 'AssembleSiegeAmmo', A, 'fixed'},
     -- coins: the MintCoins job strikes a stack from a metal bar (item implied -> 'fixed'); a
@@ -410,6 +418,22 @@ end
 -- punishment on the end of it: an order pinned to a material that runs out after the third
 -- earring is worse than an order made of something duller that finishes.
 -- module-level so a running fort can be asked what it would choose, without queueing
+-- JOBS THAT NAME THEIR OWN INGREDIENTS. A totem is carved from a skull and a ballista arrow
+-- is assembled from a head and a log: DF writes those filters into the job itself, so an
+-- order with no material is right there. EVERY OTHER JOB must pin a material or a material
+-- category -- an order with neither produces a job DF calls "Make unknown material catapult
+-- parts", with no ingredient filter at all, which no dwarf can take and which sits in the
+-- workshop until the mandate runs out. So the unpinned path is allowed only for these, and
+-- anything else is skipped and reported rather than queued as a job that cannot work.
+local SELF_SUPPLIED = {
+    [df.job_type.MakeTotem] = true,
+    [df.job_type.AssembleSiegeAmmo] = true,
+}
+
+local function unpinned_ok(o)
+    return SELF_SUPPLIED[o.job_type] or false
+end
+
 function choose_material(o, policy, m, amount)
     amount = math.max(1, amount or 1)
     -- a mandate that demands a specific material: honour it (no substitution -- the noble
@@ -504,9 +528,11 @@ function choose_material(o, policy, m, amount)
             -- that even this pile is smaller than the mandate
             return ('%s (%s)'):format(name, short and (why .. '; ' .. short) or why)
         end
-        return 'any material (' .. why .. ')'
+        if not unpinned_ok(o) then return nil end        -- no stone to pin: do not queue a
+        return 'any material (' .. why .. ')'            -- job DF would call "unknown material"
     end
-    return 'any material'   -- A: unconstrained (uses any available stone/etc.)
+    if not unpinned_ok(o) then return nil end
+    return 'any material'   -- A: the job names its own ingredients
 end
 
 -- DF's own words for item types whose token does not survive lower-casing. CATAPULTPARTS

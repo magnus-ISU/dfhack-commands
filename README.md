@@ -557,6 +557,16 @@ around the screen border -- are always left to the game.
 ### **`fort/military-labor`**
 Keeps the "Military" work detail matched to your standing squads.
 
+### **`fort/better-hives`**
+A beehive does nothing until you tick **Install a colony**, and DF never ticks it for you. One
+fort built fourteen hives — finished, each holding its glass hive, ten wild honey-bee colonies on
+the surface, eighty-eight beekeepers — and not one had a colony, because that flag was off on all
+of them. This switches it on **once, the first time a hive is seen finished**, so bees move in on
+their own. Once is the whole point: a hive you turn back off by hand, or want kept empty (an empty
+hive is how you stop a split), is never touched again; each hive's one nudge is remembered with
+the fort. Only a *built* hive counts, so a stack of planned ones is left alone until each goes up.
+Runs a pass a game day; enabled by `magnus-scripts`.
+
 ### **`fort/training-barracks`**
 Marks one barracks as the fort's training barracks and assigns the squads with nowhere to
 drill to train there.
