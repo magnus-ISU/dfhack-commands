@@ -1069,9 +1069,13 @@ list. The sort reorders DF's display list itself, so clicking a row still picks 
 shows.
 
 ### **`fort/interrogate-all`**
-Two bulk actions on the justice screen's interrogation tab, lined up with DFHack's filter
-panel and sitting above it — plain text, no border: **`[interrogate all]`** and
-**`[interrogate all visitors]`**. The tab schedules one unit per click, and the question you
+Three bulk actions on the justice screen's interrogation tab, lined up with DFHack's filter
+panel and sitting above it — plain text, no border: **`[cancel interviews]`**,
+**`[interrogate all]`** and **`[interrogate all visitors]`**. Cancel is the same walk with the
+target inverted: Enter is pressed only on rows that are *on*, each verified off by identity, so
+a row already off is never touched and nothing can be switched on by mistake. It reaches the
+whole list whatever `Show` is set to — *cancel the interviews* means all of them, and a filter
+that hid some would leave the captain of the guard still working through them. The tab schedules one unit per click, and the question you
 are actually asking ("has anything walked in here that shouldn't have?") is asked of everybody
 at once.
 

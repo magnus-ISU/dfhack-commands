@@ -7,10 +7,11 @@ The interrogation tab schedules ONE unit per click, and the question you actuall
 "has anything walked in here that shouldn't have?" -- is asked of everybody at once. DFHack's
 own overlay already filters the list; this adds the two bulk actions above it:
 
+    [cancel interviews]
     [interrogate all]
     [interrogate all visitors]
 
-Two plain text buttons, no border, lined up with DFHack's own filter panel on the same screen
+Three plain text buttons, no border, lined up with DFHack's own filter panel on the same screen
 and sitting above it.
 
 `[interrogate all]` MEANS WHAT `F: Show` MEANS. It schedules exactly the rows that filter is
@@ -162,8 +163,12 @@ local function stop(quiet)
     if not p or quiet then return end
     last_result = ('%s: added %d, already %d, missed %d, rows %d, ticks %d')
         :format(p.which, p.added, p.already, p.missed, p.row, p.ticks)
-    local msg = ('%d %s scheduled for interrogation'):format(p.added, p.which)
-    if p.already > 0 then msg = ('%s (%d already scheduled)'):format(msg, p.already) end
+    local verb = p.target and 'scheduled for interrogation' or 'interview(s) cancelled'
+    local msg = p.target and ('%d %s %s'):format(p.added, p.which, verb)
+                        or ('%d %s'):format(p.added, verb)
+    if p.already > 0 and p.target then
+        msg = ('%s (%d already scheduled)'):format(msg, p.already)
+    end
     if p.missed > 0 then msg = ('%s -- %d would not take'):format(msg, p.missed) end
     dfhack.gui.showAnnouncement(msg, p.added > 0 and COLOR_GREEN or COLOR_YELLOW, false)
 end
@@ -173,7 +178,7 @@ end
 -- with no way back short of a reload.
 local SCREEN = 'dwarfmode/Info/JUSTICE/Interrogating'
 
-local function start(which, wanted)
+local function start(which, wanted, target)
     -- ONLY FROM THE SCREEN ITSELF. A pass started while the interrogation tab is not up --
     -- which a button click cannot do, but a script call can -- has nowhere to run: the pump
     -- only ticks while the overlay is on screen, so the pass sat dormant in `pump` and fired
@@ -190,11 +195,13 @@ local function start(which, wanted)
             COLOR_LIGHTRED, false)
         return
     end
-    pump = {which = which, wanted = wanted, added = 0, already = 0, missed = 0,
+    pump = {which = which, wanted = wanted, target = target ~= false,
+            added = 0, already = 0, missed = 0,
             row = 0, state = 'walk', ticks = 0, tries = 0,
             max_ticks = (#list.entry_list + 400) * 4}
     last_result = 'running'
-    dfhack.gui.showAnnouncement(('Interrogating all %s...'):format(which), COLOR_WHITE, false)
+    dfhack.gui.showAnnouncement(pump.target and ('Interrogating all %s...'):format(which)
+        or ('Cancelling %s...'):format(which), COLOR_WHITE, false)
 end
 
 
@@ -278,7 +285,8 @@ local function pump_tick()
     -- count cannot tell "this unit got scheduled" from "some other row got switched off"
     if p.state == 'verify' then
         local unit = df.unit.find(p.unit_id)
-        if unit and scheduled_set(list)[addr_of(unit)] then
+        local now_on = unit and scheduled_set(list)[addr_of(unit)] or false
+        if unit and now_on == p.target then
             p.added, p.state, p.tries = p.added + 1, 'walk', 0
         else
             p.tries = p.tries + 1
@@ -331,8 +339,9 @@ local function pump_tick()
         local unit = row_unit(row)
         p.row = idx + 1
         if unit and p.wanted(unit) then
-            if scheduled_set(list)[addr_of(unit)] then
-                p.already = p.already + 1             -- already on: never pressed
+            local is_on = scheduled_set(list)[addr_of(unit)] or false
+            if is_on == p.target then
+                p.already = p.already + 1             -- already as wanted: never pressed
             else
                 p.unit_id, p.row_pressed, p.state, p.tries = unit.id, idx, 'verify', 0
                 list.cursor_idx = idx
@@ -415,6 +424,15 @@ local function interrogate_visitors()
     end)
 end
 
+-- CANCEL: every scheduled interview, whatever `Show` is set to. The same walk with the
+-- target state inverted -- Enter is pressed only on rows that are ON, verified off by
+-- identity afterwards -- so a row already off is never touched, and nothing can be switched
+-- on by accident. It reaches the whole list, not the filtered view: "cancel the interviews"
+-- means all of them, and a filter that hid some would leave the captain still working.
+local function cancel_interviews()
+    return start('scheduled interview(s)', function() return true end, false)
+end
+
 -- ---- overlay -----------------------------------------------------------------
 --
 -- Two bare labels rather than TextButtons: a TextButton draws its banner, and these sit
@@ -428,12 +446,12 @@ local STOCK_PANEL_W = 30          -- the visible panel inside DFHack's (much wid
 
 InterrogateAllOverlay.ATTRS{
     desc = 'Adds interrogate-all and interrogate-all-visitors buttons to the justice screen.',
-    default_pos = {x = 1, y = -9},
+    default_pos = {x = 1, y = -10},
     default_enabled = true,
     viewscreens = 'dwarfmode/Info/JUSTICE/Interrogating',
-    frame = {w = STOCK_PANEL_W, h = 2},
+    frame = {w = STOCK_PANEL_W, h = 3},
     overlay_onupdate_max_freq_seconds = 0,       -- the pump needs every frame
-    version = 2,
+    version = 3,
 }
 
 function InterrogateAllOverlay:overlay_onupdate()
@@ -444,12 +462,18 @@ function InterrogateAllOverlay:init()
     self:addviews{
         widgets.Label{
             frame = {t = 0, l = 1},
+            text = '[cancel interviews]',
+            text_pen = COLOR_WHITE,
+            on_click = cancel_interviews,
+        },
+        widgets.Label{
+            frame = {t = 1, l = 1},
             text = '[interrogate all]',
             text_pen = COLOR_WHITE,
             on_click = interrogate_all,
         },
         widgets.Label{
-            frame = {t = 1, l = 1},
+            frame = {t = 2, l = 1},
             text = '[interrogate all visitors]',
             text_pen = COLOR_WHITE,
             on_click = interrogate_visitors,
