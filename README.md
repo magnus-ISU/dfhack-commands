@@ -565,7 +565,11 @@ of them. This switches it on **once, the first time a hive is seen finished**, s
 their own. Once is the whole point: a hive you turn back off by hand, or want kept empty (an empty
 hive is how you stop a split), is never touched again; each hive's one nudge is remembered with
 the fort. Only a *built* hive counts, so a stack of planned ones is left alone until each goes up.
-Runs a pass a game day; enabled by `magnus-scripts`.
+It fires **on the build itself**: the job that raises a hive is a `ConstructBuilding` job
+carrying a reference to the building, and DFHack's `JOB_COMPLETED` event hands that job over
+the moment the builder finishes — so the flag goes on in the same tick the hive becomes a hive,
+with nothing scanned in between. Hives already finished when it is switched on are caught once,
+on enable. Enabled by `magnus-scripts`.
 
 ### **`fort/training-barracks`**
 Marks one barracks as the fort's training barracks and assigns the squads with nowhere to

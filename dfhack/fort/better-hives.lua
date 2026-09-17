@@ -20,19 +20,21 @@ without a colony is how you stop a split) is never touched again: each hive gets
 one nudge, the first time it is seen finished, and that hive's id is then remembered with
 the fort. Turning the flag off afterwards STAYS off.
 
-Only a hive that is actually BUILT counts. While it is a construction site it has no
-`do_install` to speak of, so the flag is set the first time the building stage says it is
-done -- which is also what makes this fire at the right moment rather than on a stack of
-planned hives.
+IT FIRES ON THE BUILD ITSELF, not on a timer. The job that raises a hive is a
+`ConstructBuilding` job carrying a reference to the building it is raising, and DFHack's
+JOB_COMPLETED event hands that job over the moment the builder finishes. So the flag goes on
+in the same tick the hive becomes a hive, and nothing is scanned in between. A hive that
+was already finished when this was switched on -- or built while it was off -- is caught
+once, on enable, by a single pass over the fort's buildings; after that the event is the
+whole mechanism.
 
 Usage:
-    enable fort/better-hives      watch for finished hives (a pass every game day)
-    disable fort/better-hives     stop watching
+    enable fort/better-hives      nudge each hive as it is finished
+    disable fort/better-hives     stop
     fort/better-hives             status, and nudge any finished hive not yet seen
 ]]
 
 local GLOBAL_KEY = 'better-hives'
-local CYCLE_TICKS = 1200          -- a pass a game day: a hive takes days to build anyway
 
 -- ---- state: which hives have had their one nudge ------------------------------
 
@@ -55,21 +57,40 @@ local function finished(bld)
     return ok and done
 end
 
--- every finished hive this fort has not nudged yet: set do_install, remember it.
--- Returns how many were nudged.
+-- the one nudge a hive gets. Returns true if the flag was actually switched on.
+local function nudge(bld)
+    local s = load_state()
+    local key = tostring(bld.id)
+    if s.seen[key] then return false end
+    s.seen[key] = true
+    local did = false
+    if not bld.hive_flags.do_install then
+        bld.hive_flags.do_install = true
+        did = true
+    end
+    save_state()
+    return did
+end
+
+-- the building a ConstructBuilding job was raising, if it was a hive
+local function hive_of(job)
+    if job.job_type ~= df.job_type.ConstructBuilding then return nil end
+    for _, r in ipairs(job.general_refs) do
+        if r:getType() == df.general_ref_type.BUILDING_HOLDER then
+            local bld = df.building.find(r.building_id)
+            if bld and df.building_hivest:is_instance(bld) then return bld end
+        end
+    end
+end
+
+-- every finished hive this fort has not nudged yet: the catch-up pass, run once on enable
+-- and from the command line. Returns how many were nudged.
 local function nudge_new_hives()
     local s = load_state()
     local n = 0
     for _, bld in ipairs(df.global.world.buildings.all) do
-        if df.building_hivest:is_instance(bld) and finished(bld) then
-            local key = tostring(bld.id)
-            if not s.seen[key] then
-                s.seen[key] = true
-                if not bld.hive_flags.do_install then
-                    bld.hive_flags.do_install = true
-                    n = n + 1
-                end
-            end
+        if df.building_hivest:is_instance(bld) and finished(bld) and nudge(bld) then
+            n = n + 1
         end
     end
     -- forget hives that no longer exist, so the record does not grow with every rebuild
@@ -85,38 +106,32 @@ end
 enabled = enabled or false
 function isEnabled() return enabled end
 
-local last_run, hb_gen = nil, 0
+local eventful = require('plugins.eventful')
 
-local function do_cycle()
-    if not dfhack.world.isFortressMode() then return end
-    local n = nudge_new_hives()
-    if n > 0 then
-        print(('better-hives: %d new hive%s set to install a colony'):format(n, n == 1 and '' or 's'))
+-- JOB_COMPLETED fires after DF has finished the job -- for ConstructBuilding, after the
+-- building's stage has been advanced -- so the hive is a hive by the time this runs.
+-- Registered under our own key: a reload replaces the handler rather than stacking one.
+local function on_job_completed(job)
+    local ok, bld = pcall(hive_of, job)
+    if ok and bld and finished(bld) and nudge(bld) then
+        print(('better-hives: hive %d finished -- set to install a colony'):format(bld.id))
     end
 end
 
--- per-frame heartbeat gated on the game calendar, the shape training-barracks uses:
--- repeat-util day timeouts are frame-counted on this build
 local function start()
     enabled = true
-    last_run = nil
-    hb_gen = hb_gen + 1
-    local my_gen = hb_gen
-    local function heartbeat()
-        if not enabled or my_gen ~= hb_gen then return end
-        local now = df.global.cur_year * 403200 + df.global.cur_year_tick
-        if not last_run or now - last_run >= CYCLE_TICKS then
-            last_run = now
-            do_cycle()
-        end
-        dfhack.timeout(1, 'frames', heartbeat)
+    eventful.enableEvent(eventful.eventType.JOB_COMPLETED, 5)
+    eventful.onJobCompleted[GLOBAL_KEY] = on_job_completed
+    -- anything finished while we were not listening
+    local n = nudge_new_hives()
+    if n > 0 then
+        print(('better-hives: %d hive%s already finished set to install a colony'):format(n, n == 1 and '' or 's'))
     end
-    heartbeat()
 end
 
 local function stop()
     enabled = false
-    hb_gen = hb_gen + 1
+    eventful.onJobCompleted[GLOBAL_KEY] = nil
 end
 
 function set_enabled(on)
@@ -147,7 +162,7 @@ if dfhack_flags and dfhack_flags.enable ~= nil then
         qerror('better-hives can only be enabled in fortress mode')
     end
     set_enabled(dfhack_flags.enable_state)
-    print('better-hives: ' .. (enabled and 'enabled (a pass every game day)' or 'disabled'))
+    print('better-hives: ' .. (enabled and 'enabled (fires as each hive is finished)' or 'disabled'))
 else
     if not dfhack.world.isFortressMode() then
         qerror('better-hives only works in fortress mode')
