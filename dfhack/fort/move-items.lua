@@ -49,9 +49,12 @@ stockpiled items, and the contents of bins and barrels. Only items that can REAC
 dwarf get from here to there" -- and nothing already standing on it.
 
 Rows are one kind of thing, not one item: every gabbro figurine is a row, whatever its
-quality or what it is encrusted with, because that is how you think about them. `[specific]`
-opens the individual items behind a row, listed by distance, if you want to choose among
-them (shift-click selects a range).
+quality or what it is encrusted with, because that is how you think about them. CLICKING A ROW
+takes all of that kind, and clicking it again clears it; SHIFT-CLICK marks every row from the
+last one clicked to this one. The bands along the right edge -- `[-1]`, the count, `[+1]`,
+`[+10]`, `[all]` -- are there when you want an exact number instead. `[specific]` opens the
+individual items behind a row, listed by distance, if you want to choose among them
+(shift-click selects a range there too).
 
 THE THREE STANDING ORDERS. Refuse hauling is what actually moves a corpse or a bone to a
 dump zone, and a fort that has turned any of the three off silently never finishes the job.
@@ -927,6 +930,11 @@ function PickerScreen:init(info)
                     choices = {},
                 },
                 widgets.Label{
+                    frame = {b = 3, l = 0},
+                    text = {{text = 'Click a row for all of that kind; shift-click a run of rows.',
+                             pen = COLOR_GRAY}},
+                },
+                widgets.Label{
                     view_id = 'summary',
                     frame = {b = 2, l = 0},
                     text = '',
@@ -1046,6 +1054,28 @@ local function band_at(x)
     end
 end
 
+-- CLICKING THE ROW ITSELF TAKES THE WHOLE KIND. The bands along the right edge are for
+-- exact amounts; the row is the common case -- "all of those" -- so a click anywhere else on
+-- it marks every item of that kind, and clicking a marked row clears it again. SHIFT-CLICK
+-- carries that across a run of rows from the last one clicked, the same range gesture the
+-- individual-item window uses.
+function PickerScreen:mark_row(idx, shift)
+    local g = self.shown[idx]
+    if not g then return end
+    if shift and self.last_row and self.shown[self.last_row] then
+        local a, b = math.min(self.last_row, idx), math.max(self.last_row, idx)
+        for i = a, b do
+            local row = self.shown[i]
+            if row then row.sel, row.specific = row.total, nil end
+        end
+        self.last_row = idx
+        self:refresh()
+        return
+    end
+    self.last_row = idx
+    self:set_sel(g, g.sel >= g.total and 0 or g.total)
+end
+
 function PickerScreen:set_sel(g, n)
     g.sel = math.max(0, math.min(n, g.total))
     g.specific = nil           -- a number means "the closest N", not the set you had picked
@@ -1068,6 +1098,10 @@ function PickerScreen:onInput(keys)
             elseif band == 'plus10' then self:set_sel(g, g.sel + 10); return true
             elseif band == 'all' then self:set_sel(g, g.total); return true
             elseif band == 'count' then self:ask_count(g); return true
+            else
+                -- anywhere else on the row (the label, the gaps): the whole kind
+                self:mark_row(idx, dfhack.internal.getModifiers().shift)
+                return true
             end
         end
     end

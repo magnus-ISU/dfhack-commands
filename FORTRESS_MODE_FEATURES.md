@@ -226,6 +226,12 @@ how it ends up in a refuse pile. Those rows are ordinary item rows now, one per 
 part reports no material at all (camel hair, yak hair and alpaca wool all key as `46:-1:-1:-1`),
 so the description joins the group key to keep them apart.
 
+
+**Clicking a row takes all of that kind**, and clicking it again clears it; **shift-click**
+marks every row from the last one clicked to this one. The bands along the right edge — `[-1]`,
+the count, `[+1]`, `[+10]`, `[all]` — are still there for an exact number, and `[specific]` still
+opens the items behind a row. Before this, a click that landed on the label did nothing at all.
+
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
 
