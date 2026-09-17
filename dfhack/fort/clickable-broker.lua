@@ -68,10 +68,22 @@ end
 
 -- the line's text as the bytes DF drew, blanks as spaces. DF renders names in CP437 and
 -- translateName hands back CP437, so a name found here is an exact byte match.
+-- THE PANEL ONLY. The sheet lives in the right part of the screen; the map, the alert strip and
+-- the notification panel on the left are not it. Reading a whole row used to let a name drawn
+-- on the left half -- a notification line, an announcement -- make that ROW look like the
+-- broker's, and a click on whatever DF drew at the right end of the same row (the Trade
+-- button, say) then opened the broker's sheet. The band is padded with spaces on the left so
+-- column numbers stay screen columns.
+local function panel_x1()
+    local w = dfhack.screen.getWindowSize()
+    return math.floor(w * 0.45)
+end
+
 local function line_text(y)
     local w = dfhack.screen.getWindowSize()
-    local out = {}
-    for x = 0, w - 1 do
+    local x1 = panel_x1()
+    local out = {(' '):rep(x1)}
+    for x = x1, w - 1 do
         local p = dfhack.screen.readTile(x, y)
         out[#out + 1] = string.char((p and p.ch and p.ch ~= 0) and p.ch or 32)
     end
@@ -114,11 +126,12 @@ local function block_span(name_y)
         if y >= 0 and y < h and not line_text(y):find('%S') then ref = y; break end
     end
     local x1 = probe
+    local floor = panel_x1()
     if ref then
         local p = dfhack.screen.readTile(probe, ref)
         local panel = p and p.tile
         if panel and panel ~= 0 then
-            while x1 > 0 do
+            while x1 > floor do
                 local q = dfhack.screen.readTile(x1 - 1, ref)
                 if not q or q.tile ~= panel then break end
                 x1 = x1 - 1
@@ -161,6 +174,17 @@ function hit_broker(x, y, name_y)
     local x1, x2 = block_span(name_y)
     if not x1 then return false end
     return x >= x1 and x <= x2
+end
+
+-- ---- breadcrumbs ---------------------------------------------------------------
+
+hit_log = hit_log or {}
+local HIT_LOG_MAX = 8
+
+local function record_hit(text)
+    local stamp = ('%d/%d'):format(df.global.cur_year, df.global.cur_year_tick)
+    table.insert(hit_log, stamp .. ' ' .. text)
+    while #hit_log > HIT_LOG_MAX do table.remove(hit_log, 1) end
 end
 
 -- ---- the action --------------------------------------------------------------
@@ -241,11 +265,20 @@ function BrokerClickOverlay:onInput(keys)
     local x, y = dfhack.screen.getMousePos()
     if not x or not y then return false end
 
+    if x < panel_x1() then return false end        -- the map side of the screen is DF's
     local unit = broker_unit()
     if not unit then return false end
     local name_y = broker_name_line(unit)
     if not name_y then return false end
     if not hit_broker(x, y, name_y) then return false end
+
+    -- A BREADCRUMB PER HIT. A click that opened the broker's sheet when it was meant for
+    -- something else is the kind of thing that happens once a week and cannot be reproduced
+    -- on demand, so every hit records the geometry it was decided on: `clickable-broker
+    -- log` prints the last few.
+    local x1, x2 = block_span(name_y)
+    record_hit(('click %d,%d name_y=%d span=%s-%s row=%q'):format(
+        x, y, name_y, tostring(x1), tostring(x2), (line_text(y):gsub('^%s+', ''):gsub('%s+$', ''))))
 
     goto_broker(unit)
     return true
@@ -282,7 +315,14 @@ if dfhack_flags.module then
     return
 end
 
+if ({...})[1] == 'log' then
+    print(('clickable-broker: %d hit%s recorded (newest last)'):format(#hit_log, #hit_log == 1 and '' or 's'))
+    for _, line in ipairs(hit_log) do print('  ' .. line) end
+    if #hit_log == 0 then print('  nothing yet -- the overlay has not taken a click this session') end
+    return
+end
+
 require('plugins.overlay').rescan()
 print('clickable-broker: registered overlay fort/clickable-broker.click')
 print("  click the broker's icon, name, job or depot-access line on the Trade Depot sheet")
-print('  to open their sheet and follow them.')
+print('  to open their sheet and follow them. `clickable-broker log` shows recent hits.')

@@ -1131,6 +1131,14 @@ following them. The block is found by reading the screen for the broker's own na
 not care where the merchant notice or the tab strip have pushed it, and DF's three
 "requested at depot" buttons just above are named explicitly and never swallowed.
 
+
+**It reads the sheet's panel only, never the whole row.** Reading a full screen row let a name
+drawn on the left half — a notification line, an announcement — make that *row* look like the
+broker's, and a click on whatever DF had drawn at the right end of the same row (the *Trade*
+button, say) opened the broker's sheet instead. Every hit now records the geometry it was decided
+on; `fort/clickable-broker log` prints the last eight, so a mis-click that happens once a week
+can be explained after the fact.
+
 ### **`fort/clickable-squad-members`**
 On a squad's details screen, clicking anywhere on a member's row — portrait or name — opens
 that dwarf's sheet and follows them instead of offering to replace them. Clicking again,
