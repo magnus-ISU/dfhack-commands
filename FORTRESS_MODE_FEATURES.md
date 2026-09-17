@@ -1075,7 +1075,15 @@ panel and sitting above it — plain text, no border: **`[cancel interviews]`**,
 target inverted: Enter is pressed only on rows that are *on*, each verified off by identity, so
 a row already off is never touched and nothing can be switched on by mistake. It reaches the
 whole list whatever `Show` is set to — *cancel the interviews* means all of them, and a filter
-that hid some would leave the captain of the guard still working through them. The tab schedules one unit per click, and the question you
+that hid some would leave the captain of the guard still working through them.
+
+**And it empties the committed queue, not just the ticks.** What the tab shows is a pending edit
+(the list's `selected` set); DF commits it into each *crime's* own interrogation queue
+(`crime.reports`, `interrogation_queue_ihf` in DF's terms) when you leave the tab, and that
+per-crime queue — across every open and cold case — is what the captain actually works through.
+One fort's queue stood at 164 with nothing ticked on screen. Cancel un-ticks the tab and then
+drops every queued entry on every crime, clearing the screen's own *scheduled* marks to match; a
+subject the captain is interviewing right now is left in place. The tab schedules one unit per click, and the question you
 are actually asking ("has anything walked in here that shouldn't have?") is asked of everybody
 at once.
 

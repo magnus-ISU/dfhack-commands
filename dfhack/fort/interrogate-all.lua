@@ -157,6 +157,8 @@ pump = pump or nil
 
 last_result = last_result or nil
 
+local clear_committed_queue        -- defined with the queue code below
+
 local function stop(quiet)
     local p = pump
     pump = nil
@@ -166,6 +168,15 @@ local function stop(quiet)
     local verb = p.target and 'scheduled for interrogation' or 'interview(s) cancelled'
     local msg = p.target and ('%d %s %s'):format(p.added, p.which, verb)
                         or ('%d %s'):format(p.added, verb)
+    if not p.target then
+        local ok, removed, kept = pcall(clear_committed_queue)
+        if ok then
+            if removed > 0 then msg = ('%s, %d dropped from the queue'):format(msg, removed) end
+            if kept > 0 then msg = ('%s (%d in progress, left)'):format(msg, kept) end
+            last_result = ('cancel: %d unticked, %d dropped from the queue, %d kept')
+                :format(p.added, removed, kept)
+        end
+    end
     if p.already > 0 and p.target then
         msg = ('%s (%d already scheduled)'):format(msg, p.already)
     end
@@ -422,6 +433,69 @@ local function interrogate_visitors()
         if not questionable(unit) then return false end
         return keep_interviewed or not is_interviewed(unit)
     end)
+end
+
+-- ---- the committed queue ---------------------------------------------------------
+--
+-- WHAT THE SCREEN SHOWS IS NOT THE WHOLE QUEUE. The rows you tick on the interrogation tab are
+-- a pending edit -- the list's `selected` set -- and DF commits them into each CRIME's own
+-- `interrogation_queue_ihf` (df-structures calls it `crime.reports`) when you leave the tab.
+-- That per-crime queue is what the captain of the guard actually works through, and it holds
+-- everything ever committed, across every open and cold case: one fort's queue stood at 164
+-- with the tab showing nothing ticked at all. Toggling rows off cannot reach it; DF would
+-- un-commit only what it re-reads from `selected`, which after a cancel is empty.
+--
+-- So cancelling means BOTH: the walk clears the pending edit on the tab, and then every
+-- crime's queue is emptied directly. `crimeflag` -- the per-unit SCHEDULED bit the screen
+-- draws -- is rebuilt from the queue when the tab opens and stale until then, so its bits are
+-- cleared too; the map cannot be addressed by unit, but every value it hands out is writable.
+--
+-- A subject the captain is interviewing RIGHT NOW is left in the queue: DF moves that entry
+-- from queued to interviewed when the job completes, and pulling it out from under the job is
+-- the one write here with a plausible way to go wrong.
+local function subjects_in_progress()
+    local busy = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        local j = link.item
+        if j and j.job_type == df.job_type.InterrogateSubject then
+            for _, r in ipairs(j.general_refs) do
+                local ok, id = pcall(function() return r.unit_id end)
+                if ok and id then
+                    local u = df.unit.find(id)
+                    if u and u.hist_figure_id >= 0 then busy[u.hist_figure_id] = true end
+                end
+            end
+        end
+        link = link.next
+    end
+    return busy
+end
+
+function clear_committed_queue()
+    local busy = subjects_in_progress()
+    local removed, kept = 0, 0
+    for _, crime in ipairs(df.global.world.crimes.all) do
+        local q = crime.reports
+        for i = #q - 1, 0, -1 do
+            local rec = q[i]
+            local hfid = rec and rec.historical_hfid or -1
+            if busy[hfid] then
+                kept = kept + 1
+            else
+                q:erase(i)
+                if rec then rec:delete() end
+                removed = removed + 1
+            end
+        end
+    end
+    -- the screen's own copy of "scheduled", so the rows match what is now true
+    pcall(function()
+        for _, flags in pairs(df.global.game.main_interface.info.justice.crimeflag) do
+            flags.SCHEDULED_FOR_INTERVIEW = false
+        end
+    end)
+    return removed, kept
 end
 
 -- CANCEL: every scheduled interview, whatever `Show` is set to. The same walk with the
