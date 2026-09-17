@@ -34,6 +34,14 @@ Known residuals on top of that: a soldier with the **mining labor** can't be uni
 (a DF conflict), and one civilian-squad manager's **cloak** slot refuses every assignable
 cloak. Run by `magnus-scripts` every session, which also registers its Equip-screen overlay.
 
+**Fixed since:** it no longer orders a metal that cannot legally be that item. Silver carries
+`ITEMS_WEAPON` but not `ITEMS_ARMOR` — it is in the stand-in list only because a uniform may ask
+for a silver war hammer, the one thing silver is genuinely best at — and the stand-in pass used
+to reach for it whenever nothing better was affordable, ordering armour out of it: five large
+silver mail shirts were forged in one fort that way. The gate sits on the order itself, so no
+route (stand-in, template, or a uniform pinned by hand) can put an illegal piece in a forge's
+queue; the slot stays bare until a legal metal is affordable.
+
 `military-uniforms altsched` is the fort's **schedule** half and works: it builds the **even
 month / odd month** training routines (each trains on its months and stands Ready the rest, with
 three "at least 3" Train orders per training month so the squad spars in shifts instead of mobbing

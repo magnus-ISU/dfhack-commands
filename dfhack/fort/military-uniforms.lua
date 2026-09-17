@@ -661,6 +661,31 @@ local function metal_rank(mt, mi, item_type)
     return metal_rank_cache[mi] or (#STANDIN_ORDER + 1)
 end
 
+-- CAN THIS METAL LEGALLY BE THAT ITEM? A material only makes armour if it carries
+-- ITEMS_ARMOR, a weapon if it carries ITEMS_WEAPON. SILVER carries NEITHER -- it is in the
+-- stand-in list only because a uniform may ask for a silver war hammer, which is a BLUNT
+-- weapon and the one thing silver is good for.
+--
+-- Without this gate the stand-in pass would reach for silver the moment nothing better was
+-- affordable and order armour out of it: five large silver mail shirts were forged here that
+-- way, which are not armour DF recognises and not something a soldier should be wearing.
+local ITEM_FLAG = {
+    [df.item_type.ARMOR] = 'ITEMS_ARMOR', [df.item_type.HELM] = 'ITEMS_ARMOR',
+    [df.item_type.PANTS] = 'ITEMS_ARMOR', [df.item_type.GLOVES] = 'ITEMS_ARMOR',
+    [df.item_type.SHOES] = 'ITEMS_ARMOR',
+    [df.item_type.WEAPON] = 'ITEMS_WEAPON',
+    [df.item_type.SHIELD] = 'ITEMS_HARD',
+}
+
+local function legal_metal(mat_index, item_type)
+    local flag = ITEM_FLAG[item_type]
+    if not flag then return true end                       -- no rule for it: leave it alone
+    local ok, mi = pcall(dfhack.matinfo.decode, 0, mat_index)
+    if not ok or not mi or not mi.material then return false end
+    local ok2, set = pcall(function() return mi.material.flags[flag] end)
+    return ok2 and set or false
+end
+
 -- MATERIALS THIS SERVICE IS WILLING TO ASK FOR. A uniform spec naming anything else -- the
 -- adamantine short sword on an otherwise steel uniform -- is the player customising that
 -- slot by hand: we leave that property alone entirely (no pin, no order), while still
@@ -941,6 +966,15 @@ end
 
 local function queue_one(key, r, n)
     n = n or 1
+    -- LAST GATE BEFORE THE FORGE. Whatever route asked for this -- our stand-in pass, a
+    -- template, or a uniform the player pinned by hand -- a metal that cannot legally be this
+    -- item is not ordered. Forging armour out of silver produces an item nothing wants; the
+    -- slot is better left bare until a legal metal is affordable.
+    if r.mat_type == 0 and r.mat_index and r.mat_index >= 0
+        and not legal_metal(r.mat_index, r.item_type)
+    then
+        return
+    end
     if dry_run then
         local mat = 'material class ' .. tostring(r.mat_index)
         if r.mat_type == 0 then
@@ -1915,7 +1949,9 @@ local function queue_standins(shortfall, budget)
             local best_mi, best_rank
             for _, id in ipairs(STANDIN_ORDER) do
                 local idx = inorganic_idx(id)
-                if idx and idx ~= r.mat_index and (budget[barkey(0, idx)] or 0) >= BARS_PER_ITEM then
+                if idx and idx ~= r.mat_index and (budget[barkey(0, idx)] or 0) >= BARS_PER_ITEM
+                    and legal_metal(idx, r.item_type)      -- no silver mail shirts
+                then
                     local rk = metal_rank(0, idx)
                     if not best_rank or rk < best_rank then best_mi, best_rank = idx, rk end
                 end
