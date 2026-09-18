@@ -12,10 +12,13 @@ Two overlays, both live on any workshop or furnace building panel
 right edge of the panel; clicking it queues another identical task without
 reopening the menu. Pick "make bed" once, then click `+` six times for seven beds
 -- the task you just added gets its own `+` straight away, so you can keep
-clicking down the column. The copy carries the original's material, subtype and
-reaction, plus its repeat/suspend flags -- it is DFHack's own deep job clone,
-minus the worker assignment -- so it is exactly the task you already set up, not a
-fresh one you have to re-specify. DF caps a shop at ten tasks; at ten the buttons
+clicking down the column -- or SHIFT-CLICK once to fill the shop with copies of
+that task up to DF's ten (five queued, shift-click one: five more of it). The copy
+carries the original's material, subtype and
+reaction, plus its repeat, suspend and "do this now" (top priority) flags -- it is
+DFHack's own deep job clone with those flags put back, minus the worker
+assignment -- so it is exactly the task you already set up, not a fresh one you
+have to re-specify. DF caps a shop at ten tasks; at ten the buttons
 grey out.
 
 **Doable jobs first in "Add new task".** DF lists every job the shop can ever do
@@ -59,9 +62,9 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Queue another copy of `job` at `bld`. cloneJobStruct deep-copies the job spec
--- (job_items, material, subtype, reaction) and keeps the repeat/suspend flags and
--- the BUILDING_HOLDER general ref, while dropping the worker, the attached items
--- and the posting -- i.e. exactly a fresh, unstarted copy of the same order.
+-- (job_items, material, subtype, reaction) and the BUILDING_HOLDER general ref,
+-- while dropping the worker, the attached items, the posting -- and, measured
+-- live, EVERY flag -- so the order's own flags are restored below.
 function duplicate_job(bld, job)
     if not bld or not job then return nil, 'no task' end
     if #bld.jobs >= MAX_JOBS then
@@ -69,6 +72,12 @@ function duplicate_job(bld, job)
     end
     local nj = dfhack.job.cloneJobStruct(job)
     if not nj then return nil, 'could not copy the task' end
+    -- the clone comes back with every flag cleared, repeat and suspend included, whatever
+    -- the docs say; the flags that describe the ORDER rather than its progress are copied
+    -- back by hand, and "do this now" (top priority) is one of them
+    nj.flags.do_now = job.flags.do_now
+    nj.flags['repeat'] = job.flags['repeat']
+    nj.flags.suspend = job.flags.suspend
     dfhack.job.linkIntoWorld(nj, true)     -- assigns a fresh id and links it into the world job list
     bld.jobs:insert('#', nj)
     dfhack.job.checkBuildingsNow()
@@ -339,10 +348,20 @@ function DupeOverlay:onInput(keys)
     if not job then return false end   -- a gap between rows: let the click through
     local bld = panel_building()
     if not bld then return false end
-    local _, err = duplicate_job(bld, job)
+    -- SHIFT-CLICK FILLS THE SHOP: copies of this task up to DF's ten. Five tasks queued and
+    -- a shift-click on one of them adds five more of it.
+    local copies = dfhack.internal.getModifiers().shift and (MAX_JOBS - #bld.jobs) or 1
+    local made, err = 0, nil
+    for _ = 1, copies do
+        local nj
+        nj, err = duplicate_job(bld, job)
+        if not nj then break end
+        made = made + 1
+    end
     if err then
         dfhack.printerr('workshop-tools: ' .. err)
-    else
+    end
+    if made > 0 then
         self.sig = nil                 -- the list grew: re-scrape on the next frame
     end
     return true
