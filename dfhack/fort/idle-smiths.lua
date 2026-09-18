@@ -244,7 +244,24 @@ local FURNITURE = {
 --
 -- Only OUR OWN jobs are followed. The forge is the player's too, and a piece from an order
 -- they queued at the same building is nothing to do with this.
-local ours = ours or {}                 -- job id -> {bld = building id, mark = item id floor}
+-- job id -> {bld = building id, mark = item id floor}
+--
+-- ON `dfhack.internal`, AND THAT IS THE WHOLE POINT. This was `local ours = ours or {}`, an
+-- idiom meant to survive a reload -- and it cannot, ever: the right-hand `ours` is the GLOBAL
+-- one, which nothing assigns, so the `or` branch always wins and every re-run of this chunk
+-- silently forged a SECOND table. The two halves of the tool then drifted apart: the job loop
+-- recorded into the newest table while eventful's completion handler, registered by an earlier
+-- run, still read the first one. Assignments kept happening, JOB_COMPLETED kept firing, and
+-- `ours[job.id]` was always nil, so NOTHING was ever marked for melting and the practice
+-- pieces piled up in the forges. Measured on a live fort: 68 assignments in one session, 0
+-- marked, and `ours` sitting at zero keys with the products stacked up inside the forge.
+--
+-- `dfhack.internal` is the one table that outlives both a chunk re-run and a `reqscript`, so
+-- both halves are guaranteed the same one. (It does NOT outlive a DF restart -- jobs in flight
+-- across a restart lose their record and their product stays unmarked. That is a fair trade:
+-- the alternative is melting something the player forged themselves.)
+dfhack.internal.idle_smiths_jobs = dfhack.internal.idle_smiths_jobs or {}
+local ours = dfhack.internal.idle_smiths_jobs
 local KEEP_QUALITY = df.item_quality.Masterful
 
 local function war_hammer_subtype()
@@ -263,6 +280,21 @@ local function keep_forever(item)
         if ok and mi and mi.inorganic and mi.inorganic.id == 'SILVER' then return true end
     end
     return false
+end
+
+-- A cancelled job never completes, so its record is never claimed. That leaked nothing back
+-- when the table died with every reload; now that it outlives them, sweep the records whose
+-- job is gone rather than growing one entry per cancelled job for the life of the fort.
+local function prune_ours()
+    local live = {}
+    local link = df.global.world.jobs.list.next
+    while link do
+        if link.item then live[link.item.id] = true end
+        link = link.next
+    end
+    for id in pairs(ours) do
+        if not live[id] then ours[id] = nil end
+    end
 end
 
 -- everything this job made, marked for melting as it comes off the forge
@@ -528,6 +560,7 @@ local function processUnit(forge, idx, unit_id)
 end
 
 local function unit_loop()
+    prune_ours()                        -- drop records for jobs that were cancelled, not finished
     local current_frame = df.global.world.frame_counter
     for forge_id, last_job_frame in pairs(allowed) do
         if failing[forge_id] then goto next_forge end
