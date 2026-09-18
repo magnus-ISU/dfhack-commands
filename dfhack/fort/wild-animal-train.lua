@@ -142,11 +142,20 @@ end
 CagedTrainOverlay = defclass(CagedTrainOverlay, overlay.OverlayWidget)
 CagedTrainOverlay.ATTRS{
     desc = 'Adds a [Train] toggle to the item sheet of a cage holding a wild tamable animal.',
-    default_pos = {x = 3, y = -12},
+    -- THE SAME SPOT `fort/auto-pasture` PUTS [Graze]/[Scavenge]. That overlay
+    -- (`auto-pasture.cagegraze`) owns this row of the cage sheet for a caged animal that is
+    -- already tame or trained; this one owns it for a caged animal that is not. The two can
+    -- never be visible at once -- one wants `isTame`, the other `not isTame` -- so sharing the
+    -- position is deliberate, and it means the button is always in the place your eye already
+    -- goes for "what do I do with this animal". Anchored from the RIGHT because the item sheet
+    -- is a right-hand panel and moves with the screen edge, not the left one.
+    default_pos = {x = -56, y = 9},
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/ITEM',
     frame = {w = 7, h = 1},
-    version = 1,
+    -- 2: moved onto DF's own button row. A version bump RESETS the saved config, which is what
+    -- makes the new default_pos take, but the widget comes back DISABLED -- re-enable after.
+    version = 2,
 }
 
 function CagedTrainOverlay:init()

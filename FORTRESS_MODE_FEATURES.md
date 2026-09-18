@@ -1067,6 +1067,12 @@ a cage waiting for it. A cage holding several (a trap's catch) trains them toget
 only reads green once every occupant is queued, and only an all-queued cage un-queues, so a
 half-done cage never toggles the wrong way.
 
+It sits in **the same spot `fort/auto-pasture` puts `[Graze]`/`[Scavenge]`**. That overlay owns
+that row of the cage sheet for an animal already tame or trained; this one owns it for one that
+is not. They can never be visible at once — one wants `isTame`, the other `not isTame` — so
+sharing the position is deliberate, and it keeps the button where your eye already goes for
+"what do I do with this animal".
+
 Either way it writes the game's own basic-training assignment with `any_trainer` — every animal
 trainer in the fort is eligible, rather than one being singled out.
 
