@@ -12,9 +12,10 @@ to "Only Selected Does This" but has no living, civilian worker to actually do i
       with no Ready (off-duty) month this month or next -- so the labor doesn't get done. A soldier
       who cycles back to Ready within the next month (e.g. any squad on the even/odd-month routines)
       still does the work in a Ready month, so those details are NOT flagged.
-Messages:
-    * exactly one   -> 'Work detail "Masonry" has no available workers!'
-    * more than one -> '3 work details have no available workers!'
+Messages say WHICH of those it is, since the fixes differ:
+    * 'No workers for Masonry'                        nobody living is selected
+    * 'Workers for Masonry are in a squad training'   selected, but all soldiers kept on duty
+    * with several: 'No workers for 2 work details; Workers for Smithing are in a squad training'
 
 Clicking the notification lists the offending details and the labors they cover. (A detail
 you genuinely want nobody to do should be set to "Nobody Does This", which does NOT warn.)
@@ -147,16 +148,22 @@ end
 -- either not a soldier or is a soldier whose schedule makes them Ready within the next month (see
 -- ready_soon). Dead/expelled units linger in assigned_units but don't count. All such "unworkable"
 -- details are flagged.
-local function has_available_worker(w)
+-- Returns nil when the detail has a worker; otherwise WHY it has none:
+--   'none'      nobody living is selected for it
+--   'training'  the living selected dwarves are all soldiers kept on duty by their schedule
+-- The two are different problems -- one wants a dwarf assigned, the other wants a squad's
+-- schedule looked at -- so the line says which.
+local function why_no_worker(w)
+    local any_living = false
     for _, uid in ipairs(w.assigned_units) do
         local u = df.unit.find(uid)
         if u and not dfhack.units.isDead(u)
-            and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u))
-            and ready_soon(u) then
-            return true
+            and (dfhack.units.isCitizen(u) or dfhack.units.isResident(u)) then
+            if ready_soon(u) then return nil end
+            any_living = true
         end
     end
-    return false
+    return any_living and 'training' or 'none'
 end
 
 local cache = {frame = -1, list = nil}   -- recompute at most once per frame (cheap, but called often)
@@ -168,9 +175,9 @@ local function scan()
     for i = 0, #wds - 1 do
         local w = wds[i]
         if w.flags.mode == df.work_detail_mode.OnlySelectedDoesThis
-            and w.name ~= MILITARY_DETAIL                 -- the grouping detail itself; soldier-only by design
-            and not has_available_worker(w) then
-            out[#out + 1] = w
+            and w.name ~= MILITARY_DETAIL then            -- the grouping detail itself; soldier-only by design
+            local why = why_no_worker(w)
+            if why then out[#out + 1] = {detail = w, why = why} end
         end
     end
     cache.frame, cache.list = f, out
@@ -181,12 +188,18 @@ local function empty_labor_message()
     if not dfhack.world.isFortressMode() then return end
     if labor_plugin_running() then return end   -- the plugin decides who works, not the details
     local list = scan()
-    local n = #list
-    if n == 0 then return end
-    if n == 1 then
-        return ('Work detail "%s" has no available workers!'):format(list[1].name)
+    if #list == 0 then return end
+    local none, training = {}, {}
+    for _, e in ipairs(list) do
+        local bucket = e.why == 'training' and training or none
+        bucket[#bucket + 1] = e.detail.name
     end
-    return ('%d work details have no available workers!'):format(n)
+    local parts = {}
+    if #none == 1 then parts[#parts + 1] = ('No workers for %s'):format(none[1])
+    elseif #none > 1 then parts[#parts + 1] = ('No workers for %d work details'):format(#none) end
+    if #training == 1 then parts[#parts + 1] = ('Workers for %s are in a squad training'):format(training[1])
+    elseif #training > 1 then parts[#parts + 1] = ('Workers for %d work details are in a squad training'):format(#training) end
+    return table.concat(parts, '; ')
 end
 
 -- ---------------------------------------------------------------------------
@@ -224,8 +237,10 @@ local function show_dialog()
         'Does This" to silence this warning.',
         '',
     }
-    for _, w in ipairs(list) do
-        lines[#lines + 1] = ('  %s  --  %s'):format(w.name, labor_names(w))
+    for _, e in ipairs(list) do
+        lines[#lines + 1] = ('  %s  (%s)  --  %s'):format(e.detail.name,
+            e.why == 'training' and 'its workers are in a squad training' or 'nobody selected',
+            labor_names(e.detail))
     end
     dlg.showMessage('Work details with no available workers', table.concat(lines, '\n'), COLOR_YELLOW)
 end
