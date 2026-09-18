@@ -387,7 +387,13 @@ function site_books(site)
         if art.site == site.id then
             local item = art.item
             if item and item:getType() == df.item_type.BOOK then
-                out[#out + 1] = dfhack.translation.translateName(art.name, true)
+                -- The artifact's name is the usual source, but one book in ninety-seven at
+                -- Furnacehailed has a name that translates to nothing at all. The item carries
+                -- its own `title`, so fall back to that before giving up and dropping it --
+                -- a blank line in a list of sixty titles just looks like a rendering bug.
+                local title = dfhack.translation.translateName(art.name, true)
+                if title == '' then title = item.title or '' end
+                if title ~= '' then out[#out + 1] = title end
             end
         end
     end
@@ -476,6 +482,37 @@ function site_hostile(site)
     return false                                  -- no state at all: no contact, not hostile
 end
 
+-- THREE ANSWERS, not two. `site_hostile` collapses "at war" and "never heard of them" into
+-- "not hostile", which is right for deciding whether to colour a marker red and wrong for
+-- deciding whether scribes may visit: you cannot copy books from a library you have had no
+-- contact with, and you cannot copy them from one whose owners are trying to kill you either,
+-- but those are different problems with different fixes.
+--
+--   'war'      at war with the site government -- make peace first
+--   'contact'  a diplomatic state exists and it is not war
+--   nil        no state at all: never contacted
+function site_contact(site)
+    if not site then return nil end
+    local me = df.historical_entity.find(df.global.plotinfo.civ_id)
+    if not me then return nil end
+    -- your own holdings and your own forts are always "contacted" -- they are yours, and no
+    -- diplomacy state is ever recorded between you and yourself
+    local standing = site_standing(site)
+    if standing == 'own' or standing == 'controlled' or standing == 'civ' then return 'contact' end
+    local gov
+    for _, link in ipairs(site.entity_links) do
+        local e = df.historical_entity.find(link.entity_id)
+        if e and e.type == df.historical_entity_type.SiteGovernment then gov = e break end
+    end
+    if not gov then return nil end
+    for _, st in ipairs(me.relations.diplomacy.state) do
+        if st.group_id == gov.id then
+            return st.relation == 1 and 'war' or 'contact'
+        end
+    end
+    return nil
+end
+
 -- Is this site somewhere we can send an expedition?
 --
 -- YOUR HOLDINGS, and other fortresses you have played. Belonging to your civilization is NOT
@@ -529,6 +566,7 @@ function survey(site)
         savagery = site_savagery(site),
         libraries = site_libraries(site),
         books = site_books(site),
+        contact = site_contact(site),
         ours = is_ours(site),
     }
     cache.id, cache.data = site.id, d
@@ -553,6 +591,15 @@ end
 local MARCH_KEY = 'economic-expeditions/march'
 local MARCH_CHECK_TICKS = 100
 local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
+-- RETARGET MARGIN. The edge is recomputed on every check, because the squad moves and the
+-- nearest reachable edge moves with them -- a dwarf who starts deep in the fort may surface
+-- closer to a different side than the one picked at the door. Switching on the slightest
+-- improvement would make them dither between two edges forever, so a new edge has to beat the
+-- one they are walking to by this many tiles before the order is rewritten.
+local RETARGET_MARGIN = 8
+
+-- defined further down, once the map-edge and haul machinery they need exists
+local depart_arrivals, come_home
 
 -- THE NEAREST MAP EDGE THE SQUAD CAN ACTUALLY REACH. A pure straight-line pick sends them at
 -- whatever edge is fewest tiles away as the crow flies, which is the wrong edge when terrain
@@ -722,6 +769,43 @@ local function order_patrol_edge(sq, tile)
     return rt
 end
 
+-- Tear the Expedition route back down. Without this every march leaves a route behind in the
+-- player's Routes list -- three had piled up before I noticed -- and its points with it.
+local function destroy_route(route_id)
+    if not route_id then return end
+    local wp = df.global.plotinfo.waypoints
+    if wp.in_edit_waypts_mode or wp.in_edit_name_mode then return end
+    for i = #wp.routes - 1, 0, -1 do
+        local rt = wp.routes[i]
+        if rt.id == route_id then
+            local doomed = {}
+            for _, pid in ipairs(rt.points) do doomed[pid] = true end
+            for j = #wp.points - 1, 0, -1 do
+                if doomed[wp.points[j].id] then
+                    local pt = wp.points[j]
+                    wp.points:erase(j)
+                    pt:delete()
+                end
+            end
+            wp.routes:erase(i)
+            rt:delete()
+            return
+        end
+    end
+end
+
+-- WHY THE FIRST MARCH LOOKED LIKE A MARCH INTO THE CAVERNS. The patrol order was live and DF
+-- had even copied its destination onto the soldier's `idle_area` -- but her path goal was
+-- `IndividualSkillDrill` and her destination the barracks, twenty-six z-levels DOWN. She was
+-- going to drill, not to the caverns; every route point was on the surface the whole time.
+--
+-- I tried clearing the `train` bit on the squad's barracks to remove the competing errand, and
+-- it is NOT a lever: DF put the bit back by itself, with nothing here restoring it, and the
+-- squad reached the edge regardless. The drill is chosen upstream as an activity, so neither
+-- the barracks flag nor a direct write to `path.goal`/`path.dest` -- both outputs, rewritten on
+-- the unit's next decision -- suppresses it. The standing patrol order is the durable lever and
+-- it wins on its own; a drill is only ever an interlude on the way.
+
 local function order_station(sq, tile)
     local mo = df.squad_order_movest:new()
     mo.issuer_hf = leader_hf(sq)
@@ -774,6 +858,30 @@ function expedition_days(site)
     return WORK_DAYS + 2 * travel_days(site)
 end
 
+-- DF's calendar is twelve 28-day months, so a date that many days out is pure arithmetic.
+-- DISPLAY ONLY -- the expedition's own clock is accumulated ticks, never this, because
+-- `cur_year_tick` is not monotonic under timestream.
+local MONTHS = {'Granite', 'Slate', 'Felsite', 'Hematite', 'Malachite', 'Galena',
+                'Limestone', 'Sandstone', 'Timber', 'Moonstone', 'Opal', 'Obsidian'}
+local DAYS_PER_MONTH, MONTHS_PER_YEAR = 28, 12
+
+local function ordinal(n)
+    local ones, teens = n % 10, n % 100
+    if teens >= 11 and teens <= 13 then return n .. 'th' end
+    return n .. (({'st', 'nd', 'rd'})[ones] or 'th')
+end
+
+function date_in(days)
+    local day = math.floor(df.global.cur_year_tick / TICKS_PER_DAY) + days
+    local per_year = DAYS_PER_MONTH * MONTHS_PER_YEAR
+    local year = df.global.cur_year + math.floor(day / per_year)
+    day = day % per_year
+    local out = ('the %s of %s'):format(
+        ordinal(day % DAYS_PER_MONTH + 1), MONTHS[math.floor(day / DAYS_PER_MONTH) + 1])
+    if year ~= df.global.cur_year then out = out .. ', ' .. year end
+    return out
+end
+
 -- ---------------------------------------------------------------------------
 -- the march, driven
 -- ---------------------------------------------------------------------------
@@ -821,26 +929,49 @@ function march_status()
         name = sq and dfhack.military.getSquadName(sq.id) or ('squad ' .. st.squad_id),
         site_name = site and dfhack.translation.translateName(site.name, true) or '?',
         kind = st.kind, choice = st.choice, days = st.days,
-        tile = st.tile, arrived = st.arrived,
+        tile = st.tile,
+        away = st.away and #st.away or 0,
+        still_marching = sq and #squad_members(sq) or 0,
+        days_left = st.phase == 'away'
+            and math.max(0, (st.days or 0) - (st.ticks_away or 0) / TICKS_PER_DAY) or nil,
     }
 end
 
--- how many of the squad are standing at (or near) the edge tile
-local function at_edge(sq, tile)
-    local there, total = 0, 0
-    for _, u in ipairs(squad_members(sq)) do
-        total = total + 1
-        if math.abs(u.pos.x - tile.x) <= ARRIVE_RADIUS
-            and math.abs(u.pos.y - tile.y) <= ARRIVE_RADIUS
-            and u.pos.z == tile.z then
-            there = there + 1
-        end
-    end
-    return there, total
+-- standing at (or near) the edge tile, close enough to walk off it
+local function at_edge(u, tile)
+    return math.abs(u.pos.x - tile.x) <= ARRIVE_RADIUS
+        and math.abs(u.pos.y - tile.y) <= ARRIVE_RADIUS
+        and u.pos.z == tile.z
 end
 
 local function stop_march_driver()
     require('repeat-util').cancel(MARCH_KEY)
+end
+
+-- Re-pick the edge as they walk. `edge_tile` ranks candidates from where the unit is standing
+-- NOW, so a squad that started underground and has since surfaced gets the edge that is nearest
+-- from up here rather than the one that was nearest from the stairwell. Only a clearly better
+-- edge is taken (see RETARGET_MARGIN), and the old route is torn down with the old order so
+-- routes do not pile up once per check.
+local function retarget_edge(sq, st)
+    local members = squad_members(sq)
+    if #members == 0 then return end
+    local u = members[1]
+    local cur = math.max(math.abs(u.pos.x - st.tile.x), math.abs(u.pos.y - st.tile.y))
+    local tile = edge_tile(u)
+    if not tile then return end
+    local new = math.max(math.abs(u.pos.x - tile.x), math.abs(u.pos.y - tile.y))
+    if new + RETARGET_MARGIN > cur then return end
+    if tile.x == st.tile.x and tile.y == st.tile.y and tile.z == st.tile.z then return end
+
+    local old_route = st.route_id
+    clear_squad_orders(sq)
+    local route = order_patrol_edge(sq, tile)
+    if not route then order_station(sq, tile) end
+    destroy_route(old_route)
+    st.route_id = route and route.id or nil
+    st.tile = {x = tile.x, y = tile.y, z = tile.z}
+    save_march(st)
 end
 
 local function march_tick()
@@ -849,32 +980,69 @@ local function march_tick()
     local sq = df.squad.find(st.squad_id)
     if not sq then cancel_march('the squad is gone') return end
 
-    -- CANCELLING THE ORDER IS HOW YOU CANCEL THE EXPEDITION. If the squad is no longer
-    -- carrying its patrol order, the player took it off them -- by standing the squad down, by
-    -- giving them something else to do, or by deleting the order outright -- and that is a
-    -- perfectly good way to say "never mind". Re-issuing it would make the march impossible to
-    -- call off by hand, which is worse than losing a march to a stray stand-down.
-    if not carrying_order(sq, st.tile, st.route_id) then
+    -- CANCELLING THE ORDER IS HOW YOU CANCEL THE EXPEDITION, but only while nobody has gone
+    -- yet. If the squad is no longer carrying its patrol order the player took it off them --
+    -- by standing the squad down, by giving them something else to do, or by deleting the
+    -- order outright -- and that is a perfectly good way to say "never mind". Once somebody is
+    -- off the map there is no recalling them by deleting an order.
+    if st.phase == 'marching' and not carrying_order(sq, st.tile, st.route_id) then
         cancel_march('the squad was given other orders')
         return
     end
 
-    local there, total = at_edge(sq, st.tile)
-    if st.phase == 'marching' and total > 0 and there >= total then
-        st.phase, st.arrived = 'ready', true
-        save_march(st)
+    if st.phase == 'marching' then retarget_edge(sq, st) end
+
+    -- NOBODY WAITS FOR THE SLOW ONES. Seven dwarves fetching their kit from across the fort
+    -- arrive at the edge minutes apart, and holding the first six there until the seventh
+    -- turns up is how an expedition sits looking broken for a week. Each one walks off the map
+    -- the moment they reach it; the stragglers keep their order and join later.
+    local left = depart_arrivals(st, sq)
+    local site = df.world_site.find(st.site_id)
+    local where = site and dfhack.translation.translateName(site.name, true) or 'the expedition'
+
+    if #left > 0 and st.phase == 'marching' then
+        -- THE CLOCK STARTS WITH THE FIRST ONE OUT, not with the last.
+        st.phase, st.ticks_away = 'away', 0
         dfhack.gui.showAnnouncement(
-            ('%s has reached the edge of the map, ready to leave for %s (%d days).'):format(
-                dfhack.military.getSquadName(sq.id),
-                (df.world_site.find(st.site_id) and
-                 dfhack.translation.translateName(df.world_site.find(st.site_id).name, true))
-                    or 'the expedition', st.days or 0),
-            COLOR_LIGHTGREEN)
+            ('%s has set out for %s, expected back in %d days on %s%s.'):format(
+                dfhack.military.getSquadName(sq.id), where, st.days or 0, date_in(st.days or 0),
+                #squad_members(sq) > 0 and (', %d still making their way'):format(
+                    #squad_members(sq)) or ''), COLOR_LIGHTCYAN)
+    elseif #left > 0 then
+        dfhack.gui.showAnnouncement(('%d more %s caught up with the expedition.'):format(
+            #left, #left == 1 and 'has' or 'have'), COLOR_WHITE)
     end
+
+    if st.phase == 'away' then
+        -- once the last of them is gone the patrol has nothing left to walk
+        if #squad_members(sq) == 0 and st.route_id then
+            clear_squad_orders(sq)
+            destroy_route(st.route_id)
+            st.route_id = nil
+        end
+        -- Days abroad are counted HERE, not off `cur_year_tick`. That clock is not monotonic
+        -- once timestream is in play and it wraps at the year end, so an expedition begun in
+        -- Timber would come home instantly or never. The driver's own interval is immune.
+        st.ticks_away = (st.ticks_away or 0) + MARCH_CHECK_TICKS
+        if st.ticks_away >= (st.days or 0) * TICKS_PER_DAY then
+            come_home(st)
+            return
+        end
+    end
+    save_march(st)
 end
 
 local function start_march_driver()
     require('repeat-util').scheduleEvery(MARCH_KEY, MARCH_CHECK_TICKS, 'ticks', march_tick)
+end
+
+-- HOT-RELOAD HELPER. `repeat-util` holds the callback that registered it, so redeploying this
+-- file leaves the PREVIOUS copy's `march_tick` driving the expedition -- new code on disk,
+-- old code running, and no sign of it. Re-register so the driver is the one you just wrote.
+function restart_march_driver()
+    stop_march_driver()
+    if march_state() then start_march_driver() return true end
+    return false
 end
 
 -- Send a squad to the map edge. Nothing leaves yet -- this is the walk, and the notification
@@ -884,6 +1052,26 @@ function begin_march(squad, site, kind, choice)
     if march_state() then return false, 'an expedition is already under way' end
     local members = squad_members(squad)
     if #members == 0 then return false, 'that squad has no living members' end
+    local no_tool = missing_tool(kind)
+    if no_tool then return false, no_tool end
+    -- WHERE THIS TRADE MAY GO. The four work trades strip a place, so they are confined to your
+    -- own holdings; scribes only copy, so they may visit any library you are on speaking terms
+    -- with -- but speaking terms is the condition, and war and never-met both fail it.
+    if kind == 'scholarly' then
+        local contact = site_contact(site)
+        if contact == nil then
+            return false, 'you have had no contact with that site'
+        elseif contact == 'war' then
+            return false, 'you are at war with that site -- make peace first'
+        end
+        if #site_books(site) == 0 then return false, 'that library holds no known books' end
+    elseif not is_ours(site) then
+        return false, 'that site is not yours to send a work party to'
+    end
+    -- Rolled now only to VALIDATE the picks and to record what a full turnout would fetch. The
+    -- haul that lands is rolled on return, from whoever actually made it off the map.
+    local haul, bad = resolve_expedition(kind, choice, members, survey(site))
+    if not haul then return false, bad end
 
     local tile, how = edge_tile(members[1])
     if not tile then return false, 'no walkable map-edge tile the squad can reach' end
@@ -897,6 +1085,7 @@ function begin_march(squad, site, kind, choice)
         route_id = route and route.id or nil, phase = 'marching',
         tile = {x = tile.x, y = tile.y, z = tile.z},
         days = expedition_days(site),
+        manifest = haul,
     }
     start_march_driver()
     if how then print('economic-expeditions: edge tile ' .. how) end
@@ -912,11 +1101,233 @@ function cancel_march(why)
     if not st or not st.squad_id then return false end
     local sq = df.squad.find(st.squad_id)
     if sq then clear_squad_orders(sq) end
+    destroy_route(st.route_id)
     save_march(nil)
     stop_march_driver()
     dfhack.gui.showAnnouncement(('The expedition is called off%s.'):format(
         why and (' -- ' .. why) or ''), COLOR_YELLOW)
     return true
+end
+
+-- ---------------------------------------------------------------------------
+-- off the map, and back again
+-- ---------------------------------------------------------------------------
+-- THE MANUAL ROUND TRIP, rather than a real DF mission. A mission would hand the squad to an
+-- `army_controller` and hope DF gives them back; this takes them off the map by hand, counts
+-- the days here, and puts them down again on the tile they left from. Fewer moving parts, and
+-- the expedition cannot be lost to DF deciding the army should do something else.
+--
+-- A unit is "off the map" the way DF itself parks one: `flags1.inactive` set and dropped from
+-- `world.units.active`. Both halves matter -- leaving them in the active list keeps the engine
+-- ticking a unit that is nowhere, and leaving the tile's occupancy set leaves an invisible
+-- body blocking the square they walked off.
+
+-- With a position it goes out as a ZOOM announcement, so clicking the notification (or
+-- pressing the recentre key on it) puts the map on the tile it is about -- which for an
+-- expedition is the corner of the map where the goods were just dropped, a hundred tiles from
+-- anywhere you were looking. `MIGRANT_ARRIVAL` is the carrier because it is display-only in
+-- `announcements.txt` (`A_D:D_D`): no popup box, no forced pause, just a recentrable line.
+local function announce_at(pos, text, color)
+    local ok = false
+    if pos then
+        ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.MIGRANT_ARRIVAL,
+                   pos, text, color, true)
+    end
+    if not ok then pcall(dfhack.gui.showAnnouncement, text, color, true) end
+end
+
+local function offload(u)
+    -- Detach them from any job FIRST -- never `removeJob` a unit's `current_job`, that
+    -- segfaults; `removeWorker` unhooks the worker and leaves the job to be picked up again.
+    if u.job.current_job then pcall(dfhack.job.removeWorker, u.job.current_job, 0) end
+    local blk = dfhack.maps.ensureTileBlock(u.pos)
+    if blk then blk.occupancy[u.pos.x % 16][u.pos.y % 16].unit = false end
+    u.flags1.inactive = true
+    local act = df.global.world.units.active
+    for i = #act - 1, 0, -1 do
+        if act[i].id == u.id then act:erase(i) break end
+    end
+end
+
+local function reload_unit(u, pos)
+    u.flags1.inactive = false
+    local act, found = df.global.world.units.active, false
+    for _, a in ipairs(act) do if a.id == u.id then found = true break end end
+    if not found then act:insert('#', u) end
+    pcall(dfhack.units.teleport, u, xyz2pos(pos.x, pos.y, pos.z))
+end
+
+-- name -> raws index. The survey speaks in display names because that is what the panel shows;
+-- creating the goods needs the index back, so each lookup walks the raws once on return.
+local function find_inorganic(name)
+    for i = 0, #df.global.world.raws.inorganics.all - 1 do
+        if inorganic_name(i) == name then return i end
+    end
+end
+
+local function find_plant(name, namer)
+    for i = 0, #df.global.world.raws.plants.all - 1 do
+        if namer(i) == name then return i, df.global.world.raws.plants.all[i] end
+    end
+end
+
+local function find_creature(name)
+    for i = 0, #df.global.world.raws.creatures.all - 1 do
+        if creature_name(i) == name then return i, df.global.world.raws.creatures.all[i] end
+    end
+end
+
+local function make(creator, item_type, mat_type, mat_index, count)
+    local made = {}
+    for _ = 1, count do
+        local ok, items = pcall(dfhack.items.createItem, creator, item_type, -1, mat_type, mat_index)
+        if not ok or not items or #items == 0 then break end
+        for _, it in ipairs(items) do made[#made + 1] = it end
+    end
+    return made
+end
+
+-- Turn one haul row into real items at the returning squad's feet. Returns how many landed and,
+-- when nothing could be made, why -- the caller reports shortfalls rather than silently losing
+-- a week's work.
+local function deliver_row(creator, row)
+    if row.kind == 'stone' then
+        local idx = find_inorganic(row.name)
+        if not idx then return 0, 'no such stone in the raws' end
+        return #make(creator, df.item_type.BOULDER, 0, idx, row.count)
+
+    elseif row.kind == 'log' then
+        local _, raw = find_plant(row.name, tree_name)
+        if not raw then return 0, 'no such tree in the raws' end
+        local mi = dfhack.matinfo.find('PLANT_MAT:' .. raw.id .. ':WOOD')
+            or dfhack.matinfo.find('PLANT_MAT:' .. raw.id .. ':STRUCTURAL')
+        if not mi then return 0, 'that tree has no wood material' end
+        return #make(creator, df.item_type.WOOD, mi.type, mi.index, row.count)
+
+    elseif row.kind == 'plant' then
+        local _, raw = find_plant(row.name, plant_name)
+        if not raw then return 0, 'no such plant in the raws' end
+        local mi = dfhack.matinfo.find('PLANT_MAT:' .. raw.id .. ':STRUCTURAL')
+        if not mi then return 0, 'that plant has no structural material' end
+        return #make(creator, df.item_type.PLANT, mi.type, mi.index, row.count)
+
+    elseif row.kind == 'corpse' then
+        local race, raw = find_creature(row.name)
+        if not raw then return 0, 'no such creature in the raws' end
+        local mi = dfhack.matinfo.find('CREATURE_MAT:' .. raw.creature_id .. ':MUSCLE')
+        if not mi then return 0, 'that creature has no flesh material' end
+        local made = make(creator, df.item_type.CORPSE, mi.type, mi.index, row.count)
+        for _, it in ipairs(made) do
+            -- a corpse that does not know whose it is renders as "nil corpse" and butchers into
+            -- nothing, so stamp the race and a caste on every one
+            pcall(function()
+                it.race, it.normal_race = race, race
+                it.caste, it.normal_caste = 0, 0
+            end)
+        end
+        return #made
+
+    elseif row.kind == 'book' then
+        -- A COPY IS THREE PARTS: the bound item, its title, and a pages improvement carrying
+        -- the page material, the page count and the `written_content` ids. Sharing the content
+        -- id with the original is not a shortcut -- that is precisely what a scribe's copy is,
+        -- and DF expects many items to point at one written work.
+        local src = find_book_source(row.name)
+        if not src then return 0, 'no copy of that book exists to work from' end
+        local pages = src.improvements and #src.improvements > 0 and src.improvements[0]
+        local made = make(creator, df.item_type.BOOK, src.mat_type, src.mat_index, row.count)
+        for _, it in ipairs(made) do
+            it.title = (src.title ~= '' and src.title) or row.name
+            if pages then
+                local imp = df.itemimprovement_pagesst:new()
+                imp.mat_type, imp.mat_index = pages.mat_type, pages.mat_index
+                imp.maker, imp.masterpiece_event = -1, -1
+                imp.quality, imp.skill_rating, imp.age_counter = 0, 0, 0
+                imp.count = pages.count
+                for _, c in ipairs(pages.contents) do imp.contents:insert('#', c) end
+                it.improvements:insert('#', imp)
+            end
+        end
+        return #made
+    end
+    -- CAGES ARE NOT BUILT YET. A caged beast is a live unit as well as an item -- the whole
+    -- `units.create` + makeown dance -- and that is its own piece of work. Report it, do not
+    -- pretend it arrived.
+    return 0, 'live cages are not implemented yet'
+end
+
+-- WHO WENT IS WHO PAID. The haul is priced on the units that actually made it off the map,
+-- not on the squad roster -- a dwarf who never finished fetching their kit contributes nothing,
+-- which is why this is resolved on return rather than reused from the send-time manifest.
+local function deliver(st, sq, members)
+    if #members == 0 then return end
+    local site = df.world_site.find(st.site_id)
+    if not site then return end
+    local haul, why = resolve_expedition(st.kind, st.choice, members, survey(site))
+    if not haul then
+        dfhack.printerr('economic-expeditions: nothing to unload -- ' .. tostring(why))
+        return
+    end
+    local creator, lines, missed = members[1], {}, {}
+    for _, row in ipairs(haul) do
+        local n, err = deliver_row(creator, row)
+        if n > 0 then lines[#lines + 1] = ('%d %s'):format(n, row.name) end
+        if n < row.count then
+            missed[#missed + 1] = ('%d %s (%s)'):format(row.count - n, row.name,
+                err or 'could not be unloaded')
+        end
+    end
+    if #lines > 0 then
+        announce_at(copyall(creator.pos), ('The expedition unloads %s.'):format(
+            table.concat(lines, ', ')), COLOR_LIGHTGREEN)
+    end
+    for _, m in ipairs(missed) do
+        dfhack.printerr('economic-expeditions: lost ' .. m)
+    end
+end
+
+-- Walk off the map anyone who has reached the edge since the last check. Returns the units
+-- that left this time, so the caller can tell the first departure (which starts the clock) from
+-- a straggler catching up. `squad_members` skips `inactive` units, so somebody who has already
+-- gone simply stops appearing.
+function depart_arrivals(st, sq)
+    local left = {}
+    for _, u in ipairs(squad_members(sq)) do
+        if at_edge(u, st.tile) then
+            offload(u)
+            left[#left + 1] = u
+        end
+    end
+    if #left > 0 then
+        st.away = st.away or {}
+        for _, u in ipairs(left) do st.away[#st.away + 1] = u.id end
+    end
+    return left
+end
+
+-- The days are up: put them back on the tile they left from, with what they went for.
+function come_home(st)
+    local sq = df.squad.find(st.squad_id)
+    local back, lost = {}, 0
+    for _, id in ipairs(st.away or {}) do
+        local u = df.unit.find(id)
+        if u then reload_unit(u, st.tile); back[#back + 1] = u else lost = lost + 1 end
+    end
+    if #back > 0 then
+        announce_at(copyall(back[1].pos),
+            ('%s has returned from the expedition -- %d of them.'):format(
+                sq and dfhack.military.getSquadName(sq.id) or 'The expedition', #back),
+            COLOR_LIGHTGREEN)
+        if sq then deliver(st, sq, back) end
+    end
+    -- anyone who never reached the edge is still walking to it; take the order back
+    if sq then clear_squad_orders(sq) end
+    destroy_route(st.route_id)
+    if lost > 0 then
+        dfhack.printerr(('economic-expeditions: %d expedition member(s) could not be found'):format(lost))
+    end
+    save_march(nil)
+    stop_march_driver()
 end
 
 dfhack.onStateChange[MARCH_KEY] = function(sc)
@@ -1027,6 +1438,22 @@ end
 
 -- Recomputed at most once a frame: four fort-wide sweeps behind a panel that redraws sixty
 -- times a second would be four sweeps a frame.
+-- WHICH TITLES THE FORTRESS ALREADY HOLDS, by title, keyed the same way the survey names
+-- them. Every book in the fort is an item in play whatever shelf it is on, so this is one pass
+-- over the book vector rather than a walk of every bookcase. Cached per frame alongside the
+-- rest of the holdings, because the survey asks it once per title.
+local books_cache, books_frame
+function fort_books()
+    local frame = df.global.world.frame_counter
+    if books_cache and books_frame == frame then return books_cache end
+    local out = {}
+    for _, it in ipairs(df.global.world.items.other.BOOK) do
+        if it.title and it.title ~= '' then out[it.title] = true end
+    end
+    books_cache, books_frame = out, frame
+    return out
+end
+
 function fort_holdings()
     local frame = df.global.world.frame_counter
     if holdings_cache.frame == frame and holdings_cache.data then return holdings_cache.data end
@@ -1086,11 +1513,110 @@ local HUNT_RATE = {
     giant_game  = {2, 0.2},
 }
 
+-- WHAT THE TRADE NEEDS TO HAND. A mining party needs a pick in the fortress and a logging
+-- party an axe. The expedition never touches them -- nobody carries one out and none comes
+-- back worn -- they are proof the fortress is equipped for the work, the same way you cannot
+-- put a dwarf on Mining with no pick in the stockpile.
+local TOOL_OF = {mining = 'pick', logging = 'axe'}
+
+-- The CIV'S OWN DIGGER is the yardstick for what counts. `entity.resources.digger_type` is
+-- authoritative for picks, and because that pick is by construction a weapon your race wields
+-- in one hand, its two-handed threshold is exactly the line a chopping axe has to stay under.
+-- That keeps great axes and halberds -- same AXE skill, twice the size, useless for felling --
+-- out of the count without hard-coding a race or a subtype name.
+local function tool_subtypes(which)
+    local defs = df.global.world.raws.itemdefs.weapons
+    local ent = df.historical_entity.find(df.global.plotinfo.civ_id)
+    local diggers, limit = {}, 0
+    for _, st in ipairs(ent and ent.resources.digger_type or {}) do
+        diggers[st] = true
+        local d = defs[st]
+        if d and d.two_handed > limit then limit = d.two_handed end
+    end
+    if which == 'pick' then return diggers end
+
+    local axes = {}
+    for i = 0, #defs - 1 do
+        local d = defs[i]
+        if d.skill_melee == df.job_skill.AXE and (limit == 0 or d.two_handed <= limit) then
+            axes[i] = true
+        end
+    end
+    return axes
+end
+
+-- How many of the tool this trade needs the fortress holds. `nil` means the trade needs none.
+-- A merchant's pick is not yours, and neither is one already packed for trade.
+function fort_tool_count(kind)
+    local which = TOOL_OF[kind]
+    if not which then return nil end
+    local want, n = tool_subtypes(which), 0
+    for _, it in ipairs(df.global.world.items.other.WEAPON) do
+        if it.subtype and want[it.subtype.subtype]
+            and not it.flags.garbage_collect and not it.flags.foreign
+            and not it.flags.trader then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+-- nil when the fortress is equipped; otherwise why it is not
+function missing_tool(kind)
+    local which = TOOL_OF[kind]
+    if not which then return nil end
+    if (fort_tool_count(kind) or 0) > 0 then return nil end
+    return ('there is no %s in the fortress -- a %s expedition needs one to hand'):format(
+        which, EXPEDITIONS[kind] and EXPEDITIONS[kind].label or kind)
+end
+
+-- EVERY BOOK THAT EXISTS, by title. Ordinary copies do not exist off-map -- an off-site
+-- library instantiates no book items at all -- so the world's books are its ARTIFACT books,
+-- the same 1162 records the site panel lists under Artifacts. Scanned on demand, never per
+-- frame.
+function world_books()
+    local out = {}
+    for _, art in ipairs(df.global.world.artifacts.all) do
+        local item = art.item
+        if item and item:getType() == df.item_type.BOOK then
+            local title = dfhack.translation.translateName(art.name, true)
+            if title == '' then title = item.title or '' end
+            if title ~= '' then out[title] = item end
+        end
+    end
+    return out
+end
+
+-- The item to copy a title FROM. A copy needs the original's page material, page count and
+-- written content, none of which can be invented, so a title with no findable source is a
+-- title we cannot bring back.
+function find_book_source(title)
+    for _, art in ipairs(df.global.world.artifacts.all) do
+        local item = art.item
+        if item and item:getType() == df.item_type.BOOK then
+            local name = dfhack.translation.translateName(art.name, true)
+            if name == '' then name = item.title or '' end
+            if name == title then return item end
+        end
+    end
+    for _, item in ipairs(df.global.world.items.other.BOOK) do
+        if item.title == title then return item end
+    end
+end
+
+-- Which trades come home with something no matter how unskilled the squad is. A week at a
+-- quarry or in the woods yields at least one rock or one log; a week of foraging or hunting can
+-- genuinely turn up nothing.
+local MIN_ONE = {mining = true, logging = true}
+
 EXPEDITIONS = {
     mining  = {label = 'mining',  skill = df.job_skill.MINING,      picks = 'stone'},
     logging = {label = 'logging', skill = df.job_skill.WOODCUTTING, picks = 'trees'},
     botany  = {label = 'botany',  skill = df.job_skill.HERBALISM,   picks = 'plants'},
     hunting = {label = 'hunting', skill = df.job_skill.SNEAK,       picks = 'game'},
+    -- SCRIBES, not a work party. There is nothing to choose: the library is the target, and
+    -- what they come back with is whatever they managed to copy.
+    scholarly = {label = 'scholarly', skill = df.job_skill.READING, picks = 'books'},
 }
 
 -- A rate in percent becomes a whole number of results plus one roll for the remainder, so 120%
@@ -1141,8 +1667,11 @@ function resolve_expedition(kind, choice, units, d, roll)
     if not spec then return nil, 'no such expedition: ' .. tostring(kind) end
     local attempts = squad_skill(units, spec.skill)
     local haul, index = {}, {}
-    local function add(name, k, n)
-        if not name or n <= 0 then return end
+    -- `keep` holds a row that came out at zero. Mining and logging need one to exist so the
+    -- per-mission floor below has something to raise; every other kind drops it.
+    local function add(name, k, n, keep)
+        if not name then return end
+        if n <= 0 and not keep then return end
         local key = k .. '\0' .. name
         local row = index[key]
         if not row then
@@ -1155,13 +1684,20 @@ function resolve_expedition(kind, choice, units, d, roll)
 
     if kind == 'mining' then
         -- two picks: what to quarry, and what to dig for. Either may be left out.
-        local layer = type(choice) == 'table' and choice.layer or choice
-        local target = type(choice) == 'table' and choice.target or nil
+        -- NOT an `and/or` ternary: with `{target = 'amethyst'}` the `and` yields nil, the `or`
+        -- falls through, and `layer` becomes the CHOICE TABLE itself -- which then fails as
+        -- "table: 0x... is not a layer stone". Picking only a vein is perfectly legal.
+        local layer, target
+        if type(choice) == 'table' then
+            layer, target = choice.layer, choice.target
+        else
+            layer = choice
+        end
         if layer then
             if stone_tier(d, layer) ~= 'layer' then
                 return nil, ('%s is not a layer stone at this site'):format(tostring(layer))
             end
-            add(layer, 'stone', rate_to_count(MINING_YIELD.layer * 100 * attempts, roll))
+            add(layer, 'stone', rate_to_count(MINING_YIELD.layer * 100 * attempts, roll), true)
         end
         if target then
             local tier = stone_tier(d, target)
@@ -1172,17 +1708,65 @@ function resolve_expedition(kind, choice, units, d, roll)
                 return nil, ('%s is a layer stone -- pick it as the quarry, not the target')
                     :format(tostring(target))
             end
-            add(target, 'stone', rate_to_count((MINING_YIELD[tier] or 0) * 100 * attempts, roll))
+            add(target, 'stone', rate_to_count((MINING_YIELD[tier] or 0) * 100 * attempts, roll), true)
         end
         if not layer and not target then return nil, 'pick a layer stone, a target, or both' end
 
     elseif kind == 'logging' then
-        add(choice, 'log', rate_to_count(LOG_YIELD * 100 * attempts, roll))
+        add(choice, 'log', rate_to_count(LOG_YIELD * 100 * attempts, roll), true)
 
     elseif kind == 'botany' then
         for _, u in ipairs(units) do
             local lvl = squad_skill({u}, spec.skill)
             add(choice, 'plant', rate_to_count(10 * lvl, roll))
+        end
+
+    elseif kind == 'scholarly' then
+        -- ONE ROLL PER SCRIBE: a flat tenth for turning up at all, plus a tenth for every level
+        -- of Reading. Summed as a percentage and converted once, so ten unskilled scribes make
+        -- 100% -- a squad of ten always comes home with at least one book, exactly as specified.
+        local have = fort_books()
+        local all, wanted = {}, {}
+        for _, t in ipairs(d.books or {}) do
+            all[#all + 1] = t
+            if not have[t] then wanted[#wanted + 1] = t end
+        end
+
+        local percent, levels = 0, 0
+        for _, u in ipairs(units) do
+            local lvl = squad_skill({u}, spec.skill)
+            levels = levels + lvl
+            percent = percent + 10 + 10 * lvl
+        end
+
+        -- NO DUPLICATES WHILE ANYTHING NEW IS LEFT. Copying the same book twice in one trip is
+        -- a wasted trip; once the fort holds every title this library has, a second copy is the
+        -- only thing left to bring, so the rule relaxes rather than coming home empty.
+        local function take(pool, exclusive)
+            if #pool == 0 then return nil end
+            local i = math.min(#pool, math.max(1, math.floor(roll() * #pool) + 1))
+            local pick = pool[i]
+            if exclusive then table.remove(pool, i) end
+            return pick
+        end
+        for _ = 1, rate_to_count(percent, roll) do
+            local pick = #wanted > 0 and take(wanted, true) or take(all, false)
+            if not pick then break end
+            add(pick, 'book', 1)
+        end
+
+        -- A RARER FIND, and not from this library at all: a hundredth per level of Reading that
+        -- somebody turns up a book the fortress has never held, from anywhere in the world. If
+        -- you already own a copy of everything that exists, this finds nothing.
+        local elsewhere = {}
+        for title in pairs(world_books()) do
+            if not have[title] then elsewhere[#elsewhere + 1] = title end
+        end
+        table.sort(elsewhere)
+        for _ = 1, rate_to_count(levels, roll) do
+            local pick = take(elsewhere, true)
+            if not pick then break end
+            add(pick, 'book', 1)
         end
 
     elseif kind == 'hunting' then
@@ -1194,6 +1778,21 @@ function resolve_expedition(kind, choice, units, d, roll)
             add(choice, 'corpse', rate_to_count(corpse_rate * lvl, roll))
             add(choice, 'cage', rate_to_count(cage_rate * lvl, roll))
         end
+    end
+    -- MINING AND LOGGING NEVER COME HOME EMPTY. A squad with no Mining between them still
+    -- spends a week at a quarry and can carry one rock out of it; the same for a week in the
+    -- woods and one log. The floor is per MISSION, not per pick, so choosing a small cluster
+    -- alongside a layer stone does not turn a 1-in-500 vein into a guaranteed one -- the
+    -- guaranteed item goes on the FIRST row, which is the quarry stone or the tree they went
+    -- for. Botany and hunting keep no floor: a week's foraging really can find nothing.
+    if MIN_ONE[kind] then
+        local total = 0
+        for _, row in ipairs(haul) do total = total + row.count end
+        if total == 0 and haul[1] then haul[1].count = 1 end
+    end
+    -- drop the placeholders that stayed at zero, so nothing reads "0 bituminous coal"
+    for i = #haul, 1, -1 do
+        if haul[i].count <= 0 then table.remove(haul, i) end
     end
     table.sort(haul, function(a, b)
         if a.kind ~= b.kind then return a.kind < b.kind end
@@ -1279,6 +1878,54 @@ local function button_row(rows, kind, enabled)
     }
 end
 
+-- THE LIBRARY BLOCK. Unlike every other group this one is a LIST, one title per line, because
+-- a library runs to dozens of books -- Bannertongue holds 67 -- and wrapped prose at that
+-- length is unreadable. For the same reason the button goes on the HEADER row rather than
+-- after the names: you should not have to scroll past sixty titles to find it.
+--
+-- Three states, and the difference is the whole point of showing the line at all:
+--   contacted      the titles, a count, and a button
+--   never met      no titles -- you do not know what they have until you have spoken to them
+--   at war         the titles, but no button; make peace first
+local function library_rows(rows, d)
+    -- No library, no line. A site with no library has nothing to say here and a row saying so
+    -- on every one of them is noise.
+    if d.libraries <= 0 then return end
+    rows[#rows + 1] = {}
+
+    if d.contact == nil then
+        rows[#rows + 1] = {{text = 'Library: ', pen = LABEL_PEN}}
+        rows[#rows + 1] = {{text = INDENT, pen = VALUE_PEN},
+            {text = 'Contact the site to learn about their books and send scribes to copy them.',
+             pen = COLOR_BROWN}}
+        return
+    end
+
+    if d.contact == 'war' then
+        rows[#rows + 1] = {{text = 'Library: ', pen = LABEL_PEN}}
+        rows[#rows + 1] = {{text = INDENT, pen = VALUE_PEN},
+            {text = 'Make peace in order to send scribes to copy these books.',
+             pen = COLOR_BROWN}}
+    else
+        local head = {{text = 'Library: ', pen = LABEL_PEN},
+                      {text = ('%d book%s'):format(#d.books, #d.books == 1 and '' or 's'),
+                       pen = VALUE_PEN}}
+        -- nothing to copy, nothing to send anybody for
+        if #d.books > 0 then
+            head[#head + 1] = {text = '   ', pen = VALUE_PEN}
+            head[#head + 1] = {text = '[Send Expedition]', pen = BUTTON_PEN}
+            head.button = 'scholarly'
+        end
+        rows[#rows + 1] = head
+    end
+
+    local have = fort_books()
+    for _, title in ipairs(d.books) do
+        rows[#rows + 1] = {{text = INDENT, pen = VALUE_PEN},
+                           {text = title, pen = have[title] and VALUE_PEN or MISSING_PEN}}
+    end
+end
+
 local function survey_lines(d)
     local rows = {}
     local have = fort_holdings()
@@ -1324,13 +1971,7 @@ local function survey_lines(d)
     if not shown_game then labelled(rows, 'Game', {}, 'none here') end
     button_row(rows, 'hunting',
         d.ours and (#d.game + #d.savage_game + #d.giant_game) > 0)
-    -- No library, no line: a site with no library has nothing to say here, and a row saying so
-    -- on every one of them is noise. With a library, the named books it holds -- or the plain
-    -- fact that none are known.
-    if d.libraries > 0 then
-        rows[#rows + 1] = {}
-        labelled(rows, 'Library', d.books, 'No books known')
-    end
+    library_rows(rows, d)
     return rows
 end
 
@@ -1366,6 +2007,10 @@ local function target_groups(kind, d)
         }
     elseif kind == 'logging' then return {{'Trees', d.trees, 'target'}}
     elseif kind == 'botany' then return {{'Plants', d.plants, 'target'}}
+    elseif kind == 'scholarly' then
+        -- Nothing to pick: the library IS the target. The titles are listed so you can see what
+        -- you are sending scribes for, on a slot nothing reads.
+        return {{'Books in the library', d.books, 'browse'}}
     elseif kind == 'hunting' then
         return {
             {'Game',        d.game,        'target'},
@@ -1508,18 +2153,31 @@ function ExpeditionWindow:send()
     if not sq then return end
     local choice = self.sel.target
     if self.kind == 'mining' then choice = {layer = self.sel.layer, target = self.sel.target} end
+    local no_tool = missing_tool(self.kind)
+    if no_tool then
+        dfhack.printerr('economic-expeditions: ' .. no_tool)
+        return
+    end
     local haul, err, attempts = resolve_expedition(self.kind, choice, sq.members, self.d)
     if err then
         dfhack.printerr('economic-expeditions: ' .. err)
         return
     end
-    -- THE DRY RUN, to the console. Nothing travels and nothing is created yet.
+    -- THE MANIFEST, to the console, and then they go. `begin_march` rolls its own haul; this
+    -- one is only what the player is shown, so the two can differ by a rock. Print before
+    -- sending so a refusal is not buried under a list.
     print(('%s expedition to %s -- %s, %d dwarves, %d attempts'):format(
         EXPEDITIONS[self.kind].label, self.d.name,
-        dfhack.translation.translateName(sq.squad.name, true), #sq.members, attempts))
+        dfhack.military.getSquadName(sq.squad.id), #sq.members, attempts))
     if #haul == 0 then print('  comes home with nothing') end
     for _, row in ipairs(haul) do
         print(('  %-6s %-26s x%d'):format(row.kind, row.name, row.count))
+    end
+
+    local ok, why = begin_march(sq.squad, self.site, self.kind, choice)
+    if not ok then
+        dfhack.printerr('economic-expeditions: ' .. tostring(why))
+        return
     end
     self.parent_view:dismiss()
 end

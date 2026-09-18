@@ -413,6 +413,14 @@ a pile you give no type (the "None" icon, or clearing it out in Custom settings)
 ### **`fort/auto-tomb`**
 Drops the right zone onto furniture: a tomb on every coffin, a pasture on every nest box.
 
+### **`fort/auto-mayor-quarters`**
+Name a bedroom, dining hall, tomb and office with "Mayor" in the zone name and they follow
+the office: when DF announces an election or a succession, every one of them the new mayor
+does not already own is reassigned to them, so the quarters stop staying with the last
+mayor while the new one sulks over unmet demands. One zone per kind — two bedrooms named
+for the mayor and it leaves bedrooms alone and says so. Run bare to hand over now and see
+who owns what.
+
 ## Fortress Management
 
 ### **`fort/planeswalkers`**
@@ -667,9 +675,51 @@ blue sedge, ryegrass — which no herbalist can gather and which has no seed to 
 listed because the region records them as growing there, which is true and useless. Dropping them
 took Burnedroofs from 37 plants to 26.
 
-**The expeditions themselves** are being built. The buttons, the pickers and the resolution
-engine are done; the travel and the delivery are not yet — pressing *Send* prints the result to
-the console rather than moving anybody.
+**The round trip is real, and it is not a DF mission.** A mission hands the squad to an
+`army_controller` and hopes DF gives them back; this walks them out and counts the days itself,
+which has far fewer moving parts and cannot be lost to DF deciding the army should do something
+else. Four phases:
+
+1. **Marching.** The squad gets a genuine patrol order to the nearest map-edge tile it can
+   *actually reach* — ranked by distance, then confirmed with `canWalkBetween`, which is a real
+   DF pathfind rather than a straight line. **Always on the surface**: the tile must be `outside`
+   and unhidden, so nobody is ever sent out through a cavern. The edge is re-picked on every
+   check, because a dwarf who starts deep in the fort may surface nearer a different side than
+   the one that was closest from the stairwell; a new edge has to beat the current one by eight
+   tiles before the order is rewritten, or they dither between two forever.
+2. **Departing.** At the edge they come **off the map**, the way DF parks a unit that has left:
+   `flags1.inactive` set, dropped from `world.units.active`, and the tile's `occupancy.unit`
+   cleared. All three matter — leave them in the active list and the engine keeps ticking a unit
+   that is nowhere; leave the occupancy set and an invisible body blocks the square they walked
+   off. Any job they were on is released with `removeWorker` first, never `removeJob`, which
+   segfaults on a unit's `current_job`.
+3. **Away**, for a week plus travel each way. The days are counted **here**, by accumulating the
+   driver's own interval — `cur_year_tick` is not monotonic once timestream is in play and it
+   wraps at the year end, so an expedition begun in Timber would come home instantly or never.
+4. **Home.** They are put back on the tile they left from and the haul is created at their feet:
+   boulders for stone, logs and plants through their `PLANT_MAT`, corpses stamped with their race
+   so they do not render as a *nil corpse*. Anything that could not be made is reported rather
+   than quietly lost — **live cages are not built yet**, since a caged beast is a unit as well as
+   an item.
+
+**Cancelling the order is how you cancel the expedition** — take the patrol off the squad by any
+means and the march calls itself off. Once they are off the map there is no order left to carry
+and no recalling them. `fort/dwarf-rts`, which stands every squad down when the squads screen
+closes, asks a generic guard table before clearing orders so it cannot cancel a march by
+accident.
+
+**A trade needs its tool in the fortress**: a pick for mining, an axe for logging. Nobody carries
+one out and none comes back worn — it is proof the fortress is equipped for the work, the same
+way you cannot put a dwarf on Mining with no pick in the stockpile. What counts as a pick is the
+civ's own `digger_type`; what counts as an axe is an `AXE` weapon small enough that your race
+wields it in one hand, measured against that same pick — which keeps great axes and halberds,
+same skill and twice the size, out of the count.
+
+**Mining and logging never come home empty.** A squad with no Miner between them still spends a
+week at a quarry and can carry one rock out of it. The floor is one item per **mission**, not per
+pick, so choosing a small cluster alongside a layer stone does not turn a 1-in-500 vein into a
+guaranteed one — the guaranteed item lands on the quarry stone. Botany and hunting keep no floor:
+a week's foraging really can find nothing.
 
 A **`[Send Expedition]`** button sits at the foot of the stone, trees, plants and game sections,
 on sites **under your control** only. It opens a two-panel picker: the **squad** on the left with
@@ -691,6 +741,49 @@ experience** — they spend skill rather than build it.
 | **logging** | Woodcutter | ⅕ of a log |
 | **botany** | Herbalist | a 10% chance at the chosen plant |
 | **hunting** | Ambusher | a 10% chance at a corpse, 1% at a live one in a cage |
+
+Mining and logging additionally guarantee a single item per mission, however unskilled the squad
+(see above); an unskilled party comes home with one rock or one log, not nothing.
+
+**Scholarly expeditions** send scribes to copy books, and are the one trade that may leave your
+own holdings: copying takes nothing away, so any library you are on speaking terms with will do.
+
+| | |
+|---|---|
+| **contacted** | `Library: N books   [Send Expedition]`, then every title, one per line |
+| **never met** | the label and *"Contact the site to learn about their books and send scribes to copy them."* — **no titles**, because you do not know what they have |
+| **at war** | the titles, and *"Make peace in order to send scribes to copy these books."* — no button |
+
+Titles are a **list**, not the wrapped prose the other groups use: a library runs to dozens of
+books — Furnacehailed holds 96 — and the button sits on the **header** row so you never scroll
+past sixty titles to reach it. Titles the fort already holds are plain; ones it lacks are red,
+the same convention as everything else.
+
+Each scribe has a flat **1/10** of bringing a book home, plus **1/10 per level of Reading** —
+summed and converted once, so **ten unskilled scribes always come home with at least one book**
+(verified: ten yields exactly one, nine yields nothing). **No duplicates in one trip** while the
+library still holds anything the fort lacks; once you own every title it has, a second copy is
+the only thing left to bring, so the rule relaxes rather than returning nothing. Verified at a
+hundred scribes: ten books, ten distinct, zero duplicates.
+
+Separately, **1/100 per level of Reading** that somebody turns up a book the fortress has never
+held **from anywhere in the world** — the 1117 distinct artifact-book titles that exist. If you
+already own a copy of everything, this finds nothing.
+
+**A book is three parts, and a copy has to build all three**: the bound `item_bookst`, its
+`title`, and an `itemimprovement_pagesst` carrying the page material, the page count and the
+`written_content` ids. Sharing the content id with the original is not a shortcut — that is
+precisely what a scribe's copy *is*, and DF expects many items to point at one written work.
+Ordinary copies do not exist off-map, so the source to copy from is the **artifact** record, the
+same one the site panel lists under Artifacts; all 96 of Furnacehailed's titles resolve to one.
+
+**Contact is a third state, not a flag.** `site_hostile` collapses "at war" and "never heard of
+them" into "not hostile", which is right for colouring a map marker and wrong here — both block
+scribes, for different reasons with different fixes. `site_contact` returns `war` / `contact` /
+`nil`, and your own holdings short-circuit to `contact` since DF records no diplomacy state
+between you and yourself. In this world only **Furnacehailed** (96 books) and your own
+**Scrapedwind** (20) are contacted; Bannertongue, Silkendied, Scarsabre, Brasschained and
+Stalkerhex are all unmet, and nothing is at war — so the war branch is written but unexercised.
 
 Any fractional rate reads as "this many for certain, and a roll for the remainder" — 120% is one
 guaranteed and a one-in-five chance of a second.
@@ -1241,6 +1334,11 @@ DFHack tool for this.
 
 ## Information
 
+### **`fort/better-world-map`**
+On the World screen, `Center on fort` also flashes a bright `!` over the fort for five seconds,
+because on a big world the centre of the map is a crowd of sites and the fort is one tile among
+them. The marker follows the fort if you scroll during the flash.
+
 ### **`fort/find-hidden-artifacts`**
 Run by hand; prints who has your artifacts and where the missing ones went. The fort's
 artifacts are read from the world's history — made here, ever stored here, claimed by the
@@ -1301,7 +1399,9 @@ together.
 ![fort/creature-description demo](demos/fort-creature-description.png)
 
 ### **`fort/item-description`**
-Shows an item's full description instead of DF's truncated box.
+Shows an item's full description instead of DF's truncated box. For an artifact it adds, two
+rows below the description, who made it — *"Created by Blanchefleur Dodókumril, dwarf child in
+129."* — read from the world's history, which is the only place DF keeps it.
 
 ![fort/item-description demo](demos/fort-item-description.png)
 
