@@ -1159,22 +1159,63 @@ end
 
 -- name -> raws index. The survey speaks in display names because that is what the panel shows;
 -- creating the goods needs the index back, so each lookup walks the raws once on return.
+-- EVERY ONE OF THESE GUARDS AGAINST A NIL NAME, and the guard is not paranoia. `plant_name`
+-- returns nil for the grasses it deliberately filters out, so a row with no name compared
+-- nil == nil and matched meadow-grass -- the expedition delivered the one plant the survey
+-- exists to exclude. A nameless row is a bug upstream; it must never resolve to something.
 local function find_inorganic(name)
+    if not name or name == '' then return nil end
     for i = 0, #df.global.world.raws.inorganics.all - 1 do
         if inorganic_name(i) == name then return i end
     end
 end
 
 local function find_plant(name, namer)
+    if not name or name == '' then return nil end
     for i = 0, #df.global.world.raws.plants.all - 1 do
         if namer(i) == name then return i, df.global.world.raws.plants.all[i] end
     end
 end
 
 local function find_creature(name)
+    if not name or name == '' then return nil end
     for i = 0, #df.global.world.raws.creatures.all - 1 do
         if creature_name(i) == name then return i, df.global.world.raws.creatures.all[i] end
     end
+end
+
+-- Put a live animal of `race` on the map at `pos`, wild and belonging to nobody. Shared by the
+-- cage branch (which then locks it in) and the corpse branch (which then bleeds it out).
+--
+-- ORDER MATTERS: a freshly created unit comes out at -30000 with `inactive` set, so seed `pos`
+-- to a real tile BEFORE clearing the flag, and insert into `units.active` last or DF never
+-- ticks it. See [[df-unit-spawn-solved]].
+local function spawn_animal(race, raw, pos)
+    local u = dfhack.units.create(race, math.random(0, #raw.caste - 1))
+    if not u then return nil end
+    u.pos:assign(pos)
+    u.flags1.inactive = false
+    df.global.world.units.active:insert('#', u)
+    u.flags1.tame = false
+    u.civ_id, u.population_id = -1, -1
+    u.training_level = df.animal_training_level.WildUntamed
+    -- what a genuinely wild animal carries, and a created one does not
+    u.flags2.roaming_wilderness_population_source = true
+    return u
+end
+
+-- The wood an expedition's cages are knocked together from. Any plant with a WOOD material
+-- will do -- the cage is a container, not a trophy -- so this takes the first and remembers it.
+local cage_wood_cache
+local function cage_wood()
+    if cage_wood_cache ~= nil then return cage_wood_cache or nil end
+    for i = 0, #df.global.world.raws.plants.all - 1 do
+        local pr = df.global.world.raws.plants.all[i]
+        local mi = dfhack.matinfo.find('PLANT_MAT:' .. pr.id .. ':WOOD')
+        if mi then cage_wood_cache = mi return mi end
+    end
+    cage_wood_cache = false
+    return nil
 end
 
 local function make(creator, item_type, mat_type, mat_index, count)
@@ -1190,7 +1231,12 @@ end
 -- Turn one haul row into real items at the returning squad's feet. Returns how many landed and,
 -- when nothing could be made, why -- the caller reports shortfalls rather than silently losing
 -- a week's work.
-local function deliver_row(creator, row)
+--
+-- EXPORTED so it can be exercised without waiting a fortnight for a squad to come home. Three
+-- of these branches shipped untested because proving them meant a real round trip, and two of
+-- the three were wrong; `unload` runs one row on the spot.
+function unload_row(creator, row)
+    if not row.name or row.name == '' then return 0, 'that row has no name' end
     if row.kind == 'stone' then
         local idx = find_inorganic(row.name)
         if not idx then return 0, 'no such stone in the raws' end
@@ -1212,20 +1258,29 @@ local function deliver_row(creator, row)
         return #make(creator, df.item_type.PLANT, mi.type, mi.index, row.count)
 
     elseif row.kind == 'corpse' then
+        -- DF MUST BUILD THE CORPSE, NOT US. An `item_corpsest` from `createItem` carries a race
+        -- and a material and nothing else -- none of the body-component data DF dereferences --
+        -- and `Items::getDescription` SEGFAULTS on it. That is not a cosmetic problem: DF calls
+        -- getDescription whenever it draws the item, so such a corpse crashes the fort the
+        -- moment a hunting party's pile is rendered. It killed this one at 23:59.
+        --
+        -- So the animal comes home and dies HERE. Spawn it live the same way the cage branch
+        -- does, knock it senseless so it cannot act in the tick or two it is breathing, and
+        -- empty its blood; DF's own death handling then produces a real corpse with everything
+        -- in it. Note `exterminate`'s `destroyUnit` pairs blood_count with a vanish_countdown --
+        -- that is what removes the body, and it must NOT be copied here.
         local race, raw = find_creature(row.name)
         if not raw then return 0, 'no such creature in the raws' end
-        local mi = dfhack.matinfo.find('CREATURE_MAT:' .. raw.creature_id .. ':MUSCLE')
-        if not mi then return 0, 'that creature has no flesh material' end
-        local made = make(creator, df.item_type.CORPSE, mi.type, mi.index, row.count)
-        for _, it in ipairs(made) do
-            -- a corpse that does not know whose it is renders as "nil corpse" and butchers into
-            -- nothing, so stamp the race and a caste on every one
-            pcall(function()
-                it.race, it.normal_race = race, race
-                it.caste, it.normal_caste = 0, 0
-            end)
+        local made = 0
+        for _ = 1, row.count do
+            local u = spawn_animal(race, raw, creator.pos)
+            if not u then break end
+            u.counters.unconscious = 1000
+            u.body.blood_count = 0
+            made = made + 1
         end
-        return #made
+        if made == 0 then return 0, 'could not bring the quarry home' end
+        return made
 
     elseif row.kind == 'book' then
         -- A COPY IS THREE PARTS: the bound item, its title, and a pages improvement carrying
@@ -1249,11 +1304,46 @@ local function deliver_row(creator, row)
             end
         end
         return #made
+
+    elseif row.kind == 'cage' then
+        -- A CAGED BEAST IS TWO OBJECTS, wired to each other. The cage is an ordinary item; the
+        -- occupant is a real live unit sitting in `units.active` with `flags1.caged` set, and
+        -- the two are joined BOTH WAYS -- `contains_unitst` on the cage, `contained_in_itemst`
+        -- on the unit. Wire only one side and DF renders an empty cage with a loose animal in
+        -- it. Get it right and the description builds itself: "crundle () cage (cherry wood)".
+        local race, raw = find_creature(row.name)
+        if not raw then return 0, 'no such creature in the raws' end
+        local wood = cage_wood()
+        if not wood then return 0, 'no wood to build a cage from' end
+
+        local made = 0
+        for _ = 1, row.count do
+            local cages = make(creator, df.item_type.CAGE, wood.type, wood.index, 1)
+            local cage = cages[1]
+            if not cage then break end
+            -- A RANDOM CASTE, which is to say a random sex: you caught what you caught. Two
+            -- captures may well be the same sex and thus no breeding pair, which is exactly
+            -- the shortage that sent you hunting in the first place.
+            local u = spawn_animal(race, raw, cage.pos)
+            if not u then break end
+            u.flags1.caged = true
+
+            -- THE FLAG IS NOT OPTIONAL. DF treats an item as HOLDING something only when
+            -- `flags.container` is set; without it the refs are all correctly wired, the
+            -- description still reads "wild boar () cage" -- and the cage shows up EMPTY in
+            -- the UI, which is exactly how this was caught.
+            cage.flags.container = true
+            local holds = df.general_ref_contains_unitst:new()
+            holds.unit_id = u.id
+            cage.general_refs:insert('#', holds)
+            local held = df.general_ref_contained_in_itemst:new()
+            held.item_id = cage.id
+            u.general_refs:insert('#', held)
+            made = made + 1
+        end
+        return made
     end
-    -- CAGES ARE NOT BUILT YET. A caged beast is a live unit as well as an item -- the whole
-    -- `units.create` + makeown dance -- and that is its own piece of work. Report it, do not
-    -- pretend it arrived.
-    return 0, 'live cages are not implemented yet'
+    return 0, ('nothing knows how to unload a %s'):format(tostring(row.kind))
 end
 
 -- WHO WENT IS WHO PAID. The haul is priced on the units that actually made it off the map,
@@ -1270,7 +1360,7 @@ local function deliver(st, sq, members)
     end
     local creator, lines, missed = members[1], {}, {}
     for _, row in ipairs(haul) do
-        local n, err = deliver_row(creator, row)
+        local n, err = unload_row(creator, row)
         if n > 0 then lines[#lines + 1] = ('%d %s'):format(n, row.name) end
         if n < row.count then
             missed[#missed + 1] = ('%d %s (%s)'):format(row.count - n, row.name,
