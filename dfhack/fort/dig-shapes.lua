@@ -231,34 +231,22 @@ end
 
 -- ---- designation / construction primitives ----------------------------------
 
-local function block_of(pos) return dfhack.maps.getTileBlock(pos) end
-local function set_dig(pos, val)
-    local blk = block_of(pos); if not blk then return end
-    blk.designation[pos.x % 16][pos.y % 16].dig = val
-    blk.flags.designated = true
-end
-local function clear_dig(pos)
-    local blk = block_of(pos); if not blk then return end
-    blk.designation[pos.x % 16][pos.y % 16].dig = DV.No
-end
-
-local SMOOTHABLE = {}
-for _, n in ipairs({'STONE', 'MINERAL', 'LAVA_STONE', 'FEATURE'}) do
-    if TM[n] then SMOOTHABLE[TM[n]] = true end
-end
-
--- SMOOTHING GOES TO THE BACK OF THE QUEUE, at priority 7.
+-- EVERY DESIGNATION CARRIES THE DIG TOOL'S PRIORITY. DF's Dig menu has a priority selector
+-- (1 drop-everything .. 7 last, 4 the default) that applies to what you paint by hand; the
+-- digging, stairs, channels and smoothing this lays are the same job to a miner, so they
+-- go in at whatever that selector reads when the shape is placed. (Smoothing used to be
+-- pinned to 7 on the theory that polishing should always wait; a player who has set the
+-- tool to 1 wants the room now, walls and all.)
 --
--- A smoothing designation and a mining designation are the same queue to a dwarf: drop a
--- room's worth of smoothing on a half-dug fort and the miners stop digging to go and polish
--- walls. Priority is what DF has for saying "eventually": 1 is drop-everything, 4 is the
--- default, 7 is last.
---
--- It lives in a BLOCK SQUARE EVENT rather than the tile -- `block_square_event_designation_
--- priorityst`, one per block, holding a 16x16 grid of priority * 1000 -- so a block that has
--- never had a priority set has no event at all and one has to be made. This is the same path
--- quickfort's dig mode takes.
-local SMOOTH_PRIORITY = 7
+-- Priority lives in a BLOCK SQUARE EVENT rather than the tile -- `block_square_event_
+-- designation_priorityst`, one per block, holding a 16x16 grid of priority * 1000 -- so a
+-- block that has never had a priority set has no event at all and one has to be made. This
+-- is the same path quickfort's dig mode takes.
+local function current_priority()
+    local p = mi().designation.priority
+    if not p or p <= 0 then return 4 end
+    return math.max(1, math.min(7, math.floor(p / 1000)))
+end
 
 local function set_tile_priority(block, bx, by, priority)
     local pbse
@@ -275,6 +263,23 @@ local function set_tile_priority(block, bx, by, priority)
     pbse.priority[bx][by] = priority * 1000
 end
 
+local function block_of(pos) return dfhack.maps.getTileBlock(pos) end
+local function set_dig(pos, val)
+    local blk = block_of(pos); if not blk then return end
+    blk.designation[pos.x % 16][pos.y % 16].dig = val
+    set_tile_priority(blk, pos.x % 16, pos.y % 16, current_priority())
+    blk.flags.designated = true
+end
+local function clear_dig(pos)
+    local blk = block_of(pos); if not blk then return end
+    blk.designation[pos.x % 16][pos.y % 16].dig = DV.No
+end
+
+local SMOOTHABLE = {}
+for _, n in ipairs({'STONE', 'MINERAL', 'LAVA_STONE', 'FEATURE'}) do
+    if TM[n] then SMOOTHABLE[TM[n]] = true end
+end
+
 -- designate smoothing on a natural-stone tile (ignored on soil/air/constructions). dig+smooth
 -- coexist, so an interior tile being mined smooths itself into a smooth floor after it's dug.
 -- CRITICAL: skip tiles that are ALREADY smooth -- smooth=1 on an already-smooth wall carves a
@@ -285,7 +290,7 @@ local function designate_smooth(pos)
     if tt and df.tiletype.attrs[tt].special == df.tiletype_special.SMOOTH then return end
     local blk = block_of(pos); if not blk then return end
     blk.designation[pos.x % 16][pos.y % 16].smooth = 1
-    set_tile_priority(blk, pos.x % 16, pos.y % 16, SMOOTH_PRIORITY)
+    set_tile_priority(blk, pos.x % 16, pos.y % 16, current_priority())
     blk.flags.designated = true
 end
 
@@ -574,8 +579,9 @@ function convert_dig_box(a, b)
     -- CHOP: mark whole TREES (by trunk, via the designations API -- tile marks on one big
     -- tree would miscount it several times), capped by the elven lumber budget from
     -- auto-elf-chop: new marks stop when total designations reach the remaining allowance.
-    -- budget nil = no cap (no elf agreement, or already AT the limit -- past that point
-    -- designating more is plainly deliberate and is not blocked).
+    -- budget nil = no cap (no elf agreement, or this year's already broken); 0 = AT the
+    -- limit, and the box is refused with the notice below -- on purpose or by accident,
+    -- the agreement is not broken from here. DF's own Chop tool is the way past it.
     if #trees > 0 then
         local budget
         local okr, aec = pcall(reqscript, 'fort/auto-elf-chop')
