@@ -20,12 +20,14 @@ TODAY IT KNOWS ONE LABOR, ONE POST AND ONE JOB:
   ordinary (half a fort is a little short of wandering at any time) and the stress alone
   says nothing about which need is doing it.
 
-  NOTHING CREATIVE -> A STATUE. A dwarf short on being creative is handed a statue to
-  carve at a free mason's workshop -- obsidian if the fort has any, otherwise a stone with
-  no economic use, so art never eats the flux or the ores. It is offered ONLY when carving
-  cannot change the dwarf's highest moodable skill: masonry is moodable, and a strange mood
-  claims the highest, so an armorer handed a statue can quietly end up making furniture
-  instead of an artifact suit. See NOTHING CREATIVE below.
+  NOTHING CREATIVE -> SOMETHING TO MAKE. A dwarf short on being creative is handed a
+  statue or a figurine, cheapest material first: an OBSIDIAN statue or figurine, then a
+  GREEN GLASS statue if the fort has a magma glass furnace and sand (no fuel, no stone
+  spent), then the same in a plain stone with no economic use, so art never eats the flux
+  or the ores. It is offered ONLY when the work cannot change the dwarf's highest moodable
+  skill: masonry, stonecrafting and glassmaking are all moodable, and a strange mood claims
+  the highest, so an armorer handed a statue can quietly end up making furniture instead of
+  an artifact suit. See NOTHING CREATIVE below.
 
   THINK ABSTRACTLY / SELF-EXAMINATION -> A SCHOLAR'S POST AT THE PUBLIC LIBRARY. Both of
   those needs are drained by the same act -- reading or writing something -- and the
@@ -542,27 +544,43 @@ end
 local function library_marked() return load_state().library_id >= 0 end
 local function service_wanted() return isEnabled() or library_marked() end
 
--- ---- NOTHING CREATIVE -> A STATUE -------------------------------------------
+-- ---- NOTHING CREATIVE -> SOMETHING TO MAKE ----------------------------------
 --
--- "Has been unable to be creative lately" is answered by MAKING something, and a statue is
--- the cheapest thing in the fort that counts: one boulder, one mason's workshop, no chain of
--- industries behind it. The job is handed to the dwarf directly (a worker reference on the
--- job), the way `fort/idle-smiths` hands out forge work, so it does not wait on labors or on
--- whoever happens to be nearest.
+-- "Has been unable to be creative lately" is answered by MAKING something, and a statue or a
+-- figurine is the cheapest thing in the fort that counts: one boulder (or one bag of sand),
+-- one workshop, no chain of industries behind it. The job is handed to the dwarf directly (a
+-- worker reference on the job), the way `fort/idle-smiths` hands out forge work, so it does
+-- not wait on labors or on whoever happens to be nearest.
 --
--- THE STONE: OBSIDIAN FIRST, then any NON-ECONOMIC stone. Obsidian is worth nothing to
--- anything else and looks the part; after that, a stone with no economic use -- no ore, no
--- thread metal, nothing on its `economic_uses` list -- so making art never eats the flux,
--- the gypsum or the ores the fort is keeping for something.
+-- WHAT IT OFFERS, cheapest to the fort first:
+--    1. an OBSIDIAN statue, then an obsidian figurine -- obsidian is worth nothing to
+--       anything else and looks the part.
+--    2. a GREEN GLASS statue, but ONLY with a MAGMA glass furnace and sand to hand. A magma
+--       furnace burns no fuel, so the statue costs one bag of sand and nothing else -- which
+--       is why it is preferred over spending a real boulder. A wood- or coal-fired glass
+--       furnace is deliberately NOT used: that statue would cost fuel, which is worse than
+--       the stone it saves. (The furnace job carries no fuel job_item precisely because
+--       magma furnaces take none -- the same shape DF's own "make green glass goblet" uses:
+--       mat_type = GLASS_GREEN, one ANY_GLASSABLE item with flags1.sand_bearing.)
+--    3. a PLAIN STONE statue, then a plain stone figurine -- a stone with no economic use:
+--       no ore, no thread metal, nothing on its `economic_uses` list, so making art never
+--       eats the flux, the gypsum or the ores the fort is keeping for something.
 --
--- AND ONLY IF IT DOES NOT CHANGE WHAT A MOOD WOULD CLAIM. A statue trains MASONRY, which is
--- a moodable skill, and a strange mood takes the dwarf's highest moodable skill -- so
--- handing an armorer a statue can quietly turn their next artifact from a suit of armour
--- into a piece of furniture. So it is offered only when masonry ALREADY is their highest
--- moodable skill (nothing can change), or sits at least a full level below it (one statue
--- cannot close a level). A tie at the top counts as unsafe.
+-- AND ONLY IF IT DOES NOT CHANGE WHAT A MOOD WOULD CLAIM. Each of these trains a MOODABLE
+-- skill -- MASONRY for a statue, STONECRAFT for a figurine, GLASSMAKER for a glass statue --
+-- and a strange mood takes the dwarf's highest moodable skill, so handing an armorer a statue
+-- can quietly turn their next artifact from a suit of armour into a piece of furniture. A job
+-- is offered only when its skill ALREADY is their highest moodable skill alone (nothing can
+-- change), or sits at least MOOD_MARGIN levels below it. A tie at the top counts as unsafe.
+-- The margin is TWO, not one: a single level of room is not enough, because one job is not
+-- the only thing that will ever train that skill and a dwarf sitting exactly one level down
+-- can be carried over the top by ordinary work.
+--
+-- Each dwarf is offered the first option that is both safe for them and has a free building,
+-- so a dwarf blocked on masonry can still be served a figurine or a glass statue.
 local CREATIVE_NEED = df.need_type.BeCreative
-local STATUE_SKILL = df.job_skill.MASONRY
+local GLASS_GREEN = 3                  -- builtin material index; mat_index is -1 for glass
+local MOOD_MARGIN = 2                  -- levels the top moodable skill must clear the job's by
 
 -- the skills a strange mood can claim -- the same set `fort/help-mood` maps to workshops
 local MOODABLE = {
@@ -580,17 +598,17 @@ local function skill_level(unit, skill)
     return (ok and v) or 0
 end
 
--- would a statue change the skill a mood would claim from this dwarf?
-local function statue_is_safe(unit)
-    local mine = skill_level(unit, STATUE_SKILL)
+-- would training `skill` change the skill a mood would claim from this dwarf?
+local function mood_safe(unit, skill)
+    local mine = skill_level(unit, skill)
     local best, best_count = -1, 0
-    for _, skill in ipairs(MOODABLE) do
-        local lvl = skill_level(unit, skill)
+    for _, s in ipairs(MOODABLE) do
+        local lvl = skill_level(unit, s)
         if lvl > best then best, best_count = lvl, 1
         elseif lvl == best then best_count = best_count + 1 end
     end
     if mine == best and best_count == 1 then return true end   -- already theirs alone
-    return mine < best                                          -- a level of room to spare
+    return mine <= best - MOOD_MARGIN                          -- two levels of room to spare
 end
 
 -- a stone that is nobody's raw material: no ore, no thread metal, no economic use
@@ -604,73 +622,230 @@ local function plain_stone(mat_index)
         and #ir.thread_metal.mat_index == 0
 end
 
--- the stone to carve: obsidian if the fort has any, else the most plentiful plain stone
-local function statue_stone()
+-- A boulder a dwarf could actually walk up to and carry off.
+--
+-- THE FLAG LIST IS NOT OPTIONAL, and `encased` is the one that bit. This fort had six
+-- obsidian boulders; three were `encased` -- sealed inside a wall or ice, where nothing can
+-- reach them -- and the old filter, which checked only forbid/artifact/dump/in_job, counted
+-- all six. Obsidian ranks first, so every dwarf short on being creative was handed an
+-- obsidian statue and every one of those jobs came straight back as
+-- "cancels Make obsidian statue: Needs obsidian."
+--
+-- The names are resolved ONCE against a real item, not written out inline: a flag this DF
+-- build does not carry would otherwise throw, and it would throw on every one of the
+-- thousands of boulders in a mature fort, every pass.
+local UNUSABLE_FLAGS = {'forbid', 'artifact', 'dump', 'in_job', 'encased', 'hidden',
+                        'in_building', 'garbage_collect', 'removed', 'trader', 'owned',
+                        'construction'}
+local unusable_flags = nil
+
+local function unusable_flag_names(sample)
+    if unusable_flags then return unusable_flags end
+    unusable_flags = {}
+    for _, n in ipairs(UNUSABLE_FLAGS) do
+        if pcall(function() return sample.flags[n] end) then
+            unusable_flags[#unusable_flags + 1] = n
+        end
+    end
+    return unusable_flags
+end
+
+local function item_is_free(it)
+    for _, n in ipairs(unusable_flag_names(it)) do
+        if it.flags[n] then return false end
+    end
+    return true
+end
+
+local function usable_boulder(it)
+    return it.mat_type == 0 and item_is_free(it)
+end
+
+-- ...AND NEITHER IS REACHABILITY, which is what actually broke this fort. The other three
+-- obsidian boulders were not encased -- they were loose on the ground at (19..23, 212..216,
+-- z123), in a pocket with WALKABLE GROUP 0: no group at all, nothing can stand there. Every
+-- mason's workshop in the fort sits in group 8564. Counting stone without asking whether a
+-- dwarf can get to it is how a tool ends up confidently ordering a statue out of rock that
+-- is sealed in the caverns.
+--
+-- The walkable group is DF's own answer to "can somebody walk from here to there", the same
+-- one `move-items` uses to decide what it can offer, and comparing two groups is a integer
+-- compare rather than a pathfind.
+local function boulder_group(it)
+    local p = dfhack.items.getPosition(it)
+    if not p then return nil end                      -- inside something, or off-map
+    local g = dfhack.maps.getWalkableGroup(xyz2pos(p.x, p.y, p.z))
+    if not g or g == 0 then return nil end
+    return g
+end
+
+-- The walkable groups the fort's workshops stand in. A boulder has to share one of these or
+-- nobody can fetch it.
+--
+-- Built from every FINISHED workshop, not the ones that happen to be idle this second. Which
+-- stone the fort carves is a fact about the fort; if it depended on the free pool then a
+-- moment when every mason was busy would read as "there is no stone anybody can reach", and
+-- the whole offer list would vanish instead of simply waiting for a workshop.
+--
+-- The UNION across workshops rather than a per-workshop test is a deliberate simplification:
+-- a fort whose mason's shop and craftsdwarf's shop sit in different walkable groups is two
+-- disconnected fortresses, and the worst case there is one mis-offered job that DF cancels --
+-- which is exactly the old behaviour, not a new failure.
+local function reachable_groups(built_list)
+    local groups = {}
+    for _, b in ipairs(built_list) do
+        local g = dfhack.maps.getWalkableGroup(xyz2pos(b.centerx, b.centery, b.z))
+        if g and g ~= 0 then groups[g] = true end
+    end
+    return groups
+end
+
+-- the stone to carve: obsidian (if the fort has any a dwarf can reach) and the most plentiful
+-- other reachable plain stone
+local function statue_stones(groups)
+    if not next(groups) then return nil, nil end      -- nowhere to carve it anyway
     local counts, obsidian = {}, nil
     for _, it in ipairs(df.global.world.items.other.BOULDER) do
-        if it.mat_type == 0 and not it.flags.forbid and not it.flags.artifact
-            and not it.flags.dump and not it.flags.in_job and plain_stone(it.mat_index)
-        then
-            counts[it.mat_index] = (counts[it.mat_index] or 0) + 1
-            local ir = df.global.world.raws.inorganics.all[it.mat_index]
-            if ir and ir.id == 'OBSIDIAN' then obsidian = it.mat_index end
+        if usable_boulder(it) and plain_stone(it.mat_index) then
+            local g = boulder_group(it)
+            if g and groups[g] then
+                counts[it.mat_index] = (counts[it.mat_index] or 0) + 1
+                local ir = df.global.world.raws.inorganics.all[it.mat_index]
+                if ir and ir.id == 'OBSIDIAN' then obsidian = it.mat_index end
+            end
         end
     end
-    if obsidian then return obsidian end
     local best, best_n = nil, 0
     for idx, n in pairs(counts) do
-        if n > best_n then best, best_n = idx, n end
+        if idx ~= obsidian and n > best_n then best, best_n = idx, n end
     end
-    return best
+    return obsidian, best
 end
 
--- a finished mason's workshop with nothing queued and no master assigned
-local function free_masons_shop()
-    for _, b in ipairs(df.global.world.buildings.all) do
-        if b:getType() == df.building_type.Workshop
-            and b:getSubtype() == df.workshop_type.Masons
-            and b:getBuildStage() >= b:getMaxBuildStage()
-            and #b.jobs == 0
-            and (not b.profile or b.profile.max_general_orders > 0)
-        then
-            return b
+-- one sand-bearing item (a bag of sand) a dwarf can reach. Stops at the first hit -- the
+-- vector runs to hundreds and nothing here needs a count.
+local function have_sand(groups)
+    for _, it in ipairs(df.global.world.items.other.ANY_GLASSABLE) do
+        if item_is_free(it) then
+            local g = boulder_group(it)
+            if g and groups[g] then return true end
         end
     end
+    return false
 end
 
-local function statue_job(unit, shop, mat_index)
+-- ONE pass over buildings.all per creative pass, bucketed by kind: `built` says a kind exists
+-- at all (so the glass option knows whether there is a magma furnace), `free` lists the ones
+-- that are finished, idle, and not master-restricted. Buildings are POPPED off `free` as they
+-- are handed jobs, so nothing is double-booked and nothing rescans.
+local function building_key(btype, subtype) return btype .. ':' .. subtype end
+
+local function survey_buildings()
+    local built, free, finished = {}, {}, {}
+    for _, b in ipairs(df.global.world.buildings.all) do
+        local bt = b:getType()
+        if bt == df.building_type.Workshop or bt == df.building_type.Furnace then
+            if b:getBuildStage() >= b:getMaxBuildStage() then
+                local k = building_key(bt, b:getSubtype())
+                built[k] = true
+                finished[#finished + 1] = b
+                if #b.jobs == 0 and (not b.profile or b.profile.max_general_orders > 0) then
+                    free[k] = free[k] or {}
+                    table.insert(free[k], b)
+                end
+            end
+        end
+    end
+    return built, free, finished
+end
+
+-- What the fort can offer right now, in preference order. Rebuilt each pass: stock, furnaces
+-- and sand all move.
+local function creative_offers(built, finished)
+    local groups = reachable_groups(finished)
+    local obsidian, plain = statue_stones(groups)
+    local offers = {}
+    local function add(label, job, skill, btype, subtype, mat_type, mat_index)
+        offers[#offers + 1] = {label = label, job = job, skill = skill, mat_type = mat_type,
+                               mat_index = mat_index, key = building_key(btype, subtype)}
+    end
+    local function stone_pair(mat_index, what)
+        add(what .. ' statue', df.job_type.ConstructStatue, df.job_skill.MASONRY,
+            df.building_type.Workshop, df.workshop_type.Masons, 0, mat_index)
+        add(what .. ' figurine', df.job_type.MakeFigurine, df.job_skill.STONECRAFT,
+            df.building_type.Workshop, df.workshop_type.Craftsdwarfs, 0, mat_index)
+    end
+    if obsidian then stone_pair(obsidian, 'obsidian') end
+    -- green glass before ANY non-obsidian stone: a magma furnace spends only a bag of sand
+    if built[building_key(df.building_type.Furnace, df.furnace_type.MagmaGlassFurnace)]
+        and have_sand(groups)
+    then
+        add('green glass statue', df.job_type.ConstructStatue, df.job_skill.GLASSMAKER,
+            df.building_type.Furnace, df.furnace_type.MagmaGlassFurnace, GLASS_GREEN, -1)
+    end
+    if plain then stone_pair(plain, 'stone') end
+    return offers
+end
+
+-- `dfhack.job.assignToWorkshop` is typed to building_workshopst and REFUSES a furnace
+-- ("incompatible pointer type"), so the glass furnace gets the generic attachment DF itself
+-- uses and stock `lever.lua`/`gui/advfort` build by hand: a BUILDING_HOLDER general ref on the
+-- job, the job on the building's own list, and a nudge so DF picks it up this tick.
+local function attach_job(job, b)
+    if df.building_workshopst:is_instance(b) then
+        return dfhack.job.assignToWorkshop(job, b)
+    end
+    job.pos = xyz2pos(b.centerx, b.centery, b.z)
+    job.general_refs:insert('#', {new = df.general_ref_building_holderst, building_id = b.id})
+    b.jobs:insert('#', job)
+    dfhack.job.checkBuildingsNow()
+    return true
+end
+
+local function creative_job(unit, offer, shop)
     local job = dfhack.job.createLinked()
-    job.job_type = df.job_type.ConstructStatue
-    job.mat_type = 0
-    job.mat_index = mat_index
+    job.job_type = offer.job
+    job.mat_type = offer.mat_type
+    job.mat_index = offer.mat_index
 
     local jitem = df.job_item:new()
-    jitem.item_type = df.item_type.BOULDER
-    jitem.mat_type = 0
-    jitem.mat_index = mat_index
     jitem.quantity = 1
-    jitem.vector_id = df.job_item_vector_id.BOULDER
+    if offer.mat_type == GLASS_GREEN then
+        -- the shape DF's own glass-furnace jobs use: any sand-bearing container, no fuel
+        jitem.item_type = df.item_type.NONE
+        jitem.item_subtype = -1
+        jitem.mat_type = -1
+        jitem.mat_index = -1
+        jitem.vector_id = df.job_item_vector_id.ANY_GLASSABLE
+        jitem.flags1.sand_bearing = true
+    else
+        jitem.item_type = df.item_type.BOULDER
+        jitem.mat_type = 0
+        jitem.mat_index = offer.mat_index
+        jitem.vector_id = df.job_item_vector_id.BOULDER
+    end
     job.job_items.elements:insert('#', jitem)
 
-    dfhack.job.assignToWorkshop(job, shop)
+    attach_job(job, shop)
     return dfhack.job.addWorker(job, unit)
 end
 
--- One creative pass: the neediest dwarf a statue is safe for, per free workshop.
+-- One creative pass: the neediest dwarf first, each served the best option that is safe for
+-- them and still has a free building.
 function scan_creative(dry)
     local made, skipped = {}, 0
-    local mat = statue_stone()
-    if not mat then return made, skipped, 'no obsidian or non-economic stone' end
+    local built, free, finished = survey_buildings()
+    local offers = creative_offers(built, finished)
+    if #offers == 0 then
+        return made, skipped,
+            'no obsidian, green glass or non-economic stone a dwarf can actually reach', offers
+    end
 
     local want = {}
     for _, unit in ipairs(citizens()) do
         local focus = need_focus(unit, CREATIVE_NEED)
         if past_the_bar(unit, focus) and dfhack.units.isJobAvailable(unit) then
-            if statue_is_safe(unit) then
-                want[#want + 1] = {unit = unit, focus = focus, stress = stress_of(unit)}
-            else
-                skipped = skipped + 1
-            end
+            want[#want + 1] = {unit = unit, focus = focus, stress = stress_of(unit)}
         end
     end
     -- angriest first, then the deepest need: the same order fort/idle-smiths serves
@@ -681,15 +856,31 @@ function scan_creative(dry)
     end)
 
     for _, cand in ipairs(want) do
-        local shop = free_masons_shop()
-        if not shop then break end
-        if dry then
-            made[#made + 1] = cand.unit
-        elseif statue_job(cand.unit, shop, mat) then
-            made[#made + 1] = cand.unit
+        local served, safe_any, free_any = false, false, false
+        for _, offer in ipairs(offers) do
+            local pool = free[offer.key]
+            local has_shop = pool and #pool > 0
+            if has_shop then free_any = true end
+            if mood_safe(cand.unit, offer.skill) then
+                safe_any = true
+                if has_shop then
+                    local shop = table.remove(pool)
+                    if dry or creative_job(cand.unit, offer, shop) then
+                        made[#made + 1] = {unit = cand.unit, label = offer.label}
+                        served = true
+                        break
+                    end
+                    table.insert(pool, shop)    -- the job did not take; leave the shop free
+                end
+            end
+        end
+        if not served then
+            -- only a MOOD block is a "skip"; running out of workshops is not the dwarf's fault
+            if not safe_any then skipped = skipped + 1 end
+            if not free_any then break end      -- nothing free for any option; done this pass
         end
     end
-    return made, skipped, nil
+    return made, skipped, nil, offers
 end
 
 local function one_pass()
@@ -862,5 +1053,29 @@ else
     if reading > 0 then print(('  %d still reading there.'):format(reading)) end
     if #posted == 0 and #released == 0 and reading == 0 then
         print('  nobody is short enough on abstract thinking or self-examination to post.')
+    end
+end
+
+-- ---- the creative half ------------------------------------------------------
+
+print()
+local carved, blocked, why, offers = scan_creative(dry or not once)
+if why then
+    print('Nothing creative to hand out: ' .. why .. '.')
+else
+    local what = {}
+    for _, o in ipairs(offers) do what[#what + 1] = o.label end
+    print('Creative work, best first: ' .. table.concat(what, ', ') .. '.')
+    if #carved > 0 then
+        print(('%s%d handed something to make:'):format(tag, #carved))
+        for _, e in ipairs(carved) do
+            print(('    %s -- %s'):format(dfhack.units.getReadableName(e.unit), e.label))
+        end
+    else
+        print('  nobody is short enough on being creative to hand work to.')
+    end
+    if blocked > 0 then
+        print(('  %d passed over: every option would change what a strange mood claims'
+            .. ' from them.'):format(blocked))
     end
 end
