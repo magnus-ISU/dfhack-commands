@@ -368,6 +368,16 @@ function TrainingConfigOverlay:onInput(keys)
     return TrainingConfigOverlay.super.onInput(self, keys)
 end
 
+-- Open the trainer picker from somewhere else. `fort/butcher-shop` puts a [training] button
+-- under its own [Butcher] one: the butcher's shop is where you stand when you are deciding an
+-- animal's fate, and "train it instead" is the other half of that decision. The button lives
+-- over there because that overlay already snaps itself to the right row by scraping for
+-- "Add new task", and two widgets guessing at the same anchor would be one too many.
+function open_config()
+    if not view then view = ConfigureTrainingScreen{}:show() end
+    return true
+end
+
 OVERLAY_WIDGETS = {config = TrainingConfigOverlay}
 
 if dfhack_flags and dfhack_flags.module then return end

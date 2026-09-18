@@ -113,7 +113,76 @@ function WildTrainOverlay:init()
     }
 end
 
-OVERLAY_WIDGETS = {train = WildTrainOverlay}
+-- ---- the same button, on a CAGE --------------------------------------------
+--
+-- Clicking a caged animal on the map does NOT open the unit's sheet -- it opens the CAGE's
+-- item sheet, because what you clicked is an item that happens to contain somebody. So the
+-- unit-sheet button above never appears for exactly the animals you are most likely to want
+-- trained: the ones already sitting in a cage waiting for it.
+--
+-- A cage holds its occupants as `general_ref_contains_unitst`; there is normally one, but a
+-- trap can hold several, so this trains all of the tamable ones together.
+
+local function caged_animals(item)
+    local out = {}
+    if not item then return out end
+    for _, g in ipairs(item.general_refs) do
+        if df.general_ref_contains_unitst:is_instance(g) then
+            local u = df.unit.find(g.unit_id)
+            if is_wild_tamable(u) then out[#out + 1] = u end
+        end
+    end
+    return out
+end
+
+local function cur_cage_animals()
+    return caged_animals(dfhack.gui.getSelectedItem(true))
+end
+
+CagedTrainOverlay = defclass(CagedTrainOverlay, overlay.OverlayWidget)
+CagedTrainOverlay.ATTRS{
+    desc = 'Adds a [Train] toggle to the item sheet of a cage holding a wild tamable animal.',
+    default_pos = {x = 3, y = -12},
+    default_enabled = true,
+    viewscreens = 'dwarfmode/ViewSheets/ITEM',
+    frame = {w = 7, h = 1},
+    version = 1,
+}
+
+function CagedTrainOverlay:init()
+    self.visible = function() return #cur_cage_animals() > 0 end
+    self:addviews{
+        widgets.HotkeyLabel{
+            frame = {t = 0, l = 0, w = 7},
+            label = '[Train]',
+            -- green once every occupant is queued, so a trap holding three reads as done
+            -- only when all three are
+            text_pen = function()
+                local animals = cur_cage_animals()
+                if #animals == 0 then return COLOR_WHITE end
+                for _, u in ipairs(animals) do
+                    if not is_queued(u.id) then return COLOR_WHITE end
+                end
+                return COLOR_GREEN
+            end,
+            on_activate = function()
+                local animals = cur_cage_animals()
+                if #animals == 0 then return end
+                -- if any is unqueued the click queues them all; only an all-queued cage
+                -- un-queues, so a half-done cage never toggles the wrong way
+                local all_queued = true
+                for _, u in ipairs(animals) do
+                    if not is_queued(u.id) then all_queued = false break end
+                end
+                for _, u in ipairs(animals) do
+                    if all_queued then unqueue_training(u.id) else queue_training(u.id) end
+                end
+            end,
+        },
+    }
+end
+
+OVERLAY_WIDGETS = {train = WildTrainOverlay, caged = CagedTrainOverlay}
 
 if dfhack_flags.module then return end
 

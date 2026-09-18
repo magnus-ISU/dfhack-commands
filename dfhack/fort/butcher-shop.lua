@@ -320,7 +320,7 @@ ButcherOverlay.ATTRS{
     default_pos = {x = 2, y = 6},                     -- fallback until it snaps next to "Add new task"
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/BUILDING/Workshop/Butchers',
-    frame = {w = 9, h = 1},
+    frame = {w = 10, h = 2},                          -- [Butcher], and [training] beneath it
     overlay_onupdate_max_freq_seconds = 0,            -- checked every frame, but only re-scrapes on change
     -- 4: the button is hidden while the "Add new task" job list is open. Bumping this is also what
     -- makes a running game pick the change up: `overlay reload` keeps an existing widget INSTANCE,
@@ -336,13 +336,29 @@ end
 function ButcherOverlay:init()
     self:addviews{
         widgets.Panel{
-            frame = {t = 0, l = 0, w = 9, h = 1},
+            frame = {t = 0, l = 0, w = 10, h = 2},
             visible = function() return self.on_task_list == true end,
             subviews = {
                 widgets.HotkeyLabel{
                     frame = {t = 0, l = 0, w = 9},
                     label = '[Butcher]',
                     on_activate = function() self:open() end,
+                },
+                -- The other half of the same decision. `fort/animal-training` owns the picker;
+                -- the button sits HERE because this widget already knows where the row is --
+                -- it snaps itself under "Add new task" every time the task list changes, and a
+                -- second overlay guessing at that anchor would drift out of line with this one.
+                widgets.HotkeyLabel{
+                    frame = {t = 1, l = 0, w = 10},
+                    label = '[training]',
+                    on_activate = function()
+                        local ok, at = pcall(reqscript, 'fort/animal-training')
+                        if ok and at and at.open_config then
+                            at.open_config()
+                        else
+                            dfhack.printerr('butcher-shop: fort/animal-training is not installed')
+                        end
+                    end,
                 },
             },
         },

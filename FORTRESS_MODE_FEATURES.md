@@ -1006,6 +1006,13 @@ chasm. Where an item was made is ignored: a foreign block builds like any other.
 Bulk-marks animals for slaughter, grouped by species and sex, with last-breeder warnings. Young
 get their own rows and stay hidden until you ask for them (Ctrl-Y).
 
+Beneath its `[Butcher]` button sits a **`[training]`** one, opening `fort/animal-training`'s
+trainer picker. The butcher's shop is where you stand while deciding an animal's fate, and
+"train it instead" is the other half of that decision — but reaching it otherwise means going
+and finding an animal-training zone first. The button lives in *this* overlay rather than in
+`animal-training` because this one already snaps itself to the right row by scraping for
+"Add new task"; a second widget guessing at the same anchor would drift out of line with it.
+
 ### **`fort/filter-other-units`**
 Category filter buttons on the Units screen's **Other** tab, where the Dead/Missing tab
 keeps its `[Show death cause]`: `[Friendly] [Wildlife] [Hostile]` are independent toggles
@@ -1052,7 +1059,16 @@ row.
 Assigns a trainer to many caged animals at once.
 
 ### **`fort/wild-animal-train`**
-Marks a wild animal for taming, so it's trained the moment it's caught.
+Marks a wild animal for taming, so it's trained the moment it's caught. The `[Train]` toggle sits
+on the animal's unit sheet, and **also on the item sheet of a cage holding one** — because
+clicking a caged animal on the map opens the *cage's* sheet, not the unit's, so the unit-sheet
+button never appeared for exactly the animals most likely to want training: the ones already in
+a cage waiting for it. A cage holding several (a trap's catch) trains them together; the button
+only reads green once every occupant is queued, and only an all-queued cage un-queues, so a
+half-done cage never toggles the wrong way.
+
+Either way it writes the game's own basic-training assignment with `any_trainer` — every animal
+trainer in the fort is eligible, rather than one being singled out.
 
 ## Automation
 
