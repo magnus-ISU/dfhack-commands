@@ -152,21 +152,42 @@ end
 
 -- Is the mouse on the `Center on fort` button? Read only the row under the cursor, only
 -- when a click has happened: the label's own cells, plus one either side for the box.
+-- Is the mouse on the `Center on fort` button? The label is found by reading the screen, and
+-- the hit box is deliberately BIGGER than the text: one row above and below, and two columns
+-- either side. DF's own button is a graphical widget whose clickable area is larger than the
+-- glyphs it draws, so matching the text exactly meant clicks that visibly landed on the button
+-- did nothing.
+local PAD_ROWS, PAD_COLS = 1, 2
+
+local function row_text(y, sw)
+    if y < 0 then return nil end
+    local row = {}
+    for x = 0, sw - 1 do
+        local ok, pen = pcall(dfhack.screen.readTile, x, y)
+        local ch = (ok and pen and pen.ch) or 0
+        row[#row + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    end
+    return table.concat(row)
+end
+
 local function on_center_button()
     local mx, my = dfhack.screen.getMousePos()
     if not mx then return false end
-    local sw = dfhack.screen.getWindowSize()
-    local row = {}
-    for x = 0, sw - 1 do
-        local pen = dfhack.screen.readTile(x, my)
-        local ch = pen and pen.ch or 0
-        row[#row + 1] = (ch >= 32 and ch < 127) and string.char(ch) or ' '
+    local sw, sh = dfhack.screen.getWindowSize()
+    -- the label may be on this row or on one the padding reaches, so look for it on each
+    for dy = -PAD_ROWS, PAD_ROWS do
+        local y = my + dy
+        if y >= 0 and y < sh then
+            local text = row_text(y, sw)
+            local s = text and text:find(BUTTON, 1, true)
+            if s then
+                local x1 = s - 1 - PAD_COLS               -- to 0-based, then pad
+                local x2 = s - 1 + #BUTTON - 1 + PAD_COLS
+                if mx >= x1 and mx <= x2 then return true end
+            end
+        end
     end
-    local text = table.concat(row)
-    local s = text:find(BUTTON, 1, true)
-    if not s then return false end
-    local e = s + #BUTTON - 1
-    return mx + 1 >= s - 1 and mx + 1 <= e + 1
+    return false
 end
 
 FlashOverlay = defclass(FlashOverlay, overlay.OverlayWidget)
