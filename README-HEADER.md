@@ -24,6 +24,10 @@ That opens the switchboard — a checkbox per helper in this pack. Click rows to
 on or off; your choice is saved and re-applied on every map load, so it is a one-time setup.
 Press `r` if you just want everything on.
 
+Two columns stay out of `r`'s way and start empty: **house rules**, for tools that change what
+the game *means* rather than doing the clicking for you, and **joke/**. Turn those on a row at
+a time, or with their own `h` / `j` header keys.
+
 Non-standard install path, installing individual scripts by hand, or the rest of the
 arguments: [`SETUP_INSTRUCTIONS.md`](SETUP_INSTRUCTIONS.md).
 

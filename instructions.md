@@ -9,6 +9,15 @@ This repo holds two kinds of deliverables for **Dwarf Fortress 0.53.x + DFHack**
   `joke/` is documented in `JOKE_FEATURES.md`, which is deliberately NOT composed into the
   README, and its `magnus-scripts` column is opt-in: off by default and untouched by the
   `[r]`/`[m]` master switches.
+
+  **HOUSE RULES ARE THE OTHER OPT-IN COLUMN**, and it is a category, not a folder: a house-rule
+  script lives in `fort/` like any other. What puts it in that column is that it CHANGES WHAT
+  THE GAME MEANS rather than doing the clicking for you. Everything else in the pack automates
+  something you could have done by hand; a house rule invents a rule vanilla does not have.
+  `fort/research-breakthrough` is the one today (vanilla research topics unlock literary forms
+  and nothing else; it makes a breakthrough pay out a craftable recipe). When you add one, say
+  so in its docstring, put it in the `house` column of `magnus-scripts`, and say plainly in its
+  feature entry what vanilla does instead.
 - **`content-mods/high-adventure/`** — the *High Adventure* mod suite (raws + per-mod
   active scripts + graphics). Each mod is a folder with `info.txt`, `objects/`,
   `graphics/`, `scripts_modactive/`.

@@ -24,6 +24,10 @@ That opens the switchboard — a checkbox per helper in this pack. Click rows to
 on or off; your choice is saved and re-applied on every map load, so it is a one-time setup.
 Press `r` if you just want everything on.
 
+Two columns stay out of `r`'s way and start empty: **house rules**, for tools that change what
+the game *means* rather than doing the clicking for you, and **joke/**. Turn those on a row at
+a time, or with their own `h` / `j` header keys.
+
 Non-standard install path, installing individual scripts by hand, or the rest of the
 arguments: [`SETUP_INSTRUCTIONS.md`](SETUP_INSTRUCTIONS.md).
 
@@ -106,8 +110,9 @@ effectively nothing.
 
 Every tile it designates goes in at **priority 7**, the back of the queue: a smoothing
 designation and a mining designation are the same queue to a dwarf, so a room's worth of
-smoothing dropped on a half-dug fort stops the miners to go and polish walls. `fort/dig-shapes`
-does the same with the smoothing it lays alongside its digging.
+smoothing dropped on a half-dug fort stops the miners to go and polish walls. (`fort/dig-shapes`
+instead gives everything it lays — digging, stairs and smoothing alike — the priority the Dig
+tool is set to.)
 
 ### **`fort/builder-burrow`**
 Turn a burrow into a district. Pick a burrow (only those on a single z-level are listed, under
@@ -156,6 +161,9 @@ staircase built over it (a construction cannot be carved into) while a **natural
 simply designated for a down stair — it is rock, and a miner cuts the down side into it for free
 rather than spending a block and a mason on it.
 
+Everything it lays — the digging, the stairs, the channels and the smoothing beside them — goes
+in at the priority the Dig tool is set to, the same as a tile you paint by hand.
+
 ![fort/dig-shapes demo](demos/fort-dig-shapes.gif)
 
 ### **`fort/dig-building`**
@@ -199,11 +207,36 @@ the same order with the controls filed off: you mark items, and haulers take the
 garbage dump zone suits them, where they land forbidden. This puts the controls back. Reached
 from the `fort/dig-building` picker as **Move items**, beside Replace wall.
 
+**Corpses and cages are rowed by what they mean, not what they are made of.** Corpses split
+into butcherable bodies, refuse, and your own dead. Cages split by occupant:
+
+| Row | What lands there |
+|---|---|
+| **Important cages** | a megabeast, semimegabeast, titan, forgotten beast, unique demon or night creature |
+| **Prisoner cages** | anybody else who can think — `CAN_LEARN` or `CAN_SPEAK` |
+| **Animal cages** | everything else alive |
+| **Empty cages** | nothing inside at all |
+| **Other cages** | a cage being used as a plain container |
+
+"Wooden cage" is a useless row when one of them holds a forgotten beast and forty hold seeds.
+A cage holding several takes the rank of its most important occupant, so one goblin among the
+war dogs makes it a prisoner cage rather than a kennel. "Important" is deliberately wider than
+megabeasts: sorting strictly on `MEGABEAST`/`SEMIMEGABEAST` would file a caged forgotten beast
+under *animal cages*, since none of those creatures is sapient — and those are exactly the
+cages you never want to move by accident. Unlike the corpse rows, cages are **not** exempt from
+the quality and value sliders; a masterwork glass cage is a real thing to filter on.
+
 Click the destination and it makes a dump zone there and **deletes every other dump zone in the
 fort**, so there is exactly one place a dumped item can go and it is the one you picked. Then a
 picker opens: every kind of item that can actually reach that spot — same walkability group,
 which is DF's own answer to "can a dwarf get from here to there" — one row per kind, with the
 same search, sort, value, quality and wear filters as DFHack's *move goods to depot* screen.
+The filters cut *inside* a row: a minimum quality turns five earrings into the three that pass
+— that is the count shown, those are what `[specific]` lists, and those are what a click takes;
+a row with nothing left is not shown, and narrowing pulls a selection down with it. Each row
+opens with the distance to its closest passing item, and **Melt targets** (Shift-T) keeps only
+metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
+as a starting point you can move; off puts quality back to any.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
 behind a row, by distance, if you want to choose among them.
 
@@ -454,8 +487,263 @@ forge and magma forge only. Auto-discovered by `overlay rescan`; `forge-bars` on
 the same counts for the open menu.
 
 ### **`fort/workshop-tools`**
-Puts a `+` on every queued workshop task that queues another one just like it, and sorts
-a shop's "Add new task" list so the jobs you can actually do come before the ones you can't.
+Puts a `+` on every queued workshop task that queues another one just like it — material,
+repeat, suspend and "do this now" priority included; shift-click fills the shop to DF's ten
+with copies of it — and sorts a shop's "Add new task" list so the jobs you can actually do come before the ones you can't.
+
+### **`fort/better-world-map`**
+The World screen's **`Center on fort`** button scrolls the map so your fort sits in the middle,
+and that is all it does — on a big world the middle is a crowd of sites, roads and rumour icons
+in which the fort is one tile among hundreds.
+
+This flashes a `!` for five seconds over every site worth finding, in three colours:
+
+| | |
+|---|---|
+| **blue** | your own fortress |
+| **yellow** | a site **under your control** — your holding as a land holder, the one whose panel offers *Request workers* and reads "economically linked to you" |
+| **white** | a site that merely **belongs to your civilization** — your civ, somebody else's holding. You cannot attack it and cannot negotiate with it, and that is all it means |
+
+**The glyph says library, the colour says whose.** A site that keeps books draws an **∞** (CP437
+236, the nearest thing the map font has to a scroll) instead of a `!`, in whatever colour its
+standing calls for — so Furnacehailed, which is your civilization's, now shows a white scroll
+where it used to show a plain white bang and hide its library entirely.
+
+**Your own fortress is the exception** and keeps its blue `!`: you do not need telling that your
+own library is there, and the bang is what you clicked the button to find.
+
+Foreign libraries have no standing to colour them by, so they are coloured by how dangerous
+fetching from one would be:
+
+| | |
+|---|---|
+| **red ∞** | held by a government you are **at war** with |
+| **white ∞** | allied, or never met |
+
+Books are worth going out of your way for *because* they are rare — **7 libraries across 3664
+sites** — so a foreign one is marked whoever owns it. Getting in is your problem; knowing it is
+there is the point.
+
+**Shift+click pins it.** Five seconds is right for "where am I" and wrong for reading the map with
+your holdings in front of you, so shift+click keeps the markers flashing with no time limit until
+the next click on `Center on fort` clears them. They still blink — the blink is what makes a
+marker findable against a crowded map. `fort/better-world-map pin` and `... clear` do the same
+from the console.
+
+**The middle tier is the point.** Flattening "under your control" into "belongs to your
+civilization" made fifteen sites look like yours when only one was.
+
+**Which sites count is not decided here.** `fort/economic-expeditions` already has to answer
+this to know where an expedition may go, and two scripts disagreeing about what belongs to you
+would be worse than a dependency — so this asks that one, through its exported `site_standing`. If it is not
+installed the flash falls back to marking the fort alone rather than failing. The list is built
+once when the flash starts, not per frame: it is a 3664-site scan taking ~60 ms, nothing once
+but a stutter sixty times a second.
+
+The markers are placed from the map's centre and each site's world position every frame, so
+scrolling mid-flash carries them along. `fort/better-world-map flash` triggers it from the
+console without the button.
+
+### **`fort/economic-expeditions`**
+On the fort-mode world map, clicking a site tells you its name, its population and nothing at
+all about the land. This adds a survey panel under DF's **`Diplomacy`** button:
+
+- **Stone** — the layer stones (always there) and the vein materials, grouped by how hard they
+  are to find: *veins*, *clusters*, *small clusters*, *single gems*. **Soils are left out** —
+  clay, silt and their kin are layers like any other but digging them yields no boulder, so
+  listing them as something to fetch would be a lie. Adamantine is never listed.
+- **Trees**, **Plants** and **Game** — the surface roster of the tiles the site stands on.
+  **Animal people are not game** — they can talk, and they turn up as visitors and residents.
+  A **savage** tile legitimately carries far more, because the giant variants live there.
+- **Library** — the named books it holds, by title. The line is absent on a site with no
+  library rather than saying so on every one of them.
+
+Nothing here writes to the game; this is the read-only half of a larger house rule, and sending
+expeditions comes later.
+
+**None of it is a scan.** Stone is the world tile's *geology* — `region_map_entry.geo_index`
+picks a `world_geo_biome` whose layers carry the layer stone and the vein materials, each tagged
+with an `inclusion_type` that *is* the rarity signal. A handful of vector reads, not a prospect
+sweep, so it is cheap enough to compute behind a panel. It models what the rock would hold
+rather than counting what is there.
+
+**The exact answer is only available near home.** `world.populations.all` is generated for the
+loaded embark's neighbourhood and nowhere else — measured here, 9146 entries covering **49 world
+tiles out of 33153**. So there are two answers, and the panel says which one you are getting:
+
+- **exact** — the site's tiles have local populations: the 13–15 surface animals DF actually
+  spawns there, per tile.
+- **estimated** — the fallback, marked *"living things estimated from the region"*: the roster of
+  the region the site sits in, intersected with the biome of the site's own tile. Broader than
+  the truth — what could be there rather than what is.
+
+Without the fallback, Shinmystery — a forest retreat with vegetation 90, 116 tiles east —
+reported **"Trees: none here"**. Stone is unaffected: geology is world-wide and always exact.
+
+Trees, plants and game come from **`world.populations.all`** where it exists — DF's per-world-tile
+local populations, the roster it actually spawns from. Two filters make that correct, and without
+either one the list is confidently wrong:
+
+- **Per world tile, not per region.** `world_region.population` is the union over every tile a
+  region covers — "The Prairie of Zeniths" spans **415** of them — so it credits a site with
+  things growing four hundred tiles away. A single tile carries **13–15 surface animals**, which
+  is the number you see wandering into a fort.
+- **Surface only** — `layer_depth`, `cave_id` and `feature_idx` must all be `-1`. Unfiltered, a
+  tile returns **74–126** entries, because the same structure holds the cavern layers (crundle,
+  troll, gorlak), the magma sea (fire imp, magma man), the HFS (demons) and the water (carp,
+  pike, sturgeon).
+
+**A site is not one tile**, so the survey unions across the tiles it covers. **1441 of this
+world's 3664 sites** span more than one, the largest four. Burnedroofs covers x 70–71, y 78–79:
+three of those tiles hold the same 15 grassland animals, and the fourth holds a 10-strong desert
+roster with camels, jaguar and leopard. Reading `pos` alone would have dropped the camels.
+
+Vermin and insect colonies are dropped throughout, and animal people are dropped as people.
+
+**The titles come from artifacts, not from the library.** An off-map library instantiates no
+ordinary book items — `library.item_id` is empty on all 7 of this world's libraries — and
+`written_content` records an author and references but never a location. **Artifact** books are
+a different thing: `world.artifacts.all` holds 1710 records, each with a real `item` and a
+`site`, which is what DF itself lists under Artifacts on the site panel. Filtering those to
+books gives the titles — *The Journey into Trickery*, *Musings on Surveying* and fifteen more at
+Silkendied.
+
+These are the **named** books, not every volume on the shelves; ordinary copies still do not
+exist off-map. That is the difference between "there is a library here" and "here is what is
+worth sending somebody for".
+
+**The panel is placed by reading the screen.** DF's site panel is a v50 `widget_container`
+behind an opaque `shared_ptr`, so nothing can be inserted into it — the `Diplomacy` label is
+located in a bounded band and the survey drawn beneath it, the same trick `fort/butcher-shop`
+uses. It draws full width and is allowed to sit over DF's own right-edge buttons, behind a filled
+background box so the text never interleaves with what was underneath; the buttons return the
+moment the panel stops drawing. If the label is not found it draws nothing rather than guessing.
+
+**Every name is shown** — there is no "and N more". A list you cannot read to the end is no use
+for deciding where to send an expedition, so vertical space is spent instead: no counts, no
+heading over the stone tiers, a blue label and its names sharing one line, and a blank row
+between groups. Burnedroofs fills about forty of the fifty-odd rows under the button.
+
+**Where an expedition can go**, and how a site stands to you generally — three answers, because
+DF draws a real distinction the first version of this flattened:
+
+- **`own`** — your fortress.
+- **`controlled`** — *your* holding, what DF calls "economically linked to you" and the only
+  sites whose panel offers *Request workers*.
+- **`civ`** — merely your civilization's. Another noble's holding.
+
+**The discriminator is `position_profile_id`, not the link flags.** All sixteen of this world's
+`land_for_holding` links point at the same civ entity, so testing the flag alone calls all
+sixteen yours when fifteen belong to other nobles. Each link records the position profile it was
+granted to, and yours is the one on your own fort's link — profile 11 here, which is also the
+`land_holder_residence`. That sorts them 1 own / 1 controlled / 14 civ.
+
+An expedition may go to a **`controlled`** site, or to **another player fortress** (a fort you
+played and retired is yours whatever the diplomacy graph says). Belonging to your civilization is
+**not** enough — another noble's hillocks are not yours to strip.
+
+**Red means the fort has no source of it**, in both the survey and the picker — the point of an
+expedition is to fetch what you cannot get at home, and a list that does not say which is which
+makes you check four screens before deciding. "Already have it" means something different for
+each:
+
+| | counts as *have* when |
+|---|---|
+| **stone** | it is in your own geology, so you could mine it out of a wall |
+| **trees** | it grows on your own tiles |
+| **plants** | you hold **seeds** of it — a plant you cannot plant is one you have to go and pick |
+| **animals** | you have a **breeding pair**: a live tame male who would breed with a female and a female who would breed with a male |
+
+DF tracks orientation on animals too (`soul.orientation_flags`), and a pair that will not breed
+is not a herd — which is exactly when you would send a hunting party for another. The stone check
+reads the fort's geo layers rather than sweeping the map for wall types, which would lock the
+game up.
+
+On this desert fort that lights up every temperate tree at Burnedroofs in red — alder, birch,
+cherry, chestnut, oak, pear, willow — which is a good reason to send a logging party.
+
+**Grass is not a crop.** `plant_raw.flags.GRASS` marks the ground cover — meadow-grass, grama,
+blue sedge, ryegrass — which no herbalist can gather and which has no seed to plant. They were
+listed because the region records them as growing there, which is true and useless. Dropping them
+took Burnedroofs from 37 plants to 26.
+
+**The expeditions themselves** are being built. The buttons, the pickers and the resolution
+engine are done; the travel and the delivery are not yet — pressing *Send* prints the result to
+the console rather than moving anybody.
+
+A **`[Send Expedition]`** button sits at the foot of the stone, trees, plants and game sections,
+on sites **under your control** only. It opens a two-panel picker: the **squad** on the left with
+the skill that matters to this trade beside each one, and the **targets** on the right, one name
+per line under their group headings — a list you are picking from wants to be a list, even though
+the same names read better wrapped when you are only looking. Mining carries two ticks, one in
+the layer stones and one below; it defaults to the first layer stone and the first vein. The
+window opens as tall as the screen allows so a forty-name list rarely needs scrolling.
+
+The survey panel itself scrolls too — the wheel moves it while the pointer is over it — and
+always leaves five rows free at the bottom of the screen.
+
+Every dwarf gets **one attempt per level** of the relevant skill, and expeditions grant **no
+experience** — they spend skill rather than build it.
+
+| trade | skill | a level buys |
+|---|---|---|
+| **mining** | Miner | ⅕ of a layer stone **and** a share of the vein or cluster it was digging for |
+| **logging** | Woodcutter | ⅕ of a log |
+| **botany** | Herbalist | a 10% chance at the chosen plant |
+| **hunting** | Ambusher | a 10% chance at a corpse, 1% at a live one in a cage |
+
+Any fractional rate reads as "this many for certain, and a roll for the remainder" — 120% is one
+guaranteed and a one-in-five chance of a second.
+
+**A mining expedition picks two things**: a layer stone to quarry, and a vein or cluster to dig
+for. There is no failure roll — the layer stone is the quarry work that always pays, and the
+target is what they were actually after. The share depends on how the geology buried it:
+
+| target | per level | at 150 squad levels |
+|---|---|---|
+| layer stone | ⅕ | 30 |
+| vein | ⅒ | 15 |
+| cluster | 1/20 | 7–8 |
+| small cluster | 1/100 | 1–2 |
+| single gem | 1/500 | rarely one at all |
+
+Single gems are an **extrapolation** and not part of the agreed rates — the ramp had to continue
+somewhere, and leaving a whole tier unfetchable seemed worse than guessing. Adamantine is never
+offered. A full squad of legendary woodcutters brings home **40 logs**, which you would not
+usually have.
+
+**Hunting has three tiers and they do not stack**: ordinary game 10%/1% per level, ordinary game
+in a **savage** place 5%/0.5%, and a **giant** 2%/0.2% wherever it stands.
+
+`fort/economic-expeditions plan <kind> <site id> <squad #> <what>` prints what a squad would
+bring back, changing nothing — mining takes its two picks as `"<layer stone> + <vein or cluster>"`.
+
+`fort/economic-expeditions` prints the survey for the selected site, or pass a site id.
+
+### **`fort/research-breakthrough`**
+When a scholar in your library finally cracks a topic — the vanilla **research breakthrough**
+announcement — this hands you **one recipe unlock**. A picker opens listing every item your
+civilization does not know how to make yet, and the one you pick is yours for good: high boots,
+cloaks, masks, bowls, great picks. Items native to a dwarf civ are marked `*` and sorted first;
+the rest is other civs' gear, yours to take anyway. Procedural artifact junk types and training
+weapons are filtered out.
+
+This is a **house rule, not a hidden vanilla link** — in DF the 312 research topics unlock only
+literary forms and have nothing to do with crafting. The breakthrough is just the trigger; the
+topic discovered does not constrain the choice. Breakthroughs are rare (a scholar needs ~120+
+ponder cycles for their first), so expect a few a year at most in a fort with a real library.
+
+It lives in the **house rules** column of `magnus-scripts` — the column for tools that change what
+the game *means* rather than doing the clicking for you. Like `joke/`, that column starts empty and
+is untouched by the `[r]` and `[m]` master switches: a switch meant "arm the useful pack" should not
+quietly change the rules of your fort. Turn it on with its own `[h]` header or by clicking the row.
+
+Detection is the announcement, not a scan — a watermark on the announcement id, walking only what
+arrived since the last look. The unlock writes the same civ field the stock `add-recipe` writes,
+with diggers routed to `digger_type` so picks land in the right menu. Unspent unlocks are banked
+per fort and shown as the `research_unlock` notification; Esc banks rather than wastes, and the
+`Cancel` button at the top of the picker forfeits the banked unlocks outright.
+`research-breakthrough list` prints what is still unlockable.
 
 ### **`fort/quick-order`**
 Type plain text on the Work Orders screen to create a legal manager order, with "keep N in
@@ -791,15 +1079,33 @@ the library, and neither switches the other on behind your back.
 `enable fort/auto-needs` runs one about once a game day. `magnus-scripts` has a row for it.
 
 
-**Nothing creative → a statue.** A dwarf short on being creative is handed a statue to carve at
-a free mason's workshop, assigned to them by name the way `idle-smiths` hands out forge work.
-The stone is **obsidian first**, then any stone with **no economic use** — no ore, no thread
-metal, nothing on its `economic_uses` list — so making art never eats the flux, the gypsum or
-the ores. It is offered **only when carving cannot change what a strange mood would claim**:
-masonry is a moodable skill and a mood takes the dwarf's highest, so an armorer given a statue
-can quietly turn their next artifact from a suit of armour into a piece of furniture. Safe means
-masonry is already their highest moodable skill *alone*, or sits a full level below it — a tie
-at the top counts as unsafe.
+**Nothing creative → something to make.** A dwarf short on being creative is handed a statue or
+a figurine, assigned to them by name the way `idle-smiths` hands out forge work. The options, in
+preference order — cheapest to the fort first:
+
+1. an **obsidian statue**, then an **obsidian figurine** — obsidian is worth nothing to anything
+   else and looks the part;
+2. a **green glass statue**, but only with a **magma** glass furnace and sand to hand. A magma
+   furnace burns no fuel, so the statue costs one bag of sand and nothing else — which is why it
+   comes *before* spending a real boulder. A wood- or coal-fired glass furnace is deliberately
+   skipped: that statue would cost fuel, which is worse than the stone it saves;
+3. a **plain stone statue**, then a **plain stone figurine** — a stone with **no economic use**
+   (no ore, no thread metal, nothing on its `economic_uses` list) so making art never eats the
+   flux, the gypsum or the ores.
+
+Each dwarf gets the first option that is safe for them *and* has a free building, so a dwarf
+blocked on masonry can still be served a figurine or a glass statue.
+
+It is offered **only when the work cannot change what a strange mood would claim**. Masonry
+(statue), stonecrafting (figurine) and glassmaking (glass statue) are all moodable, and a mood
+takes the dwarf's highest, so an armorer given a statue can quietly turn their next artifact from
+a suit of armour into a piece of furniture. Safe means the job's skill is already their highest
+moodable skill *alone*, or sits **two full levels** below it — a tie at the top counts as unsafe.
+The margin is two, not one: one level of room is not enough, because this job is not the only
+thing that will ever train that skill and a dwarf sitting exactly one level down gets carried over
+the top by ordinary work. On a 113-dwarf fort that difference blocks 27 dwarf/skill pairs the
+one-level rule would have allowed, nearly all of them the same shape — top moodable skill at 1,
+the craft skill at 0.
 
 **The bar is flat: −500, the same for every dwarf, for every need tracked.** It sat at −750,
 which is where an unmet need stops being background noise for a dwarf with slack to spare — and
@@ -811,6 +1117,13 @@ the bar moved down rather than growing a second, stress-shaped test.
 ### **`fort/idle-smiths`**
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
 Soldiers whose squad is under orders are left to those orders.
+
+**What it makes is melted again.** A dwarf forging to settle a craving turns a bar into a helm
+nobody asked for, so each piece is designated for melting as it comes off the forge and the bar
+comes back. Two things are kept: a **masterwork** (melting a dwarf's best work is the one sure
+way to make them miserable) and a **silver war hammer** (silver is useless as armour but its
+weight makes the best blunt weapon in the game). Only jobs *this tool* queued are followed — a
+piece from an order you placed at the same forge is left alone.
 
 
 **Angriest first, and a pass a day.** A need bucket used to be a hash set, so whichever dwarf
@@ -874,6 +1187,9 @@ an order pinned to a stone the masons will not touch is worse than an open one.
 
 ### **`fort/auto-elf-chop`**
 Keeps tree-cutting under the elves' yearly limit by designating the nearest trees itself.
+A `fort/dig-shapes` chop box that would go past the allowance is cut back to what is left, and
+at the limit refused outright, with a notice either way — on purpose or by accident, the
+agreement is not broken from there; DF's own Chop tool is the way past it.
 
 ### **`fort/harvest-plants`**
 Designates every ripe shrub standing in a Gather Fruit zone for gathering once a month, instead
@@ -924,6 +1240,25 @@ skills. Everything else rusts as normal. Swept once a game season. There is no s
 DFHack tool for this.
 
 ## Information
+
+### **`fort/find-hidden-artifacts`**
+Run by hand; prints who has your artifacts and where the missing ones went. The fort's
+artifacts are read from the world's history — made here, ever stored here, claimed by the
+fort — not from the artifact's current site, because DF blanks the site the moment a thief
+picks one up, which is exactly when you want it listed. **On somebody who is not yours** names
+every non-citizen on the map with one of them: how it is held, where they stand, and who they
+really are — a visitor with a "name" in quotes is wearing a false identity, and the line gives
+the real name, race, profession, civilization and every religion, troupe or company they
+belong to, since villains are entities too. It catches the one DF hides: a thief at the map
+edge is already dropped from the active unit list while still standing on it with the
+artifact in hand, so the pass is over the whole unit list, once, flagged *HEADING FOR THE MAP
+EDGE*. If they laid claim to it themselves it says when. **Gone from the map** gives each
+missing artifact the world's best answer — destroyed, away with your own squad, held by a
+named figure and where they are, at another site, lost in the wilds — or, when DF has not
+caught up with a thief on the road, says so, names the pedestal it was last on and whether
+anyone saw it go. Both sections count the foreign claimants and list the newest few living
+ones, because claims are how the world decides who comes for an artifact next. Citizens and
+visitors' own artifacts are not listed.
 
 ### **`fort/unit-attributes`**
 An `[Attributes]` button on a unit sheet's *Other Skills* tab, above the Progress Bar toggles,
@@ -1378,15 +1713,18 @@ having bones on the strength of 66 unbutchered pieces and five bones it could no
 nothing while a possessed weaponsmith waited thirty days for one. It
 warns at **fewer than three** rather than at none, since three is the most of one thing a mood
 asks for and one bar of the metal it settles on is the same dead end as none, found a day
-later: *"No shells; only 2 tanned leather for a mood"*.
+later: *"No shells; 2 leather"*.
 
 The shells line only appears when somebody in the fort actually prefers a shell material: shells are
 the one mood material chosen by preference rather than stock (a bone carver demands shells only if they
 like a type of shell, bones otherwise), so a fort with no shell-lover can never be asked for one.
 
 ### **`fort/empty-labor-notification`**
-Warns when a restricted work detail has nobody who can actually do it. Stays quiet while
-`autolabor` or `labormanager` is enabled, since those assign labors themselves.
+Warns when a restricted work detail has nobody who can actually do it, and says which problem it
+is — *"No workers for Masonry"* (nobody selected) or *"Workers for Masonry are in a squad
+training"* (selected, but all soldiers their schedule keeps on duty) — since one wants a dwarf
+assigned and the other a schedule looked at. Stays quiet while `autolabor` or `labormanager` is
+enabled, since those assign labors themselves.
 
 ### **`fort/needs-tomb-notification`**
 Alerts when a dwarf dies with no tomb, or when anything is haunting the fort — a ghost counts
