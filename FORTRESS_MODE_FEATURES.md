@@ -792,6 +792,18 @@ per fort and shown as the `research_unlock` notification; Esc banks rather than 
 `Cancel` button at the top of the picker forfeits the banked unlocks outright.
 `research-breakthrough list` prints what is still unlockable.
 
+### **`fort/rusty-legends`**
+Keeps skill rust off a retired adventurer's every skill — matched on the nemesis
+`ADVENTURER` flag, never a name or a skill count — and off any citizen's legendary
+skills. Everything else rusts as normal. Swept once a game season. There is no stock
+DFHack tool for this.
+
+This is a **house rule**: in vanilla every unused skill rusts, legendary ones included,
+and a retired adventurer's lifetime of skills rots in the dining room like anyone else's —
+the game has no "no rust" switch for anyone. Exempting a class of skills from rust is a rule
+DF does not have, so it lives in the **house rules** column of `magnus-scripts`, off until
+you turn it on and untouched by the `[r]` / `[m]` master switches.
+
 ### **`fort/quick-order`**
 Type plain text on the Work Orders screen to create a legal manager order, with "keep N in
 stock" repeats. Only offers subtypes your civilization actually knows how to make.
@@ -1301,12 +1313,6 @@ world by historical figure id, whether or not they ever lived here.
 
 ### **`fort/broker-ready`**
 Frees a soldier broker to trade, then puts their squad back on duty afterward.
-
-### **`fort/rusty-legends`**
-Keeps skill rust off a retired adventurer's every skill — matched on the nemesis
-`ADVENTURER` flag, never a name or a skill count — and off any citizen's legendary
-skills. Everything else rusts as normal. Swept once a game season. There is no stock
-DFHack tool for this.
 
 ## Information
 

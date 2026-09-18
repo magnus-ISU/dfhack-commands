@@ -27,11 +27,12 @@ own header ([h] / [j]) and a click on one of its rows.
   * house rules are the tools that CHANGE WHAT THE GAME MEANS rather than doing
     the clicking for you. Everything in the other columns automates something you
     could have done by hand; a house rule invents a rule vanilla does not have.
-    research-breakthrough is the one there today: vanilla's 312 research topics
-    unlock literary forms and nothing else, and it makes a breakthrough pay out a
+    research-breakthrough is the model: vanilla's 312 research topics unlock
+    literary forms and nothing else, and it makes a breakthrough pay out a
     craftable recipe instead -- permanently, written into the civ and saved with
-    the fort. A master switch meant "arm the useful pack" should not quietly
-    change the rules of somebody's fort.
+    the fort. rusty-legends is another: vanilla rusts every unused skill, and it
+    exempts legendary skills and retired adventurers. A master switch meant "arm
+    the useful pack" should not quietly change the rules of somebody's fort.
   * joke/ are jokes; they should never arrive by surprise, and that same master
     switch should not start playing music.
 
@@ -230,8 +231,6 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-name'), disable = cmd('disable', 'fort/auto-name')},
         {key = 'statue-redirect', label = 'statue-redirect',
          enable = cmd('enable', 'fort/statue-redirect'), disable = cmd('disable', 'fort/statue-redirect')},
-        {key = 'rusty-legends', label = 'rusty-legends',
-         enable = cmd('enable', 'fort/rusty-legends'), disable = cmd('disable', 'fort/rusty-legends')},
         {key = 'tarrasque', label = 'tarrasque',
          enable = cmd('enable', 'fort/tarrasque'), disable = cmd('disable', 'fort/tarrasque')},
         {key = 'caravan-unstick', label = 'caravan-unstick',
@@ -707,6 +706,12 @@ local COLUMNS = {
                 (dfhack.internal.research_breakthrough_hb_gen or 0) + 1
             notify_off({'research_unlock'})()
          end},
+        -- vanilla: every skill rusts when unused, legendary ones included, and a retired
+        -- adventurer's lifetime of skills rots in the dining room like anyone else's. This
+        -- exempts adventurers and legendary skills from rust outright -- a rule the game
+        -- does not have, not a shortcut to one it does.
+        {key = 'rusty-legends', label = 'rusty-legends',
+         enable = cmd('enable', 'fort/rusty-legends'), disable = cmd('disable', 'fort/rusty-legends')},
     }},
     {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
         {key = 'joke-super-saiyan', label = 'super-saiyan',

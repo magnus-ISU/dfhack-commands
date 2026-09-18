@@ -40,6 +40,12 @@ as rusty until the next check wipes it, rather than never appearing at all. Noth
 is actually lost, because `demotion_counter` is cleared long before it can mature
 into a lost level.
 
+**This is a house rule.** Vanilla rusts every unused skill, legendary or not, and a
+retired adventurer's are no exception; there is no "no rust" switch anywhere in the
+game. Exempting a class of skills from rust invents a rule DF does not have, so this
+lives in the *house rules* column of `fort/magnus-scripts`: off until you turn it on,
+and untouched by the `[r]` / `[m]` master switches.
+
 There is no stock DFHack tool for any of this: `gui/gm-unit`'s `remove_rust` is an
 empty `--TODO` stub and `modtools/skill-change` says `--TODO: skill rust?` at the
 top of the file. DF exposes no per-unit or global "no rust" switch either, so the
