@@ -44,8 +44,9 @@ kept breaking the limit; it stays disabled and THIS script designates trees itse
     retroactively, so gap-cutting can break it before it's even signed. Verified live.)
   * dig-shapes' drag-to-chop also consults this limit (manual_chop_budget below): it caps a
     chop box so total designations stop at the remaining allowance (manual marks may use the
-    reserved tree) -- unless you're already AT the limit, in which case designating more is
-    plainly deliberate and is not blocked.
+    reserved tree), and AT the limit it refuses the box outright, with the same notice --
+    breaking the agreement on purpose is refused exactly like breaking it by accident. DF's
+    own Chop tool is the way past it.
 
 Usage:
     enable auto-elf-chop        start managing tree-chopping under the limit (persists)
@@ -321,15 +322,16 @@ local function gate_status()
 end
 
 -- How many MORE trees may be designated by hand (dig-shapes' drag-to-chop consults this).
--- nil = no cap: either no elven agreement exists (unrestricted) or the fort is already AT
--- the limit -- past that point more designation is plainly deliberate, so it isn't blocked.
+-- nil = no cap (no elven agreement exists, or this year's is already broken and there is
+-- nothing left to protect). Under an intact agreement the answer is a number, and AT the
+-- limit that number is ZERO: a chop box that would break the agreement is refused whether
+-- the break is an accident or on purpose -- the refusal is the same, and so is the notice.
 -- Manual marks may use the reserved last tree, so the cap is `remaining`, not remaining-1.
 function manual_chop_budget()
     if not dfhack.world.isFortressMode() then return nil end
     load_state()
     local g = gate_status()
-    if g.unlimited then return nil end
-    if g.remaining <= 0 then return nil end
+    if g.unlimited or g.remaining < 0 then return nil end
     local designated = tree_survey(nil)
     return math.max(0, g.remaining - designated)
 end
@@ -341,7 +343,12 @@ function isEnabled()
     return enabled
 end
 
-local hb_gen = 0
+-- the heartbeat generation lives in dfhack.internal, shared across reloads of this file, so
+-- a hot reload's start() retires the OLD copy's closure instead of running beside it
+local function hb_gen(set)
+    if set ~= nil then dfhack.internal.auto_elf_chop_hb_gen = set end
+    return dfhack.internal.auto_elf_chop_hb_gen or 0
+end
 local warned_noburrow = false
 local last_pass = nil     -- {day, target}: gates the (heavier) tree survey
 
@@ -469,11 +476,11 @@ end
 local function start()
     enabled = true
     last_pass = nil
-    hb_gen = hb_gen + 1
-    local my_gen = hb_gen
+    local my_gen = hb_gen() + 1
+    hb_gen(my_gen)
     local n = 0
     local function heartbeat()
-        if not enabled or my_gen ~= hb_gen then return end
+        if not enabled or my_gen ~= hb_gen() then return end
         n = n + 1
         if n >= CHECK_FRAMES then n = 0; pcall(do_check) end
         dfhack.timeout(1, 'frames', heartbeat)
@@ -485,7 +492,7 @@ end
 
 local function stop()
     enabled = false
-    hb_gen = hb_gen + 1
+    hb_gen(hb_gen() + 1)
 end
 
 -- ---- lifecycle ------------------------------------------------------------
