@@ -554,39 +554,27 @@ local MARCH_KEY = 'economic-expeditions/march'
 local MARCH_CHECK_TICKS = 100
 local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
 
--- THE NEAREST MAP EDGE BY PATH, not by ruler. A straight-line pick sends the squad at whatever
--- edge is fewest tiles away as the crow flies, which is the wrong edge whenever a mountain, a
--- chasm or the shape of the fort is in the way -- and DFHack exposes no path LENGTH, only
--- `canWalkBetween` (a yes/no) and `getWalkableGroup` (which tiles are mutually reachable). So
--- this walks outward from the squad itself and takes the first edge tile it reaches: a
--- breadth-first search visits in order of distance, so the first one found IS the closest.
+-- THE NEAREST MAP EDGE THE SQUAD CAN ACTUALLY REACH. A pure straight-line pick sends them at
+-- whatever edge is fewest tiles away as the crow flies, which is the wrong edge when terrain
+-- or the shape of the fort is in the way. DFHack exposes no path LENGTH -- only
+-- `canWalkBetween` (a yes/no, but a REAL DF pathfind) and `getWalkableGroup`.
 --
--- Bounded, because a fort's walkable area is large and this runs on DF's own thread: past
--- BFS_CAP tiles it gives up and falls back to the straight-line pick rather than hold the game.
--- It runs once, when an expedition starts, never per frame.
+-- A breadth-first search of our own was tried and abandoned. It is correct -- BFS visits in
+-- distance order, so the first edge tile found is genuinely the nearest -- but unaffordable:
+-- measured on this fort (288x288, 312 z-levels), a citizen standing outdoors near an edge
+-- resolved in 23ms, while the DEEPEST citizen burned 272ms and gave up without reaching the
+-- surface at all, and the highest exhausted its reachable set in 46ms having found no outdoor
+-- edge tile. Most squads are inside the fort, so giving up was the common case, and half a
+-- second of held main thread is too much to pay for an answer that then fell back anyway.
 --
--- Distance is counted in STEPS, and DF walks diagonals in one step, so the eight horizontal
--- neighbours all cost the same. Vertical moves are allowed only off a stair or a ramp.
-local BFS_CAP = 120000
-
-local function is_edge(x, y)
-    local W = df.global.world.map
-    return x == 0 or y == 0 or x == W.x_count - 1 or y == W.y_count - 1
-end
-
-local function walkable_here(pos, group)
-    local ok, wg = pcall(dfhack.maps.getWalkableGroup, pos)
-    return ok and wg ~= 0 and wg == group
-end
-
--- can you change z from this tile? only off a stair or a ramp
-local function vertical_ok(pos)
-    local tt = dfhack.maps.getTileType(pos)
-    if not tt then return false end
-    local sh = df.tiletype.attrs[tt].shape
-    return sh == df.tiletype_shape.STAIR_UP or sh == df.tiletype_shape.STAIR_DOWN
-        or sh == df.tiletype_shape.STAIR_UPDOWN or sh == df.tiletype_shape.RAMP
-end
+-- So: rank the edge tiles by distance and ask DF's own pathfinder, nearest first, until one
+-- says yes. That is nearest-reachable rather than nearest-by-path -- a nearer edge whose route
+-- happens to wind can still be chosen over a further one with a straight road -- but it is
+-- honest about reachability, which is what was actually going wrong, and it costs a couple of
+-- pathfind calls instead of a hundred thousand tile reads.
+--
+-- Distance is CHEBYSHEV: DF walks a diagonal in one step, so the eight neighbours cost alike.
+local MAX_PATH_TESTS = 40     -- give up rather than pathfind to every tile on the perimeter
 
 -- an edge tile is only a place to leave from if it is open to the sky and unbuilt
 local function usable_edge(pos)
@@ -595,135 +583,67 @@ local function usable_edge(pos)
         and occ and occ.building == df.tile_building_occ.None
 end
 
-local function edge_tile_by_path(unit)
-    local W = df.global.world.map
-    local ok, group = pcall(dfhack.maps.getWalkableGroup, unit.pos)
-    if not ok or group == 0 then return nil end
-
-    local function key(x, y, z) return (z * W.y_count + y) * W.x_count + x end
-    local seen = {[key(unit.pos.x, unit.pos.y, unit.pos.z)] = true}
-    local queue = {{x = unit.pos.x, y = unit.pos.y, z = unit.pos.z}}
-    local head, visited = 1, 0
-
-    while head <= #queue do
-        local cur = queue[head]
-        head = head + 1
-        visited = visited + 1
-        if visited > BFS_CAP then return nil end
-
-        local here = xyz2pos(cur.x, cur.y, cur.z)
-        if is_edge(cur.x, cur.y) and usable_edge(here) then return here end
-
-        local steps = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{1,1,0},{1,-1,0},{-1,1,0},{-1,-1,0}}
-        if vertical_ok(here) then
-            steps[#steps + 1] = {0,0,1}
-            steps[#steps + 1] = {0,0,-1}
-        end
-        for _, d in ipairs(steps) do
-            local nx, ny, nz = cur.x + d[1], cur.y + d[2], cur.z + d[3]
-            if nx >= 0 and nx < W.x_count and ny >= 0 and ny < W.y_count
-                and nz >= 0 and nz < W.z_count then
-                local k = key(nx, ny, nz)
-                if not seen[k] then
-                    seen[k] = true
-                    if walkable_here(xyz2pos(nx, ny, nz), group) then
-                        queue[#queue + 1] = {x = nx, y = ny, z = nz}
-                    end
-                end
-            end
-        end
-    end
-    return nil
-end
-
--- The straight-line fallback, kept for when the search is capped out or finds nothing.
--- Topmost floor in each perimeter column, outside, unhidden, unbuilt, same walkable group.
-local function edge_tile_by_ruler(unit)
+-- Outdoor perimeter tiles in the unit's walkable group, nearest first.
+--
+-- The columns are RANKED BEFORE they are probed, and probing stops once enough near ones have
+-- been found. Finding the surface in a column means walking z downward until the first floor,
+-- and this map is 312 levels deep over a 1148-column perimeter -- scanning all of them cost
+-- ~200ms, nearly all of it spent on the far side of the map for candidates that were never
+-- going to win. Sorting first and stopping early looks at a few dozen columns instead.
+local function edge_candidates(unit, want)
     local W = df.global.world.map
     local ok, mygroup = pcall(dfhack.maps.getWalkableGroup, unit.pos)
-    if not ok then mygroup = nil end
+    if not ok or mygroup == 0 then return {} end
     local xmax, ymax = W.x_count - 1, W.y_count - 1
-    local cands = {}
-    for y = 1, ymax - 1 do
-        cands[#cands + 1] = {0, y}
-        cands[#cands + 1] = {xmax, y}
+
+    local cols = {}
+    local function add_col(x, y)
+        cols[#cols + 1] = {x = x, y = y,
+            d = math.max(math.abs(x - unit.pos.x), math.abs(y - unit.pos.y))}
     end
-    for x = 1, xmax - 1 do
-        cands[#cands + 1] = {x, 0}
-        cands[#cands + 1] = {x, ymax}
-    end
-    local best, bestd
-    for _, xy in ipairs(cands) do
+    for y = 1, ymax - 1 do add_col(0, y); add_col(xmax, y) end
+    for x = 1, xmax - 1 do add_col(x, 0); add_col(x, ymax) end
+    table.sort(cols, function(a, b) return a.d < b.d end)
+
+    local out = {}
+    for _, c in ipairs(cols) do
         for z = W.z_count - 1, 1, -1 do
-            local pos = xyz2pos(xy[1], xy[2], z)
+            local pos = xyz2pos(c.x, c.y, z)
             local tt = dfhack.maps.getTileType(pos)
             if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR then
                 if usable_edge(pos) then
                     local ok2, wg = pcall(dfhack.maps.getWalkableGroup, pos)
-                    if ok2 and wg ~= 0 and (not mygroup or wg == mygroup) then
-                        -- DF steps diagonally for the same cost, so distance is Chebyshev
-                        local d = math.max(math.abs(xy[1] - unit.pos.x),
-                                           math.abs(xy[2] - unit.pos.y))
-                        if not bestd or d < bestd then best, bestd = pos, d end
+                    if ok2 and wg ~= 0 and wg == mygroup then
+                        out[#out + 1] = {pos = pos, d = c.d}
                     end
                 end
                 break                      -- topmost floor in the column is the surface
             end
         end
+        if #out >= (want or MAX_PATH_TESTS) then break end
     end
-    return best
+    return out
 end
 
-local function edge_tile(unit)
+function edge_tile(unit)
     local t0 = os.clock()
-    local found = edge_tile_by_path(unit)
-    local ms = (os.clock() - t0) * 1000
-    if found then return found, ('pathfound in %.0f ms'):format(ms) end
-    return edge_tile_by_ruler(unit), ('search capped after %.0f ms, fell back to straight line'):format(ms)
-end
-
-local MARCH_KEY = 'economic-expeditions/march'
-local MARCH_CHECK_TICKS = 100
-local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
-
--- A walkable tile on the map PERIMETER, in the same walkable group as the unit -- borrowed
--- whole from `fort/loyal-retirees`, which learned that non-perimeter tiles never serve.
--- Topmost floor in each perimeter column, outside, unhidden, no building on it.
-local function edge_tile(unit)
-    local W = df.global.world.map
-    local ok, mygroup = pcall(dfhack.maps.getWalkableGroup, unit.pos)
-    if not ok then mygroup = nil end
-    local xmax, ymax = W.x_count - 1, W.y_count - 1
-    local cands = {}
-    for y = 1, ymax - 1 do
-        cands[#cands + 1] = {0, y}
-        cands[#cands + 1] = {xmax, y}
-    end
-    for x = 1, xmax - 1 do
-        cands[#cands + 1] = {x, 0}
-        cands[#cands + 1] = {x, ymax}
-    end
-    local best, bestd
-    for _, xy in ipairs(cands) do
-        for z = W.z_count - 1, 1, -1 do
-            local pos = xyz2pos(xy[1], xy[2], z)
-            local tt = dfhack.maps.getTileType(pos)
-            if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR then
-                local fl, occ = dfhack.maps.getTileFlags(pos)
-                if fl and fl.outside and not fl.hidden
-                    and occ and occ.building == df.tile_building_occ.None then
-                    local ok2, wg = pcall(dfhack.maps.getWalkableGroup, pos)
-                    if ok2 and wg ~= 0 and (not mygroup or wg == mygroup) then
-                        local d = math.abs(xy[1] - unit.pos.x) + math.abs(xy[2] - unit.pos.y)
-                        if not bestd or d < bestd then best, bestd = pos, d end
-                    end
-                end
-                break                      -- topmost floor in the column is the surface
-            end
+    local cands = edge_candidates(unit, MAX_PATH_TESTS)
+    if #cands == 0 then return nil, 'no outdoor map-edge tile in the squad\'s walkable group' end
+    local tested = 0
+    for _, c in ipairs(cands) do
+        tested = tested + 1
+        if tested > MAX_PATH_TESTS then break end
+        local ok, reachable = pcall(dfhack.maps.canWalkBetween, unit.pos, c.pos)
+        if ok and reachable then
+            return c.pos, ('%d tiles off, confirmed reachable on try %d, %.0f ms'):format(
+                c.d, tested, (os.clock() - t0) * 1000)
         end
     end
-    return best
+    -- nothing confirmed: take the nearest anyway rather than refuse the expedition
+    return cands[1].pos, ('no route confirmed in %d tries, taking the nearest (%.0f ms)'):format(
+        tested, (os.clock() - t0) * 1000)
 end
+
 
 -- the leader's histfig, which is who DF records as having given the order
 local function leader_hf(sq)
