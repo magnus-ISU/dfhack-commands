@@ -1,7 +1,27 @@
--- Create steel military uniform templates and pin each soldier's actual gear items.
+-- BACKUP of military-uniforms as it was before stand-ins were removed (2026-09-17). Frozen.
 --@module = true
 --@enable = true
 --[[
+military-uniforms-old -- THE PREVIOUS BEHAVIOUR, KEPT WHOLE
+
+This is `fort/military-uniforms` exactly as it stood before it stopped substituting
+materials: it still pins a copper breastplate onto a soldier whose uniform says steel while
+the steel is short, and still forges cheap stand-in gear (iron, bronze, copper, wood shields)
+when the demanded metal's bar budget is spent. That behaviour was judged too complex to
+trust and the live script no longer does it; this copy exists so it can be compared against,
+or switched back to, without digging through git.
+
+Same commands, same overlay, own persisted state (`military-uniforms-old`). RUN ONE OR THE
+OTHER, never both: both services would queue orders for the same slots and both overlays
+draw on the same spot of the Equip screen. `disable military-uniforms` before
+`enable military-uniforms-old`, and turn the other overlay off in `gui/overlay`.
+
+    military-uniforms-old            create/refresh the steel uniform set
+    military-uniforms-old orders     run one gear cycle (pin items + queue orders), once
+    enable military-uniforms-old     background service
+    disable military-uniforms-old    stop it
+
+------------------------------------------------------------------------------------------
     military-uniforms            create/refresh the steel uniform set
     military-uniforms orders     run one gear cycle (pin items + queue orders), once
     enable military-uniforms     background: pin gear items and queue orders as
@@ -24,19 +44,8 @@ player's explicit choice as far as DF is concerned, so DF's equipment solver doe
 not second-guess it.
 
 Asking what to PRODUCE then becomes trivial: anything a soldier is supposed to have
-but isn't pinned (nothing suitable in stock) is exactly one order.
-
-THE SQUAD'S UNIFORM IS THE TRUTH, AND THE ONLY THING THIS KNOWS. Each squad position's
-spec -- type, subtype, material, as set on the Equip screen -- is taken as correct, and the
-service's whole job is to turn it into a specific item that matches it exactly. It never
-CHOOSES a wrong piece: a slot that says steel is filled with steel or left empty. What a
-soldier already has on that does not match -- DF's own partial-match assignment, say -- is
-left on them rather than stripped, counted as still owed, and swapped for a piece of the
-spec's material the moment one is free; there is no ranking of wrong pieces, only the
-question "is this correct". It never forges backup gear in a cheaper metal while the steel
-is short, and has no notion of a stand-in to forge. It used to have all of that -- stand-in ranking, per-metal budgets
-shared between real and stand-in orders, upgrade-on-arrival -- and the version that did is
-kept whole as `fort/military-uniforms-old`.
+but isn't pinned (nothing suitable in stock), or is pinned only to an inferior
+stand-in (wrong material), is exactly one order.
 
 ONLY WHAT THE CIVILIZATION CAN MAKE. A template asks for the best forgeable piece of each
 family the civ has a recipe for -- a civ without high boots gets low boots -- and the forge
@@ -217,8 +226,9 @@ end
 -- with no steel bars silently rebuilt the fort's entire military as "Copper - <weapon>" --
 -- renamed AND with copper armour in the specs, which is a permanent downgrade of every squad
 -- the uniform is later applied to. It also contradicted the core rule that THE UNIFORM IS
--- NEVER EDITED: the uniform states the goal, and a shortage is a slot that waits. So the
--- templates always ask for their intended metal. Deliberate per-weapon exceptions
+-- NEVER EDITED: the uniform states the goal, and a shortage is handled by making a cheaper
+-- STAND-IN (see queue_standins) which soldiers wear until the real thing is forged. So the
+-- templates now always ask for their intended metal. Deliberate per-weapon exceptions
 -- (SILVER war hammer, COPPER crossbow) live in GROUP and are unaffected.
 
 -- "STEEL" -> "Steel", "COPPER" -> "Copper" (for the template name)
@@ -479,7 +489,7 @@ local widgets = require('gui.widgets')
 local gui = require('gui')
 local utils = require('utils')
 
-local GLOBAL_KEY = 'military-uniforms'
+local GLOBAL_KEY = 'military-uniforms-old'
 local DAY_TICKS = 1200
 local BARS_PER_ITEM = 1   -- metal gear (armour/weapon) = ~1 bar each
 local RESERVE_BARS = 3    -- keep this many bars of each metal free (moods / other jobs)
@@ -672,6 +682,35 @@ local function uniform_matpair(spec)
     if spec.mattype >= 0 then return spec.mattype, spec.matindex end
     if spec.material_class >= 0 and MATCLASS[spec.material_class] then return -1, spec.material_class end
     return nil
+end
+
+-- How good a metal is as ARMOUR/WEAPON stock, best first -- used both to choose the best
+-- stand-in already in stock and to decide what to forge when the demanded metal is
+-- unaffordable. Deliberately NOT the raw's material_value: that is an economic price, and
+-- by it SILVER outranks IRON, which would put soldiers in soft silver breastplates. Silver
+-- is last here for the same reason (it is only ever wanted where a uniform asks for it, on
+-- war hammers). Anything unlisted -- including wood/leather/bone -- sorts after all metals.
+local STANDIN_ORDER = {'STEEL', 'IRON', 'BRONZE', 'BISMUTH_BRONZE', 'COPPER', 'SILVER'}
+local WOOD_SHIELD_RANK = 1.5     -- better than iron (2), below the demanded steel (1)
+local metal_rank_cache
+local function metal_rank(mt, mi, item_type)
+    if mt ~= 0 then
+        -- A WOODEN SHIELD IS PREFERRED over any metal stand-in: it costs no bars at all and
+        -- blocks just as well while weighing far less. Only the material the uniform
+        -- actually demands outranks it.
+        if item_type == df.item_type.SHIELD and mi == df.entity_material_category.Wood then
+            return WOOD_SHIELD_RANK
+        end
+        return #STANDIN_ORDER + 1                          -- other material classes: worst
+    end
+    if not metal_rank_cache then
+        metal_rank_cache = {}
+        for i, id in ipairs(STANDIN_ORDER) do
+            local idx = inorganic_idx(id)
+            if idx then metal_rank_cache[idx] = i end
+        end
+    end
+    return metal_rank_cache[mi] or (#STANDIN_ORDER + 1)
 end
 
 -- CAN THIS METAL LEGALLY BE THAT ITEM? A material only makes armour if it carries
@@ -1514,7 +1553,8 @@ local function build_pool(claimed, jobitems)
                 b[#b + 1] = {it = it, id = it.id, mt = mt, mi = mi,
                              q = it:getQuality(), wear = item_wear(it),
                              size = item_size_race(it),
-                             hand = handed and item_hand(it) or nil}
+                             hand = handed and item_hand(it) or nil,
+                             rank = metal_rank(mt, mi, it:getType())}
             end
         end
     end
@@ -1548,32 +1588,44 @@ local function take_from_inventory(sol, w, hand, claimed)
             and (hand == nil or not HANDED[w.item_type] or item_hand(it) == hand)
         then
             local mt, mi = item_matpair(it)
-            -- the uniform's material only, the same rule as the pool
-            if mt ~= w.mat_type or mi ~= w.mat_index then goto continue end
             return {it = it, id = it.id, mt = mt, mi = mi, q = it:getQuality(),
                     wear = item_wear(it), size = item_size_race(it),
-                    hand = HANDED[w.item_type] and item_hand(it) or nil}
+                    hand = HANDED[w.item_type] and item_hand(it) or nil,
+                    rank = metal_rank(mt, mi, it:getType())}
         end
-        ::continue::
     end
 end
 
--- Pick the best free candidate for a want: the spec's own type, subtype, size AND material,
--- nothing else is a candidate at all; among those, higher quality, then less wear. `hand`
--- restricts to one hand for gauntlets. `require = 'masterwork'` narrows it to masterworks,
--- for the upgrade pass. Returns the candidate and removes it from the pool.
+-- Pick the best free candidate for a want. EXACT material always beats a stand-in; then
+-- higher quality, then less wear, then the more valuable material (so a stand-in is the
+-- best metal on hand rather than the first one found). `hand` restricts to one hand for
+-- gauntlets. `require` narrows what counts as acceptable at all:
+--   nil           anything that fits -- used to fill an EMPTY slot, where a stand-in
+--                 beats sending a soldier out bare
+--   'exact'       only the material the uniform demands -- used to replace a stand-in
+--   'masterwork'  only an exact-material masterwork -- used to upgrade a piece that is
+--                 already the right material while the masterwork toggle is on
+-- Returns the candidate and removes it from the pool.
 local function take_best(pool, w, hand, require)
     local bucket = pool[w.item_type .. '/' .. w.subtype]
     if not bucket then return nil end
     local best, best_i
     for i = 1, #bucket do
         local c = bucket[i]
-        if cand_fits(c, w, hand) and cand_exact(c, w)
-            and (require ~= 'masterwork' or c.q >= df.item_quality.Masterful)
-        then
-            if not best or c.q > best.q or (c.q == best.q and c.wear < best.wear) then
-                best, best_i = c, i
+        if cand_fits(c, w, hand) then
+            local ok = true
+            if require == 'exact' then
+                ok = cand_exact(c, w)
+            elseif require == 'masterwork' then
+                ok = cand_exact(c, w) and c.q >= df.item_quality.Masterful
             end
+            if ok and (not best
+                or (cand_exact(c, w) and not cand_exact(best, w))
+                or (cand_exact(c, w) == cand_exact(best, w)
+                    and (c.q > best.q
+                        or (c.q == best.q and (c.wear < best.wear
+                            or (c.wear == best.wear and c.rank < best.rank))))))
+            then best, best_i = c, i end
         end
     end
     if best then table.remove(bucket, best_i) end
@@ -1659,9 +1711,6 @@ local function pin_still_valid(id, w, unit_id, claimed)
     if it:getType() ~= w.item_type or it:getSubtype() ~= w.subtype then return false end
     if not item_pinnable(it) then return false end
     if item_size_race(it) ~= w.size_race then return false end
-    -- MATERIAL IS NOT CHECKED HERE. A piece of the wrong material on a soldier -- DF's own
-    -- partial-match assignment, or a pin from before -- is left on them rather than stripped;
-    -- it is counted as still owed and swapped for the spec's material the moment one is free.
     -- somebody else's property: DF will never fetch it for this soldier, so the slot would
     -- show "pending" forever. Release it and let the pin pass find (or order) another.
     if owned_by_other(it, unit_id) then return false end
@@ -1808,10 +1857,9 @@ local function assign_gear(soldiers, claimed, pool, jobitems)
                 end
             end
 
-            -- a piece that is not what the spec says -- wrong material, or (in masterwork
-            -- mode) below masterwork -- is a slot still owed, and one to put right the moment
-            -- a piece that IS what the spec says is free. No ranking of what is on them:
-            -- the only question is "is this correct", and if not, it is replaced
+            -- a stand-in of the wrong material, or (in masterwork mode) a piece below
+            -- masterwork, is a slot we still owe -- and one we upgrade the moment a
+            -- proper piece exists
             local upgradeable = {}
             for i, id in ipairs(keep) do
                 local it = df.item.find(id)
@@ -1848,17 +1896,13 @@ local function assign_gear(soldiers, claimed, pool, jobitems)
             end
 
             local changed = stale
-            -- 1. fill empty slots from the pool -- with what the spec says and nothing else.
-            -- A slot with no steel to put in it stays empty until steel exists; the service
-            -- never decides that copper will do. (It used to: "a stand-in beats nothing" put
-            -- soldiers in whatever metal was lying about and forged more of it -- see
-            -- military-uniforms-old for that behaviour, kept whole.)
+            -- 1. fill empty slots from the pool (any material -- a stand-in beats nothing)
             local gap = w.qty - #keep
             local unfilled = 0
             for _ = 1, gap do
                 local hand = want_hand
                 -- prefer something already on this dwarf, then the shared pool
-                local c = take_from_inventory(sol, w, hand, claimed) or take_best(pool, w, hand, 'exact')
+                local c = take_from_inventory(sol, w, hand, claimed) or take_best(pool, w, hand, false)
                 if c then
                     keep[#keep + 1] = c.id
                     claimed[c.id] = sol.pos
@@ -1868,10 +1912,11 @@ local function assign_gear(soldiers, claimed, pool, jobitems)
                     unfilled = unfilled + 1
                 end
             end
-            -- 2. put wrong pieces right when a correct one is free: a wrong-material piece
-            -- gives way to ANY piece of the spec's material (a plain steel helm beats a
-            -- masterwork copper one -- the spec says steel); a right-material piece only
-            -- ever gives way to a masterwork of the same, and only in masterwork mode
+            -- 2. upgrade stand-ins / sub-masterwork pieces when a proper one is now free.
+            -- A WRONG-MATERIAL stand-in upgrades to any exact-material piece; a piece that
+            -- is already the right material only ever upgrades to an exact masterwork (and
+            -- only while that toggle is on). Getting this split wrong is what would leave a
+            -- soldier in a copper breastplate just because no steel MASTERWORK existed yet.
             local still_owed = unfilled
             for _, idx in ipairs(upgradeable) do
                 local old = keep[idx]
@@ -1880,10 +1925,10 @@ local function assign_gear(soldiers, claimed, pool, jobitems)
                 local old_exact = (mt == w.mat_type and mi == w.mat_index)
                 local old_q = it:getQuality()
                 local hand = w.handed and item_hand(it) or nil   -- swap like for like
-                local c = take_best(pool, w, hand, old_exact and 'masterwork' or nil)
-                -- never swap DOWN in quality within the right material: a soldier should not
-                -- drop a fine steel helm to fetch a plain one of the same metal
-                if c and (not old_exact or c.q >= old_q) then
+                local c = take_best(pool, w, hand, old_exact and 'masterwork' or 'exact')
+                -- never swap DOWN in quality: a soldier should not drop a fine steel helm
+                -- to fetch a plain one of the same metal
+                if c and c.q >= old_q then
                     keep[idx] = c.id
                     claimed[c.id] = sol.pos
                     claimed[old] = nil
@@ -2046,13 +2091,63 @@ local function queue_shortfall(shortfall)
     -- gear finally arrived), plus anything left over from the pre-pinning model
     for key in pairs(state.orders) do
         if key:sub(1, 7) == 'supply/' then                  -- ensure_supply handles it
-        elseif key:sub(1, 4) == 'sub/' then drop_order(key) -- a stand-in order from before
+        elseif key:sub(1, 4) == 'sub/' then                 -- queue_standins handles these
         elseif key == 'pick' or key == 'axe' then           -- equip_workers handles these
         elseif not shortfall[key] then
             drop_order(key)                                 -- covered, or a retired cu/* key
         end
     end
     return queued, budget
+end
+
+-- STAND-IN PRODUCTION. Everything above orders the material the uniform actually demands.
+-- When that material is unaffordable -- its bar budget is spent, e.g. 2 steel bars against a
+-- 3-bar reserve -- the order is withheld, and if stock is empty too the slot then stays bare
+-- FOREVER: nothing to pin, nothing being made. That is how five soldiers ended up with no
+-- shield at all while the fort had none in stock and no steel to forge one.
+--
+-- So also order the piece in the best material we CAN afford (for a shield, plain wood costs
+-- no bars at all). The pin pass already treats a wrong-material piece as a stand-in and
+-- upgrades the soldier the moment the real thing exists, so this costs nothing but a cheap
+-- item. Generalises the old wood-shield-only pass to every slot.
+local function queue_standins(shortfall, budget)
+    local want_sub = {}
+    for key, r in pairs(shortfall) do
+        local mk = barkey(r.mat_type, r.mat_index)
+        if (r.empty or 0) > 0 and r.mat_type == 0 and (budget[mk] or 0) < BARS_PER_ITEM then
+            local best_mi, best_rank
+            for _, id in ipairs(STANDIN_ORDER) do
+                local idx = inorganic_idx(id)
+                if idx and idx ~= r.mat_index and (budget[barkey(0, idx)] or 0) >= BARS_PER_ITEM
+                    and legal_metal(idx, r.item_type)      -- no silver mail shirts
+                then
+                    local rk = metal_rank(0, idx)
+                    if not best_rank or rk < best_rank then best_mi, best_rank = idx, rk end
+                end
+            end
+            local sub = 'sub/' .. key
+            local wood_shield = r.item_type == df.item_type.SHIELD
+                and #df.global.world.items.other[df.items_other_id.WOOD] > 0
+            if wood_shield then
+                -- PREFERRED over any metal stand-in (see metal_rank): costs no bars, so it
+                -- also leaves the whole metal budget for armour that actually needs metal.
+                queue_one(sub, {item_type = r.item_type, subtype = r.subtype, mat_type = -1,
+                                mat_index = df.entity_material_category.Wood,
+                                size_race = r.size_race}, r.empty)
+                want_sub[sub] = true
+            elseif best_mi then
+                local n = math.max(1, math.min(r.empty, budget[barkey(0, best_mi)]))
+                queue_one(sub, {item_type = r.item_type, subtype = r.subtype, mat_type = 0,
+                                mat_index = best_mi, size_race = r.size_race}, n)
+                budget[barkey(0, best_mi)] = budget[barkey(0, best_mi)] - n
+                want_sub[sub] = true
+            end
+        end
+    end
+    -- retire stand-ins whose real key is covered, or whose real material is affordable again
+    for key in pairs(state.orders) do
+        if key:sub(1, 4) == 'sub/' and not want_sub[key] then drop_order(key) end
+    end
 end
 
 -- Masterwork re-forging needs metal: melt surplus inferior copies of the gear types we
@@ -2416,9 +2511,8 @@ local function run_cycle()
     local pool = build_pool(claimed, jobitems)
     local shortfall, pinned, repinned, released, adopted, repaired, nudged, pruned =
         assign_gear(soldiers, claimed, pool, jobitems)
-    queue_shortfall(shortfall)
-    -- no stand-in orders: what the uniform names is what gets forged, when its metal is
-    -- affordable, and nothing else (the old pass is in military-uniforms-old)
+    local _, budget = queue_shortfall(shortfall)
+    queue_standins(shortfall, budget)   -- something wearable while the real metal is short
 
     -- recycle surplus gear into bars: for the masterwork upgrade, and when the miner/
     -- woodcutter tools have run the steel out
@@ -2716,9 +2810,8 @@ end
 -- algorithms fighting: the pre-pinning version's weekly unstick pass erases any assignment
 -- whose item the soldier is not yet carrying and no job is fetching -- i.e. exactly the pins
 -- this version writes. Symptom was ~50 assignments silently reverting each game-day while
--- the code looked correct. Hit AGAIN 2026-09-17: the stand-in removal was deployed and the
--- old closure kept pinning copper onto marksdwarves for a day. So the module guard at the
--- bottom of this file now restarts the heartbeat whenever a reload finds one ticking.
+-- the code looked correct. AFTER ANY HOT RELOAD, take ownership of the tick:
+--     dfhack-run lua 'reqscript("fort/military-uniforms").set_toggle("queue", true)'
 -- (Tell-tale that the old code is still live: state.last_unstick or state.best_q reappearing
 -- in the persisted site data -- only the pre-rewrite version ever wrote those.)
 local last_run = nil
@@ -3253,13 +3346,7 @@ local function setup_alt_schedules()
     return n, eidx, oidx
 end
 
--- Loaded as a module (reqscript, a hot reload): if a heartbeat is already ticking, it is
--- an OLDER copy of this code -- take the tick over now, so a deploy is a deploy and not
--- the trap described above start_heartbeat. Nothing to take over on a fresh session.
-if dfhack_flags.module then
-    if hb_gen() > 0 and dfhack.world.isFortressMode() and service_on() then start_heartbeat() end
-    return
-end
+if dfhack_flags.module then return end
 
 if dfhack_flags and dfhack_flags.enable ~= nil then
     if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
