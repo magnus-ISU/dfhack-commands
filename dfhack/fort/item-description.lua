@@ -88,11 +88,73 @@ ItemDescriptionOverlay.ATTRS{
     frame = {w = 55, h = 34},
 }
 
--- the wrapped description lines DF computed for the current item, or nil if not applicable
+-- ---- the artifact's maker ----------------------------------------------------
+--
+-- DF's description of an artifact never says who made it; the maker is in the world's
+-- history, on the ARTIFACT_CREATED event, and nowhere on the item. One pass over the
+-- event list finds it (comparing type ids only -- a name lookup per event is a hundred
+-- times slower), cached per item so it is asked once per sheet, not once per frame.
+local creator_cache = {id = nil, text = nil}
+
+local function race_name(race)
+    local cr = df.creature_raw.find(race)
+    return cr and cr.name[0] or 'creature'
+end
+
+local function creator_line(item)
+    if not item or not item.flags.artifact then return nil end
+    local ref = dfhack.items.getGeneralRef(item, df.general_ref_type.IS_ARTIFACT)
+    if not ref then return nil end
+    local CREATED = df.history_event_type.ARTIFACT_CREATED
+    local ev = df.global.world.history.events
+    for i = #ev - 1, 0, -1 do
+        local e = ev[i]
+        if e:getType() == CREATED and e.artifact_id == ref.artifact_id then
+            local hf = df.historical_figure.find(e.creator_hfid)
+            if not hf then return nil end
+            local name = dfhack.translation.translateName(hf.name)
+            if name == '' then return nil end
+            local prof = (df.profession[hf.profession] or ''):lower():gsub('_', ' ')
+            local when = e.year >= 0 and (' in %d'):format(e.year) or ''
+            return ('Created by %s, %s %s%s.'):format(name, race_name(hf.race), prof, when)   -- cp437, as the grid wants
+        end
+    end
+    return nil
+end
+
+-- wrap a sentence into lines of at most `width` characters, on spaces
+local function wrap(text, width)
+    local out, line = {}, ''
+    for word in text:gmatch('%S+') do
+        if #line == 0 then line = word
+        elseif #line + 1 + #word <= width then line = line .. ' ' .. word
+        else out[#out + 1] = line; line = word end
+    end
+    if #line > 0 then out[#out + 1] = line end
+    return out
+end
+
+-- The wrapped description lines DF computed for the current item, or nil if not applicable.
+-- For an artifact with a known maker, two rows below the description (one blank, one of
+-- text) name them, in the same list so scrolling and the box height take them in.
 local function desc_lines()
     local vs = df.global.game.main_interface.view_sheets
     if vs.active_sheet ~= df.view_sheet_type.ITEM then return nil, vs end
-    return vs.description.text, vs
+    local lines = vs.description.text
+    if creator_cache.id ~= vs.active_id then
+        creator_cache.id = vs.active_id
+        creator_cache.text = creator_line(df.item.find(vs.active_id))
+    end
+    if not creator_cache.text then return lines, vs end
+    local out, width = {}, 0
+    for i = 0, #lines - 1 do
+        out[#out + 1] = lines[i]
+        width = math.max(width, #lines[i].value)     -- wrap the way DF wrapped the rest
+    end
+    if width < 20 then width = SPAN_W - TEXT_SHIFT - 4 end
+    out[#out + 1] = {value = ''}
+    for _, l in ipairs(wrap(creator_cache.text, width)) do out[#out + 1] = {value = l} end
+    return out, vs, true
 end
 
 -- true if anything HOLDS the viewed item -- building (pedestal, case, workshop),
@@ -373,7 +435,9 @@ local function render_display_mode(lines, vs)
         g.moved_in_row = nil
     end
 
-    -- description below, scrollable, up to half the screen
+    -- description below, scrollable, up to half the screen. `lines` is DF's own vector
+    -- (0-based) unless a maker line was appended, in which case it is a Lua list (1-based).
+    local off = df.isvalid(lines) and 0 or 1
     local total = #lines
     local maxrows = math.max(1, math.floor(gps.dimy / 2))
     local n = math.min(total, maxrows)
@@ -384,7 +448,7 @@ local function render_display_mode(lines, vs)
     for row = 0, cover - 1 do
         local y = desc_top + row
         if y >= gps.dimy then break end
-        local s = pad .. (row < n and lines[scroll + row].value or '')
+        local s = pad .. (row < n and lines[scroll + row + off].value or '')
         local w = SPAN_W + TEXT_SHIFT - BORDER_PAD
         if #s < w then s = s .. (' '):rep(w - #s) else s = s:sub(1, w) end
         dfhack.screen.paintString(TEXT_PEN, paint_l, y, s)
@@ -396,11 +460,12 @@ end
 
 function ItemDescriptionOverlay:onRenderFrame(dc, rect)
     local ok, err = pcall(function()
-        local lines, vs = desc_lines()
+        local lines, vs, extra = desc_lines()
         if not lines then geo = nil return end
         -- unheld items with a short description already fit DF's own box --
-        -- leave those alone rather than redraw them for no reason
-        if not has_holder(vs) and #lines <= DF_VISIBLE_ROWS then
+        -- leave those alone rather than redraw them for no reason (unless we have a
+        -- maker line to add under it)
+        if not has_holder(vs) and not extra and #lines <= DF_VISIBLE_ROWS then
             geo = nil
             return
         end
