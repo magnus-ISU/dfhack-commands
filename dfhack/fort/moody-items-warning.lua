@@ -265,7 +265,7 @@ end
 local CATEGORIES = {
     {label = 'stone boulders',  vec = 'BOULDER',     test = hard_stone},
     {label = 'logs',            vec = 'WOOD'},
-    {label = 'tanned leather',  vec = 'SKIN_TANNED'},
+    {label = 'leather',         vec = 'SKIN_TANNED'},
     {label = 'metal bars',      vec = 'BAR',         test = metal_bar},
     {label = 'rough gems',      vec = 'ROUGH',       test = rough_gem},
     {label = 'cut gems',        vec = 'SMALLGEM'},
@@ -460,8 +460,8 @@ function message()   -- module-level: the notification resolves it live, see reg
     if #gone == 0 and #short == 0 then return end
     local parts = {}
     if #gone > 0 then parts[#parts + 1] = ('No %s'):format(table.concat(gone, ', ')) end
-    if #short > 0 then parts[#parts + 1] = ('only %s'):format(table.concat(short, ', ')) end
-    return ('%s for a mood'):format(table.concat(parts, '; '))
+    if #short > 0 then parts[#parts + 1] = table.concat(short, ', ') end
+    return table.concat(parts, '; ')
 end
 
 function show_dialog()   -- module-level: the notification resolves it live, see register()
