@@ -49,7 +49,23 @@ stockpiled items, and the contents of bins and barrels. Only items that can REAC
 dwarf get from here to there" -- and nothing already standing on it.
 
 Rows are one kind of thing, not one item: every gabbro figurine is a row, whatever its
-quality or what it is encrusted with, because that is how you think about them. CLICKING A ROW
+quality or what it is encrusted with, because that is how you think about them.
+
+TWO KINDS OF THING ARE ROWED BY WHAT THEY MEAN INSTEAD. Corpses split into butcherable
+bodies / refuse / your own dead, and CAGES split by what is inside them -- important cages
+(a megabeast, titan, forgotten beast, demon or night creature), prisoner cages (anybody
+else who can think), animal cages, empty cages, and other cages for a cage being used as a
+plain container. "Wooden cage" is a useless row when one of them holds a forgotten beast
+and forty hold seeds. THE FILTERS
+CUT INSIDE A ROW: set a minimum quality and a row of five earrings becomes a row of the
+three that pass -- that is the count it shows, those are the items `[specific]` lists, and
+those are what a click on it takes. A row none of whose items pass is not shown. Narrowing
+the sliders pulls a selection down with them (the closest N of what still passes; a hand-
+picked set drops what is hidden), and widening them again does not put it back. Each row
+opens with the distance to its closest passing item. `Melt targets` (Shift-T) keeps only
+metal items and caps the quality sliders at exceptional -- everything below masterwork, since
+the masterworks and artifacts are the ones you keep -- as a starting point; move them
+afterwards if you like. Turning it off puts quality back to "any". CLICKING A ROW
 takes all of that kind, and clicking it again clears it; SHIFT-CLICK marks every row from the
 last one clicked to this one. The bands along the right edge -- `[-1]`, the count, `[+1]`,
 `[+10]`, `[all]` -- are there when you want an exact number instead. `[specific]` opens the
@@ -159,8 +175,9 @@ end
 
 -- ---- corpses ------------------------------------------------------------------
 --
--- (Wool and hair are excluded: DF files them as corpse pieces because they come off an
--- animal, but they are cloth stock, not remains. See corpse_category.)
+-- (Butchery PRODUCTS are excluded -- bones, skulls, teeth, horns, shells, wool. DF files them
+-- as corpse pieces because they come off an animal, but they are craft stock, not remains, and
+-- they get ordinary item rows instead. See is_usable_remains.)
 --
 -- Three rows, because a pile of corpses is three different chores wearing one word. What
 -- DF calls them all is "refuse".
@@ -208,17 +225,59 @@ local function is_own_dead(it)
     return false
 end
 
+-- DF's own bits for "this piece IS a material", one per refuse-stockpile category: a refuse
+-- pile sorts bones / skulls / shells / teeth / horns / hair separately from corpses and body
+-- parts precisely because those are STOCK and the rest is rot.
+local CORPSE_MATERIAL_FLAGS = {
+    'bone', 'skull', 'shell', 'tooth', 'horn', 'hair_wool',
+    'leather', 'pearl', 'silk', 'yarn', 'soap', 'wood', 'plant',
+}
+
+-- Is this corpse piece a usable craft material rather than remains?
+--
+-- The test is one of those flags AND NOT `unbutchered`, and both halves are load-bearing --
+-- measured on a live fort, neither alone is enough:
+--
+--   * A SEVERED LIMB CARRIES THE MATERIAL BIT TOO. "troglodyte right lower arm" is
+--     `bone + unbutchered`, because there are two bones inside it waiting to be cut out
+--     (`material_amount[Bone] == 2`). It is a body part, not a bone. `unbutchered` is what
+--     tells the two apart: the finished item -- "right lower leg bone" -- carries `bone`
+--     alone. A severed head is `unbutchered` with no material bit at all.
+--   * THE MATERIAL IS NOT A TEST EITHER. `dfhack.matinfo.decode` on that same severed arm
+--     returns "troglodyte bone" with ITEMS_HARD set, because the item's dominant tissue is
+--     bone -- so anything keyed off the material flags files severed limbs as craft stock.
+--
+-- MANGLED IS NOT UNUSABLE, which was worth checking because it looks like it should be: a
+-- "crundle mangled skull" carries the same `skull` bit, the same "crundle bone" material and
+-- the same ITEMS_HARD as a clean one, and the wiki is explicit that being mangled does not
+-- stop a corpse being butchered. So mangled bones and skulls count as stock like any other.
+-- The word only describes the state of the thing it came off.
+--
+-- SCALES AND CHITIN ARE NOT STOCK, which is the other way round from what you would guess.
+-- "crundle scale" and "antman chitin" carry NO corpse flag and NO material amount, and their
+-- material has no ITEMS_* flag of any kind -- nothing in the game can be made out of them --
+-- so they stay filed with the refuse, which is where DF puts them.
+local function is_usable_remains(it)
+    local ok, flags = pcall(function() return it.corpse_flags end)
+    if not ok or not flags then return false end
+    if flags.unbutchered then return false end
+    for _, bit in ipairs(CORPSE_MATERIAL_FLAGS) do
+        local got, on = pcall(function() return flags[bit] end)
+        if got and on then return true end
+    end
+    return false
+end
+
 -- which of the three rows this corpse or body part belongs to, or nil if it is not one
 local function corpse_category(it)
     local t = it:getType()
     if t ~= df.item_type.CORPSE and t ~= df.item_type.CORPSEPIECE then return nil end
-    -- WOOL AND HAIR ARE NOT REMAINS. DF files shorn wool as a CORPSEPIECE -- it comes off an
-    -- animal, so it shares the item type with a severed arm -- but nobody thinks of a bin of
-    -- alpaca wool as a corpse: it is thread waiting for a loom, and burying it with the
-    -- butchery leftovers is how it ends up in a refuse pile. `corpse_flags.hair_wool` is DF's
-    -- own bit for it, and the yarn ones carry `yarn` on top.
-    local ok, wool = pcall(function() return it.corpse_flags.hair_wool end)
-    if ok and wool then return nil end
+    -- BUTCHERY PRODUCTS ARE NOT REMAINS. A bone, a skull, a tooth, an antler, a bin of shorn
+    -- alpaca wool -- DF files them all as CORPSEPIECE because they came off an animal, so they
+    -- share an item type with a severed arm, but they are craft stock waiting on a workshop.
+    -- Rowing them with the butchery leftovers is how they end up buried in a refuse pile.
+    -- They fall through to ordinary item rows instead, grouped by what they are.
+    if t == df.item_type.CORPSEPIECE and is_usable_remains(it) then return nil end
     if is_own_dead(it) then return CORPSE_OWN end
     -- a whole, unrotten body of an animal is meat on legs; anything else is refuse. A
     -- severed hand is a body PART however fresh it is, and a sentient corpse is never
@@ -230,6 +289,106 @@ local function corpse_category(it)
         end
     end
     return CORPSE_REFUSE
+end
+
+-- ---- cages -------------------------------------------------------------------
+--
+-- A pile of cages is not one chore either. "cage" is a container, and what is inside decides
+-- entirely what moving it means: a caged forgotten beast, a captured goblin, a stack of war
+-- dogs and an empty cage waiting to be re-used have nothing to do with each other, and they
+-- all read as "wooden cage" in a list sorted by what things are made of. So cages get rows by
+-- OCCUPANT, the way corpses get rows by chore.
+--
+-- Unlike the corpse rows these are NOT exempt from the quality and value sliders: a cage is a
+-- crafted object with both, and a masterwork glass cage is a real thing to filter on.
+
+local CAGE_IMPORTANT = 'cages:important'
+local CAGE_PRISONER  = 'cages:prisoner'
+local CAGE_ANIMAL    = 'cages:animal'
+local CAGE_EMPTY     = 'cages:empty'
+local CAGE_OTHER     = 'cages:other'
+
+local CAGE_LABEL = {
+    [CAGE_IMPORTANT] = 'Important cages (beasts)',
+    [CAGE_PRISONER]  = 'Prisoner cages',
+    [CAGE_ANIMAL]    = 'Animal cages',
+    [CAGE_EMPTY]     = 'Empty cages',
+    [CAGE_OTHER]     = 'Other cages',
+}
+
+-- WHAT COUNTS AS "IMPORTANT" IS WIDER THAN MEGABEAST, deliberately. Sorting strictly on
+-- MEGABEAST/SEMIMEGABEAST would file a caged forgotten beast, titan or werebeast under ANIMAL
+-- CAGES, because none of them is sapient -- which is the one place this could be actively
+-- misleading, since those are exactly the cages you never want to move by accident. So the
+-- test is "is this thing a named horror", and the flag list says which: 7 castes in these raws
+-- carry MEGABEAST and 8 carry SEMIMEGABEAST, but 45 carry TITAN, 459 FEATURE_BEAST (forgotten
+-- beasts), 20 UNIQUE_DEMON and 192 NIGHT_CREATURE. Trim the list if you want it narrower.
+local IMPORTANT_CASTE_FLAGS = {
+    'MEGABEAST', 'SEMIMEGABEAST', 'TITAN', 'FEATURE_BEAST',
+    'UNIQUE_DEMON', 'DEMON', 'NIGHT_CREATURE',
+}
+
+-- the units a cage holds. DF hangs them off the CAGE as CONTAINS_UNIT refs (the unit carries
+-- the matching CONTAINED_IN_ITEM), which is not the same list as its contained ITEMS.
+local function caged_units(it)
+    local out = {}
+    for _, r in ipairs(it.general_refs) do
+        if r:getType() == df.general_ref_type.CONTAINS_UNIT then
+            local u = df.unit.find(r.unit_id)
+            if u then out[#out + 1] = u end
+        end
+    end
+    return out
+end
+
+-- 3 = a beast you would rather not lose track of, 2 = somebody who can think, 1 = livestock
+local function occupant_rank(u)
+    local _, caste = creature_caste(u.race, u.caste)
+    if not caste then return 1 end
+    for _, f in ipairs(IMPORTANT_CASTE_FLAGS) do
+        local ok, on = pcall(function() return caste.flags[f] end)
+        if ok and on then return 3 end
+    end
+    if caste.flags.CAN_LEARN or caste.flags.CAN_SPEAK then return 2 end
+    return 1
+end
+
+-- which cage row this belongs to, or nil if it is not a cage
+local function cage_category(it)
+    if it:getType() ~= df.item_type.CAGE then return nil end
+    local units = caged_units(it)
+    if #units > 0 then
+        -- a cage holding several takes the rank of its most important occupant: one goblin
+        -- among the war dogs makes it a prisoner cage, not a kennel
+        local rank = 0
+        for _, u in ipairs(units) do
+            local r = occupant_rank(u)
+            if r > rank then rank = r end
+        end
+        if rank >= 3 then return CAGE_IMPORTANT end
+        if rank == 2 then return CAGE_PRISONER end
+        return CAGE_ANIMAL
+    end
+    -- NOT EMPTY JUST BECAUSE NOBODY IS IN IT. Forts use cages as ordinary containers -- 45 of
+    -- the 126 cages in the fort this was written against hold seeds and no creature at all --
+    -- and calling those "empty" would have somebody move a cage expecting it to be spare.
+    local ok, contents = pcall(dfhack.items.getContainedItems, it)
+    if ok and contents and #contents > 0 then return CAGE_OTHER end
+    return CAGE_EMPTY
+end
+
+-- ---- what row does this item belong to? --------------------------------------
+--
+-- Corpses and cages are grouped by what they MEAN -- whose body, what is inside -- rather than
+-- by what they are made of, which is how everything else is grouped. Returns the row key, its
+-- label, and whether it is a corpse row (those alone are exempt from the quality/value
+-- sliders, having neither).
+local function special_row(it)
+    local cat = corpse_category(it)
+    if cat then return cat, CORPSE_LABEL[cat], true end
+    cat = cage_category(it)
+    if cat then return cat, CAGE_LABEL[cat], false end
+    return nil
 end
 
 -- WHICH BURROW IS IT STANDING IN? A burrow is how a fort says "this pile is the hospital's"
@@ -266,6 +425,16 @@ end
 -- question per row or per keystroke, is the same work many times over. The tile -> walkability
 -- lookup is cached because items pile up: 14k items sat on 2.1k distinct tiles here.
 
+-- Made of a metal, whatever the item: the thing a smelter can take back. Metals are
+-- inorganic (material type 0), so the raw is read straight rather than through matinfo,
+-- which costs 0.5ms an item and this runs on every item in the fort.
+local function is_metal(it)
+    local idx = it:getMaterialIndex()
+    if it:getMaterial() ~= 0 or idx < 0 then return false end
+    local raw = df.global.world.raws.inorganics.all[idx]
+    return raw and raw.material.flags.IS_METAL or false
+end
+
 function scan_items(target)
     burrow_cache = nil                     -- fresh burrow answers per scan
     local tgroup = walk_group(target)
@@ -285,11 +454,8 @@ function scan_items(target)
                     local g = tile_group[key]
                     if g == nil then g = walk_group(pos) or false; tile_group[key] = g end
                     if g == tgroup then
-                        local cat = corpse_category(it)
-                        local gkey, label
-                        if cat then
-                            gkey, label = cat, CORPSE_LABEL[cat]
-                        else
+                        local gkey, label, is_corpse = special_row(it)
+                        if not gkey then
                             -- DF appends a stack marker (" <#8>") to a stacked item's
                             -- description; the row is the KIND, so the one item's count has
                             -- no business in its name
@@ -305,7 +471,7 @@ function scan_items(target)
                         end
                         local grp = groups[gkey]
                         if not grp then
-                            grp = {key = gkey, label = label, corpse = cat and true or false,
+                            grp = {key = gkey, label = label, corpse = is_corpse or false,
                                    items = {}, sel = 0, specific = nil}
                             groups[gkey] = grp
                             order[#order + 1] = grp
@@ -316,6 +482,7 @@ function scan_items(target)
                             value = dfhack.items.getValue(it),
                             quality = it:getQuality(), wear = it.wear,
                             forbidden = it.flags.forbid,
+                            metal = is_metal(it),
                             burrow = burrow_at(pos),
                         }
                         total = total + 1
@@ -336,6 +503,7 @@ function scan_items(target)
             v = math.max(v, e.value); q = math.max(q, e.quality); w = math.max(w, e.wear)
         end
         grp.value, grp.quality, grp.wear = v, q, w
+        grp.eligible = grp.items      -- narrowed per filter by the picker
         grp.total = #grp.items
     end
     return order, nil, total
@@ -768,12 +936,14 @@ SpecificScreen.ATTRS{focus_path = 'move-items/specific'}
 function SpecificScreen:init(info)
     self.group = info.group
     self.on_close = info.on_close
+    -- only what the picker's sliders let through: the row IS those items, here as elsewhere
+    self.items = self.group.eligible or self.group.items
     -- the explicit set starts as whatever the row's number already means: the closest N
     self.chosen = {}
     if self.group.specific then
         for id in pairs(self.group.specific) do self.chosen[id] = true end
     else
-        for i = 1, self.group.sel do self.chosen[self.group.items[i].id] = true end
+        for i = 1, math.min(self.group.sel, #self.items) do self.chosen[self.items[i].id] = true end
     end
     self.last_idx = nil
     SPEC_ACTIVE = self    -- module-level handle, the picker's twin
@@ -803,7 +973,7 @@ end
 
 function SpecificScreen:choices()
     local out = {}
-    for i, e in ipairs(self.group.items) do
+    for i, e in ipairs(self.items) do
         local mark = self.chosen[e.id] and string.char(251) or ' '   -- a checkmark if we have one
         local row = {{text = ('%-8d [%s] %s'):format(e.dist, mark, e.desc)}}
         if e.burrow then
@@ -814,15 +984,35 @@ function SpecificScreen:choices()
     return out
 end
 
+-- A CLICK MUST NOT SCROLL THE LIST BACK TO THE TOP.
+--
+-- `widgets.List` moves the view to wherever `selected` is every time `setChoices` runs (it
+-- calls setSelected -> moveCursor, which drags page_top to bring the selection into view).
+-- Both screens here take `_MOUSE_L` in their own `onInput` -- they have to, because WHICH BAND
+-- of a row was clicked is what decides between [specific], [-], [+], [+10] and "all of this
+-- kind" -- and returning true means the List's own mouse handler, the one that would have
+-- called `setSelected(idx)`, never runs. So `selected` sat at row 1 while the player clicked
+-- row 40, and the refresh afterwards snapped the view back to the top.
+--
+-- Two halves: move the selection to the row actually clicked, and put `page_top` back after
+-- rebuilding, so that a row appearing or disappearing under a filter cannot scroll the view
+-- either. The scrollbar is told separately because `setChoices` updated it from the old top.
+local function set_choices_keeping_view(list, choices, selected)
+    local top = list.page_top
+    list:setChoices(choices, selected)
+    local max_top = math.max(1, #list.choices - list.page_size + 1)
+    list.page_top = math.max(1, math.min(top, max_top))
+    list.scrollbar:update(list.page_top, list.page_size, #list.choices)
+end
+
 function SpecificScreen:refresh()
     local list = self.subviews.list
-    local sel = list:getSelected()
-    list:setChoices(self:choices(), sel)
+    set_choices_keeping_view(list, self:choices(), list:getSelected())
 end
 
 -- shift-click extends from the last one clicked, which is what every list in the world does
 function SpecificScreen:toggle(idx, shift)
-    local items = self.group.items
+    local items = self.items
     if shift and self.last_idx then
         local a, b = math.min(self.last_idx, idx), math.max(self.last_idx, idx)
         local on = not self.chosen[items[idx].id]
@@ -837,8 +1027,10 @@ end
 
 function SpecificScreen:onInput(keys)
     if keys._MOUSE_L then
-        local idx = self.subviews.list:getIdxUnderMouse()
+        local list = self.subviews.list
+        local idx = list:getIdxUnderMouse()
         if idx then
+            list:setSelected(idx)      -- we swallow the click, so do the List's own bookkeeping
             self:toggle(idx, dfhack.internal.getModifiers().shift)
             return true
         end
@@ -917,6 +1109,27 @@ function PickerScreen:init(info)
                     initial_option = false,
                     on_change = function() self:refresh() end,
                 },
+                -- MELT TARGETS: metal only, and the quality sliders jump to ordinary..exceptional
+                -- -- everything BELOW masterwork, because the masterworks and artifacts are the
+                -- ones you keep -- as a starting point; they stay yours to move afterwards. Off
+                -- puts quality back to "any", since the jump was this button's doing.
+                widgets.ToggleHotkeyLabel{
+                    view_id = 'melt_targets',
+                    frame = {t = 1, l = 56, w = 26},
+                    label = 'Melt targets:',
+                    key = 'CUSTOM_SHIFT_T',
+                    options = {{label = 'Yes', value = true, pen = COLOR_GREEN},
+                               {label = 'No', value = false}},
+                    initial_option = false,
+                    on_change = function(on)
+                        local sv = self.subviews
+                        if sv.min_quality and sv.max_quality then
+                            sv.min_quality:setOption(0)
+                            sv.max_quality:setOption(on and 4 or 6)
+                        end
+                        self:refresh()
+                    end,
+                },
                 -- the trade screen's own filter sliders, and they are laid out for a 38-wide
                 -- column: given the whole width they draw on top of each other
                 widgets.Panel{
@@ -957,6 +1170,9 @@ end
 
 function PickerScreen:onDismiss()
     if ACTIVE == self then ACTIVE = nil end
+    -- the errand is over, however it ended (moved, cancelled, Esc): give the mining menu back
+    -- exactly as it was. Defined further down; a global, so it resolves when this actually runs.
+    reopen_mining_menu()
 end
 
 -- the sliders call this by name (they are the trade screen's own widgets)
@@ -964,36 +1180,74 @@ function PickerScreen:refresh_list()
     self:refresh()
 end
 
+-- the slider settings, read the way DFHack's own move-goods screen reads them
 function PickerScreen:filters()
-    local f = {min_quality = 0, max_quality = 5, min_value = 0, min_condition = 3}
+    local f = {min_quality = 0, max_quality = 6, min_value = 0, max_value = math.huge,
+               min_condition = 3, max_condition = 0,
+               hide_forbidden = self.subviews.hide_forbidden:getOptionValue(),
+               melt = self.subviews.melt_targets:getOptionValue()}
     local sv = self.subviews
+    local function num(v) return (type(v) == 'table') and v.value or v end
     if sv.min_quality then f.min_quality = sv.min_quality:getOptionValue() end
     if sv.max_quality then f.max_quality = sv.max_quality:getOptionValue() end
-    if sv.min_value then
-        local v = sv.min_value:getOptionValue()
-        f.min_value = (type(v) == 'table') and v.value or v
-    end
+    if sv.min_value then f.min_value = num(sv.min_value:getOptionValue()) end
+    if sv.max_value then f.max_value = num(sv.max_value:getOptionValue()) end
     if sv.min_condition then f.min_condition = sv.min_condition:getOptionValue() end
+    if sv.max_condition then f.max_condition = sv.max_condition:getOptionValue() end
     return f
+end
+
+-- THE FILTERS ARE PER ITEM, NOT PER ROW. A row is a kind -- "gabbro earring" -- and two
+-- earrings of that kind can sit either side of a quality slider; the row stays, with the
+-- earrings that pass and no others. What the row shows, counts, offers in [specific] and
+-- sends when clicked is exactly `eligible`, the items behind it that pass the sliders now.
+-- Corpses are exempt from quality and value (they have neither) but not from forbidden or
+-- wear, the same as DFHack's screen treats them.
+local function item_passes(e, g, f)
+    if f.hide_forbidden and e.forbidden then return false end
+    if f.melt and not e.metal then return false end
+    if f.min_condition < e.wear or f.max_condition > e.wear then return false end
+    if not g.corpse then
+        if e.quality < f.min_quality or e.quality > f.max_quality then return false end
+        if e.value < f.min_value or e.value > f.max_value then return false end
+    end
+    return true
+end
+
+-- Recompute every row's eligible items and pull its selection down to what still passes:
+-- a count of "the closest N" becomes the closest N of those, and a hand-picked set drops
+-- the items the sliders have hidden, since sending something you can no longer see would be
+-- a surprise on the day the haulers arrive.
+function PickerScreen:apply_filters()
+    local f = self:filters()
+    for _, g in ipairs(self.groups) do
+        local eligible = {}
+        for _, e in ipairs(g.items) do
+            if item_passes(e, g, f) then eligible[#eligible + 1] = e end
+        end
+        g.eligible = eligible
+        g.total = #eligible
+        g.value = 0
+        for _, e in ipairs(eligible) do g.value = math.max(g.value, e.value) end
+        if g.specific then
+            local kept, n = {}, 0
+            for _, e in ipairs(eligible) do
+                if g.specific[e.id] then kept[e.id] = true; n = n + 1 end
+            end
+            g.specific = (n > 0) and kept or nil
+            g.sel = n
+        else
+            g.sel = math.min(g.sel, g.total)
+        end
+    end
 end
 
 function PickerScreen:visible_groups()
     local search = (self.subviews.search.text or ''):lower()
-    local hide_forbidden = self.subviews.hide_forbidden:getOptionValue()
-    local f = self:filters()
     local out = {}
     for _, g in ipairs(self.groups) do
-        local ok = true
-        if #search > 0 and not g.label:lower():find(search, 1, true) then ok = false end
-        if ok and hide_forbidden then
-            local any = false
-            for _, e in ipairs(g.items) do if not e.forbidden then any = true; break end end
-            ok = any
-        end
-        if ok and not g.corpse then
-            if g.quality < f.min_quality or g.quality > f.max_quality then ok = false end
-            if ok and g.value < f.min_value then ok = false end
-        end
+        local ok = g.total > 0
+        if ok and #search > 0 and not g.label:lower():find(search, 1, true) then ok = false end
         if ok then out[#out + 1] = g end
     end
     local sort = self.subviews.sort:getOptionValue()
@@ -1004,7 +1258,7 @@ function PickerScreen:visible_groups()
         elseif sort == 'value' then
             if a.value ~= b.value then return a.value > b.value end
         else
-            local ad, bd = a.items[1].dist, b.items[1].dist
+            local ad, bd = a.eligible[1].dist, b.eligible[1].dist
             if ad ~= bd then return ad < bd end
         end
         return a.label < b.label
@@ -1013,13 +1267,14 @@ function PickerScreen:visible_groups()
 end
 
 function PickerScreen:refresh()
+    self:apply_filters()
     self.shown = self:visible_groups()
     local choices = {}
     for _, g in ipairs(self.shown) do
         choices[#choices + 1] = {text = self:row_text(g), group = g}
     end
     local list = self.subviews.list
-    list:setChoices(choices, list:getSelected())
+    set_choices_keeping_view(list, choices, list:getSelected())
     local chosen, kinds = 0, 0
     for _, g in ipairs(self.groups) do
         if g.sel > 0 then chosen = chosen + g.sel; kinds = kinds + 1 end
@@ -1030,22 +1285,26 @@ function PickerScreen:refresh()
 end
 
 -- One row, laid out in fixed columns so a click can be read back to the thing it landed on.
+-- It opens with the distance to the closest item that passes the filters, the number the
+-- "closest N" promise is made in.
 function PickerScreen:row_text(g)
-    return ('%-12s %-44s %s %4d/%-5d %s %s %s'):format(
+    local nearest = g.eligible[1] and g.eligible[1].dist or 0
+    return ('%5d %-12s %-44s %s %4d/%-5d %s %s %s'):format(nearest,
         '[specific]', g.label:sub(1, 44), '[-1]', g.sel, g.total, '[+1]', '[+10]', '[all]')
 end
 
 -- The column bands of a row, ZERO-BASED, counted straight off the format string above:
--- [specific] 0-11, label 13-56, [-1] 58-61, count 62-72, [+1] 74-77, [+10] 79-83, [all] 85-89.
--- The COUNT band deliberately runs from just after [-1] to the end of the total, so clicking
--- the number -- or the space either side of the slash -- is what asks for an exact amount.
+-- dist 0-4, [specific] 6-17, label 19-62, [-1] 64-67, count 68-78, [+1] 80-83, [+10] 85-89,
+-- [all] 91-95. The COUNT band deliberately runs from just after [-1] to the end of the total,
+-- so clicking the number -- or the space either side of the slash -- is what asks for an
+-- exact amount.
 local BANDS = {
-    {name = 'specific', x1 = 0,  x2 = 11},
-    {name = 'minus',    x1 = 58, x2 = 61},
-    {name = 'count',    x1 = 62, x2 = 72},
-    {name = 'plus',     x1 = 74, x2 = 77},
-    {name = 'plus10',   x1 = 79, x2 = 83},
-    {name = 'all',      x1 = 85, x2 = 89},
+    {name = 'specific', x1 = 6,  x2 = 17},
+    {name = 'minus',    x1 = 64, x2 = 67},
+    {name = 'count',    x1 = 68, x2 = 78},
+    {name = 'plus',     x1 = 80, x2 = 83},
+    {name = 'plus10',   x1 = 85, x2 = 89},
+    {name = 'all',      x1 = 91, x2 = 95},
 }
 
 local function band_at(x)
@@ -1087,6 +1346,7 @@ function PickerScreen:onInput(keys)
         local list = self.subviews.list
         local idx = list:getIdxUnderMouse()
         if idx and self.shown[idx] then
+            list:setSelected(idx)      -- we swallow the click, so do the List's own bookkeeping
             local g = self.shown[idx]
             local x = self:getMouseXInList()
             local band = x and band_at(x)
@@ -1131,12 +1391,13 @@ end
 function PickerScreen:apply()
     local ids = {}
     for _, g in ipairs(self.groups) do
+        local items = g.eligible or g.items
         if g.specific then
-            for _, e in ipairs(g.items) do
+            for _, e in ipairs(items) do
                 if g.specific[e.id] then ids[#ids + 1] = e.id end
             end
         else
-            for i = 1, g.sel do ids[#ids + 1] = g.items[i].id end
+            for i = 1, math.min(g.sel, #items) do ids[#ids + 1] = items[i].id end
         end
     end
     -- Nothing selected: the window closes and that is the whole answer. A dwarf-sized
@@ -1194,20 +1455,53 @@ local saved_tool = nil
 -- made after that counts as picking a spot.
 local armed = false
 
-local function start_targeting()
+-- THE MINING MENU STAYS SHUT FOR THE WHOLE ERRAND, not just while the spot is being picked.
+-- `main_designation_selected` is what holds the designation panel open (with a tool chosen the
+-- focus reads dwarfmode/Designate/DIG_DIG; set it to NONE and the panel is gone), so putting it
+-- back is what REOPENS the mining interface -- and the old code put it back the instant the
+-- spot was chosen, a beat before the picker appeared. Mining was therefore live underneath the
+-- picker for the whole time it was up, and every click that missed the panel painted a dig
+-- designation on the map behind it. So the two halves are separate now: `stop_targeting` only
+-- ends the spot-picking overlay, and the tool goes back when the ERRAND ends -- the picker
+-- dismissed, cancelled, or never opened at all.
+local function close_mining_menu()
     local mi = df.global.game.main_interface
-    saved_tool = mi.main_designation_selected
+    if saved_tool == nil then saved_tool = mi.main_designation_selected end
     mi.main_designation_selected = df.main_designation_type.NONE
+end
+
+-- Reopen it exactly as it was. Safe to call twice, and safe when we never closed anything.
+function reopen_mining_menu()
+    if saved_tool == nil then return end
+    df.global.game.main_interface.main_designation_selected = saved_tool
+    saved_tool = nil
+end
+
+local function start_targeting()
+    close_mining_menu()
     armed = false
     targeting = true
 end
 
+-- ends the spot-picking overlay ONLY -- the designation tool deliberately stays put away
 local function stop_targeting()
     targeting = false
-    if saved_tool then
-        df.global.game.main_interface.main_designation_selected = saved_tool
-        saved_tool = nil
-    end
+end
+
+-- Give up on the whole errand: stop asking for a spot AND hand the mining menu back. This is
+-- the one call every way out of spot-picking goes through.
+--
+-- WHY THIS EXISTS: `targeting` gates `active()`, and `active()` is what tells the
+-- dig-building picker to get out of the way -- so a `targeting` left stuck on does not just
+-- leave a panel up, it makes the DIG-BUILDING PICKER VANISH COMPLETELY, with no way back
+-- short of reloading the save. It happened. Previously the only way out was a right-click
+-- read off `enabler`: press Esc instead, or click somewhere the release did not register,
+-- and the flag stayed on forever.
+function abort_targeting()
+    if not targeting then return false end
+    stop_targeting()
+    reopen_mining_menu()
+    return true
 end
 
 TargetOverlay = defclass(TargetOverlay, overlay.OverlayWidget)
@@ -1232,12 +1526,22 @@ TargetOverlay.ATTRS{
     version = 1,
 }
 
+-- Esc is the key every other way out of a DF panel uses, and somebody backing out of this
+-- one will reach for it before they think to right-click.
+function TargetOverlay:onInput(keys)
+    if targeting and keys.LEAVESCREEN then
+        abort_targeting()
+        return true
+    end
+    return TargetOverlay.super.onInput(self, keys)
+end
+
 function TargetOverlay:init()
     self.lbut, self.rbut = 0, 0
     self:addviews{
         widgets.Label{frame = {t = 0, l = 0}, text = {
             'Click the spot to move', NEWLINE, 'things to.', NEWLINE,
-            {text = 'Right-click cancels.', pen = COLOR_GRAY},
+            {text = 'Right-click or Esc cancels.', pen = COLOR_GRAY},
         }},
     }
 end
@@ -1247,6 +1551,13 @@ end
 -- the way every other map tool here does.
 function TargetOverlay:overlay_onupdate()
     if not targeting then return end
+    -- A spot can only be picked on a fort map. If we are anywhere else the flag is stale, and
+    -- a stale flag costs the player the dig-building picker -- so drop it rather than wait for
+    -- a right-click that is never coming.
+    if not dfhack.world.isFortressMode() or not dfhack.isMapLoaded() then
+        stop_targeting()
+        return
+    end
     local e = df.global.enabler
     local l, r = e.mouse_lbut_down, e.mouse_rbut_down
     if not armed then                          -- waiting for the opening click to be let go
@@ -1257,7 +1568,7 @@ function TargetOverlay:overlay_onupdate()
     local l_rel, r_rel = (l ~= 1 and self.lbut == 1), (r ~= 1 and self.rbut == 1)
     self.lbut, self.rbut = l, r
     if r_rel then
-        stop_targeting()
+        abort_targeting()             -- cancelled outright: the errand is over
         return
     end
     if not l_rel then return end
@@ -1279,10 +1590,12 @@ function open_picker(target)
     local groups, err = scan_items(target)
     if not groups then
         say('move-items: ' .. tostring(err), COLOR_YELLOW)
+        reopen_mining_menu()          -- no picker is coming; give the menu back
         return
     end
     if #groups == 0 then
         say('move-items: nothing that can reach that spot is anywhere else.', COLOR_YELLOW)
+        reopen_mining_menu()
         return
     end
     PickerScreen{target = target, groups = groups}:show()
@@ -1317,6 +1630,9 @@ OVERLAY_WIDGETS = {watch = WatchOverlay, target = TargetOverlay}
 register_notification()
 dfhack.onStateChange[NOTIFY_NAME] = function(ev)
     if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then register_notification() end
+    -- never strand the designation tool put away across a reload: the fort would come back
+    -- with the mining menu mysteriously refusing to stay open
+    if ev == SC_MAP_UNLOADED then targeting = false; saved_tool = nil end
 end
 
 if dfhack_flags.module then
@@ -1334,7 +1650,13 @@ if cmd == 'status' then
             :format(st.pending, st.total, st.target.x, st.target.y, st.target.z, st.zone_id))
     end
 elseif cmd == 'cancel' then
-    print(cancel() and 'move-items: cancelled.' or 'move-items: nothing to cancel.')
+    -- clears BOTH a delivery in flight and a stuck spot-picking flag, so there is always a
+    -- console way back if the picker ever disappears again
+    local stopped = abort_targeting()
+    local cancelled = cancel()
+    if cancelled then print('move-items: cancelled.')
+    elseif stopped then print('move-items: stopped asking for a spot.')
+    else print('move-items: nothing to cancel.') end
 elseif cmd == 'finish' then
     print(finish() and 'move-items: finished.' or 'move-items: nothing in progress.')
 else
