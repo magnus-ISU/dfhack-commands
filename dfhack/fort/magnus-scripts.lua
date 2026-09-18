@@ -9,21 +9,31 @@ Tags: fort | adventure | auto
 
 GUI switchboard for all of magnus's persistent DFHack helpers.
 
-Running `fort/magnus-scripts` opens a window with five individually-scrollable
-columns -- fort/, adv/, embark/, vanilla DFHack tools and joke/ -- with a checkbox per
-script. Click a row to toggle that helper on or off; the choice is saved to
-dfhack-config/magnus-scripts.json and re-applied on every map load. Column
-headers toggle a whole column, [m] toggles all the mod columns (fort/adv/embark)
-at once, and [r] is the "recommended" master switch: everything on (or, pressed
-again, everything off).
+Running `fort/magnus-scripts` opens a window with six individually-scrollable
+columns -- fort/, adv/, embark/, vanilla DFHack tools, house rules and joke/ --
+with a checkbox per script. Click a row to toggle that helper on or off; the
+choice is saved to dfhack-config/magnus-scripts.json and re-applied on every map
+load. Column headers toggle a whole column, [m] toggles all the mod columns
+(fort/adv/embark) at once, and [r] is the "recommended" master switch: everything
+on (or, pressed again, everything off).
 
 The first run enables everything: any script that has never been toggled counts
 as ON, so a fresh install starts with the whole pack armed.
 
-joke/ IS THE EXCEPTION, both ways round. Its scripts are off until you turn them
-on, and neither [r] nor [m] touches them -- only the joke/ header [j] and a click
-on one of its rows. They are jokes; they should never arrive by surprise, and a
-master switch meant "arm the useful pack" should not start playing music.
+HOUSE RULES AND joke/ ARE THE EXCEPTIONS, both ways round. Their scripts are off
+until you turn them on, and neither [r] nor [m] touches them -- only that column's
+own header ([h] / [j]) and a click on one of its rows.
+
+  * house rules are the tools that CHANGE WHAT THE GAME MEANS rather than doing
+    the clicking for you. Everything in the other columns automates something you
+    could have done by hand; a house rule invents a rule vanilla does not have.
+    research-breakthrough is the one there today: vanilla's 312 research topics
+    unlock literary forms and nothing else, and it makes a breakthrough pay out a
+    craftable recipe instead -- permanently, written into the civ and saved with
+    the fort. A master switch meant "arm the useful pack" should not quietly
+    change the rules of somebody's fort.
+  * joke/ are jokes; they should never arrive by surprise, and that same master
+    switch should not start playing music.
 
 Usage
 -----
@@ -71,9 +81,10 @@ local function save_cfg()
 end
 
 -- OPT-IN KEYS INVERT THE DEFAULT. Absent-means-on is right for the pack proper, but the
--- joke/ column must never come on by itself -- not on a fresh install, and not because a
--- master switch swept it up. Those keys live in cfg.enabled instead, where absent means OFF
--- and only an explicit choice turns them on.
+-- joke/ and house-rules columns must never come on by themselves -- not on a fresh install,
+-- and not because a master switch swept them up. A joke should not arrive unannounced, and
+-- neither should a rule change to somebody's fort. Those keys live in cfg.enabled instead,
+-- where absent means OFF and only an explicit choice turns them on.
 local opt_in = {}          -- filled in from COLUMNS below
 
 local function is_on(key)
@@ -124,9 +135,10 @@ local function notify_off(ours, restore_stock)
 end
 
 -- ---- the registry -----------------------------------------------------------
--- Four columns; each item: key (config id), label (shown), mode ('fort'|'adv'|
--- 'any' -- when the enable/disable runs), enable(), disable(). Order = display
--- order. dig-building leads the fort column by request.
+-- Each column: id, title, mode, optional opt_in / w. Each item: key (config id),
+-- label (shown), mode ('fort'|'adv'|'any' -- when the enable/disable runs),
+-- enable(), disable(). Order = display order. dig-building leads the fort column
+-- by request, and the two opt-in columns sit together at the right-hand end.
 local COLUMNS = {
     {id = 'fort', title = 'fort/', mode = 'fort', items = {
         {key = 'dig-building', label = 'dig-building',
@@ -164,6 +176,12 @@ local COLUMNS = {
             dfhack.run_command('overlay', 'enable', 'fort/repeated-flood-fill.watcher')
          end,
          disable = overlay_set('disable', 'fort/repeated-flood-fill.watcher')},
+        {key = 'better-world-map', label = 'better-world-map',
+         enable = function()
+            reqscript('fort/better-world-map')
+            dfhack.run_command('overlay', 'enable', 'fort/better-world-map.flash')
+         end,
+         disable = overlay_set('disable', 'fort/better-world-map.flash')},
         {key = 'plan-tile', label = 'plan-tile',
          enable = function()
             dfhack.run_script('fort/plan-tile')
@@ -658,6 +676,36 @@ local COLUMNS = {
             end)
          end},
     }},
+    -- HOUSE RULES: tools that CHANGE WHAT THE GAME MEANS, not tools that do the clicking
+    -- for you. Everything in every other column automates something you could have done
+    -- yourself -- these invent a rule vanilla does not have, so they get their own column,
+    -- their own header key, and the joke/ treatment: off until you ask, and untouched by
+    -- [r] and [m]. A master switch meant "arm the useful pack" should not quietly change
+    -- the rules of the fort.
+    {id = 'house', title = 'house rules', mode = 'fort', opt_in = true, w = 26, items = {
+        -- vanilla: the 312 research topics unlock literary forms and NOTHING else -- they
+        -- have no connection to what a civ can forge or sew. This makes a breakthrough pay
+        -- out a craftable recipe, which is an invented rule, and a permanent one: the
+        -- recipe is written into the civ and saved with the fort.
+        -- vanilla: a world-map site panel tells you its name, its population and nothing
+        -- whatsoever about the land. This surveys its stone, trees, plants and game -- a
+        -- reading no screen in the game offers, and the groundwork for expeditions.
+        {key = 'economic-expeditions', label = 'economic-expeditions',
+         enable = function()
+            -- reqscript, NOT run_script: run as a command with no site selected it qerrors
+            -- ("click a site"), which would read as the row failing to turn on
+            reqscript('fort/economic-expeditions')
+            dfhack.run_command('overlay', 'enable', 'fort/economic-expeditions.survey')
+         end,
+         disable = overlay_set('disable', 'fort/economic-expeditions.survey')},
+        {key = 'research-breakthrough', label = 'research-breakthrough',
+         enable = script('fort/research-breakthrough'),
+         disable = function()   -- stop the watcher, then hide the notification line
+            dfhack.internal.research_breakthrough_hb_gen =
+                (dfhack.internal.research_breakthrough_hb_gen or 0) + 1
+            notify_off({'research_unlock'})()
+         end},
+    }},
     {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
         {key = 'joke-super-saiyan', label = 'super-saiyan',
          enable = cmd('enable', 'joke/super-saiyan'), disable = cmd('disable', 'joke/super-saiyan')},
@@ -739,15 +787,30 @@ local function set_autostart(arm)
 end
 
 -- ---- GUI --------------------------------------------------------------------
-local COL_W = 30            -- interior width of one column
+local COL_W = 30            -- default interior width of one column
 local COL_GAP = 1
 
+-- A column may set its own `w`. Every column used to be 30 wide, which was fine at four and
+-- then five of them; house rules holds one short row and paying a full 30 columns of screen
+-- for it pushes the window past the edge on a narrower display.
+local function col_w(col) return col.w or COL_W end
+
+local function col_left(idx)
+    local l = 0
+    for i = 1, idx - 1 do l = l + col_w(COLUMNS[i]) + COL_GAP end
+    return l
+end
+
+local function total_w()
+    local n = #COLUMNS
+    return col_left(n) + col_w(COLUMNS[n]) + 3
+end
+
 MagnusWindow = defclass(MagnusWindow, widgets.Window)
-local COL_N = #COLUMNS      -- widen with the column count rather than a hardcoded 4
 
 MagnusWindow.ATTRS{
     frame_title = 'magnus-scripts',
-    frame = {w = COL_N * COL_W + (COL_N - 1) * COL_GAP + 3, h = 40},
+    frame = {w = total_w(), h = 40},
     resizable = true,
     resize_min = {w = 70, h = 20},
 }
@@ -767,8 +830,8 @@ end
 function MagnusWindow:column_items(which)
     local out = {}
     for _, col in ipairs(COLUMNS) do
-        -- 'all' ([r]) and 'mods' ([m]) skip opt_in columns entirely: joke/ answers to its
-        -- own header and to a click on its rows, and to nothing else
+        -- 'all' ([r]) and 'mods' ([m]) skip opt_in columns entirely: joke/ and house rules
+        -- answer to their own header and to a click on their rows, and to nothing else
         local in_group = which == col.id
             or (not col.opt_in and (which == 'all' or (which == 'mods' and col.id ~= 'vanilla')))
         if in_group then
@@ -826,11 +889,11 @@ function MagnusWindow:init()
         },
     }
     local keys = {fort = 'CUSTOM_F', adv = 'CUSTOM_A', embark = 'CUSTOM_E',
-                  joke = 'CUSTOM_J', vanilla = 'CUSTOM_V'}
+                  joke = 'CUSTOM_J', vanilla = 'CUSTOM_V', house = 'CUSTOM_H'}
     for i, col in ipairs(COLUMNS) do
-        local l = (i - 1) * (COL_W + COL_GAP)
+        local l, w = col_left(i), col_w(col)
         table.insert(views, widgets.HotkeyLabel{
-            frame = {l = l, t = 3, w = COL_W}, key = keys[col.id],
+            frame = {l = l, t = 3, w = w}, key = keys[col.id],
             label = function()
                 return ('%s [%s]'):format(col.title,
                     all_on(col.items) and 'all off' or 'all on')
@@ -840,7 +903,7 @@ function MagnusWindow:init()
         })
         table.insert(views, widgets.List{
             view_id = 'list_' .. col.id,
-            frame = {l = l, t = 5, b = 0, w = COL_W},
+            frame = {l = l, t = 5, b = 0, w = w},
             on_submit = function(_, choice) self:toggle_item(choice.col, choice.item) end,
         })
     end
