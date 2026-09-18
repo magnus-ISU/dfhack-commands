@@ -22,8 +22,9 @@ than a guess.
 WHAT IT SHOWS
 
 One row per thing the mood wants, read from the mood job's own filters (the same list
-`showmood` prints). Note that DF states the first requirement in raw units -- 150 for a bar --
-where only ONE item is ever needed, so that row is counted as one.
+`showmood` prints). Note that DF states a bar, cloth or thread requirement in raw units --
+150 to a bar, 10000 to a bolt -- so `showmood`'s "3 metal bars" is three units and ONE bar
+covers it; those rows are counted in items, not units.
 
 Each row proposes the HIGHEST-VALUE item in the fort that satisfies it, because a mood is the
 one job where spending the good material is the point. Worn goods are never offered, nor
@@ -466,12 +467,25 @@ end
 
 -- How many ITEMS a requirement wants, which is not always what `quantity` says.
 --
--- A requirement measured in a DIMENSION -- bars, cloth, thread -- states its quantity in raw
--- units: 150 to a bar, 10000 to a bolt. One item covers it. Everything else states a count of
--- items and means it: a mason's mood asking for 3 boulders takes three, and a tool that pins
--- only one leaves DF to grab the other two from whatever is nearest. That is how a mood ends
--- up part adamantine and part slate and cobaltite.
+-- A requirement for something measured in a DIMENSION -- bars, cloth, thread -- states its
+-- quantity in raw units, and one item's whole dimension counts against it: a bar is 150
+-- units, a bolt 10000, a spool 15000. So "3" of metal bars is three UNITS, and the first bar
+-- covers it -- which is why `showmood`, printing the raw quantity, says a smith wants three
+-- bars when DF takes one and moves on to the leather. (Measured live: quantity 3, one copper
+-- bar hauled in, DF sketching the next requirement.) `min_dimension` is not the tell -- it
+-- was -1 on that job -- the item type is. Everything else states a count of items and means
+-- it: a mason's mood asking for 3 boulders takes three, and a tool that pins only one leaves
+-- DF to grab the other two from whatever is nearest. That is how a mood ends up part
+-- adamantine and part slate and cobaltite.
+local UNIT_DIMENSION = {}
+for name, dim in pairs({BAR = 150, CLOTH = 10000, THREAD = 15000, POWDER_MISC = 150,
+                        LIQUID_MISC = 150, GLOB = 150}) do
+    local t = df.item_type[name]
+    if t ~= nil then UNIT_DIMENSION[t] = dim end
+end
 local function needed(ji)
+    local dim = UNIT_DIMENSION[ji.item_type]
+    if dim then return math.max(1, math.ceil(math.max(1, ji.quantity) / dim)) end
     if ji.min_dimension > 0 then return 1 end
     return math.max(1, ji.quantity)
 end
@@ -1081,6 +1095,7 @@ end
 
 -- is there ANYTHING in the fort this requirement could take? The first one found answers it,
 -- so a requirement the fort can supply costs a handful of comparisons.
+--
 local function can_fill(ji, group, from)
     for _, item in ipairs(filter_vector(ji)) do
         if filter_matches(ji, item) and usable(item) and reachable(item, group, from) then
