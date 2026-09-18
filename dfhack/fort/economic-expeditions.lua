@@ -536,6 +536,476 @@ function survey(site)
 end
 
 -- ---------------------------------------------------------------------------
+-- the march: getting a squad to the edge of the map
+-- ---------------------------------------------------------------------------
+--
+-- A STATION ORDER, the same one `fort/dwarf-rts` issues when you click the map with a squad
+-- selected -- `squad_order_movest` on the squad, `issuer_hf` set to the LEADER, `point_id` -1,
+-- with every member's individual orders cleared first so nobody is left following an older one.
+--
+-- A one-point PATROL was tried first and DF ignored it outright: the squad showed no order at
+-- all. Two reasons, both visible in dwarf-rts, which does patrols successfully -- it sets a
+-- real `issuer_hf` rather than -1, and it never builds a patrol of fewer than TWO points
+-- ("station + clicked tile = a 2-point patrol"). One waypoint is not a route to walk. A
+-- station is what "go there and stand" actually is, and the route object bought nothing that
+-- the order itself does not.
+
+local MARCH_KEY = 'economic-expeditions/march'
+local MARCH_CHECK_TICKS = 100
+local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
+
+-- THE NEAREST MAP EDGE BY PATH, not by ruler. A straight-line pick sends the squad at whatever
+-- edge is fewest tiles away as the crow flies, which is the wrong edge whenever a mountain, a
+-- chasm or the shape of the fort is in the way -- and DFHack exposes no path LENGTH, only
+-- `canWalkBetween` (a yes/no) and `getWalkableGroup` (which tiles are mutually reachable). So
+-- this walks outward from the squad itself and takes the first edge tile it reaches: a
+-- breadth-first search visits in order of distance, so the first one found IS the closest.
+--
+-- Bounded, because a fort's walkable area is large and this runs on DF's own thread: past
+-- BFS_CAP tiles it gives up and falls back to the straight-line pick rather than hold the game.
+-- It runs once, when an expedition starts, never per frame.
+--
+-- Distance is counted in STEPS, and DF walks diagonals in one step, so the eight horizontal
+-- neighbours all cost the same. Vertical moves are allowed only off a stair or a ramp.
+local BFS_CAP = 120000
+
+local function is_edge(x, y)
+    local W = df.global.world.map
+    return x == 0 or y == 0 or x == W.x_count - 1 or y == W.y_count - 1
+end
+
+local function walkable_here(pos, group)
+    local ok, wg = pcall(dfhack.maps.getWalkableGroup, pos)
+    return ok and wg ~= 0 and wg == group
+end
+
+-- can you change z from this tile? only off a stair or a ramp
+local function vertical_ok(pos)
+    local tt = dfhack.maps.getTileType(pos)
+    if not tt then return false end
+    local sh = df.tiletype.attrs[tt].shape
+    return sh == df.tiletype_shape.STAIR_UP or sh == df.tiletype_shape.STAIR_DOWN
+        or sh == df.tiletype_shape.STAIR_UPDOWN or sh == df.tiletype_shape.RAMP
+end
+
+-- an edge tile is only a place to leave from if it is open to the sky and unbuilt
+local function usable_edge(pos)
+    local fl, occ = dfhack.maps.getTileFlags(pos)
+    return fl and fl.outside and not fl.hidden
+        and occ and occ.building == df.tile_building_occ.None
+end
+
+local function edge_tile_by_path(unit)
+    local W = df.global.world.map
+    local ok, group = pcall(dfhack.maps.getWalkableGroup, unit.pos)
+    if not ok or group == 0 then return nil end
+
+    local function key(x, y, z) return (z * W.y_count + y) * W.x_count + x end
+    local seen = {[key(unit.pos.x, unit.pos.y, unit.pos.z)] = true}
+    local queue = {{x = unit.pos.x, y = unit.pos.y, z = unit.pos.z}}
+    local head, visited = 1, 0
+
+    while head <= #queue do
+        local cur = queue[head]
+        head = head + 1
+        visited = visited + 1
+        if visited > BFS_CAP then return nil end
+
+        local here = xyz2pos(cur.x, cur.y, cur.z)
+        if is_edge(cur.x, cur.y) and usable_edge(here) then return here end
+
+        local steps = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{1,1,0},{1,-1,0},{-1,1,0},{-1,-1,0}}
+        if vertical_ok(here) then
+            steps[#steps + 1] = {0,0,1}
+            steps[#steps + 1] = {0,0,-1}
+        end
+        for _, d in ipairs(steps) do
+            local nx, ny, nz = cur.x + d[1], cur.y + d[2], cur.z + d[3]
+            if nx >= 0 and nx < W.x_count and ny >= 0 and ny < W.y_count
+                and nz >= 0 and nz < W.z_count then
+                local k = key(nx, ny, nz)
+                if not seen[k] then
+                    seen[k] = true
+                    if walkable_here(xyz2pos(nx, ny, nz), group) then
+                        queue[#queue + 1] = {x = nx, y = ny, z = nz}
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- The straight-line fallback, kept for when the search is capped out or finds nothing.
+-- Topmost floor in each perimeter column, outside, unhidden, unbuilt, same walkable group.
+local function edge_tile_by_ruler(unit)
+    local W = df.global.world.map
+    local ok, mygroup = pcall(dfhack.maps.getWalkableGroup, unit.pos)
+    if not ok then mygroup = nil end
+    local xmax, ymax = W.x_count - 1, W.y_count - 1
+    local cands = {}
+    for y = 1, ymax - 1 do
+        cands[#cands + 1] = {0, y}
+        cands[#cands + 1] = {xmax, y}
+    end
+    for x = 1, xmax - 1 do
+        cands[#cands + 1] = {x, 0}
+        cands[#cands + 1] = {x, ymax}
+    end
+    local best, bestd
+    for _, xy in ipairs(cands) do
+        for z = W.z_count - 1, 1, -1 do
+            local pos = xyz2pos(xy[1], xy[2], z)
+            local tt = dfhack.maps.getTileType(pos)
+            if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR then
+                if usable_edge(pos) then
+                    local ok2, wg = pcall(dfhack.maps.getWalkableGroup, pos)
+                    if ok2 and wg ~= 0 and (not mygroup or wg == mygroup) then
+                        -- DF steps diagonally for the same cost, so distance is Chebyshev
+                        local d = math.max(math.abs(xy[1] - unit.pos.x),
+                                           math.abs(xy[2] - unit.pos.y))
+                        if not bestd or d < bestd then best, bestd = pos, d end
+                    end
+                end
+                break                      -- topmost floor in the column is the surface
+            end
+        end
+    end
+    return best
+end
+
+local function edge_tile(unit)
+    local t0 = os.clock()
+    local found = edge_tile_by_path(unit)
+    local ms = (os.clock() - t0) * 1000
+    if found then return found, ('pathfound in %.0f ms'):format(ms) end
+    return edge_tile_by_ruler(unit), ('search capped after %.0f ms, fell back to straight line'):format(ms)
+end
+
+local MARCH_KEY = 'economic-expeditions/march'
+local MARCH_CHECK_TICKS = 100
+local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
+
+-- A walkable tile on the map PERIMETER, in the same walkable group as the unit -- borrowed
+-- whole from `fort/loyal-retirees`, which learned that non-perimeter tiles never serve.
+-- Topmost floor in each perimeter column, outside, unhidden, no building on it.
+local function edge_tile(unit)
+    local W = df.global.world.map
+    local ok, mygroup = pcall(dfhack.maps.getWalkableGroup, unit.pos)
+    if not ok then mygroup = nil end
+    local xmax, ymax = W.x_count - 1, W.y_count - 1
+    local cands = {}
+    for y = 1, ymax - 1 do
+        cands[#cands + 1] = {0, y}
+        cands[#cands + 1] = {xmax, y}
+    end
+    for x = 1, xmax - 1 do
+        cands[#cands + 1] = {x, 0}
+        cands[#cands + 1] = {x, ymax}
+    end
+    local best, bestd
+    for _, xy in ipairs(cands) do
+        for z = W.z_count - 1, 1, -1 do
+            local pos = xyz2pos(xy[1], xy[2], z)
+            local tt = dfhack.maps.getTileType(pos)
+            if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR then
+                local fl, occ = dfhack.maps.getTileFlags(pos)
+                if fl and fl.outside and not fl.hidden
+                    and occ and occ.building == df.tile_building_occ.None then
+                    local ok2, wg = pcall(dfhack.maps.getWalkableGroup, pos)
+                    if ok2 and wg ~= 0 and (not mygroup or wg == mygroup) then
+                        local d = math.abs(xy[1] - unit.pos.x) + math.abs(xy[2] - unit.pos.y)
+                        if not bestd or d < bestd then best, bestd = pos, d end
+                    end
+                end
+                break                      -- topmost floor in the column is the surface
+            end
+        end
+    end
+    return best
+end
+
+-- the leader's histfig, which is who DF records as having given the order
+local function leader_hf(sq)
+    for i = 0, #sq.positions - 1 do
+        local occ = sq.positions[i].occupant
+        if occ ~= -1 then return occ end
+    end
+    return -1
+end
+
+local function clear_squad_orders(sq)
+    for i = #sq.orders - 1, 0, -1 do sq.orders:erase(i) end
+    -- a squad-wide order drops any individual member orders, or a member keeps walking an
+    -- older one of their own
+    for p = 0, #sq.positions - 1 do
+        local po = sq.positions[p].orders
+        for i = #po - 1, 0, -1 do po:erase(i) end
+    end
+end
+
+-- A SECOND EDGE TILE beside the first, so the patrol has two points to walk between. DF
+-- ignores a one-point route -- `dwarf-rts`, which does patrols successfully, always builds
+-- them from a station plus one more tile. Adjacent tiles on the same edge keep the squad
+-- pacing on the boundary rather than wandering inland.
+local function neighbour_edge_tile(tile)
+    local W = df.global.world.map
+    local ok, want = pcall(dfhack.maps.getWalkableGroup, xyz2pos(tile.x, tile.y, tile.z))
+    if not ok then return nil end
+    local on_vertical = (tile.x == 0 or tile.x == W.x_count - 1)
+    for _, d in ipairs{1, -1, 2, -2, 3, -3} do
+        local nx = on_vertical and tile.x or (tile.x + d)
+        local ny = on_vertical and (tile.y + d) or tile.y
+        if nx >= 0 and nx < W.x_count and ny >= 0 and ny < W.y_count then
+            local pos = xyz2pos(nx, ny, tile.z)
+            local tt = dfhack.maps.getTileType(pos)
+            if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR then
+                local ok2, wg = pcall(dfhack.maps.getWalkableGroup, pos)
+                if ok2 and wg ~= 0 and wg == want then return pos end
+            end
+        end
+    end
+end
+
+-- the two-point route the squad paces, and the patrol order on it
+local function order_patrol_edge(sq, tile)
+    local second = neighbour_edge_tile(tile)
+    if not second then return nil, 'no second walkable tile on that edge to patrol between' end
+    local wp = df.global.plotinfo.waypoints
+    if wp.in_edit_waypts_mode or wp.in_edit_name_mode then
+        return nil, 'close the Routes screen first'
+    end
+
+    local function new_point(pos)
+        local pt = df.pointst:new()
+        pt.id = wp.next_point_id
+        wp.next_point_id = wp.next_point_id + 1
+        pt.pos.x, pt.pos.y, pt.pos.z = pos.x, pos.y, pos.z
+        pt.tile, pt.fg_color, pt.bg_color = 88, COLOR_GREY, COLOR_BLACK
+        wp.points:insert('#', pt)
+        return pt.id
+    end
+
+    local rt = df.routest:new()
+    rt.id = wp.next_route_id
+    wp.next_route_id = wp.next_route_id + 1
+    rt.name = 'Expedition'
+    rt.points:insert('#', new_point(tile))
+    rt.points:insert('#', new_point(second))
+    wp.routes:insert('#', rt)
+
+    local o = df.squad_order_patrol_routest:new()
+    o.issuer_hf, o.recipient_hf = leader_hf(sq), -1
+    o.year, o.year_tick = df.global.cur_year, df.global.cur_year_tick
+    o.route_id = rt.id
+    sq.orders:insert('#', o)
+    return rt
+end
+
+local function order_station(sq, tile)
+    local mo = df.squad_order_movest:new()
+    mo.issuer_hf = leader_hf(sq)
+    mo.recipient_hf = -1
+    mo.year, mo.year_tick = df.global.cur_year, df.global.cur_year_tick
+    mo.pos.x, mo.pos.y, mo.pos.z = tile.x, tile.y, tile.z
+    mo.point_id = -1
+    sq.orders:insert('#', mo)
+end
+
+-- still carrying the order we gave? Either the patrol on our route, or the station fallback.
+local function carrying_order(sq, tile, route_id)
+    for _, o in ipairs(sq.orders) do
+        if route_id and df.squad_order_patrol_routest:is_instance(o) and o.route_id == route_id then
+            return true
+        end
+        if df.squad_order_movest:is_instance(o)
+            and o.pos.x == tile.x and o.pos.y == tile.y and o.pos.z == tile.z then
+            return true
+        end
+    end
+    return false
+end
+
+-- TRAVEL TIME, fitted to what DF's own world map reports. DF counts a diagonal step as one
+-- step, so the distance that matters is CHEBYSHEV -- max(|dx|, |dy|) -- not the straight line.
+-- Over 9 that reproduces every figure the game shows, exactly:
+--
+--     Cloakgales 27 -> 3      Glistenedpolished 37 -> 4
+--     Furnacehailed 56 -> 6   Guttersculpt 183 -> 20
+--
+-- and the verbal bands with it: 2 tiles reads as a short trip (0.22), 4 as half a day (0.44),
+-- 7 as nearly a day (0.78), 8 as a day (0.89), 10 as more than a day (1.11), and 18 as
+-- exactly two days (2.00). Euclidean over 9.2 fits almost as well but misses the clean
+-- integers -- Cloakgales is the tell, 27/9 = 3.00 against 29.5/9.2 = 3.21.
+local TILES_PER_DAY = 9
+local WORK_DAYS = 7          -- a week on site, whatever the trade
+local TICKS_PER_DAY = 1200
+
+function travel_days(site)
+    local home = df.world_site.find(df.global.plotinfo.site_id)
+    if not (home and site) then return 0 end
+    local dx = math.abs(site.pos.x - home.pos.x)
+    local dy = math.abs(site.pos.y - home.pos.y)
+    return math.floor(math.max(dx, dy) / TILES_PER_DAY + 0.5)
+end
+
+-- a week of work plus the road, both ways: 7 days to Burnedroofs, 47 to the far side of the world
+function expedition_days(site)
+    return WORK_DAYS + 2 * travel_days(site)
+end
+
+-- ---------------------------------------------------------------------------
+-- the march, driven
+-- ---------------------------------------------------------------------------
+
+-- No march is `nil`, not an empty table: saving `{}` reads back TRUTHY, so cancelling used to
+-- leave a state object that answered "an expedition is already under way" forever.
+local function march_state()
+    local st = dfhack.persistent.getSiteData(MARCH_KEY, nil)
+    if not st or not st.squad_id then return nil end
+    return st
+end
+
+local function save_march(st)
+    if st then
+        dfhack.persistent.saveSiteData(MARCH_KEY, st)
+    else
+        pcall(dfhack.persistent.deleteSiteData, MARCH_KEY)
+        dfhack.persistent.saveSiteData(MARCH_KEY, {})
+    end
+end
+
+-- is this squad out on an expedition? `fort/dwarf-rts` asks, so that standing every squad down
+-- when the squads screen closes does not quietly cancel a march already under way.
+function squad_on_expedition(squad_id)
+    local st = march_state()
+    return st ~= nil and st.squad_id == squad_id
+end
+
+-- THE GENERIC GUARD. Any tool that stands squads down en masse -- `fort/dwarf-rts` does it
+-- when the squads screen closes -- can ask this table whether a squad is busy with something
+-- that its orders ARE, rather than knowing about expeditions specifically. A guard is a
+-- function taking a squad id; any one returning true protects that squad's orders.
+dfhack.internal.squad_order_guards = dfhack.internal.squad_order_guards or {}
+dfhack.internal.squad_order_guards['economic-expeditions'] = function(squad_id)
+    return squad_on_expedition(squad_id)
+end
+
+function march_status()
+    local st = march_state()
+    if not st or not st.squad_id then return nil end
+    local sq = df.squad.find(st.squad_id)
+    local site = df.world_site.find(st.site_id)
+    return {
+        squad = sq, site = site, phase = st.phase,
+        name = sq and dfhack.military.getSquadName(sq.id) or ('squad ' .. st.squad_id),
+        site_name = site and dfhack.translation.translateName(site.name, true) or '?',
+        kind = st.kind, choice = st.choice, days = st.days,
+        tile = st.tile, arrived = st.arrived,
+    }
+end
+
+-- how many of the squad are standing at (or near) the edge tile
+local function at_edge(sq, tile)
+    local there, total = 0, 0
+    for _, u in ipairs(squad_members(sq)) do
+        total = total + 1
+        if math.abs(u.pos.x - tile.x) <= ARRIVE_RADIUS
+            and math.abs(u.pos.y - tile.y) <= ARRIVE_RADIUS
+            and u.pos.z == tile.z then
+            there = there + 1
+        end
+    end
+    return there, total
+end
+
+local function stop_march_driver()
+    require('repeat-util').cancel(MARCH_KEY)
+end
+
+local function march_tick()
+    local st = march_state()
+    if not st or not st.squad_id then stop_march_driver() return end
+    local sq = df.squad.find(st.squad_id)
+    if not sq then cancel_march('the squad is gone') return end
+
+    -- CANCELLING THE ORDER IS HOW YOU CANCEL THE EXPEDITION. If the squad is no longer
+    -- carrying its patrol order, the player took it off them -- by standing the squad down, by
+    -- giving them something else to do, or by deleting the order outright -- and that is a
+    -- perfectly good way to say "never mind". Re-issuing it would make the march impossible to
+    -- call off by hand, which is worse than losing a march to a stray stand-down.
+    if not carrying_order(sq, st.tile, st.route_id) then
+        cancel_march('the squad was given other orders')
+        return
+    end
+
+    local there, total = at_edge(sq, st.tile)
+    if st.phase == 'marching' and total > 0 and there >= total then
+        st.phase, st.arrived = 'ready', true
+        save_march(st)
+        dfhack.gui.showAnnouncement(
+            ('%s has reached the edge of the map, ready to leave for %s (%d days).'):format(
+                dfhack.military.getSquadName(sq.id),
+                (df.world_site.find(st.site_id) and
+                 dfhack.translation.translateName(df.world_site.find(st.site_id).name, true))
+                    or 'the expedition', st.days or 0),
+            COLOR_LIGHTGREEN)
+    end
+end
+
+local function start_march_driver()
+    require('repeat-util').scheduleEvery(MARCH_KEY, MARCH_CHECK_TICKS, 'ticks', march_tick)
+end
+
+-- Send a squad to the map edge. Nothing leaves yet -- this is the walk, and the notification
+-- when they get there.
+function begin_march(squad, site, kind, choice)
+    if not (squad and site) then return false, 'need a squad and a site' end
+    if march_state() then return false, 'an expedition is already under way' end
+    local members = squad_members(squad)
+    if #members == 0 then return false, 'that squad has no living members' end
+
+    local tile, how = edge_tile(members[1])
+    if not tile then return false, 'no walkable map-edge tile the squad can reach' end
+    clear_squad_orders(squad)
+    -- a patrol between two edge tiles, or a plain station if the edge has no second tile
+    local route, why = order_patrol_edge(squad, tile)
+    if not route then order_station(squad, tile) end
+
+    save_march{
+        squad_id = squad.id, site_id = site.id, kind = kind, choice = choice,
+        route_id = route and route.id or nil, phase = 'marching',
+        tile = {x = tile.x, y = tile.y, z = tile.z},
+        days = expedition_days(site),
+    }
+    start_march_driver()
+    if how then print('economic-expeditions: edge tile ' .. how) end
+    dfhack.gui.showAnnouncement(
+        ('%s is marching to the edge of the map, bound for %s.'):format(
+            dfhack.military.getSquadName(squad.id),
+            dfhack.translation.translateName(site.name, true)), COLOR_WHITE)
+    return true
+end
+
+function cancel_march(why)
+    local st = march_state()
+    if not st or not st.squad_id then return false end
+    local sq = df.squad.find(st.squad_id)
+    if sq then clear_squad_orders(sq) end
+    save_march(nil)
+    stop_march_driver()
+    dfhack.gui.showAnnouncement(('The expedition is called off%s.'):format(
+        why and (' -- ' .. why) or ''), COLOR_YELLOW)
+    return true
+end
+
+dfhack.onStateChange[MARCH_KEY] = function(sc)
+    if sc == SC_MAP_LOADED and dfhack.world.isFortressMode() then
+        if march_state() then start_march_driver() end
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- what the fort already has
 -- ---------------------------------------------------------------------------
 --

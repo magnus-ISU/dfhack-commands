@@ -954,13 +954,30 @@ local function single_command(ui, pos, shift)
     end
 end
 
+-- A squad whose ORDERS ARE ITS JOB must survive the mass stand-down. `fort/economic-
+-- expeditions` marches a squad to the map edge on a patrol order and treats that order going
+-- away as the player calling the expedition off -- so closing the squads screen would silently
+-- cancel it. Rather than teach this script about expeditions, any tool can protect a squad by
+-- adding a predicate to `dfhack.internal.squad_order_guards`; any guard returning true for a
+-- squad id leaves that squad's orders alone.
+--
+-- Only the MASS stand-down consults it. Giving one squad a new order by hand still replaces
+-- whatever it was doing, which is how the player cancels such a thing deliberately.
+local function orders_guarded(squad_id)
+    for _, guard in pairs(dfhack.internal.squad_order_guards or {}) do
+        local ok, yes = pcall(guard, squad_id)
+        if ok and yes then return true end
+    end
+    return false
+end
+
 -- stand every squad down: wipe all move/attack/patrol/burrow-defense orders. Used
 -- when the close-guard finally lets the screen close. squad_id survives the close,
 -- so we can read the fort's squads straight off the (closing) panel.
 local function clear_all_orders(sq)
     for i = 0, #sq.squad_id - 1 do
         local s = df.squad.find(sq.squad_id[i])
-        if s then
+        if s and not orders_guarded(s.id) then
             clear_orders(s)             -- squad-level orders
             clear_member_orders(s)      -- and every member's individual orders
         end
