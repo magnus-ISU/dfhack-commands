@@ -38,6 +38,12 @@ A custom tool opens its OWN screen, and the picker gets out of its way while it 
 entry a `focus` prefix and the picker hides (and stops taking input) for as long as that screen
 is the current one.
 
+The search box has focus while the picker is up, so `w a s d` type rather than pan. `<` and `>`
+(DF's z-level keys) drop focus and pass through; so does a movement key pressed twice as the
+FIRST thing typed -- `ww`, `aa`, `ss`, `dd` on an empty box -- which takes the first press back
+out, drops focus and pans. Once a word is under way a doubled letter is just typed. Click the
+box to type again.
+
 Registered automatically as overlay `dig-building.picker`. Reposition with `gui/overlay`.
 ]]
 
@@ -267,6 +273,16 @@ local CUSTOM_ENTRIES = {
       focus = 'dfhack/lua/dig-replace-walls',
       active = function() return reqscript('fort/dig-replace-walls').painting end,
       run = function() reqscript('fort/dig-replace-walls').show() end}},
+    -- Not a painter: the tiles are chosen by their engraving's quality, which the script
+    -- already knows fort-wide, so there is nothing to aim at and the window just offers
+    -- "take the worst N".
+    {'Upgrade engravings', {'Upgrade engravings'},
+     {custom = true, alias = {'engrave', 'engraving', 'masterwork engraving', 'recut',
+                              'reengrave', 'upgrade engraving', 'paint engravings'},
+      -- an overlay on this same screen, so it never changes the focus: `active` is the only
+      -- thing that can tell the picker to get out of its way
+      active = function() return reqscript('fort/upgrade-engravings').is_open() end,
+      run = function() reqscript('fort/upgrade-engravings').show() end}},
     -- The one row in this band that is two buttons depending on the fort's state: with a
     -- delivery in flight the useful thing to do from here is stop it, so `label` renames the
     -- row and `run` follows the name. `e[1]` stays "Move items" -- it is the entry's identity
@@ -780,6 +796,21 @@ function DigBuilding:entry_at(x, y)
     return ENTRIES[r * self.cols + c + 1]
 end
 
+-- "WW" IS A PAN, NOT A SEARCH. The box takes every printable key while it has focus, and the
+-- keys a player reaches for to look around -- w a s d -- type into it instead: the picker feels
+-- stuck. `<` and `>` drop focus, but nobody thinks of a z-key when they want to pan. So a
+-- movement key pressed TWICE AS THE FIRST THING TYPED is read as the intent it is: the first
+-- press comes back out of the search, the box drops focus, and the second press goes to DF as
+-- the pan it was. Only at the start: once there is a word in the box a doubled letter is part
+-- of the word ("glass"), and someone three letters into a name is not trying to look around.
+local PAN_KEYS = {w = true, a = true, s = true, d = true}
+local function pan_double_tap(self, ch)
+    if not PAN_KEYS[ch:lower()] or self.search ~= ch then return false end
+    self.search = ''
+    self.unfocused = true
+    return true
+end
+
 function DigBuilding:onInput(keys)
     -- yield everything while hidden or while a native panel overlaps us (covered, set in render)
     if not self.visible or self.covered then return false end
@@ -799,7 +830,9 @@ function DigBuilding:onInput(keys)
         if keys._STRING == 0 then                                 -- backspace
             self.search = self.search:sub(1, -2); return true
         elseif keys._STRING and keys._STRING >= 33 then           -- a printable, non-space char
-            self.search = self.search .. string.char(keys._STRING); return true
+            local ch = string.char(keys._STRING)
+            if pan_double_tap(self, ch) then return false end     -- "ww": DF pans, box unfocused
+            self.search = self.search .. ch; return true
         end
         if keys.SELECT then                                       -- Enter: select the BEST match
             local _, _, best = self:compute_matches()

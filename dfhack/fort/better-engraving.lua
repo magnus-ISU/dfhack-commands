@@ -26,7 +26,10 @@ and object are matched against what you have already added, so they can be short
 "aubree is raising astod" is enough.
 
 `<` and `>` are never typed: they are DF's z-level keys, and they also drop focus so the
-plain movement keys reach the game again. Click the box to type again.
+plain movement keys reach the game again. So does a movement key pressed twice as the FIRST
+thing typed -- `ww`, `aa`, `ss`, `dd` on an empty box -- which takes the first press back out,
+drops focus and pans; once a word is under way a doubled letter is just typed. Click the box to
+type again.
 
 SPACE ON AN EMPTY BOX PAUSES, as it would anywhere else in the fort. The box is on screen for
 as long as the Engrave tool is, so a space that typed a space would take the fort's pause key
@@ -1044,6 +1047,8 @@ function BetterEngraving:commit()
     self:take(choice)
 end
 
+local PAN_KEYS = {w = true, a = true, s = true, d = true}
+
 function BetterEngraving:onInput(keys)
     -- NOT gated on self.visible: the box is hidden until you type, so the first keystroke has
     -- to be taken while it is still hidden or it could never appear at all.
@@ -1099,7 +1104,19 @@ function BetterEngraving:onInput(keys)
         df.global.pause_state = not df.global.pause_state
         return true
     elseif keys._STRING and keys._STRING >= 32 then
-        self.search = self.search .. string.char(keys._STRING); self:refresh(); return true
+        local ch = string.char(keys._STRING)
+        -- "WW" IS A PAN, NOT A SEARCH: a movement key pressed twice as the FIRST thing typed
+        -- takes the first press back out of the box, drops focus, and hands the second to DF
+        -- as the pan it was. Same rule as fort/dig-building's picker, for the same reason --
+        -- nobody reaches for a z-key when they want to look around. Only on an empty box: once
+        -- a word is under way a doubled letter is part of the word ("grass").
+        if PAN_KEYS[ch:lower()] and self.search == ch then
+            self.search = ''
+            self.unfocused = true
+            self:refresh()
+            return false
+        end
+        self.search = self.search .. ch; self:refresh(); return true
     end
     -- Last: eat the keys that would act on the map behind the box. A printable keypress is
     -- normally consumed above, but under a heavy frame the same press can arrive carrying only

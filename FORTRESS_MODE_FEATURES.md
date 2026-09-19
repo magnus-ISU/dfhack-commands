@@ -122,6 +122,9 @@ in at the priority the Dig tool is set to, the same as a tile you paint by hand.
 
 ### **`fort/dig-building`**
 A searchable building picker while digging that drops you straight into DF's placement flow.
+The search box holds focus while the picker is up; `<`/`>` or a movement key pressed twice as
+the first thing typed (`ww`, `aa`, `ss`, `dd`) hand the keyboard back to DF and pan, and clicking
+the box resumes typing. The same double-tap works in `fort/better-engraving`'s image box.
 
 ### **`fort/dig-replace-walls`**
 Paint walls that should become constructed walls of your choosing. Reached from the
