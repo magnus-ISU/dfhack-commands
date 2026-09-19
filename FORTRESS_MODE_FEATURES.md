@@ -2006,6 +2006,20 @@ at, between its corners — which makes it a pointing device: forbid what you wa
 `artifacts` includes artifacts, which are excluded by default because they are unrecoverable and usually
 forbidden precisely to keep them safe.
 
+### **`fort/deconstruct-now`**
+`dig-now` for constructions: every constructed wall, floor, stair, ramp or fortification marked
+for removal comes out this instant. The tile goes back to what it was before the construction
+went in, the material it was built from drops where it stood — or on the first solid tile below,
+when it stood in mid-air — and the mark is cleared. Takes the same bounds as `dig-now`: nothing
+for the whole map, `-z` for the z-level you are looking at, `here` for the tile under the cursor,
+two corners for a box; `-c` drops no materials, `-d <pos>` drops them all under one spot.
+
+A tile whose Remove Construction job a dwarf has already **taken** is left to that dwarf and
+counted in the report — pulling a job out from under its worker is a crash this fort has seen.
+The floor a wall put on top of itself stays when the wall comes out, as it does by hand. Only
+constructions: a planned-but-unbuilt one is a building DF's own cancel already removes instantly,
+and a built building marked with `x` is not touched.
+
 ### **`fort/clear-flows`**
 Clears miasma and other flow clouds — a quick FPS fix.
 
