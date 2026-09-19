@@ -34,6 +34,15 @@ LEGAL metal currently has the most bars in the fort. Legality comes from the mat
 item flags: armor needs ITEMS_ARMOR (silver has none -- silver armor is never queued), weapons
 ITEMS_WEAPON, furniture/crafts/cages ITEMS_HARD. Anvils excepted: always iron (ITEMS_ANVIL).
 
+THE MILITARY COMES FIRST. While `fort/military-uniforms` is queueing gear (its "Queue gear
+orders" toggle) and is still short of a metal, that metal is off the table here -- a craving
+helm that gets melted again must not be why a soldier's breastplate waits. Owing an alloy also
+protects what it is smelted from: steel owed means no iron is spent either (steel is iron, via
+pig iron); a bronze owed means no copper. The military service publishes what it still owes
+after every one of its cycles, as a shortfall rather than an order list, so a metal it has
+run out of entirely is protected too. With every soldier kitted out, or the toggle off,
+nothing is held back. `idle-smiths status` shows what is currently reserved.
+
 SOLDIERS UNDER ORDERS ARE LEFT ALONE. A dwarf whose squad is carrying out an order -- or who
 holds an individual one -- is doing that order, however badly they want to craft, so they are
 never handed a forge job and the squad never arrives one dwarf short. It is checked both when
@@ -129,7 +138,32 @@ local function allowed_metal_indexes()
     return metal_idx_cache
 end
 
----bar counts per allowed metal; returns counts by name
+-- THE MILITARY COMES FIRST. While `fort/military-uniforms` is queueing gear and is still
+-- short of a metal, that metal is not ours to spend on a craving: a helm nobody asked for
+-- (and that gets melted again) must not be the reason a soldier's breastplate waits. The
+-- service publishes what it still owes, by inorganic id, in its saved state after every
+-- cycle (`short_metals`); it is the shortfall, so a metal with no bars left counts too.
+-- Owing an ALLOY also protects what it is smelted from: steel is iron (via pig iron), the
+-- bronzes are copper. Nothing here is written -- read-only on the other tool's state.
+local ALLOY_INPUTS = {
+    STEEL = {'IRON'}, PIG_IRON = {'IRON'},
+    BRONZE = {'COPPER'}, BISMUTH_BRONZE = {'COPPER'},
+}
+local function military_reserved()
+    local ok, st = pcall(dfhack.persistent.getSiteData, 'military-uniforms')
+    if not ok or not st or not st.queue or not st.short_metals then return {} end
+    local reserved = {}
+    for id, n in pairs(st.short_metals) do
+        if n > 0 then
+            reserved[id] = true
+            for _, input in ipairs(ALLOY_INPUTS[id] or {}) do reserved[input] = true end
+        end
+    end
+    return reserved
+end
+
+---bar counts per allowed metal; returns counts by name. A metal the military is still
+---short of reads as 0 bars here, so nothing below ever picks it.
 local function metal_supply()
     local idxs = allowed_metal_indexes()
     local by_index, counts = {}, {}
@@ -138,6 +172,9 @@ local function metal_supply()
         if it.mat_type == 0 and by_index[it.mat_index] and not it.flags.forbid then
             counts[by_index[it.mat_index]] = counts[by_index[it.mat_index]] + 1
         end
+    end
+    for name in pairs(military_reserved()) do
+        if counts[name] then counts[name] = 0 end
     end
     return counts
 end
@@ -791,6 +828,19 @@ if not args[1] or args[1] == 'status' then
     end
     print(('  citizens with an unmet crafting need: %d'):format(needy))
     print(('  need thresholds: %s'):format(table.concat(thresholds, ',')))
+    local held = {}
+    for name in pairs(military_reserved()) do held[#held + 1] = name:lower():gsub('_', ' ') end
+    table.sort(held)
+    if #held > 0 then
+        print(('  reserved for the military (still owed by military-uniforms): %s')
+            :format(table.concat(held, ', ')))
+    end
+    local counts = metal_supply()
+    local usable = {}
+    for _, name in ipairs(ALLOWED_METALS) do
+        if (counts[name] or 0) > 0 then usable[#usable + 1] = ('%s %d'):format(name:lower(), counts[name]) end
+    end
+    print(('  bars this may spend: %s'):format(#usable > 0 and table.concat(usable, ', ') or 'none'))
 elseif args[1] == 'thresholds' then
     local argparse = require('argparse')
     thresholds = argparse.numberList(args[2], 'thresholds')

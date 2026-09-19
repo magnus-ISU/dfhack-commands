@@ -2395,7 +2395,11 @@ local function run_cycle()
     elseif not dry_run then
         drop_order('pick'); drop_order('axe')
     end
-    if not state.queue then if not dry_run then save_state() end return end
+    if not state.queue then
+        state.short_metals = nil    -- not queueing gear: nothing is owed, nothing is protected
+        if not dry_run then save_state() end
+        return
+    end
 
     local ent = fort_entity()
     if ent then ensure_cloaks(ent) end   -- cloaks in the owned uniform TEMPLATES (never positions)
@@ -2419,6 +2423,22 @@ local function run_cycle()
     queue_shortfall(shortfall)
     -- no stand-in orders: what the uniform names is what gets forged, when its metal is
     -- affordable, and nothing else (the old pass is in military-uniforms-old)
+
+    -- METALS STILL OWED, published for other tools. `fort/idle-smiths` reads this out of the
+    -- saved state and refuses to burn those bars on craving-jobs (and refuses iron while
+    -- steel is owed, since steel is made of it). Keyed by inorganic id, NOT by material
+    -- index, so it reads the same in any world; counted in pieces still short. It is the
+    -- SHORTFALL, not the order list: a metal with no bars at all gets no order (the bar
+    -- budget drops it), and that is precisely the metal most worth protecting.
+    local short_metals = {}
+    for _, r in pairs(shortfall) do
+        if r.mat_type == 0 and r.count > 0 then
+            local raw = df.global.world.raws.inorganics.all[r.mat_index]
+            if raw then short_metals[raw.id] = (short_metals[raw.id] or 0) + r.count end
+        end
+    end
+    if tool_short > 0 then short_metals.STEEL = (short_metals.STEEL or 0) + tool_short end
+    state.short_metals = short_metals
 
     -- recycle surplus gear into bars: for the masterwork upgrade, and when the miner/
     -- woodcutter tools have run the steel out

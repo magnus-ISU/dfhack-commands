@@ -1239,14 +1239,6 @@ the bar moved down rather than growing a second, stress-shaped test.
 Lets idle dwarves work the forge to satisfy their craft need, picking legal metals per item.
 Soldiers whose squad is under orders are left to those orders.
 
-**What it makes is melted again.** A dwarf forging to settle a craving turns a bar into a helm
-nobody asked for, so each piece is designated for melting as it comes off the forge and the bar
-comes back. Two things are kept: a **masterwork** (melting a dwarf's best work is the one sure
-way to make them miserable) and a **silver war hammer** (silver is useless as armour but its
-weight makes the best blunt weapon in the game). Only jobs *this tool* queued are followed — a
-piece from an order you placed at the same forge is left alone.
-
-
 **Angriest first, and a pass a day.** A need bucket used to be a hash set, so whichever dwarf
 the iteration reached first was served and the same few kept winning — with 28 dwarves in the
 top bucket and three forges, a given dwarf could wait months. The queue is now ordered by
@@ -1315,6 +1307,14 @@ agreement is not broken from there; DF's own Chop tool is the way past it.
 ### **`fort/harvest-plants`**
 Designates every ripe shrub standing in a Gather Fruit zone for gathering once a month, instead
 of waiting for the zone to trickle a few tiles out at a time — vegetables and fruitless plants
+**The military comes first.** While `fort/military-uniforms` is queueing gear and is still
+short of a metal, that metal is not spent on cravings — a helm nobody asked for must not be
+why a soldier's breastplate waits. Owing an alloy protects what it is smelted from too: steel
+owed means no iron is used either, bronze owed means no copper. It reads the shortfall the
+military service publishes after each of its cycles, not its order list, so a metal the fort
+has run out of entirely is protected as well. `idle-smiths status` lists what is reserved and
+what it may spend.
+
 included, not just what DF picks on its own. It uses DF's own mechanism: the same tile
 designation the Designate › Gather tool paints, so DF posts and runs the jobs exactly as if you
 had dragged the tool over the zone. Tiles already designated or with a gathering job are skipped,
