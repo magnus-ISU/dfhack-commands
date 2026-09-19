@@ -31,9 +31,12 @@ custom-tool band beside Replace wall), it runs the whole errand:
      Anything you mark for dumping yourself while it runs JOINS the delivery: with one dump
      zone in the fort it was going to that spot anyway, and joining is what gets it counted,
      waited for, and unforbidden as it lands like the rest.
-     Starting a delivery first UNMARKS everything else the fort had marked for dumping, and
-     cancels any delivery already in flight: there is one dump zone and one set of marks, so
-     two deliveries at once would land in each other's pile.
+     Anything ALREADY marked for dumping when the picker opens is PRE-SELECTED in it: mark
+     a pile with `d`-`b`-`d` on the map, open Move items, click the spot, click Move, and
+     that pile is what goes. Deselect what you did not mean; whatever is left unselected
+     is unmarked when the delivery starts, and any delivery already in flight is cancelled:
+     there is one dump zone and one set of marks, so two deliveries at once would land in
+     each other's pile.
   5. EACH ITEM IS UNFORBIDDEN AS IT LANDS. Dumped items are put down forbidden (DF's own
      rule), and a pile of forbidden goods is not a delivery -- so the watcher hands each one
      back to the fort on the first tick after it arrives, rather than the whole pile at the
@@ -65,7 +68,10 @@ picked set drops what is hidden), and widening them again does not put it back. 
 opens with the distance to its closest passing item. `Melt targets` (Shift-T) keeps only
 metal items and caps the quality sliders at exceptional -- everything below masterwork, since
 the masterworks and artifacts are the ones you keep -- as a starting point; move them
-afterwards if you like. Turning it off puts quality back to "any". CLICKING A ROW
+afterwards if you like. Turning it off puts quality back to "any". `This z only` (Shift-Z)
+keeps only items on the destination's own z-level, and `Burrow` (Shift-B) cycles through the
+fort's burrows to keep only items standing inside the one named -- the two ways a fort already
+names a pile ("this floor", "the hospital's stock") that are not a kind of item. CLICKING A ROW
 takes all of that kind, and clicking it again clears it; SHIFT-CLICK marks every row from the
 last one clicked to this one. The bands along the right edge -- `[-1]`, the count, `[+1]`,
 `[+10]`, `[all]` -- are there when you want an exact number instead. `[specific]` opens the
@@ -404,18 +410,29 @@ local function burrow_at(pos)
     local key = ('%d,%d,%d'):format(pos.x, pos.y, pos.z)
     burrow_cache = burrow_cache or {}
     local hit = burrow_cache[key]
-    if hit ~= nil then return hit or nil end
-    local names = {}
+    if hit ~= nil then return hit.names or nil, hit.ids end
+    local names, ids = {}, {}
     for _, b in ipairs(df.global.plotinfo.burrows.list) do
         local ok, inside = pcall(dfhack.burrows.isAssignedTile, b, pos)
         if ok and inside then
             local name = b.name
             names[#names + 1] = (name ~= '' and name) or ('burrow ' .. b.id)
+            ids[b.id] = true
         end
     end
-    local out = #names > 0 and table.concat(names, ', ') or false
+    local out = {names = #names > 0 and table.concat(names, ', ') or false, ids = ids}
     burrow_cache[key] = out
-    return out or nil
+    return out.names or nil, ids
+end
+
+-- the fort's burrows as picker options: "any" first, then one per burrow, in list order
+local function burrow_options()
+    local opts = {{label = 'any', value = -1}}
+    for _, b in ipairs(df.global.plotinfo.burrows.list) do
+        local name = b.name
+        opts[#opts + 1] = {label = (name ~= '' and name) or ('burrow ' .. b.id), value = b.id}
+    end
+    return opts
 end
 
 -- ---- the candidate scan --------------------------------------------------------
@@ -476,14 +493,15 @@ function scan_items(target)
                             groups[gkey] = grp
                             order[#order + 1] = grp
                         end
+                        local bnames, bids = burrow_at(pos)
                         grp.items[#grp.items + 1] = {
-                            id = it.id, dist = distance(pos, target),
+                            id = it.id, dist = distance(pos, target), z = z,
                             desc = dfhack.items.getDescription(it, 0, true),
                             value = dfhack.items.getValue(it),
                             quality = it:getQuality(), wear = it.wear,
-                            forbidden = it.flags.forbid,
+                            forbidden = it.flags.forbid, dump = it.flags.dump,
                             metal = is_metal(it),
-                            burrow = burrow_at(pos),
+                            burrow = bnames, burrow_ids = bids,
                         }
                         total = total + 1
                     end
@@ -505,6 +523,16 @@ function scan_items(target)
         grp.value, grp.quality, grp.wear = v, q, w
         grp.eligible = grp.items      -- narrowed per filter by the picker
         grp.total = #grp.items
+        -- ALREADY MARKED FOR DUMPING = ALREADY CHOSEN. Marking with `d`-`b`-`d` is how the map
+        -- lets you point at things -- "these, this pile, that corpse" -- and a picker that then
+        -- opened with them unselected threw the pointing away. So they open selected, as a
+        -- hand-picked set, and the rest of the picker works as before: deselect what you do
+        -- not mean, add what you do. Whatever is left unselected when you click Move is unmarked.
+        local pre, n = {}, 0
+        for _, e in ipairs(grp.items) do
+            if e.dump then pre[e.id] = true; n = n + 1 end
+        end
+        if n > 0 then grp.specific = pre; grp.sel = n end
     end
     return order, nil, total
 end
@@ -704,10 +732,15 @@ end
 -- would be carried to the spot you just picked, mixed in with what you asked for. This is
 -- deliberately fort-wide and deliberately blunt; the alternative is a delivery that quietly
 -- brings things nobody asked for.
-local function clear_all_dumps()
+local function clear_all_dumps(keep)
     local n = 0
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if it.flags.dump then it.flags.dump = false; n = n + 1 end
+        if it.flags.dump then
+            it.flags.dump = false
+            -- an item the picker opened with pre-selected and is about to re-mark was not
+            -- "stale": it is the delivery, so it does not count as unmarked
+            if not (keep and keep[it.id]) then n = n + 1 end
+        end
     end
     return n
 end
@@ -719,7 +752,9 @@ local function begin_move(target, ids)
     -- and land its items in the wrong place. The old one is cancelled properly -- its marks
     -- dropped, its zone removed, whatever already arrived unforbidden -- rather than forgotten.
     local replaced = cancel() and true or false
-    local stale = clear_all_dumps()
+    local chosen = {}
+    for _, id in ipairs(ids) do chosen[id] = true end
+    local stale = clear_all_dumps(chosen)
     local zone = make_dump_zone(target)
     if not zone then return nil, 'could not place a dump zone there' end
     local removed = clear_dump_zones(zone.id)
@@ -1130,16 +1165,38 @@ function PickerScreen:init(info)
                         self:refresh()
                     end,
                 },
+                -- WHERE THE ITEMS ARE: only this z-level (the destination's), and/or only one
+                -- burrow. "Everything on this floor" and "the hospital's stock" are the two
+                -- ways a fort already names a pile, and neither is a kind of item.
+                widgets.ToggleHotkeyLabel{
+                    view_id = 'this_z',
+                    frame = {t = 2, l = 0, w = 24},
+                    label = 'This z only:',
+                    key = 'CUSTOM_SHIFT_Z',
+                    options = {{label = 'Yes', value = true, pen = COLOR_GREEN},
+                               {label = 'No', value = false}},
+                    initial_option = false,
+                    on_change = function() self:refresh() end,
+                },
+                widgets.CycleHotkeyLabel{
+                    view_id = 'burrow',
+                    frame = {t = 2, l = 26, r = 0},
+                    label = 'Burrow:',
+                    key = 'CUSTOM_SHIFT_B',
+                    options = burrow_options(),
+                    initial_option = -1,
+                    on_change = function() self:refresh() end,
+                },
                 -- the trade screen's own filter sliders, and they are laid out for a 38-wide
                 -- column: given the whole width they draw on top of each other
                 widgets.Panel{
-                    frame = {t = 3, l = 0, r = 0, h = 18},
+                    frame = {t = 4, l = 0, r = 0, h = 18},
                     frame_style = gui.FRAME_INTERIOR,
                     subviews = {widgets.Panel{frame = {t = 0, l = 0, w = 38}, subviews = sliders}},
                 },
                 widgets.List{
                     view_id = 'list',
-                    frame = {t = 22, l = 0, r = 0, b = 3},
+                    frame = {t = 23, l = 0, r = 0, b = 3},
                     choices = {},
                 },
                 widgets.Label{
@@ -1185,7 +1242,10 @@ function PickerScreen:filters()
     local f = {min_quality = 0, max_quality = 6, min_value = 0, max_value = math.huge,
                min_condition = 3, max_condition = 0,
                hide_forbidden = self.subviews.hide_forbidden:getOptionValue(),
-               melt = self.subviews.melt_targets:getOptionValue()}
+               melt = self.subviews.melt_targets:getOptionValue(),
+               only_z = self.subviews.this_z:getOptionValue() and self.target.z or nil,
+               burrow = self.subviews.burrow:getOptionValue()}
+    if f.burrow == -1 then f.burrow = nil end
     local sv = self.subviews
     local function num(v) return (type(v) == 'table') and v.value or v end
     if sv.min_quality then f.min_quality = sv.min_quality:getOptionValue() end
@@ -1206,6 +1266,8 @@ end
 local function item_passes(e, g, f)
     if f.hide_forbidden and e.forbidden then return false end
     if f.melt and not e.metal then return false end
+    if f.only_z and e.z ~= f.only_z then return false end
+    if f.burrow and not (e.burrow_ids and e.burrow_ids[f.burrow]) then return false end
     if f.min_condition < e.wear or f.max_condition > e.wear then return false end
     if not g.corpse then
         if e.quality < f.min_quality or e.quality > f.max_quality then return false end

@@ -236,7 +236,9 @@ The filters cut *inside* a row: a minimum quality turns five earrings into the t
 a row with nothing left is not shown, and narrowing pulls a selection down with it. Each row
 opens with the distance to its closest passing item, and **Melt targets** (Shift-T) keeps only
 metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
-as a starting point you can move; off puts quality back to any.
+as a starting point you can move; off puts quality back to any. **This z only** (Shift-Z)
+keeps only items on the destination's z-level, and **Burrow** (Shift-B) cycles through the
+fort's burrows to keep only what stands inside the one named.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
 behind a row, by distance, if you want to choose among them.
 
@@ -266,10 +268,12 @@ every render. What that cannot do is widen the panel, which is measured at rebui
 watcher overlay catches the hover transition on the frame it happens and asks the panel to lay
 out again; without that the hint is drawn into a frame too narrow for it and comes out clipped.
 
-Starting a delivery **unmarks everything else the fort had marked for dumping** and **cancels any
-delivery already in flight** (it says how many of each). Both for the same reason it deletes the
-other dump zones: a dumped item goes to whatever dump zone is going, so old marks would arrive
-mixed in with what you asked for. On one live fort that first sweep cleared 361 stray dump
+**Anything already marked for dumping opens pre-selected in the picker**: mark a pile with
+`d`-`b`-`d` on the map, open Move items, click the spot, click Move, and that pile is what goes
+— deselect what you did not mean. Starting a delivery then **unmarks whatever was left
+unselected** and **cancels any delivery already in flight** (it says how many of each). Both for
+the same reason it deletes the other dump zones: a dumped item goes to whatever dump zone is
+going, so old marks would arrive mixed in with what you asked for. On one live fort that first sweep cleared 361 stray dump
 designations. **Each item is unforbidden as it lands**, not all at once at the end — dumped goods
 are put down forbidden, and a pile of forbidden goods is not a delivery, so a long haul is usable
 while the rest of it is still walking. The zone goes when the last one is in. The job survives a
@@ -945,7 +949,16 @@ patrol walks its route once and holds at the far end, unless you close the route
 its own start, which keeps it cycling. The dotted trail DF paints between route waypoints
 is kept off the map -- the waypoint banners stay, and the trail comes back while you have
 the patrol-route screen open. Clicks on any UI -- or in the three-tile band
-around the screen border -- are always left to the game.
+around the screen border -- are always left to the game. While a squad is under any order it
+sleeps **in barracks at need** and carries **no food or water** -- the schedule and supplies
+settings you would flip by hand before an order -- and gets its own values back when the last
+order goes, even across a save. A new order also **drops the march the old one started**:
+vanilla lets a soldier finish walking to wherever the last order sent him before it reads the
+new one; here the path goal is cleared with the orders, so the next step obeys the new click.
+And **no standing over the corpse**: vanilla leaves a soldier fixed on a dead target for
+several hundred ticks -- about a day -- before he returns to his order, and does the same
+standing "search" for one that got away; a member under orders whose target is dead, gone or
+out of reach is released at once.
 
 ### **`fort/military-labor`**
 Keeps the "Military" work detail matched to your standing squads.

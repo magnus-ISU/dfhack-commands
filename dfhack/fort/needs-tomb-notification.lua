@@ -552,44 +552,52 @@ local function build_figure_info(fig, pos_by_unit)
     local L = function(s) return {text = s, pen = COLOR_GRAY} end
     local V = function(s) return {text = s, pen = COLOR_WHITE} end
 
-    line({{text = fig.name, pen = COLOR_YELLOW}})
-    if unit then
-        line({L('Profession: '), V(dfhack.units.getProfessionName(unit))})
-    end
+    -- "Aspad Mogozzolak, the Blind Shell": the profession sits on the name line
+    local prof = unit and dfhack.units.getProfessionName(unit)
+    line({{text = fig.name, pen = COLOR_YELLOW}, {text = (prof and #prof > 0) and (', ' .. prof) or '', pen = COLOR_WHITE}})
 
     local cur_year = df.global.cur_year
+    -- born_year is NEGATIVE for anything alive before year 0 (a 325-year-old pet reads -196);
+    -- only -1 means unknown, so never test born >= 0
+    local function known(y) return y ~= nil and y ~= -1 end
     local born = hf and hf.born_year
+    if not known(born) and unit and known(unit.birth_year) then born = unit.birth_year end
     local died = hf and hf.died_year
     -- Determine death from the LIVE records, not fig.dead: the browser's left-list entries come from
     -- the scan, which carries no `dead` field, so trusting fig.dead rendered every dead dwarf as
     -- "Alive". A recorded death year (died_year >= 0) or a loaded dead unit each mean dead.
     local dead = (hf and hf.died_year and hf.died_year >= 0) or (unit and dfhack.units.isDead(unit)) or false
+    -- one inline line: "Died in 129, aged 350" / "Died, year unknown" / "Alive, aged 41",
+    -- then the cause on its own line ("slain by Aubree the human")
     if dead then
-        local when = (died and died >= 0) and ('year %d'):format(died) or 'unknown'
-        local age = (born and born >= 0 and died and died >= 0) and (' (age %d)'):format(died - born) or ''
-        line({L('Died: '), V(when .. age)})
-        local cause = cause_for(fig.hf, fig.unit_id) or (unit and 'cause of death unknown')
-        if cause then line({L('Cause: '), V(cause)}) end
+        local when = (died and died >= 0) and ('Died in %d'):format(died) or 'Died, year unknown'
+        local age = (known(born) and died and died >= 0) and (', aged %d'):format(died - born) or ''
+        line({V(when .. age)})
+        local cause = cause_for(fig.hf, fig.unit_id) or 'cause of death unknown'
+        line({V(cause)})
     else
-        local age = (born and born >= 0) and (' (age %d)'):format(cur_year - born) or ''
+        local age = known(born) and (', aged %d'):format(cur_year - born) or ''
         line({{text = 'Alive' .. age, pen = COLOR_GREEN}})
+    end
+
+    -- kill_summary returns the whole line ("Kills: 0" / "12 kills: 7 goblins, ...") and only
+    -- reads hist_figure_id, so a relative with no loaded unit still gets a count.
+    local ok, cd = pcall(reqscript, 'fort/creature-description')
+    if ok and cd and cd.kill_summary then
+        local okk, ks = pcall(cd.kill_summary, unit or {hist_figure_id = fig.hf})
+        line({V(okk and ks and #ks > 0 and ks or 'Kills: ?')})
     end
 
     if unit then
         local sk = top_skills(unit, 6)
         if #sk > 0 then line({L('Skills: '), V(table.concat(sk, ', '))}) end
-        local ok, cd = pcall(reqscript, 'fort/creature-description')
-        if ok and cd and cd.kill_summary then
-            local okk, ks = pcall(cd.kill_summary, unit)
-            if okk and ks and #ks > 0 then line({L('Kills: '), V(ks)}) end
-        end
     end
 
     T[#T + 1] = NEWLINE
     local rels = build_relatives(fig, pos_by_unit)
     local choices = {}
     if #rels == 0 then
-        line({{text = 'No recorded relatives.', pen = COLOR_GRAY}})
+        line({{text = 'No recorded relatives', pen = COLOR_GRAY}})
     else
         for _, r in ipairs(rels) do
             local dead = r.fig.dead
@@ -648,7 +656,7 @@ function DeadScreen:init()
     self:addviews{
         widgets.Window{
             frame_title = 'Fortress dead',
-            frame = {w = 84, h = 30},
+            frame = {w = 100, h = 30},
             resizable = true,
             resize_min = {w = 60, h = 18},
             subviews = {

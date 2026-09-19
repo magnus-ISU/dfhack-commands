@@ -91,6 +91,24 @@ dwarf-rts -- on the Squads screen:
     flask is sought either. So they answer orders instantly -- a miner keeps fighting
     with his pick, everyone keeps their clothes -- instead of trooping off to a
     stockpile to equip gear they don't have. See `match_uniform_to_inventory`.
+  * ON DUTY, NO NAPS AND NO RATIONS. While a squad has any live order its current
+    routine's sleep mode is "in barracks at need" in every month and it carries no
+    food or water -- the settings you would flip by hand on the schedule and supplies
+    screens before an order and flip back after. When the last order goes, the values
+    it had come back (persisted with the site, so a reload mid-order still restores).
+    Any squad of yours under orders counts, whether the order came from here or from
+    DF's own buttons. See `duty_watch`.
+  * A NEW ORDER DROPS THE OLD MARCH. Vanilla lets a soldier finish walking to where the
+    previous order sent him before it reads the new one; every order issued here also
+    clears the members' path goal, so the next step is taken against the new order.
+    (Members busy with a job -- eating, fetching gear -- are left to finish it.)
+  * NO STANDING OVER THE CORPSE. After a kill DF leaves the soldier pointed at his dead
+    target for several hundred ticks (`unit.opponent.timer`, about a day) before he goes
+    back to his order -- and does the same "search" for a target that got away, standing
+    still. While a squad is under orders, a member whose last target is dead, gone, or
+    more than 3 tiles off is released at once; a fresh order releases everyone it is
+    given to. A target still in reach is a fight, and a target named in a live kill
+    order is the order itself -- both are left alone.
 
 It only acts with a squad selected and the cursor on the map, not on a command
 button (guarded via `main_interface.current_hover`). It also stands fully aside
@@ -391,8 +409,78 @@ end
 
 -- erase a squad's orders (no delete: DF frees these on its own cancel path, so we
 -- avoid leaving a dangling military target ref -- a tiny leak beats a crash)
+-- A NEW ORDER DROPS THE OLD MARCH. A soldier keeps the path he was walking when his order
+-- changes -- `unit.path.dest`/`goal` still point at the old station -- and DF lets him arrive
+-- there before it looks at the squad's orders again, so "come back" is obeyed only after
+-- he has finished running to wherever the last click sent him. Clearing the path goal when
+-- the orders are replaced makes his next step a fresh decision against the new order. Only
+-- a unit with no job is touched: a job owns its own path, and yanking it mid-haul is how
+-- items end up on the floor.
+local NO_DEST = xyz2pos(-30000, -30000, -30000)
+local function reset_path(occupant)
+    if not occupant or occupant < 0 then return end
+    local hf = df.historical_figure.find(occupant)
+    local u = hf and df.unit.find(hf.unit_id)
+    if u and not dfhack.units.isDead(u) and not u.job.current_job then
+        dfhack.units.setPathGoal(u, NO_DEST, df.unit_path_goal.None)
+        release_last_target(u)      -- a new order also ends the post-fight stand (below)
+    end
+end
+
+-- THE STAND OVER THE CORPSE. When a soldier's target dies (or gets away) DF leaves him
+-- pointed at it: `unit.opponent.unit_id` stays set and `unit.opponent.timer` counts down
+-- one per tick from several hundred, and until it reaches zero he stands where the fight
+-- ended, ignoring his squad order. Traced on a live kill: opp=30720/241 ... /1, then -1/0 and
+-- SeekStation the same tick. DF's own reset is "timer hits zero", so that is what this
+-- forces -- the timer is set to 1 and DF does the clearing itself on its next pass.
+function release_last_target(u)
+    if u.opponent.unit_id ~= -1 and u.opponent.timer > 1 then u.opponent.timer = 1 end
+end
+
+-- Members of a commanded squad whose last target is dead, gone, or simply NOT HERE: let go
+-- of it now. The same stand happens for a target that got away -- the soldier "searches"
+-- for 300 ticks by standing still 24 tiles from it (traced) -- and under orders that is
+-- 300 ticks of ignoring the order. A target still within a few tiles on the same level is a
+-- fight, and left alone.
+--
+-- EXCEPT A TARGET HE HAS BEEN ORDERED TO KILL. Under a kill order the far-away opponent IS
+-- the order: DF sets `opponent` to the kill-list target and walks him toward it, and
+-- releasing it every pass left Aubree frozen 22 tiles from a reachable target (goal None,
+-- timer pinned at 1). So a live opponent named in the squad's or the member's own kill list
+-- is never released here, whatever the distance.
+local IN_REACH = 3
+local function on_kill_list(orders, uid)
+    for i = 0, #orders - 1 do
+        local o = orders[i]
+        if df.squad_order_kill_listst:is_instance(o) then
+            for k = 0, #o.units - 1 do if o.units[k] == uid then return true end end
+        end
+    end
+    return false
+end
+local function release_dead_targets(sq)
+    for i = 0, #sq.positions - 1 do
+        local pos = sq.positions[i]
+        local occ = pos.occupant
+        if occ >= 0 then
+            local hf = df.historical_figure.find(occ)
+            local u = hf and df.unit.find(hf.unit_id)
+            if u and u.opponent.unit_id ~= -1 and not dfhack.units.isDead(u) then
+                local oid = u.opponent.unit_id
+                local t = df.unit.find(oid)
+                local alive = t and not dfhack.units.isDead(t)
+                local in_reach = alive and t.pos.z == u.pos.z
+                    and math.max(math.abs(t.pos.x - u.pos.x), math.abs(t.pos.y - u.pos.y)) <= IN_REACH
+                local ordered = alive and (on_kill_list(sq.orders, oid) or on_kill_list(pos.orders, oid))
+                if not in_reach and not ordered then release_last_target(u) end
+            end
+        end
+    end
+end
+
 local function clear_orders(sq)
     for i = #sq.orders - 1, 0, -1 do sq.orders:erase(i) end
+    for p = 0, #sq.positions - 1 do reset_path(sq.positions[p].occupant) end
 end
 
 -- ---- individual-member orders ---------------------------------------------------
@@ -425,6 +513,7 @@ end
 -- erase one member's own orders (no :delete(), same reasoning as clear_orders)
 local function clear_pos_orders(pos)
     for i = #pos.orders - 1, 0, -1 do pos.orders:erase(i) end
+    reset_path(pos.occupant)
 end
 
 -- drop every member's individual order in a squad (a squad-wide order supersedes them)
@@ -773,6 +862,92 @@ local function patrol_watch()
             prune_routes()
         end
     end
+end
+
+-- ---- on duty: no naps, no rations -------------------------------------------------
+-- A squad under an order still breaks off for the things its schedule allows: a soldier
+-- whose month says "sleep anywhere at will" walks home to bed mid-advance, and one whose
+-- squad carries 2 meals and a flask troops off for provisions (GetProvisions /
+-- FillWaterskin) before it moves. Both are settings the player could change by hand on the
+-- schedule and supplies screens before every order and change back after -- so that is what
+-- this does. While a fort squad has ANY live order (squad-level or per-member, ours or DF's),
+-- its current routine's sleep mode is set to "in barracks at need" in every month, and its
+-- carry food / water to 0 / none; when the last order goes, the values it had come back. The
+-- settings it saw are persisted with the site, so a save mid-order still restores on reload.
+-- A routine switched to mid-order is put on the same footing as it becomes current.
+local DUTY_KEY = 'dwarf-rts/duty'
+local duty_saved   -- squad id -> {food=, water=, routines = {[idx] = {12 sleep modes}}}
+
+local function duty_load()
+    if duty_saved then return duty_saved end
+    local d = dfhack.persistent.getSiteData(DUTY_KEY, nil)
+    duty_saved = type(d) == 'table' and d or {}
+    return duty_saved
+end
+
+local function duty_store()
+    pcall(dfhack.persistent.saveSiteData, DUTY_KEY, duty_saved or {})
+end
+
+local function squad_commanded(sq)
+    if #sq.orders > 0 then return true end
+    for i = 0, #sq.positions - 1 do
+        if #sq.positions[i].orders > 0 then return true end
+    end
+    return false
+end
+
+-- set the current routine to barracks-at-need, remembering what it was (once per routine)
+local function duty_apply_routine(sq, rec)
+    local idx = sq.cur_routine_idx
+    local r = sq.schedule.routine[idx]
+    if not r then return end
+    local key = tostring(idx)
+    if not rec.routines[key] then
+        local saved = {}
+        for m = 0, 11 do saved[m + 1] = r.month[m].sleep_mode end
+        rec.routines[key] = saved
+    end
+    for m = 0, 11 do r.month[m].sleep_mode = df.squad_sleep_option_type.InBarracksAtNeed end
+end
+
+local function duty_watch()
+    local saved = duty_load()
+    local changed = false
+    for _, sq in ipairs(df.global.world.squads.all) do
+        if sq.entity_id == df.global.plotinfo.group_id then
+            local key = tostring(sq.id)
+            local rec = saved[key]
+            if squad_commanded(sq) then
+                release_dead_targets(sq)
+                if not rec then
+                    rec = {food = sq.supplies.carry_food, water = sq.supplies.carry_water, routines = {}}
+                    saved[key] = rec
+                    sq.supplies.carry_food = 0
+                    sq.supplies.carry_water = df.squad_water_level_type.NoWater
+                    changed = true
+                end
+                if not rec.routines[tostring(sq.cur_routine_idx)] then
+                    duty_apply_routine(sq, rec)
+                    changed = true
+                end
+            elseif rec then
+                sq.supplies.carry_food = rec.food
+                sq.supplies.carry_water = rec.water
+                for idx, modes in pairs(rec.routines) do
+                    local r = sq.schedule.routine[tonumber(idx)]
+                    if r then for m = 0, 11 do r.month[m].sleep_mode = modes[m + 1] end end
+                end
+                saved[key] = nil
+                changed = true
+            end
+        end
+    end
+    -- a squad that no longer exists (a disbanded conscription squad) has nothing to restore
+    for key in pairs(saved) do
+        if not df.squad.find(tonumber(key)) then saved[key] = nil; changed = true end
+    end
+    if changed then duty_store() end
 end
 
 -- ---- notification group-kill: shift-click a vanilla "N invaders/hostiles/agitated animals" --
@@ -1417,7 +1592,7 @@ function DwarfRtsClickMove:overlay_onupdate()
     -- screen (a patrol walks on while you're in the equipment editor), but a few times a
     -- second is plenty -- so not every frame.
     self.patrol_tick = ((self.patrol_tick or 0) + 1) % 10
-    if self.patrol_tick == 0 then patrol_watch() end
+    if self.patrol_tick == 0 then patrol_watch(); duty_watch() end
 
     -- a portrait was clicked last frame: DF has now set the sheet's active unit, so
     -- follow it (DF's own follow mechanism; manual scrolling releases it natively).
