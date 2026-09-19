@@ -263,19 +263,6 @@ which is the same "restore what you took" discipline `fort/holiday` already need
 verifying live whether items land forbidden (DF's dump-forbid standing order) and un-forbidding
 them if so.
 
-### **`fort/auto-scaffold`**
-Automatically build the stairs needed to reach a build job nothing can path to, then take them
-down again once the building is up.
-
-**Difficulty: Hard**, and the hardest thing on this list along with the pathing half of
-suspendmanager-supreme. Reachability itself is cheap (`dfhack.maps.canWalkBetween` answers it from
-DF's own walkability groups), but *routing* a scaffold is a 3D search through open air and solid
-rock that nothing here has ever attempted, and it has to be built bottom-up in dependency order —
-each stair is only placeable from the one below it. Removal is worse than construction: the last
-tile has to be taken out from a place that still exists after it is gone, which is the classic way
-a dwarf is left standing on nothing. Worth a spike that only answers "can we route and stage a
-three-tile scaffold and get it back down cleanly", before anything else is written.
-
 ### **`fort/suspendmanager-supreme`**
 Make suspendmanager succeed in more cases: compute the pathing it gives up on, and/or — when it
 does suspend a job — **haul the planned building's materials to the site anyway**, so the builder
@@ -366,7 +353,7 @@ then adds is a real ordering problem rather than more of the same one: the exist
 chain is per tile (dig → smooth → engrave → build), while levels depend on *each other* — a level
 is unreachable until the stairway above it is dug and built, constructions need something to stand
 on, and channelling from above changes the level below. That is the same access question
-`auto-scaffold` faces, arriving from the other direction, and the two should be designed together.
+`fort/auto-scaffold` now answers for a single column of open air, arriving from the other direction.
 The parsing half is comparatively cheap: the library blueprints are already read correctly,
 including the `hidden()` sections behind `#meta` that the offline verification turned up.
 

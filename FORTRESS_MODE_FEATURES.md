@@ -265,6 +265,34 @@ marks every row from the last one clicked to this one. The bands along the right
 the count, `[+1]`, `[+10]`, `[all]` — are still there for an exact number, and `[specific]` still
 opens the items behind a row. Before this, a click that landed on the label did nothing at all.
 
+### **`fort/auto-scaffold`**
+Builds the stair shaft up to a planned construction nothing can reach, then takes it down again.
+
+A wall planned two levels up in open air — the parapet of a tower, the rim of a roof — never gets
+built: no dwarf can stand beside it, so the job sits suspended forever and looks exactly like a
+wall waiting its turn. This watches for planned constructions no citizen can walk next to and
+scaffolds them. The search is deliberately narrow: straight **down** from each of the four tiles
+orthogonally beside the construction, through open air, to a natural floor your dwarves can reach,
+at most ten levels. Where such a column exists a stair shaft goes in it — an up stair on the
+floor, up/down stairs through the air, a down stair at the top — and the shaft that serves the
+most unreachable constructions at once is chosen first, so the gap between two wall segments gets
+one shaft for both. Each stair is planned only once the one below it is built, so nothing is ever
+queued that a dwarf cannot reach, and the construction's own job is unsuspended when the top stair
+is in. Materials are `buildingplan`'s stored stair filters, so the scaffold is built from whatever
+placing a stair by hand would use.
+
+Once every construction the shaft was built for is finished (or cancelled) the shaft comes down
+the only safe way: a Remove Construction designation on the top stair, and on each one below it
+only after the one above is gone, so the dwarf always has the stair beneath to stand on. A shaft
+you cancel yourself — take the planned stair off the map — is taken back down and forgotten.
+
+A construction must be unreachable for two scans (about a day of game time) before it is
+scaffolded, so one that is merely waiting for the tunnel you are digging is left alone; a bare
+`fort/auto-scaffold` skips the wait and does one pass now. `status` lists every shaft and what it
+is doing, `teardown` takes them all down regardless of their constructions, `forget` drops the
+records and leaves the stairs. Measured on a fort with 55 planned walls hanging two levels above
+a roof, all suspended: 40 shafts covering every one of them.
+
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
 

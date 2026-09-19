@@ -540,7 +540,7 @@ These need the fort loaded + the relevant screen open to nail down the
 viewscreen focus strings and data structures before building.
 
 **A second planned list lives in `BROKEN_FEATURES.md` § Planned** (masterwork
-engrave walls, move-items, auto-scaffold, suspendmanager-supreme,
+engrave walls, move-items, suspendmanager-supreme,
 manage-encrusting, good-soup, animal-tribute, trade-agreements, the auto-needs
 extensions, military-reequip) — the ones there are whole tools that do not exist
 yet, with a difficulty on each; the ones below are the specs worked out in
