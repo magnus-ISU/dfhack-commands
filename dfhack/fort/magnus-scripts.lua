@@ -714,9 +714,10 @@ local COLUMNS = {
         -- does not have, not a shortcut to one it does.
         {key = 'rusty-legends', label = 'rusty-legends',
          enable = cmd('enable', 'fort/rusty-legends'), disable = cmd('disable', 'fort/rusty-legends')},
-        -- vanilla: dump jobs never use a wheelbarrow, however heavy the item. This makes a
-        -- heavy dump go at barrow pace when a free barrow is handy -- a feature hauling
-        -- does not have, added to it.
+        -- vanilla: dump jobs never use a wheelbarrow, however heavy the item, and no job
+        -- but a stockpile haul ever does. This retypes dump jobs into barrow runs that
+        -- carry several items a trip, and lightens every other heavy hand-haul to barrow
+        -- pace -- a feature hauling does not have, added to it.
         {key = 'wheelbarrow-dumping', label = 'wheelbarrow-dumping',
          enable = cmd('enable', 'fort/wheelbarrow-dumping'), disable = cmd('disable', 'fort/wheelbarrow-dumping')},
     }},

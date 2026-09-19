@@ -118,6 +118,15 @@ DFHack's own cursor tile rather than its `replace_wall.png`.
 The upstream project is vendored as a submodule under `other-authors/` for reference only;
 nothing in it is deployed or built.
 
+`dfhack/fort/wheelbarrow-dumping.lua` takes one idea from Tachytaenius' `wheelbarrow-dump.lua`
+(<https://github.com/Tachytaenius/df-hacking-modding>, branch `v47`, no licence stated) —
+retyping an unclaimed `DumpItem` job into a `StoreItemInStockpile` job with a wheelbarrow
+attached, so DF's own vehicle step runs — and one from Loire's *Multi-Hauling* (Steam Workshop
+3532363345, <https://github.com/LoireLab/df_scripts/tree/multihaul>, a fork of DFHack's zlib-
+licensed scripts) — attaching several nearby items to one barrow job. No code is copied from
+either; the implementation, the conditions, the completion handling and the weight-cache half
+are this repo's.
+
 ## 6. Maintenance
 
 When art is added, changed, or a new mod is forked:

@@ -449,6 +449,40 @@ next time anything touches its filter. Caps DF can no longer honour — the cont
 applying, or your number no longer fits on the pile's tiles — go back to being DF's, as does
 a pile you give no type (the "None" icon, or clearing it out in Custom settings).
 
+### **`fort/wheelbarrow-dumping`**
+Dumping uses real wheelbarrows, several items a trip; every other heavy hand-haul goes at
+barrow pace. Vanilla barrows exactly one thing — hauling to a stockpile that has a barrow
+assigned — so forty boulders designated for dumping become forty dwarves crawling across the
+fort for a season, one stone each. This is a **house rule** that reaches for the barrow
+everywhere, two ways.
+
+**Dump runs.** The moment DF posts a dump job, before any dwarf claims it, the job is retyped
+into the one job DF pushes a barrow for — a stockpile haul with the dump tile as its
+destination and a loose wheelbarrow attached as its vehicle; no stockpile is involved — and
+up to ten more items marked for dumping within ten tiles are loaded into the same trip. The
+dwarf fetches the barrow, loads everything, pushes it to the dump, and each delivered item
+is forbidden and un-marked exactly as DF's own dump does (in your fort: six sandstone
+boulders, one bard, one trip). Only an unassigned barrow is used, DF claims it for the job
+so nobody shares it, and it parks on the dump tile afterwards where the next run finds it —
+so make a couple of spare barrows and leave them loose. A dump zone over open space (a ledge,
+a magma pit) is left to vanilla, since a haul sets its load *down* rather than over the edge.
+The retype is Tachytaenius' `wheelbarrow-dump` (0.47) idea; the multi-item load is Loire's
+*Multi-Hauling*'s.
+
+**Everything else.** Any fort worker carrying a job item by hand that weighs more than 75 —
+vanilla's own line for when a stockpile haul gets a barrow: flux fetched to the smelter, a
+block walked to a construction, a stone bound for a barrowless pile — while a free
+wheelbarrow exists anywhere on the map, carries it weightless for the rest of the trip and
+walks at full pace instead of a quarter of it (measured: 37 ticks a tile with a 240-weight
+boulder in hand, 8–11 "in the barrow"). That barrow is spoken for until the item is put
+down — one idle barrow is never lent to two people — and the item gets its real weight back
+the moment it leaves the carrier's hands. Nothing is written to the barrow: DF's other jobs
+have no vehicle step to hook (a barrow attached to a dump job is simply dropped at pickup,
+and a second item released — tested), so this half is pretended through the item's cached
+weight, which DF reads and never re-checks mid-carry. Run bare for the runs and hauls in
+progress. It lives in the **house rules** column of `magnus-scripts`, off until you turn it
+on and untouched by the `[r]` / `[m]` master switches. No options.
+
 ### **`fort/auto-tomb`**
 Drops the right zone onto furniture: a tomb on every coffin, a pasture on every nest box.
 
