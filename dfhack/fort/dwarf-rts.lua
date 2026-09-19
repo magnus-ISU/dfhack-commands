@@ -45,7 +45,8 @@ dwarf-rts -- on the Squads screen:
   * SHIFT-CLICK open ground to PATROL. A stationed selection gets a route from where it
     stands to the clicked tile; one already patrolling gets the tile appended to the END of
     its route. (With no standing order to grow a route from, a shift-click just stations
-    them -- which is the first half of the next patrol.) The squads walk the route once and
+    them -- which is the first half of the next patrol -- and it is a FORCED move: see below.)
+    The squads walk the route once and
     HOLD at the far end, unless the last waypoint is within 1 tile of the first, which reads
     as a deliberate circuit and keeps cycling the way DF's own patrol does. The routes are
     real DF routes ("RTS Patrol N" in the patrol-route list) and are binned again once
@@ -102,6 +103,13 @@ dwarf-rts -- on the Squads screen:
     previous order sent him before it reads the new one; every order issued here also
     clears the members' path goal, so the next step is taken against the new order.
     (Members busy with a job -- eating, fetching gear -- are left to finish it.)
+  * SHIFT-CLICK = FORCED MOVE. Shift-click with no standing order, or on the tile of the
+    current station, orders a move the members cannot be talked out of: every member's
+    path goal is pinned to the tile until he is within 6 of it, whatever DF wanted him to
+    do (a soldier passing an enemy still swings at it, but keeps walking). While the
+    squad or member is selected the tile wears the friendly drag-select marker. A plain
+    click is always an ordinary move. Re-asserted every frame; a tile DF cannot path to
+    is given up for a while so it cannot stall the game. See `force_march`.
   * NO STANDING OVER THE CORPSE. After a kill DF leaves the soldier pointed at his dead
     target for several hundred ticks (`unit.opponent.timer`, about a day) before he goes
     back to his order -- and does the same "search" for a target that got away, standing
@@ -911,6 +919,110 @@ local function duty_apply_routine(sq, rec)
     for m = 0, 11 do r.month[m].sleep_mode = df.squad_sleep_option_type.InBarracksAtNeed end
 end
 
+-- ---- the forced move (shift-click) -------------------------------------------------
+-- A move order is a suggestion DF acts on between fights; a soldier who sees an enemy on
+-- the way stops to fight it. A FORCED move makes the order the path: every member's path
+-- goal is set to the ordered tile (SeekStation) and kept there, whatever else DF wanted
+-- him to do, until he is within FORCE_NEAR of it. It is given with SHIFT-CLICK -- with no
+-- standing order, or on the tile of the current station (shift-click elsewhere with a
+-- station is still a patrol) -- and while its holder is selected the ordered tile wears
+-- the friendly marker (the drag-select art) so you can see who has been told to run.
+-- Members holding a job (eating, fetching gear) are left alone: a job owns its path.
+-- The forced move lasts as long as the move order it rides on: replace the order and it
+-- goes with it.
+--
+-- RE-ASSERTED EVERY FRAME, but never against a wall. setPathGoal is a no-op while dest and
+-- goal already match, so a member walking as told costs a compare; one DF has redirected
+-- (goal changed, or a path laid toward an enemy) is put back the same frame. The one thing
+-- that must not happen every frame is a goal DF CANNOT REACH: that search visits every
+-- reachable tile before failing -- tens of ms on a map this size -- then drops the goal, and
+-- re-setting it the next frame runs it again, per soldier, per frame: a frame that takes a
+-- second, which is what "the game froze" looked like. A failed search leaves its signature
+-- -- goal dropped, path EMPTY, no move queued -- so a member showing that FORCE_FAILS times
+-- in a row is presumed unreachable and left alone for FORCE_UNREACHABLE ticks.
+local FORCE_NEAR = 6
+local FORCE_FAILS, FORCE_UNREACHABLE = 3, 1000
+-- holder key ('s<squad id>' / 'm<occupant hf>', as patrol_state) -> {pos = tile, units = {id -> st}}
+forced = forced or {}
+
+local function move_order(orders)
+    local last = #orders > 0 and orders[#orders - 1] or nil
+    return last and df.squad_order_movest:is_instance(last) and last or nil
+end
+
+local function same_xyz(a, b) return a.x == b.x and a.y == b.y and a.z == b.z end
+
+-- called by the shift-click, after the move order has been (re)issued
+local function force_move(key, pos)
+    forced[key] = {pos = xyz2pos(pos.x, pos.y, pos.z), units = {}}
+end
+
+local function force_march()
+    local now = df.global.cur_year_tick
+    for key, fm in pairs(forced) do
+        local orders, units = patrol_holder(key)
+        local order = orders and move_order(orders)
+        if not order or not same_xyz(order.pos, fm.pos) then
+            forced[key] = nil                   -- the order it rode on is gone
+        else
+            local target = fm.pos
+            for _, u in ipairs(units) do
+                local st = fm.units[u.id]
+                if st ~= false and not u.job.current_job then
+                    st = st or {next = now}
+                    fm.units[u.id] = st
+                    local d = math.max(math.abs(u.pos.x - target.x), math.abs(u.pos.y - target.y))
+                        + math.abs(u.pos.z - target.z)
+                    if d <= FORCE_NEAR then
+                        fm.units[u.id] = false      -- arrived: DF's own station-holding from here
+                    -- cur_year_tick can run backwards (a reload, a new year): treat that as due
+                    elseif now >= st.next or now < st.next - FORCE_UNREACHABLE then
+                        local on_goal = u.path.goal == df.unit_path_goal.SeekStation
+                            and same_xyz(u.path.dest, target)
+                        if on_goal then
+                            st.fails = 0
+                        else
+                            local moving = false
+                            for i = 0, #u.actions - 1 do
+                                if u.actions[i].type == df.unit_action_type.Move then moving = true; break end
+                            end
+                            if st.asserted and #u.path.path.x == 0 and not moving then
+                                st.fails = (st.fails or 0) + 1      -- searched, found nothing
+                            else
+                                st.fails = 0                        -- redirected: put it back
+                            end
+                            if st.fails >= FORCE_FAILS then
+                                st.next = now + FORCE_UNREACHABLE   -- unreachable: sit it out
+                                st.asserted, st.fails = false, 0
+                            else
+                                dfhack.units.setPathGoal(u, target, df.unit_path_goal.SeekStation)
+                                st.asserted = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- the forced-move tiles of whatever is selected right now, for the renderer
+local function forced_tiles_selected(ui)
+    local out = {}
+    if has_indiv_selection(ui) then
+        for _, p in ipairs(selected_positions(ui)) do
+            local fm = forced['m' .. p.occupant]
+            if fm then out[#out + 1] = fm.pos end
+        end
+    else
+        for i = 0, #ui.squad_selected - 1 do
+            local fm = ui.squad_selected[i] and forced['s' .. ui.squad_id[i]]
+            if fm then out[#out + 1] = fm.pos end
+        end
+    end
+    return out
+end
+
 local function duty_watch()
     local saved = duty_load()
     local changed = false
@@ -1118,14 +1230,36 @@ local function single_command(ui, pos, shift)
     -- stands to the clicked tile, one already patrolling gets the tile appended to the end
     -- of its route. With nothing to grow a route from it's an ordinary station, which is
     -- exactly the first half of the next patrol.
+    -- Shift with NO order, or on the tile of the current station, is a FORCED move there
+    -- (see force_march); shift elsewhere with a station is the patrol.
     if has_indiv_selection(ui) then
         for _, p in ipairs(selected_positions(ui)) do
-            if not (shift and patrol_from_click(p.orders, -1, 'm' .. p.occupant, pos)) then
+            local key = 'm' .. p.occupant
+            local cur = move_order(p.orders)
+            if shift and (not cur or same_xyz(cur.pos, pos)) then
+                pos_move(p, pos)
+                force_move(key, pos)
+            elseif not (shift and patrol_from_click(p.orders, -1, key, pos)) then
                 pos_move(p, pos)
             end
         end
-    elseif not (shift and patrol_selected(ui, pos)) then
-        move_selected(ui, pos)
+    else
+        local force = {}
+        if shift then
+            for i = 0, #ui.squad_selected - 1 do
+                if ui.squad_selected[i] then
+                    local s = df.squad.find(ui.squad_id[i])
+                    local cur = s and move_order(s.orders)
+                    if s and (not cur or same_xyz(cur.pos, pos)) then force[#force + 1] = s.id end
+                end
+            end
+        end
+        if #force > 0 then
+            move_selected(ui, pos)
+            for _, sid in ipairs(force) do force_move('s' .. sid, pos) end
+        elseif not (shift and patrol_selected(ui, pos)) then
+            move_selected(ui, pos)
+        end
     end
 end
 
@@ -1593,6 +1727,7 @@ function DwarfRtsClickMove:overlay_onupdate()
     -- second is plenty -- so not every frame.
     self.patrol_tick = ((self.patrol_tick or 0) + 1) % 10
     if self.patrol_tick == 0 then patrol_watch(); duty_watch() end
+    if next(forced) then force_march() end
 
     -- a portrait was clicked last frame: DF has now set the sheet's active unit, so
     -- follow it (DF's own follow mechanism; manual scrolling releases it natively).
@@ -2028,6 +2163,13 @@ function DwarfRtsClickMove:render(dc)
                 local s = vp:tileToScreen(pos)
                 dfhack.screen.paintTile(SELECT_PEN, s.x, s.y, nil, nil, true)
             end
+        end
+    end
+    -- the forced-move tiles of the selection, in the friendly marker: who has been told to run
+    for _, p in ipairs(forced_tiles_selected(sq)) do
+        if p.z == z and vp:isVisible(p) then
+            local s = vp:tileToScreen(p)
+            dfhack.screen.paintTile(BOX_PENS.ally, s.x, s.y, nil, nil, true)
         end
     end
     -- the live drag box (press recorded, button still held); press_ok already confined

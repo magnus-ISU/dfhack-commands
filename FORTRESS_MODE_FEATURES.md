@@ -912,7 +912,11 @@ new one; here the path goal is cleared with the orders, so the next step obeys t
 And **no standing over the corpse**: vanilla leaves a soldier fixed on a dead target for
 several hundred ticks -- about a day -- before he returns to his order, and does the same
 standing "search" for one that got away; a member under orders whose target is dead, gone or
-out of reach is released at once.
+out of reach is released at once. **Shift-click is a forced move**: with no standing order, or on
+the tile of the current station, it pins every member's path to the tile until they are within 6
+of it, whatever DF would rather they did — a retreat that does not stop to fight (shift-click
+elsewhere with a station is still the patrol). While the squad is selected the tile wears the
+friendly drag-select marker.
 
 ### **`fort/military-labor`**
 Keeps the "Military" work detail matched to your standing squads.
