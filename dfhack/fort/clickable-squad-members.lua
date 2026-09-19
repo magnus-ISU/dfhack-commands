@@ -274,6 +274,7 @@ end
 -- this handler. The wait is an overlay update rather than dfhack.timeout, whose 'frames'
 -- timers stop while a panel is up -- which is exactly the situation here.
 pending_sheet_id = pending_sheet_id or nil
+local sheet_camera = reqscript('fort/sheet-camera')
 
 local SHEET_TAB_OVERVIEW = 0
 
@@ -287,9 +288,9 @@ local function goto_member(unit)
     local pos = xyz2pos(dfhack.units.getPosition(unit))
     if pos and pos.x >= 0 then
         dfhack.gui.revealInDwarfmodeMap(pos, true, true)
-        df.global.plotinfo.follow_item = -1
-        df.global.plotinfo.follow_unit = unit.id
     end
+    -- the camera is DF's own sheet button, pressed once the sheet is up (fort/sheet-camera):
+    -- it centres the unit in the map the sheet leaves visible and follows it
     pending_sheet_id = unit.id             -- off-map (raiding, say): sheet only
 end
 
@@ -379,6 +380,7 @@ local function clear_sheet_caches(vs)
 end
 
 function PendingSheetOverlay:overlay_onupdate()
+    sheet_camera.tick()
     local id = pending_sheet_id
     if not id then return end
     pending_sheet_id = nil
@@ -392,6 +394,8 @@ function PendingSheetOverlay:overlay_onupdate()
     -- "who is this soldier" would otherwise land on Rooms or Labor
     vs.active_sub_tab = SHEET_TAB_OVERVIEW
     vs.open = true
+    local x = dfhack.units.getPosition(unit)
+    if x and x >= 0 then sheet_camera.request(unit) end
 end
 
 OVERLAY_WIDGETS = {click = SquadMemberClickOverlay, sheet = PendingSheetOverlay}

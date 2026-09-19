@@ -283,6 +283,7 @@ end
 -- on the very screen this runs from the sheet would never appear. Overlay updates keep
 -- ticking. This is the same shape dwarf-rts uses for its own deferred follow.
 pending_sheet_id = pending_sheet_id or nil
+local sheet_camera = reqscript('fort/sheet-camera')
 
 -- open the sheet and follow, the way dwarf-rts follows a squad member
 local function goto_noble(unit)
@@ -290,8 +291,6 @@ local function goto_noble(unit)
     close_info()
     if pos then
         dfhack.gui.revealInDwarfmodeMap(pos, true, true)
-        df.global.plotinfo.follow_item = -1
-        df.global.plotinfo.follow_unit = unit.id
     end
     pending_sheet_id = unit.id                    -- off-map (on a raid, say): sheet only
 end
@@ -355,11 +354,18 @@ PendingSheetOverlay.ATTRS{
 }
 
 function PendingSheetOverlay:overlay_onupdate()
+    sheet_camera.tick()
     local id = pending_sheet_id
     if not id then return end
     pending_sheet_id = nil
     local unit = df.unit.find(id)
-    if unit then open_sheet(unit) end
+    if unit then
+        open_sheet(unit)
+        -- the camera is DF's own sheet button, pressed now the sheet is up (fort/sheet-camera):
+        -- it centres the unit in the map the sheet leaves visible and follows it
+        local x = dfhack.units.getPosition(unit)
+        if x and x >= 0 then sheet_camera.request(unit) end
+    end
 end
 
 OVERLAY_WIDGETS = {click = NobleClickOverlay, sheet = PendingSheetOverlay}
