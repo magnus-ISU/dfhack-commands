@@ -217,6 +217,8 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-tomb'), disable = cmd('disable', 'fort/auto-tomb')},
         {key = 'auto-mayor-quarters', label = 'auto-mayor-quarters',
          enable = cmd('enable', 'fort/auto-mayor-quarters'), disable = cmd('disable', 'fort/auto-mayor-quarters')},
+        {key = 'auto-scaffold', label = 'auto-scaffold',
+         enable = cmd('enable', 'fort/auto-scaffold'), disable = cmd('disable', 'fort/auto-scaffold')},
         {key = 'auto-elf-chop', label = 'auto-elf-chop',
          enable = cmd('enable', 'fort/auto-elf-chop'), disable = cmd('disable', 'fort/auto-elf-chop')},
         {key = 'auto-needs', label = 'auto-needs',
@@ -712,6 +714,11 @@ local COLUMNS = {
         -- does not have, not a shortcut to one it does.
         {key = 'rusty-legends', label = 'rusty-legends',
          enable = cmd('enable', 'fort/rusty-legends'), disable = cmd('disable', 'fort/rusty-legends')},
+        -- vanilla: dump jobs never use a wheelbarrow, however heavy the item. This makes a
+        -- heavy dump go at barrow pace when a free barrow is handy -- a feature hauling
+        -- does not have, added to it.
+        {key = 'wheelbarrow-dumping', label = 'wheelbarrow-dumping',
+         enable = cmd('enable', 'fort/wheelbarrow-dumping'), disable = cmd('disable', 'fort/wheelbarrow-dumping')},
     }},
     {id = 'joke', title = 'joke/', mode = 'fort', opt_in = true, items = {
         {key = 'joke-super-saiyan', label = 'super-saiyan',

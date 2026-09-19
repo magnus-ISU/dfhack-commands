@@ -401,6 +401,27 @@ even on pedestals, with their engraved images redrawn from what they depict), ro
 office assignments and the guildhalls/temples/libraries/taverns behind meeting areas,
 squads (members, uniforms, ammunition, barracks) and their commander and captains, work details
 and labour assignments, burrows, trees and shrubs (shrubs and saplings re-planted where they stood; every tree rebuilt with
+### **`fort/wheelbarrow-dumping`**
+Heavy items hauled by hand go at wheelbarrow speed when a wheelbarrow is handy. Whenever a
+fort worker picks up an item for a job that weighs more than 75 — vanilla's own line for when
+a stockpile haul gets a barrow — and a free wheelbarrow exists anywhere on the map, the item
+weighs nothing for the rest of the trip, and the dwarf walks at full pace instead of a quarter
+of it (measured: 37 ticks a tile with a 240-weight boulder in hand, 8–11 with it "in the
+barrow"). Whatever the job: a dump run, flux fetched to the smelter, a block walked to a
+construction, a stone bound for a pile with no barrows of its own. The wheelbarrow is spoken
+for until the item is put down — the number of barrows you own is the number of heavy hauls
+that go fast at once, and one idle barrow is never lent to two people — and the item gets its
+real weight back the moment it leaves the carrier's hands: job done, cancelled, or dropped.
+Run bare for what is being barrowed right now.
+
+This is a **house rule**: vanilla barrows exactly one thing, hauling to a stockpile that has
+a barrow assigned — forty boulders designated for dumping become forty dwarves crawling across
+the fort for a season — and DF's other job code has no vehicle step to hook, so a wheelbarrow
+attached to a dump job is simply dropped at pickup (tested). The barrow is pretended: nothing
+is written to it, and the speed comes from the item's cached weight, which DF reads and never
+re-checks mid-carry. It lives in the **house rules** column of `magnus-scripts`, off until you
+turn it on and untouched by the `[r]` / `[m]` master switches. No options.
+
 its own trunk, branch and root layout and the exact tiles it stood on), the
 manager's work-order queue, locked doors and hatches, retired adventurers
 (unretirable on arrival), and every unit with skills, personality, appearance, family ties,
