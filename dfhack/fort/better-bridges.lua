@@ -23,8 +23,8 @@ that this bridge is wired to that lever, and shows you a list of mechanisms inst
    a mechanism sitting in its `contained_items` whose refs point back. So both are read,
    and a bridge driven by two controls lists both of them.
 
-2. [Open /] / [Close /] ON A PRESSURE PLATE, in that same list. DF already draws a `[Pull    /]`
-   on the LEVER rows of the linked-buildings list -- open the bridge, see its lever, pull it
+2. [Open /] / [Close /] ON A PRESSURE PLATE, in that same list. DFHack's own `buildingplan`
+   overlay already draws a `[Pull    /]` on the LEVER rows of the linked-buildings list -- open the bridge, see its lever, pull it
    from there without going to find it. A pressure plate gets no such button, because a
    plate is fired by the world rather than by a dwarf. But when the world has already put
    something on it, there IS something to fire -- so the button goes in the same column as
@@ -52,11 +52,16 @@ that this bridge is wired to that lever, and shows you a list of mechanisms inst
        of water, magma, minecart that is actually there -- a liquid beats a cart -- so it
        is one button with one meaning rather than a row of them.
 
-   WHERE THE ROW IS comes from DF's own drawing. There is no vector behind that list -- DF
-   builds it from the building's mechanisms as it paints -- so the rows are found by reading
-   back the `[Unlink]` that DF puts at the end of every one of them, inside the band the
-   button occupies and nowhere else. The button draws twelve columns to the LEFT of that
-   anchor, so it never covers the text it navigates by.
+   WHERE THE ROW IS -- AND THE `[Pull    /]` ITSELF -- is not DF's. That list is DFHack's
+   stock `buildingplan.mechanism_unlink` overlay, which paints its own list over DF's, one
+   `[Unlink]` button per row and a `[Pull    /]` on the lever rows. The overlay plugin draws
+   its widgets in hash order, so nothing says which of the two paints first; the first cut of
+   this read the `[Unlink]` text back off the screen and worked exactly until a restart put
+   this widget before that one, when it read blank cells and drew nothing. So the button is
+   painted from INSIDE the stock widget's render -- its `render` is wrapped, once, and ours
+   runs the moment it returns -- and the rows come from its own `unlink_n` button subviews,
+   each of which knows its row and which mechanism it stands for. Without that overlay there
+   is no list of this shape at all, and nothing is drawn.
 
    THE CLICK IS THE WHOLE OF IT. The flag is written there and then -- nothing in this is
    throttled or queued -- and the button repaints on the same frame, because DF only redraws
@@ -228,11 +233,10 @@ end
 --
 -- Drawn into the linked-buildings list, in the column DF uses for a lever's `[Pull    /]`.
 
-local UNLINK = '[Unlink]'          -- DF's own anchor, at the end of every row of that list
-local UNLINK_DX = 12               -- how far right of our button DF draws it
-local ROW_PITCH = 3                -- rows per entry in that list
+local STOCK = 'buildingplan.mechanism_unlink'   -- the widget that paints the list
+local PULL_DX = 12                 -- its `[Pull    /]` column, left of its `[Unlink]`
 
--- DF's own button on a lever row is `[Pull    /]` -- eleven columns, the word left-aligned in
+-- The stock widget's `[Pull    /]` on a lever row is eleven columns, the word left-aligned in
 -- eight and the `/` pushed to the end -- so ours is built to the same stencil whatever word it
 -- is carrying. A button that changed width as the bridge moved would jitter under the pointer.
 local BUTTON_W = 11
@@ -253,13 +257,14 @@ local function bridge_verb(bld)
     return going_up and 'Open' or 'Close'
 end
 
--- is DF's [Unlink] drawn starting at this screen cell?
-local function unlink_at(x, y)
-    for i = 1, #UNLINK do
-        local t = dfhack.screen.readTile(x + i - 1, y)
-        if not t or t.ch ~= UNLINK:byte(i) then return false end
+-- the building at the far end of a mechanism sitting in this one
+local function mech_target(item)
+    for _, ref in ipairs(item.general_refs) do
+        if df.general_ref_building_triggerst:is_instance(ref)
+                or df.general_ref_building_triggertargetst:is_instance(ref) then
+            return df.building.find(ref.building_id)
+        end
     end
-    return true
 end
 
 TriggerOverlay = defclass(TriggerOverlay, overlay.OverlayWidget)
@@ -269,65 +274,89 @@ TriggerOverlay.ATTRS{
     default_enabled = true,
     viewscreens = 'dwarfmode',
     frame = {w = BUTTON_W, h = 21},
-    version = 1,
+    version = 2,
 }
 
--- The linked-buildings list of the sheet that is open, or nil when that panel is not showing.
-local function shown_links()
-    local vs = df.global.game.main_interface.view_sheets
-    if not vs.open or vs.active_sheet ~= df.view_sheet_type.BUILDING then return nil end
-    if not vs.show_linked_buildings then return nil end
-    local bld = df.building.find(vs.viewing_bldid)
-    if not bld then return nil end
-    return linked_buildings(bld), vs.scroll_position_linked_buildings or 0
+-- the stock list widget, when it is loaded and switched on
+local function stock_widget()
+    local st = overlay.get_state()
+    local entry = st.db[STOCK]
+    if not entry or not entry.widget then return nil end
+    local cfg = st.config[STOCK]
+    if cfg and cfg.enabled == false then return nil end
+    return entry.widget
 end
 
--- The rows this widget should put a button on: `{dy, building}` for every VISIBLE row of the
--- list that holds a pressure plate with something on it. The rows come from DF's drawing
--- rather than from arithmetic on a guessed origin, so a list that scrolls or shifts stays
--- right; the entry behind each row comes from its position in the list.
-function TriggerOverlay:button_rows()
-    local links, scroll = shown_links()
-    if not links or #links == 0 then return {} end
-    local rect = self.frame_rect
-    if not rect then return {} end
-    local out, seen, dy = {}, 0, 0
-    while dy < self.frame.h do
-        if unlink_at(rect.x1 + UNLINK_DX, rect.y1 + dy) then
-            local bld = links[scroll + seen + 1]
-            seen = seen + 1
-            local plate = plate_of_sheet(bld)
-            if plate and plate_condition(plate) then out[#out + 1] = {dy = dy, bld = plate} end
-            dy = dy + ROW_PITCH      -- entries are a fixed number of rows apart
-        else
-            dy = dy + 1
+-- The rows this widget should put a button on: `{x, y, bld}` in SCREEN cells for every row of
+-- the stock list that holds a pressure plate with something on it. Each of its visible
+-- `unlink_n` buttons is one row; the mechanism behind it is looked up the way it does, and
+-- that mechanism's far end is the building on the row.
+function TriggerOverlay:button_rows(stock)
+    local out = {}
+    local vs = df.global.game.main_interface.view_sheets
+    if not vs.open or vs.active_sheet ~= df.view_sheet_type.BUILDING then return out end
+    if not vs.show_linked_buildings then return out end
+    local bld = df.building.find(vs.viewing_bldid)
+    if not bld or stock.building ~= bld then return out end
+    -- a subview's frame_rect is relative to its parent's; the parent's is on the screen
+    local base = stock.frame_rect
+    if not base then return out end
+    for n = 1, stock.num_buttons or 0 do
+        local btn = stock.subviews['unlink_' .. n]
+        if btn and btn.visible and btn.frame_rect then
+            local idx = stock:idx_from_offset(btn.frame.t)
+            local slot = idx > 0 and bld.contained_items[idx]
+            local target = slot and mech_target(slot.item)
+            local plate = plate_of_sheet(target)
+            if plate and plate_condition(plate) then
+                out[#out + 1] = {x = base.x1 + btn.frame_rect.x1 - PULL_DX,
+                                 y = base.y1 + btn.frame_rect.y1, bld = plate}
+            end
         end
     end
     return out
 end
 
-function TriggerOverlay:onRenderBody(dc)
-    -- one verb for the whole list: every row on it is linked to the same building, the one
-    -- whose sheet is open
+-- Painted straight after the stock widget has painted its list, whatever order the overlay
+-- plugin happens to call the two of us in. Absolute screen cells: the rows came in those.
+function TriggerOverlay:paint_after(stock)
     local word = bridge_verb(sheet_building()) or 'Trigger'
     -- kept for the click: the rows a button was actually PAINTED on are exactly the rows that
-    -- should answer to one. Working the geometry out again at input time re-reads a screen
-    -- that may have been drawn without this list on it at all -- DF suppresses the panel under
-    -- some of its own tooltips -- and a click that lands in that gap is silently dropped.
-    self.drawn_rows = self:button_rows()
+    -- should answer to one
+    self.drawn_rows = self:button_rows(stock)
     for _, row in ipairs(self.drawn_rows) do
         local cond = plate_condition(row.bld)
         local on = cond and row.bld.plate_info.flags[cond.flag]
-        dc:seek(0, row.dy):pen(on and COLOR_GREEN or COLOR_WHITE):string(button_text(word))
+        dfhack.screen.paintString({fg = on and COLOR_GREEN or COLOR_WHITE}, row.x, row.y, button_text(word))
     end
 end
 
+-- Hook the stock widget's render, once per instance of it (a rescan makes a new one, which
+-- arrives unhooked). Our own render then has nothing to paint: it only keeps the hook in place
+-- and clears the rows when the list is not showing, so a stale click has nothing to land on.
+function TriggerOverlay:onRenderBody(dc)
+    local stock = stock_widget()
+    if not stock then self.drawn_rows = nil return end
+    if stock._better_bridges ~= self then
+        local orig = stock._better_bridges_render or stock.render
+        stock._better_bridges_render = orig
+        stock._better_bridges = self
+        local me = self
+        stock.render = function(w, ...)
+            orig(w, ...)
+            local ok, err = pcall(me.paint_after, me, w)
+            if not ok then dfhack.printerr('better-bridges: ' .. tostring(err)) end
+        end
+    end
+    if not df.global.game.main_interface.view_sheets.show_linked_buildings then self.drawn_rows = nil end
+end
+
 function TriggerOverlay:onInput(keys)
-    if not keys._MOUSE_L then return false end
-    local x, y = self:getMousePos()
+    if not keys._MOUSE_L or not self.drawn_rows then return false end
+    local x, y = dfhack.screen.getMousePos()
     if not x then return false end
-    for _, row in ipairs(self.drawn_rows or self:button_rows()) do
-        if y == row.dy then
+    for _, row in ipairs(self.drawn_rows) do
+        if y == row.y and x >= row.x and x < row.x + BUTTON_W then
             flip_trigger(row.bld)
             return true
         end
