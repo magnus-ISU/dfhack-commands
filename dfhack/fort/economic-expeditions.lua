@@ -591,12 +591,13 @@ end
 local MARCH_KEY = 'economic-expeditions/march'
 local MARCH_CHECK_TICKS = 100
 local ARRIVE_RADIUS = 3      -- how close counts as "at the edge"; they will not all fit on one tile
--- RETARGET MARGIN. The edge is recomputed on every check, because the squad moves and the
--- nearest reachable edge moves with them -- a dwarf who starts deep in the fort may surface
--- closer to a different side than the one picked at the door. Switching on the slightest
--- improvement would make them dither between two edges forever, so a new edge has to beat the
--- one they are walking to by this many tiles before the order is rewritten.
-local RETARGET_MARGIN = 8
+-- THE EDGE IS PICKED ONCE. It used to be re-chosen on every check as the squad moved -- a
+-- dwarf who starts deep in the fort may surface nearer a different side than the one picked
+-- at the door -- with a margin so they would not dither between two edges. In practice even
+-- a single rewrite of the order mid-walk confused the squad: members already moving under the
+-- old order stopped, milled, and re-formed on the new point, and a second rewrite did it
+-- again. Nearest-reachable from where they stand when the order is given is good enough, and
+-- an order that never changes is one a squad can actually follow.
 
 -- defined further down, once the map-edge and haul machinery they need exists
 local depart_arrivals, come_home
@@ -844,6 +845,7 @@ end
 local TILES_PER_DAY = 9
 local WORK_DAYS = 7          -- a week on site, whatever the trade
 local TICKS_PER_DAY = 1200
+local TICKS_PER_YEAR = TICKS_PER_DAY * 28 * 12   -- 403200
 
 function travel_days(site)
     local home = df.world_site.find(df.global.plotinfo.site_id)
@@ -948,32 +950,6 @@ local function stop_march_driver()
     require('repeat-util').cancel(MARCH_KEY)
 end
 
--- Re-pick the edge as they walk. `edge_tile` ranks candidates from where the unit is standing
--- NOW, so a squad that started underground and has since surfaced gets the edge that is nearest
--- from up here rather than the one that was nearest from the stairwell. Only a clearly better
--- edge is taken (see RETARGET_MARGIN), and the old route is torn down with the old order so
--- routes do not pile up once per check.
-local function retarget_edge(sq, st)
-    local members = squad_members(sq)
-    if #members == 0 then return end
-    local u = members[1]
-    local cur = math.max(math.abs(u.pos.x - st.tile.x), math.abs(u.pos.y - st.tile.y))
-    local tile = edge_tile(u)
-    if not tile then return end
-    local new = math.max(math.abs(u.pos.x - tile.x), math.abs(u.pos.y - tile.y))
-    if new + RETARGET_MARGIN > cur then return end
-    if tile.x == st.tile.x and tile.y == st.tile.y and tile.z == st.tile.z then return end
-
-    local old_route = st.route_id
-    clear_squad_orders(sq)
-    local route = order_patrol_edge(sq, tile)
-    if not route then order_station(sq, tile) end
-    destroy_route(old_route)
-    st.route_id = route and route.id or nil
-    st.tile = {x = tile.x, y = tile.y, z = tile.z}
-    save_march(st)
-end
-
 local function march_tick()
     local st = march_state()
     if not st or not st.squad_id then stop_march_driver() return end
@@ -989,8 +965,6 @@ local function march_tick()
         cancel_march('the squad was given other orders')
         return
     end
-
-    if st.phase == 'marching' then retarget_edge(sq, st) end
 
     -- NOBODY WAITS FOR THE SLOW ONES. Seven dwarves fetching their kit from across the fort
     -- arrive at the edge minutes apart, and holding the first six there until the seventh
@@ -1020,10 +994,25 @@ local function march_tick()
             destroy_route(st.route_id)
             st.route_id = nil
         end
-        -- Days abroad are counted HERE, not off `cur_year_tick`. That clock is not monotonic
-        -- once timestream is in play and it wraps at the year end, so an expedition begun in
-        -- Timber would come home instantly or never. The driver's own interval is immune.
-        st.ticks_away = (st.ticks_away or 0) + MARCH_CHECK_TICKS
+        -- DAYS ABROAD ARE CALENDAR DAYS. The announcement names a calendar date, and with
+        -- `timestream` running the calendar moves several ticks per simulated tick on a slow
+        -- fort -- so counting the driver's own interval (100 simulated ticks a check, as this
+        -- first did) brought a "7 day" trip home a fortnight late by the calendar. So the
+        -- calendar is read, with its two known faults handled rather than avoided: it wraps at
+        -- the year end (a large negative step is the new year), and timestream can nudge it
+        -- BACKWARDS by a little (a small negative step is jitter). The driver's interval stays
+        -- as the floor, since the simulation did run that long whatever the calendar says, and
+        -- one check never credits more than a generous cap, so a save reloaded from a week ago
+        -- does not bring them home on the spot.
+        local now = df.global.cur_year_tick
+        local elapsed = MARCH_CHECK_TICKS
+        if st.last_tick then
+            local d = now - st.last_tick
+            if d < -TICKS_PER_YEAR / 2 then d = d + TICKS_PER_YEAR end
+            elapsed = math.max(MARCH_CHECK_TICKS, math.min(d, MARCH_CHECK_TICKS * 50))
+        end
+        st.last_tick = now
+        st.ticks_away = (st.ticks_away or 0) + elapsed
         if st.ticks_away >= (st.days or 0) * TICKS_PER_DAY then
             come_home(st)
             return
