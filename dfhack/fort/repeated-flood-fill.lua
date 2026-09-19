@@ -11,7 +11,8 @@ REPEATING A PLACEMENT mean "and the rest of it":
     a 1x1 placement ON THE     floods the room in 2D: every tile you could walk to from there
       SAME TILE, again         without leaving the z-level, out to the walls -- but only when
                                the 1x1 STANDS ALONE, with none of the same kind of thing in the
-                               eight tiles around it
+                               eight tiles around it. A stockpile is placed with TWO clicks (one
+                               per corner), so its repeat is two more: four clicks on the tile
     a 3x3 placement            does what DF does -- nine tiles
     a 3x3 placement ON THE     floods in 3D -- BURROWS ONLY, since a zone and a stockpile each
       SAME NINE TILES, again     live on one z-level
@@ -22,7 +23,7 @@ which is what makes this safe to leave on.
 
 WHAT COUNTS AS THE ROOM. The fill runs from the repeated tile across floors, boulders, ramps,
 stairs and brook tops -- anything you can stand on -- and stops at walls, fortifications, open
-air and DOORS, the way DF's own rooms do. Doors matter more than they sound: without them a
+air, DOORS and WINDOWS, the way DF's own rooms do. Doors matter more than they sound: without them a
 bedroom joins the corridor, the corridor joins the fort, and "the room" is the whole level.
 
 THE SHELL COMES WITH IT -- FOR ZONES AND BURROWS. What those fill is the floor you could walk plus
@@ -81,6 +82,11 @@ local MAX_TILES_3D = 6000
 -- painted -- but nothing expands through it.
 local BOUNDARY_BUILDING = {
     [df.building_type.Door] = true,
+    -- a window is a wall with a view: it is built ON a floor tile, so the tile's shape says
+    -- "floor" and only the building says otherwise. Without these a room with a window in its
+    -- wall floods out through the window into whatever is behind it
+    [df.building_type.WindowGlass] = true,
+    [df.building_type.WindowGem] = true,
     [df.building_type.Floodgate] = true,
     [df.building_type.Hatch] = true,
     [df.building_type.GrateWall] = true,
@@ -102,6 +108,10 @@ local KINDS = {
     stockpile = {
         focus = 'dwarfmode/Stockpile/Paint',
         label = 'stockpile',
+        -- A STOCKPILE IS PLACED WITH TWO CLICKS -- one for each corner -- so a 1x1 stockpile is
+        -- already two identical gestures, and the repeat that means "fill the room" is two more:
+        -- four clicks on the tile in all
+        clicks = 4,
         iface = function() return mi.stockpile end,
     },
     burrow = {
@@ -529,8 +539,14 @@ function RepeatFillOverlay:act(kind, b)
     local w, h = b.x2 - b.x1 + 1, b.y2 - b.y1 + 1
     local last = self.last[kind]
     local pos = xyz2pos(b.x1 + math.floor(w / 2), b.y1 + math.floor(h / 2), b.z)
+    -- the same gesture again: count it, and act when the tool's count is reached -- twice for
+    -- a drag-drawn zone or burrow, four times for a stockpile (two clicks make one placement)
+    if same_bounds(last and last.bounds, b) and last.n + 1 < (tool.clicks or 2) then
+        last.n = last.n + 1
+        return
+    end
     if same_bounds(last and last.bounds, b) then
-        self.last[kind] = nil                    -- a third repeat starts over, never re-fills
+        self.last[kind] = nil                    -- a further repeat starts over, never re-fills
         if w == 1 and h == 1 then
             -- a 1x1 with company is hand-painting, not a fill; leave it to DF, quietly
             if not neighbour_of_kind(kind, pos) then
@@ -544,7 +560,7 @@ function RepeatFillOverlay:act(kind, b)
     end
     -- not a trigger: remember it, along with what the tool left at that tile, so the NEXT
     -- identical gesture knows which object was already there
-    self.last[kind] = {bounds = b, obj_id = object_id_at(kind, pos)}
+    self.last[kind] = {bounds = b, obj_id = object_id_at(kind, pos), n = 1}
 end
 
 OVERLAY_WIDGETS = {watcher = RepeatFillOverlay}
@@ -552,7 +568,7 @@ OVERLAY_WIDGETS = {watcher = RepeatFillOverlay}
 if dfhack_flags and dfhack_flags.module then return end
 
 print('repeated-flood-fill: repeat a placement in the same spot to fill the room.')
-print('  1x1 twice on the same tile   -> 2D fill (zones, stockpiles, burrows)')
+print('  1x1 twice on the same tile   -> 2D fill (zones, burrows; a stockpile is placed twice, four clicks)')
 print('  3x3 twice on the same tiles  -> 3D fill (burrows only)')
 local full = 'fort/repeated-flood-fill.watcher'
 print(('  %s: %s'):format(full, require('plugins.overlay').isOverlayEnabled(full) and 'on' or 'off'))

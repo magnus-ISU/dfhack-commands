@@ -321,15 +321,17 @@ before the new job claims it — the wall is not lost, only the trip.
 ### **`fort/repeated-flood-fill`**
 Place a zone, stockpile or burrow **twice in the same spot** and the second one means *"and the
 rest of the room"*. A 1×1 placement is DF's own; a 1×1 placement on the same tile again floods
-the room in 2D. For burrows a 3×3 placed twice over the same nine tiles floods in **3D** — zones
-and stockpiles each live on one z-level, so they have nothing to fill upward into.
+the room in 2D (a stockpile is placed with two clicks, one per corner, so placing a 1×1 stockpile
+and then placing it again on top is the repeat — four clicks on the tile). For burrows a 3×3
+placed twice over the same nine tiles floods in **3D** — zones and stockpiles each live on one
+z-level, so they have nothing to fill upward into.
 
 The trigger is the *repeat*, never the tile, so clicking once inside a zone you already have does
 nothing unusual — and the repeat has to **stand alone**: a 1×1 with a zone, stockpile or burrow
 tile of its own kind in any of the eight tiles around it is left to DF, because clicking the same
 tile twice is also what painting one tile at a time looks like when a click does not register.
 It says nothing when it works, either; the room filling in front of you is the report, and only a
-**refused** fill announces itself (too big to be a room, no floor to fill from, nothing to add). The fill stops at walls, open air and **doors**, the way DF's own rooms do —
+**refused** fill announces itself (too big to be a room, no floor to fill from, nothing to add). The fill stops at walls, open air, **doors and windows**, the way DF's own rooms do —
 without that a bedroom joins the corridor, the corridor joins the fort, and "the room" would be
 the whole level. For a **zone or a burrow** what it fills is the floor **plus the walls and doors
 around it**, corners included: a room is its shell as much as its floor, a bedroom that stops one
