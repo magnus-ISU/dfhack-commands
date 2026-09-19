@@ -39,8 +39,14 @@ What the single number means:
 Everything else lives behind `[edit]`, per race, and is remembered per fort:
 
     Child limit        how many juveniles to keep. -1 (the default) means "the same as
-                       the adult limit". Juveniles are always culled youngest-first, so
-                       the ones nearest adulthood are the ones that get there.
+                       the adult limit". ADULTS GO FIRST: a juvenile surplus is paid for
+                       with adults while any adult may still be cut -- a calf grows up
+                       into the animal it was cut for, and it is the adult that has the
+                       meat on it -- so this is the size of the herd's young end, not a
+                       promise to butcher young. Only what the adult rules refuse (the
+                       male floor, the breeding pair, the oldest kept) comes out of the
+                       juveniles, and then youngest-first, so the ones nearest adulthood
+                       are the ones that get there.
     Keep males         the male floor above (default 4).
     Keep N oldest      protect the N oldest adults outright (default 0). This is what
                        makes "keep 40 dinosaurs ageing, butcher every new adult" a
@@ -456,10 +462,7 @@ local function wanted_marks()
                 adults = {}
                 for _, u in ipairs(p.adults) do if not keep[u.id] then adults[#adults + 1] = u end end
             end
-            local surplus = p.n_adults - math.max(0, cfg.limit)
-            if surplus > 0 then
-                for _, u in ipairs(pick_adults(adults, surplus, cfg)) do want[u.id] = true end
-            end
+            local surplus = math.max(0, p.n_adults - math.max(0, cfg.limit))
             -- at a limit of 0 the [kids] toggle IS the juvenile rule: `cull` takes
             -- them now, `grow` lets them reach adulthood and catches them there
             local kid_limit
@@ -468,7 +471,18 @@ local function wanted_marks()
             else
                 kid_limit = (cfg.kids or -1) >= 0 and cfg.kids or math.max(0, cfg.limit)
             end
-            local kid_surplus = p.n_kids - kid_limit
+            local kid_surplus = math.max(0, p.n_kids - kid_limit)
+            -- ADULTS BEFORE JUVENILES. A juvenile surplus is paid for with adults first: a
+            -- calf that grows up replaces the adult it was cut for, so the herd ends up
+            -- the same size, and the animal that hangs at the butcher's is the one with
+            -- the meat on it rather than the one with none. So the adult cull is asked
+            -- for the whole surplus -- adults over their limit PLUS juveniles over theirs
+            -- -- and honours its protections (the male floor, the breeding pair, the
+            -- oldest kept) exactly as before; only what those refuse is taken from the
+            -- young, youngest-first as before.
+            local picked = pick_adults(adults, surplus + kid_surplus, cfg)
+            for _, u in ipairs(picked) do want[u.id] = true end
+            kid_surplus = kid_surplus - math.max(0, #picked - surplus)
             if kid_surplus > 0 then
                 -- juveniles are always taken youngest-first, whatever `oldest_first`
                 -- says: the point of keeping a kid at all is that it grows up

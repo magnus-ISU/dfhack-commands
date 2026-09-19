@@ -1087,8 +1087,12 @@ animals last, a juvenile limit, a custom adult age. War-trained, chained and zoo
 animals are excluded from the reckoning entirely by default. Small numbers behave
 differently on purpose: 2-4 keeps one male and the rest females and never butchers the
 last breeding pair, 1 turns the left buttons into `[m] [f]` for which sex survives, and 0
-turns them into a `[kids:cull|grow]` toggle. Marks it made it takes back off if you raise
-a limit; marks you made by hand it never touches.
+turns them into a `[kids:cull|grow]` toggle. Adults go first: a surplus of young is paid
+for with adults while any adult may still be cut -- a calf grows into the animal it was
+cut for, and the adult is the one with the meat on it -- and only what the adult rules
+refuse (the male floor, the breeding pair, the oldest kept) comes out of the juveniles,
+youngest-first. Marks it made it takes back off if you raise a limit; marks you made by
+hand it never touches.
 
 ### **`fort/help-mood`**
 Run by hand during a strange mood (`fort/help-mood`). If the fort cannot satisfy the mood it
