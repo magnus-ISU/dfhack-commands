@@ -68,7 +68,10 @@ picked set drops what is hidden), and widening them again does not put it back. 
 opens with the distance to its closest passing item. `Melt targets` (Shift-T) keeps only
 metal items and caps the quality sliders at exceptional -- everything below masterwork, since
 the masterworks and artifacts are the ones you keep -- as a starting point; move them
-afterwards if you like. Turning it off puts quality back to "any". `This z only` (Shift-Z)
+afterwards if you like. Turning it off puts quality back to "any". `Marked to melt` (Shift-L)
+keeps only items already designated for melting AND selects every row of them as it is switched
+on, so carrying the whole melt pile to the smelter is one click; deselect what you would rather
+leave, and off widens the list again without touching what is picked. `This z only` (Shift-Z)
 keeps only items on the destination's own z-level, and `Burrow` (Shift-B) cycles through the
 fort's burrows to keep only items standing inside the one named -- the two ways a fort already
 names a pile ("this floor", "the hospital's stock") that are not a kind of item. CLICKING A ROW
@@ -500,7 +503,7 @@ function scan_items(target)
                             value = dfhack.items.getValue(it),
                             quality = it:getQuality(), wear = it.wear,
                             forbidden = it.flags.forbid, dump = it.flags.dump,
-                            metal = is_metal(it),
+                            metal = is_metal(it), to_melt = it.flags.melt,
                             burrow = bnames, burrow_ids = bids,
                         }
                         total = total + 1
@@ -1178,9 +1181,32 @@ function PickerScreen:init(info)
                     initial_option = false,
                     on_change = function() self:refresh() end,
                 },
+                -- MARKED TO MELT: only items already designated for melting, and every row of
+                -- them selected the moment it is switched on -- "take the melt pile to the
+                -- smelter" is one click, not a row-by-row hunt. It is a filter like the others
+                -- afterwards: deselect what you would rather leave, and off widens the list
+                -- again without touching what is picked.
+                widgets.ToggleHotkeyLabel{
+                    view_id = 'to_melt',
+                    frame = {t = 2, l = 26, w = 24},
+                    label = 'Marked to melt:',
+                    key = 'CUSTOM_SHIFT_L',
+                    options = {{label = 'Yes', value = true, pen = COLOR_GREEN},
+                               {label = 'No', value = false}},
+                    initial_option = false,
+                    on_change = function(on)
+                        self:refresh()
+                        if on then
+                            for _, g in ipairs(self.groups) do
+                                if g.total > 0 then g.sel, g.specific = g.total, nil end
+                            end
+                            self:refresh()
+                        end
+                    end,
+                },
                 widgets.CycleHotkeyLabel{
                     view_id = 'burrow',
-                    frame = {t = 2, l = 26, r = 0},
+                    frame = {t = 2, l = 52, r = 0},
                     label = 'Burrow:',
                     key = 'CUSTOM_SHIFT_B',
                     options = burrow_options(),
@@ -1243,6 +1269,7 @@ function PickerScreen:filters()
                min_condition = 3, max_condition = 0,
                hide_forbidden = self.subviews.hide_forbidden:getOptionValue(),
                melt = self.subviews.melt_targets:getOptionValue(),
+               to_melt = self.subviews.to_melt:getOptionValue(),
                only_z = self.subviews.this_z:getOptionValue() and self.target.z or nil,
                burrow = self.subviews.burrow:getOptionValue()}
     if f.burrow == -1 then f.burrow = nil end
@@ -1266,6 +1293,7 @@ end
 local function item_passes(e, g, f)
     if f.hide_forbidden and e.forbidden then return false end
     if f.melt and not e.metal then return false end
+    if f.to_melt and not e.to_melt then return false end
     if f.only_z and e.z ~= f.only_z then return false end
     if f.burrow and not (e.burrow_ids and e.burrow_ids[f.burrow]) then return false end
     if f.min_condition < e.wear or f.max_condition > e.wear then return false end

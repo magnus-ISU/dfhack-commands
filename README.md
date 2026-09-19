@@ -168,6 +168,9 @@ in at the priority the Dig tool is set to, the same as a tile you paint by hand.
 
 ### **`fort/dig-building`**
 A searchable building picker while digging that drops you straight into DF's placement flow.
+The search box holds focus while the picker is up; `<`/`>` or a movement key pressed twice as
+the first thing typed (`ww`, `aa`, `ss`, `dd`) hand the keyboard back to DF and pan, and clicking
+the box resumes typing. The same double-tap works in `fort/better-engraving`'s image box.
 
 ### **`fort/dig-replace-walls`**
 Paint walls that should become constructed walls of your choosing. Reached from the
@@ -236,7 +239,9 @@ The filters cut *inside* a row: a minimum quality turns five earrings into the t
 a row with nothing left is not shown, and narrowing pulls a selection down with it. Each row
 opens with the distance to its closest passing item, and **Melt targets** (Shift-T) keeps only
 metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
-as a starting point you can move; off puts quality back to any. **This z only** (Shift-Z)
+as a starting point you can move; off puts quality back to any. **Marked to melt** (Shift-L)
+keeps only what is already designated for melting and selects all of it as it switches on, so
+carrying the melt pile to the smelter is one click. **This z only** (Shift-Z)
 keeps only items on the destination's z-level, and **Burrow** (Shift-B) cycles through the
 fort's burrows to keep only what stands inside the one named.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
@@ -310,6 +315,34 @@ so the description joins the group key to keep them apart.
 marks every row from the last one clicked to this one. The bands along the right edge — `[-1]`,
 the count, `[+1]`, `[+10]`, `[all]` — are still there for an exact number, and `[specific]` still
 opens the items behind a row. Before this, a click that landed on the label did nothing at all.
+
+### **`fort/auto-scaffold`**
+Builds the stair shaft up to a planned construction nothing can reach, then takes it down again.
+
+A wall planned two levels up in open air — the parapet of a tower, the rim of a roof — never gets
+built: no dwarf can stand beside it, so the job sits suspended forever and looks exactly like a
+wall waiting its turn. This watches for planned constructions no citizen can walk next to and
+scaffolds them. The search is deliberately narrow: straight **down** from each of the four tiles
+orthogonally beside the construction, through open air, to a natural floor your dwarves can reach,
+at most ten levels. Where such a column exists a stair shaft goes in it — an up stair on the
+floor, up/down stairs through the air, a down stair at the top — and the shaft that serves the
+most unreachable constructions at once is chosen first, so the gap between two wall segments gets
+one shaft for both. Each stair is planned only once the one below it is built, so nothing is ever
+queued that a dwarf cannot reach, and the construction's own job is unsuspended when the top stair
+is in. Materials are `buildingplan`'s stored stair filters, so the scaffold is built from whatever
+placing a stair by hand would use.
+
+Once every construction the shaft was built for is finished (or cancelled) the shaft comes down
+the only safe way: a Remove Construction designation on the top stair, and on each one below it
+only after the one above is gone, so the dwarf always has the stair beneath to stand on. A shaft
+you cancel yourself — take the planned stair off the map — is taken back down and forgotten.
+
+A construction must be unreachable for two scans (about a day of game time) before it is
+scaffolded, so one that is merely waiting for the tunnel you are digging is left alone; a bare
+`fort/auto-scaffold` skips the wait and does one pass now. `status` lists every shaft and what it
+is doing, `teardown` takes them all down regardless of their constructions, `forget` drops the
+records and leaves the stairs. Measured on a fort with 55 planned walls hanging two levels above
+a roof, all suspended: 40 shafts covering every one of them.
 
 ### **`fort/rewall`**
 Redraws every planned construction, to shake loose the ones deadlocked on a reserved item.
@@ -2023,6 +2056,20 @@ Destroys loose forbidden items lying on the ground.
 at, between its corners — which makes it a pointing device: forbid what you want gone, look at it, run it.
 `artifacts` includes artifacts, which are excluded by default because they are unrecoverable and usually
 forbidden precisely to keep them safe.
+
+### **`fort/deconstruct-now`**
+`dig-now` for constructions: every constructed wall, floor, stair, ramp or fortification marked
+for removal comes out this instant. The tile goes back to what it was before the construction
+went in, the material it was built from drops where it stood — or on the first solid tile below,
+when it stood in mid-air — and the mark is cleared. Takes the same bounds as `dig-now`: nothing
+for the whole map, `-z` for the z-level you are looking at, `here` for the tile under the cursor,
+two corners for a box; `-c` drops no materials, `-d <pos>` drops them all under one spot.
+
+A tile whose Remove Construction job a dwarf has already **taken** is left to that dwarf and
+counted in the report — pulling a job out from under its worker is a crash this fort has seen.
+The floor a wall put on top of itself stays when the wall comes out, as it does by hand. Only
+constructions: a planned-but-unbuilt one is a building DF's own cancel already removes instantly,
+and a built building marked with `x` is not touched.
 
 ### **`fort/clear-flows`**
 Clears miasma and other flow clouds — a quick FPS fix.

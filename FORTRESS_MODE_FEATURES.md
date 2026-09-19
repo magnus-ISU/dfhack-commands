@@ -193,7 +193,9 @@ The filters cut *inside* a row: a minimum quality turns five earrings into the t
 a row with nothing left is not shown, and narrowing pulls a selection down with it. Each row
 opens with the distance to its closest passing item, and **Melt targets** (Shift-T) keeps only
 metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
-as a starting point you can move; off puts quality back to any. **This z only** (Shift-Z)
+as a starting point you can move; off puts quality back to any. **Marked to melt** (Shift-L)
+keeps only what is already designated for melting and selects all of it as it switches on, so
+carrying the melt pile to the smelter is one click. **This z only** (Shift-Z)
 keeps only items on the destination's z-level, and **Burrow** (Shift-B) cycles through the
 fort's burrows to keep only what stands inside the one named.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
