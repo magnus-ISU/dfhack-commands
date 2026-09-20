@@ -215,8 +215,6 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-mandate'), disable = cmd('disable', 'fort/auto-mandate')},
         {key = 'auto-tomb', label = 'auto-tomb',
          enable = cmd('enable', 'fort/auto-tomb'), disable = cmd('disable', 'fort/auto-tomb')},
-        {key = 'auto-mayor-quarters', label = 'auto-mayor-quarters',
-         enable = cmd('enable', 'fort/auto-mayor-quarters'), disable = cmd('disable', 'fort/auto-mayor-quarters')},
         {key = 'auto-scaffold', label = 'auto-scaffold',
          enable = cmd('enable', 'fort/auto-scaffold'), disable = cmd('disable', 'fort/auto-scaffold')},
         {key = 'auto-elf-chop', label = 'auto-elf-chop',

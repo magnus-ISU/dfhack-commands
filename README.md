@@ -492,14 +492,6 @@ on and untouched by the `[r]` / `[m]` master switches. No options.
 ### **`fort/auto-tomb`**
 Drops the right zone onto furniture: a tomb on every coffin, a pasture on every nest box.
 
-### **`fort/auto-mayor-quarters`**
-Name a bedroom, dining hall, tomb and office with "Mayor" in the zone name and they follow
-the office: when DF announces an election or a succession, every one of them the new mayor
-does not already own is reassigned to them, so the quarters stop staying with the last
-mayor while the new one sulks over unmet demands. One zone per kind — two bedrooms named
-for the mayor and it leaves bedrooms alone and says so. Run bare to hand over now and see
-who owns what.
-
 ## Fortress Management
 
 ### **`fort/planeswalkers`**
