@@ -439,13 +439,49 @@ local function our_position_profile()
     end
 end
 
+-- THE ECONOMIC LINK IS RECORDED ON YOUR OWN FORT, POINTING OUTWARD. Your site carries a
+-- `local_market` link per place you are economically linked to, naming that place's
+-- SiteGovernment; the far site carries nothing pointing back. Reading only the far site's links
+-- therefore misses them entirely unless they happen to ALSO be a civ holding.
+--
+-- Which is exactly how Riverbristle was lost. Burnedroofs is both a `land_for_holding` of the
+-- civ AND a local market, so the civ test found it; Riverbristle is a Town whose only link is
+-- its own SiteGovernment, and DF still reports it as economically linked to your position. Here
+-- the two `local_market` entities (6442, 9078) are each the `residence` government of exactly
+-- one site -- Burnedroofs and Riverbristle -- which is the pair DF names.
+--
+-- Cached per frame: `better-world-map` asks this for every site in the world while the flash
+-- runs, and the home site's link list would otherwise be walked 3664 times a frame.
+local market_cache, market_frame
+local function our_markets()
+    local frame = df.global.world.frame_counter
+    if market_cache and market_frame == frame then return market_cache end
+    local out = {}
+    local home = df.world_site.find(df.global.plotinfo.site_id)
+    if home then
+        for _, link in ipairs(home.entity_links) do
+            if link.flags.local_market then out[link.entity_id] = true end
+        end
+    end
+    market_cache, market_frame = out, frame
+    return out
+end
+
 function site_standing(site)
     if not site then return nil end
     if site.id == df.global.plotinfo.site_id then return 'own' end
     local civ, grp = df.global.plotinfo.civ_id, df.global.plotinfo.group_id
     local profile = our_position_profile()
+    local markets = our_markets()
     local in_civ = false
     for _, link in ipairs(site.entity_links) do
+        -- a market of ours: the government this site answers to is one your fort trades through
+        if markets[link.entity_id] then
+            local e = df.historical_entity.find(link.entity_id)
+            if e and e.type == df.historical_entity_type.SiteGovernment then
+                return 'controlled'
+            end
+        end
         if link.entity_id == civ or link.entity_id == grp then
             in_civ = true
             if profile and link.entity_id == civ and link.position_profile_id == profile then
@@ -939,6 +975,20 @@ function march_status()
     }
 end
 
+-- With a position it goes out as a ZOOM announcement, so clicking the notification (or
+-- pressing the recentre key on it) puts the map on the tile it is about -- which for an
+-- expedition is the corner of the map where the goods were just dropped, a hundred tiles from
+-- anywhere you were looking. `MIGRANT_ARRIVAL` is the carrier because it is display-only in
+-- `announcements.txt` (`A_D:D_D`): no popup box, no forced pause, just a recentrable line.
+local function announce_at(pos, text, color)
+    local ok = false
+    if pos then
+        ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.MIGRANT_ARRIVAL,
+                   pos, text, color, true)
+    end
+    if not ok then pcall(dfhack.gui.showAnnouncement, text, color, true) end
+end
+
 -- standing at (or near) the edge tile, close enough to walk off it
 local function at_edge(u, tile)
     return math.abs(u.pos.x - tile.x) <= ARRIVE_RADIUS
@@ -977,14 +1027,15 @@ local function march_tick()
     if #left > 0 and st.phase == 'marching' then
         -- THE CLOCK STARTS WITH THE FIRST ONE OUT, not with the last.
         st.phase, st.ticks_away = 'away', 0
-        dfhack.gui.showAnnouncement(
+        announce_at(copyall(left[1].pos),
             ('%s has set out for %s, expected back in %d days on %s%s.'):format(
                 dfhack.military.getSquadName(sq.id), where, st.days or 0, date_in(st.days or 0),
                 #squad_members(sq) > 0 and (', %d still making their way'):format(
                     #squad_members(sq)) or ''), COLOR_LIGHTCYAN)
     elseif #left > 0 then
-        dfhack.gui.showAnnouncement(('%d more %s caught up with the expedition.'):format(
-            #left, #left == 1 and 'has' or 'have'), COLOR_WHITE)
+        announce_at(copyall(left[1].pos),
+            ('%d more %s caught up with the expedition.'):format(
+                #left, #left == 1 and 'has' or 'have'), COLOR_WHITE)
     end
 
     if st.phase == 'away' then
@@ -1078,7 +1129,7 @@ function begin_march(squad, site, kind, choice)
     }
     start_march_driver()
     if how then print('economic-expeditions: edge tile ' .. how) end
-    dfhack.gui.showAnnouncement(
+    announce_at(xyz2pos(tile.x, tile.y, tile.z),
         ('%s is marching to the edge of the map, bound for %s.'):format(
             dfhack.military.getSquadName(squad.id),
             dfhack.translation.translateName(site.name, true)), COLOR_WHITE)
@@ -1110,20 +1161,6 @@ end
 -- `world.units.active`. Both halves matter -- leaving them in the active list keeps the engine
 -- ticking a unit that is nowhere, and leaving the tile's occupancy set leaves an invisible
 -- body blocking the square they walked off.
-
--- With a position it goes out as a ZOOM announcement, so clicking the notification (or
--- pressing the recentre key on it) puts the map on the tile it is about -- which for an
--- expedition is the corner of the map where the goods were just dropped, a hundred tiles from
--- anywhere you were looking. `MIGRANT_ARRIVAL` is the carrier because it is display-only in
--- `announcements.txt` (`A_D:D_D`): no popup box, no forced pause, just a recentrable line.
-local function announce_at(pos, text, color)
-    local ok = false
-    if pos then
-        ok = pcall(dfhack.gui.showZoomAnnouncement, df.announcement_type.MIGRANT_ARRIVAL,
-                   pos, text, color, true)
-    end
-    if not ok then pcall(dfhack.gui.showAnnouncement, text, color, true) end
-end
 
 local function offload(u)
     -- Detach them from any job FIRST -- never `removeJob` a unit's `current_job`, that
@@ -1740,6 +1777,121 @@ end
 -- caged animals into one pile under whichever arrived first -- 3 wild boar corpses and a cage
 -- came back as "3.31 corpses", with the cages invisible. Two different things can share a
 -- name, and a boar in a cage is not a dead boar.
+-- WHAT THE TRIP IS WORTH, BEFORE YOU COMMIT TO IT. `resolve_expedition` rolls dice; this
+-- returns the EXPECTATION of the same rates, so the picker can say "10 chert + 5 magnetite"
+-- while you are still choosing. Fractions are the point -- "0.56 caged barn owls" is honest
+-- about a cage being a one-in-two prospect, where a rolled sample would show 0 or 1 and read
+-- as a promise either way.
+--
+-- Deliberately mirrors `resolve_expedition`'s structure rather than sharing code with it: the
+-- two answer different questions (what WILL happen, what SHOULD happen on average) and fusing
+-- them behind a flag is how one of them quietly stops matching the other.
+function expected_haul(kind, choice, units, d)
+    local spec = EXPEDITIONS[kind]
+    if not spec then return nil, 'no such expedition: ' .. tostring(kind) end
+    local levels = squad_skill(units, spec.skill)
+    local rows, index = {}, {}
+    local function add(name, k, n)
+        if not name or n <= 0 then return end
+        local key = k .. '\0' .. name
+        local row = index[key]
+        if not row then
+            row = {name = name, kind = k, count = 0}
+            index[key] = row
+            rows[#rows + 1] = row
+        end
+        row.count = row.count + n
+    end
+
+    if kind == 'mining' then
+        local layer, target
+        if type(choice) == 'table' then layer, target = choice.layer, choice.target
+        else layer = choice end
+        if layer and stone_tier(d, layer) == 'layer' then
+            add(layer, 'stone', MINING_YIELD.layer * levels)
+        end
+        if target then
+            local tier = stone_tier(d, target)
+            if tier and tier ~= 'layer' then
+                add(target, 'stone', (MINING_YIELD[tier] or 0) * levels)
+            end
+        end
+
+    elseif kind == 'logging' then
+        add(choice, 'log', LOG_YIELD * levels)
+
+    elseif kind == 'botany' then
+        add(choice, 'plant', 0.10 * levels)
+
+    elseif kind == 'hunting' then
+        local tier = hunt_tier(d, choice)
+        if tier then
+            add(choice, 'corpse', HUNT_RATE[tier][1] / 100 * levels)
+            add(choice, 'cage',   HUNT_RATE[tier][2] / 100 * levels)
+        end
+
+    elseif kind == 'scholarly' then
+        -- a flat tenth per scribe plus a tenth per level, and the rarer find from anywhere
+        local n = 0
+        for _, u in ipairs(units) do
+            n = n + 0.10 + 0.10 * squad_skill({u}, spec.skill)
+        end
+        add('book', 'book', n + levels / 100)
+    end
+
+    -- the floor mining and logging carry: however unskilled, one item comes home
+    if MIN_ONE[kind] then
+        local total = 0
+        for _, r in ipairs(rows) do total = total + r.count end
+        if total < 1 then
+            if rows[1] then rows[1].count = 1 else add(choice, 'stone', 1) end
+        end
+    end
+    return rows
+end
+
+-- "10 chert", "0.56 caged barn owls" -- whole numbers without a decimal point, fractions to two
+-- places, and the creature plural DF keeps in `creature_raw.name[1]` rather than a bolted-on 's'.
+local function amount(n)
+    if math.abs(n - math.floor(n + 0.5)) < 0.005 then
+        return tostring(math.floor(n + 0.5))
+    end
+    return ('%.2f'):format(n)
+end
+
+local function creature_plural(name)
+    for i = 0, #df.global.world.raws.creatures.all - 1 do
+        if creature_name(i) == name then
+            local cr = df.global.world.raws.creatures.all[i]
+            local p = cr.name[1]
+            if p and p ~= '' then return p end
+        end
+    end
+    return name .. 's'
+end
+
+function haul_preview(rows)
+    if not rows or #rows == 0 then return 'nothing' end
+    local parts = {}
+    for _, r in ipairs(rows) do
+        local one = math.abs(r.count - 1) < 0.005
+        local label
+        if r.kind == 'corpse' then
+            label = one and r.name or creature_plural(r.name)
+        elseif r.kind == 'cage' then
+            label = 'caged ' .. (one and r.name or creature_plural(r.name))
+        elseif r.kind == 'log' then
+            label = r.name .. (one and ' log' or ' logs')
+        elseif r.kind == 'book' then
+            label = one and 'book' or 'books'
+        else
+            label = r.name
+        end
+        parts[#parts + 1] = amount(r.count) .. ' ' .. label
+    end
+    return table.concat(parts, ' + ')
+end
+
 function resolve_expedition(kind, choice, units, d, roll)
     roll = roll or math.random
     local spec = EXPEDITIONS[kind]
@@ -1948,13 +2100,27 @@ end
 -- `button` field are recorded with their screen rect when painted, so a click can be read back
 -- to the expedition it belongs to.
 local BUTTON_PEN = COLOR_LIGHTGREEN
-local function button_row(rows, kind, enabled)
-    if not enabled then return end
+-- ONE EXPEDITION AT A TIME. `begin_march` has always refused a second one, but refusing after
+-- the click means building a picker, choosing a squad and a target, pressing Send and only then
+-- being told no. Greyed out with the reason attached says it before any of that. Dropping the
+-- `button` field is what actually disables it -- the overlay only treats a row as clickable when
+-- that field is set, so there is no live button under the grey text.
+local function send_button(rows, kind)
+    local busy = march_status()
     rows[#rows + 1] = {
         {text = INDENT, pen = VALUE_PEN},
-        {text = '[Send Expedition]', pen = BUTTON_PEN},
-        button = kind,
+        {text = '[Send Expedition]', pen = busy and COLOR_DARKGREY or BUTTON_PEN},
+        button = (not busy) and kind or nil,
     }
+    if busy then
+        rows[#rows + 1] = {{text = INDENT, pen = VALUE_PEN},
+            {text = ('%s is already out'):format(busy.name), pen = COLOR_DARKGREY}}
+    end
+end
+
+local function button_row(rows, kind, enabled)
+    if not enabled then return end
+    send_button(rows, kind)
 end
 
 -- THE LIBRARY BLOCK. Unlike every other group this one is a LIST, one title per line, because
@@ -1991,9 +2157,11 @@ local function library_rows(rows, d)
                        pen = VALUE_PEN}}
         -- nothing to copy, nothing to send anybody for
         if #d.books > 0 then
+            local busy = march_status()
             head[#head + 1] = {text = '   ', pen = VALUE_PEN}
-            head[#head + 1] = {text = '[Send Expedition]', pen = BUTTON_PEN}
-            head.button = 'scholarly'
+            head[#head + 1] = {text = '[Send Expedition]',
+                               pen = busy and COLOR_DARKGREY or BUTTON_PEN}
+            head.button = (not busy) and 'scholarly' or nil
         end
         rows[#rows + 1] = head
     end
@@ -2144,8 +2312,9 @@ function ExpeditionWindow:init()
             frame = {t = 1, l = 34, r = 0, b = 3},
             on_submit = function(idx, choice) self:pick(idx, choice) end,
         },
-        widgets.Label{view_id = 'summary', frame = {b = 2, l = 0}, text = ''},
+        widgets.Label{view_id = 'summary', frame = {b = 1, l = 0, h = 3}, text = ''},
         widgets.HotkeyLabel{
+            view_id = 'send',
             frame = {b = 0, l = 0}, key = 'CUSTOM_SHIFT_S',
             label = 'Send the expedition', on_activate = function() self:send() end,
         },
@@ -2210,15 +2379,30 @@ function ExpeditionWindow:refresh_summary()
     local picks = {}
     if self.sel.layer then picks[#picks + 1] = self.sel.layer end
     if self.sel.target then picks[#picks + 1] = self.sel.target end
+    -- WHAT THEY WILL BRING BACK, not what you ticked. The old line echoed your own choices
+    -- ("for chert + magnetite"), which you could already see selected in the list beside it;
+    -- the number is the thing you cannot work out in your head, and it is what decides whether
+    -- this squad is worth sending at all.
+    local choice = self.sel.target
+    if self.kind == 'mining' then choice = {layer = self.sel.layer, target = self.sel.target} end
+    local preview = 'nothing'
+    if sq then
+        local rows = expected_haul(self.kind, choice, sq.members, self.d)
+        preview = haul_preview(rows)
+    end
+    local busy = march_status()
     self.subviews.summary:setText{
         {text = ('%s, %s %d'):format(
             sq and dfhack.translation.translateName(sq.squad.name, true) or 'no squad',
             df.job_skill.attrs[spec.skill].caption or spec.label,
             sq and sq.level or 0), pen = COLOR_WHITE},
         NEWLINE,
-        {text = 'for ' .. (#picks > 0 and table.concat(picks, ' + ') or 'nothing'),
-         pen = COLOR_GREY},
+        {text = 'for ' .. preview, pen = COLOR_GREY},
+        NEWLINE,
+        {text = busy and ('%s is already out -- only one expedition at a time'):format(busy.name)
+                or '', pen = COLOR_DARKGREY},
     }
+    self.subviews.send.text_pen = busy and COLOR_DARKGREY or COLOR_WHITE
 end
 
 function ExpeditionWindow:pick(_, choice)
