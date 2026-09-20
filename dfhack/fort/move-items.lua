@@ -21,8 +21,10 @@ custom-tool band beside Replace wall), it runs the whole errand:
      screen uses. Say how many of each you want and it marks the CLOSEST ones.
   4. It marks them for dumping, sets the three standing orders the haulers need, and gets
      out of the way -- and reports "Moving N items" in DFHack's notification panel for as
-     long as the haul takes. Clicking that line walks the items still on their way, one per
-     click, so you can see where each has got to. Hover it and it says
+     long as the haul takes. Clicking that line walks the PLACES the items still on their way
+     are at -- a pile on one tile is one stop, not one click per stone -- with the
+     destination as the second stop of every lap, so you can see where things have got to
+     and where they are going. Hover it and it says
      "Moving N items (Shift+click to cancel)"; SHIFT+CLICK calls the whole delivery off --
      the marks come off what has not moved, the zone goes, and whatever already landed is
      unforbidden. The picker's own row says `Cancel move` instead of `Move items` while a
@@ -958,10 +960,12 @@ local function notify_message()
     }}
 end
 
--- Clicking the line walks the items that have not arrived yet, one per click -- the same
--- cycle-zoom the fort's other notifications use. "Moving 7 items" answers how many; WHICH
--- seven, and where they have got to, is the question you click for. An item being carried
--- reports the hauler's position, since that is where it is.
+-- Clicking the line walks the places the unarrived items are, one per click -- the same
+-- cycle-zoom the fort's other notifications use. "Moving 7 items" answers how many; WHERE
+-- they have got to is the question you click for. An item being carried reports the
+-- hauler's position, since that is where it is. THE DESTINATION IS THE SECOND STOP of every
+-- lap: first place, then the spot they are all going to, then the rest -- so "where is this
+-- going" is one click past "where is it now", never lost behind a long list of stragglers.
 local notify_cycle = 0
 
 -- SHIFT+CLICK CALLS THE WHOLE THING OFF. The notification panel hands the click's secondary
@@ -982,20 +986,28 @@ local function notify_click(_, shift)
         end
         return
     end
-    -- skip over anything that has stopped having a position (eaten, melted, hauled into a
-    -- container that is itself in flight) rather than sitting on a dead item forever
-    for _ = 1, #pending do
-        notify_cycle = (notify_cycle % #pending) + 1
-        local it = df.item.find(pending[notify_cycle])
-        local x, y, z = nil, nil, nil
+    -- THE LAP IS PLACES, NOT ITEMS: a pile of forty stones on one tile is one stop, not
+    -- forty clicks on the same square. Anything that has stopped having a position (eaten,
+    -- melted, hauled into a container that is itself in flight) is simply not a place.
+    -- The destination is spliced in as the second stop.
+    local stops, seen = {}, {}
+    for _, id in ipairs(pending) do
+        local it = df.item.find(id)
+        local x, y, z
         if it then x, y, z = dfhack.items.getPosition(it) end
         if x and x >= 0 then
-            df.global.plotinfo.follow_unit = -1
-            df.global.plotinfo.follow_item = -1
-            dfhack.gui.revealInDwarfmodeMap(xyz2pos(x, y, z), true, true)
-            return
+            local k = x .. ',' .. y .. ',' .. z
+            if not seen[k] then seen[k] = true; stops[#stops + 1] = xyz2pos(x, y, z) end
         end
     end
+    if s.target then
+        table.insert(stops, math.min(2, #stops + 1), xyz2pos(s.target.x, s.target.y, s.target.z))
+    end
+    if #stops == 0 then return end
+    notify_cycle = (notify_cycle % #stops) + 1
+    df.global.plotinfo.follow_unit = -1
+    df.global.plotinfo.follow_item = -1
+    dfhack.gui.revealInDwarfmodeMap(stops[notify_cycle], true, true)
 end
 
 -- Our row grows by the width of the hint when the mouse lands on it, and the notification

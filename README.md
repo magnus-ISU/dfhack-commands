@@ -280,8 +280,9 @@ residents** — your own dead, and the merchants and visitors who died here.
 It also turns on the three standing orders the haulers need (*gather refuse*, *gather refuse
 outdoors*, *gather outdoor vermin remains*) and says which it changed: a fort with any of them
 off never finishes the job and never says why. While the haul runs, DFHack's notification panel
-carries a **"Moving N items"** line, and clicking it walks the items still on their way — one
-per click, so you can see where each has got to (an item being carried shows you the hauler).
+carries a **"Moving N items"** line, and clicking it walks the *places* the items still on
+their way are at — a pile on one tile is one stop, not a click per stone; an item being
+carried shows you the hauler — with the destination as the second stop of every lap.
 The announcement when the delivery lands is a zoom announcement, so clicking *that* recentres
 the map on the finished pile.
 
