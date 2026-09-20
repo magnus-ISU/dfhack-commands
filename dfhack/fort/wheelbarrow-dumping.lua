@@ -16,9 +16,11 @@ them on that one job. This is a house rule that reaches for them everywhere, two
 posts a dump job -- before any dwarf has claimed it -- the job is turned into the one kind
 of job DF does push a barrow for: a stockpile haul, with the dump tile as its destination
 and a free wheelbarrow attached as its vehicle. No stockpile is involved; the job only
-needs a place to go. Up to ten more items marked for dumping within ten tiles of the
-first are loaded into the same job, so a pile of designated rubble goes in one trip
-instead of one dwarf per stone. The dwarf fetches the barrow, loads everything, pushes it
+needs a place to go. More items marked for dumping within ten tiles of the
+first are loaded into the same job -- until the run holds ten items or its load passes
+1000 in weight, four boulders' worth -- so a pile of designated rubble goes in one trip
+instead of one dwarf per stone. The barrow that just delivered is the one used for the
+next run, since it is parked beside the dump the next run ends at. The dwarf fetches the barrow, loads everything, pushes it
 to the dump, and when the job completes each delivered item is forbidden and un-marked
 exactly as DF's own dump does. (Tachytaenius' `wheelbarrow-dump` for 0.47 is the origin
 of the job retype; the multi-item loading is the idea of Loire's *Multi-Hauling*.)
@@ -28,8 +30,10 @@ of the job retype; the multi-item loading is the idea of Loire's *Multi-Hauling*
     take along. A lone sock is dumped by hand as before.
   * Only an UNASSIGNED wheelbarrow is used -- one not belonging to any stockpile -- and
     only one a dwarf can walk to from the item. DF claims it for the job, so nobody
-    shares it, and it is parked on the dump tile afterwards, where the next dump run
-    finds it. Make a couple of spare barrows and leave them loose.
+    shares it. DF's haul completion unloads ONE item and stops; the rest are emptied
+    out of the barrow onto the dump tile the moment the job ends, and the barrow is
+    parked one tile aside, where the next dump run finds it. Make a couple of spare
+    barrows and leave them loose.
   * A dump zone over open space -- the ledge you throw things off, the magma pit -- is
     left to vanilla: a stockpile haul puts the item DOWN on the destination tile rather
     than over the edge, so those dumps keep their by-hand throw.
@@ -54,7 +58,8 @@ which is why this half is pretended and the dump half is retyped.
 
 **This is a house rule.** Lives in the *house rules* column of `fort/magnus-scripts`: off
 until you turn it on, untouched by the `[r]` / `[m]` master switches. No options: the 75
-line is vanilla's, ten items and ten tiles are Multi-Hauling's defaults.
+line is vanilla's, ten items and ten tiles are Multi-Hauling's defaults, 1000 is four
+boulders.
 
 **How the pretending works.** DF caches an item's weight on the item (`item.weight`) and
 weighs it lazily: a boulder nobody has touched sits at 0 until the first pickup, and
@@ -79,9 +84,11 @@ local HEAVY = 75
 -- the weight a pretend-barrowed item shows while carried. Not 0: 0 is DF's "not weighed
 -- yet" value and would invite a re-weigh at the next pickup-like moment.
 local LIGHT = 1
--- how many more marked items a barrow run takes along, and from how far around the
--- first one. Multi-Hauling's defaults; DF never balked at a barrow holding ten.
-local MAX_EXTRA = 10
+-- a barrow run's load: more marked items from around the first one are added until the
+-- run holds ten items or its weight passes 1000. Ten is Multi-Hauling's default and DF
+-- never balked at it; 1000 is four boulders, which is a barrow.
+local MAX_LOAD = 10
+local MAX_WEIGHT = 1000
 local RADIUS = 10
 
 -- rendered frames between pretend sweeps. A pickup is only missed for as long as one
@@ -117,6 +124,19 @@ local function is_heavy(item)
     return w.whole > HEAVY or (w.whole == HEAVY and w.fraction > 0)
 end
 
+-- What an item weighs, whether or not DF has weighed it yet. The cache is authoritative
+-- once filled; before that (most of what gets dumped has never been lifted) the number
+-- DF will arrive at is density x volume / 100000 -- checked against DF's own: a 2850
+-- dolomite boulder (volume 10000) is 285, a 2000 conglomerate block (600) is 12.
+local function est_weight(item)
+    local w = item.weight
+    if w.whole > 0 or w.fraction > 0 then return w.whole + w.fraction / 1000000 end
+    local ok, mi = pcall(dfhack.matinfo.decode, item)
+    local density = ok and mi and mi.material and mi.material.solid_density or 0
+    local okv, vol = pcall(function() return item:getVolume() end)
+    return density * (okv and vol or 0) / 100000
+end
+
 local function item_pos(item)
     local x, y, z = dfhack.items.getPosition(item)
     return x and xyz2pos(x, y, z) or nil
@@ -129,16 +149,30 @@ end
 -- a wheelbarrow DF itself would let a job claim: on the ground, no job on it, not
 -- forbidden, and NOT assigned to any stockpile (that pile's own hauls own it); and one
 -- the dwarf can actually reach from the item
+local function claimable(it, from)
+    local f = it.flags
+    return it:isWheelbarrow() and it.stockpile.id == -1 and f.on_ground
+        and not f.in_job and not f.forbid and not f.in_inventory
+        and not f.garbage_collect and dfhack.maps.canWalkBetween(from, it.pos)
+end
+
+-- THE BARROW THAT JUST DELIVERED IS THE ONE TO USE AGAIN: it is parked beside the dump,
+-- which is where the next run ends, so the trip is dump -> items -> dump instead of a
+-- walk across the fort to fetch a different one. Failing that, the nearest claimable
+-- barrow to the item.
 local function claimable_wheelbarrow(from)
+    if stats.last_wb then
+        local it = df.item.find(stats.last_wb)
+        if it and claimable(it, from) then return it end
+    end
+    local best, best_d
     for _, it in ipairs(df.global.world.items.other.TOOL) do
-        local f = it.flags
-        if it:isWheelbarrow() and it.stockpile.id == -1 and f.on_ground
-                and not f.in_job and not f.forbid and not f.in_inventory
-                and not f.garbage_collect and dfhack.maps.canWalkBetween(from, it.pos) then
-            return it
+        if claimable(it, from) then
+            local d = math.abs(it.pos.x - from.x) + math.abs(it.pos.y - from.y) + 10 * math.abs(it.pos.z - from.z)
+            if not best or d < best_d then best, best_d = it, d end
         end
     end
-    return nil
+    return best
 end
 
 -- the tile a retyped job would put its load DOWN on has to be one you can put a thing
@@ -150,12 +184,29 @@ local function can_set_down(pos)
     return shape ~= df.tiletype_shape.EMPTY and shape ~= df.tiletype_shape.RAMP_TOP
 end
 
--- other items marked for dumping near `first`, on the ground and unclaimed, reachable
--- from it, not already on the dump tile: the rest of the load. Walks the map blocks
--- under a RADIUS square, which is a handful of blocks.
+-- An item marked for dumping is almost never "unclaimed": DF posts one dump job per
+-- marked item the moment it is marked, all at once, and they sit in the list waiting for
+-- haulers. So the item next to ours already has a job -- an UNCLAIMED one, with no dwarf
+-- on it. That job is taken down and the item loaded into our run instead; the dwarf who
+-- would have carried it alone is spared the trip. Only a workerless plain dump job is
+-- ever removed: a job somebody is already doing is theirs.
+local function release_from_unclaimed_dump(o)
+    if not o.flags.in_job then return true end
+    local ref = dfhack.items.getSpecificRef(o, df.specific_ref_type.JOB)
+    local job = ref and ref.data.job
+    if not job or job.job_type ~= df.job_type.DumpItem or runs[job.id] then return false end
+    if dfhack.job.getWorker(job) then return false end
+    dfhack.job.removeJob(job)
+    return not o.flags.in_job
+end
+
+-- other items marked for dumping near `first`, on the ground and not being carried,
+-- reachable from it, not already on the dump tile: the rest of the load, up to MAX_LOAD
+-- items or MAX_WEIGHT all told. Walks the map blocks under a RADIUS square, a handful.
 local function nearby_marked(first, dest)
     local out = {}
     local p = first.pos
+    local load, weight = 1, est_weight(first)
     local bx0, bx1 = (p.x - RADIUS) // 16, (p.x + RADIUS) // 16
     local by0, by1 = (p.y - RADIUS) // 16, (p.y + RADIUS) // 16
     for by = by0, by1 do
@@ -165,13 +216,15 @@ local function nearby_marked(first, dest)
                 for _, id in ipairs(block.items) do
                     local o = df.item.find(id)
                     if o and o ~= first and o.flags.dump and o.flags.on_ground
-                            and not o.flags.in_job and not o.flags.forbid
+                            and not o.flags.forbid
                             and not o:isWheelbarrow() and not dfhack.items.isRouteVehicle(o)
                             and math.abs(o.pos.x - p.x) <= RADIUS and math.abs(o.pos.y - p.y) <= RADIUS
                             and not same_xyz(o.pos, dest)
-                            and dfhack.maps.canWalkBetween(p, o.pos) then
+                            and dfhack.maps.canWalkBetween(p, o.pos)
+                            and release_from_unclaimed_dump(o) then
                         out[#out + 1] = o
-                        if #out >= MAX_EXTRA then return out end
+                        load, weight = load + 1, weight + est_weight(o)
+                        if load >= MAX_LOAD or weight > MAX_WEIGHT then return out end
                     end
                 end
             end
@@ -196,13 +249,8 @@ local function convert(job)
     local wb = claimable_wheelbarrow(item.pos)
     if not wb then return end
     local extra = nearby_marked(item, job.pos)
-    -- a lone light item is not worth the walk to fetch the barrow. The weight cache
-    -- reads 0 on an item nobody has lifted yet, which is most of what gets dumped, so
-    -- a boulder counts as heavy by kind -- there is no light boulder -- and anything
-    -- else by its cached weight.
-    if #extra == 0 and not (item:getType() == df.item_type.BOULDER or is_heavy(item)) then
-        return
-    end
+    -- a lone light item is not worth the walk to fetch the barrow
+    if #extra == 0 and est_weight(item) <= HEAVY then return end
     for _, o in ipairs(extra) do
         dfhack.job.attachJobItem(job, o, df.job_role_type.Hauled, -1, -1)
     end
@@ -211,25 +259,73 @@ local function convert(job)
     end
     job.job_type = df.job_type.StoreItemInStockpile
     job.item_subtype = df.unit_labor.HAUL_REFUSE
-    runs[job.id] = {pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}}
+    -- DFHack tells a completed job from a cancelled one by the timer it last saw on it:
+    -- 0 is "done", -1 (a dump job's resting value, which a stockpile haul never changes)
+    -- reads as cancelled and JOB_COMPLETED never fires. Tachytaenius' fix.
+    job.completion_timer = 0
+    runs[job.id] = {pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}, wb = wb.id}
     stats.runs = stats.runs + 1
     stats.items = stats.items + 1 + #extra
     persist()
 end
 
--- The retyped job is over: everything it put down on the dump tile is forbidden and
--- un-marked, exactly as DF's own dump does. What is not on the tile (a cancelled run)
--- keeps its mark and gets dumped another day. This runs from JOB_COMPLETED, in the
--- same tick the job ends, so DF cannot post a fresh dump job for a delivered item
--- in between.
+-- a tile next to `pos` a barrow can be parked on: walkable, and not the dump tile itself
+local function parking_spot(pos)
+    for _, d in ipairs({{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,1},{1,-1},{-1,-1}}) do
+        local p = xyz2pos(pos.x + d[1], pos.y + d[2], pos.z)
+        if can_set_down(p) and dfhack.maps.canWalkBetween(pos, p) then return p end
+    end
+    return nil
+end
+
+-- The retyped job is over. DF's stockpile-haul completion takes ONE item out of the
+-- barrow and calls it done; the rest of the load stays inside the parked barrow,
+-- invisible on the tile, until something empties it (DFHack's daily
+-- fix/empty-wheelbarrows, in practice -- "they show up later"). So the barrow is
+-- emptied HERE, onto the dump tile, and then parked one tile aside so it is not lying
+-- in the refuse it delivered. Then everything on the dump tile from this run is
+-- forbidden and un-marked, exactly as DF's own dump does; what is not on the tile (a
+-- cancelled run) keeps its mark and gets dumped another day. This runs from
+-- JOB_COMPLETED, in the same tick the job ends, so DF cannot post a fresh dump job for
+-- a delivered item in between.
 local function finish(job)
     local r = runs[job.id]
     if not r then return end
+    local dest = xyz2pos(r.pos.x, r.pos.y, r.pos.z)
+    local wb
+    for _, ji in ipairs(job.items) do
+        if ji.item and ji.role == df.job_role_type.PushHaulVehicle then wb = ji.item end
+    end
+    -- The barrow is "at the dump" when it is on the tile or next to it: the dwarf stands
+    -- beside the tile to unload, and the barrow they are pushing is where they are.
+    -- Further away than that the job was cancelled mid-road, and the load is emptied
+    -- where the barrow stands instead -- still marked, to be dumped another day -- so
+    -- nothing rides around inside a parked barrow either way.
+    local emptied, parked, arrived = 0, nil, false
+    if wb then
+        local wp = item_pos(wb)
+        if wp then
+            arrived = wp.z == dest.z and math.abs(wp.x - dest.x) <= 1 and math.abs(wp.y - dest.y) <= 1
+            for _, o in ipairs(dfhack.items.getContainedItems(wb)) do
+                dfhack.items.moveToGround(o, arrived and dest or wp)
+                emptied = emptied + 1
+            end
+            if arrived then
+                parked = parking_spot(dest)
+                if parked then dfhack.items.moveToGround(wb, parked) end
+            end
+        end
+        stats.last_wb = wb.id
+    end
+    stats.last = ('job %d: %d hauled, %d emptied out of the barrow, barrow %s'):format(
+        job.id, #job.items - (wb and 1 or 0), emptied,
+        parked and ('parked at %d,%d,%d'):format(parked.x, parked.y, parked.z)
+        or (arrived and 'left on the dump tile' or 'not at the dump (run cancelled?)'))
     for _, ji in ipairs(job.items) do
         local o = ji.item
         if o and ji.role == df.job_role_type.Hauled then
             local p = item_pos(o)
-            if p and p.x == r.pos.x and p.y == r.pos.y and p.z == r.pos.z then
+            if p and same_xyz(p, dest) then
                 o.flags.forbid = true
                 o.flags.dump = false
             end
@@ -239,10 +335,23 @@ local function finish(job)
     persist()
 end
 
--- a run whose job vanished without the event (a reload in between, say): sweep the tile
+-- a run whose job vanished without the event (a reload in between, say): sweep the tile.
+-- Also the second chance for conversion: a dump job that was posted before the service
+-- came on, or whose first look found nothing to load, is looked at again while it sits
+-- unclaimed -- a neighbour's job may since have been posted, or a barrow freed. Each
+-- job is retried a few times, not forever.
+local looked = {}
+local LOOKS = 3
 local function reconcile_runs()
     local live = {}
-    for _, job in utils.listpairs(df.global.world.jobs.list) do live[job.id] = true end
+    for _, job in utils.listpairs(df.global.world.jobs.list) do
+        live[job.id] = true
+        if job.job_type == df.job_type.DumpItem and (looked[job.id] or 0) < LOOKS then
+            looked[job.id] = (looked[job.id] or 0) + 1
+            pcall(convert, job)
+        end
+    end
+    for id in pairs(looked) do if not live[id] then looked[id] = nil end end
     local changed = false
     for id, r in pairs(runs) do
         if not live[id] then
@@ -365,13 +474,34 @@ end
 
 function isEnabled() return enabled end
 
+-- Conversion is deferred by a frame rather than done inside the JOB_INITIATED callback:
+-- loading a run takes other jobs DOWN, and the event is raised while DFHack is walking the
+-- job list. A dump job waits for a free hauler far longer than a frame, so nothing is lost;
+-- one claimed in between is simply skipped.
+local pending_jobs = {}
+local function convert_pending()
+    local ids = pending_jobs
+    pending_jobs = {}
+    if #ids == 0 then return end
+    local want = {}
+    for _, id in ipairs(ids) do want[id] = true end
+    for _, job in utils.listpairs(df.global.world.jobs.list) do
+        if want[job.id] then pcall(convert, job) end
+    end
+end
+
 local function start()
     enabled = true
-    -- the retype has to land before a dwarf claims the job, and dump jobs are claimed
-    -- within ticks of being posted: the per-tick event is the only thing fast enough
+    -- the retype has to land before a dwarf claims the job: the per-tick event is what
+    -- notices the job the moment it is posted
     eventful.enableEvent(eventful.eventType.JOB_INITIATED, 1)
     eventful.enableEvent(eventful.eventType.JOB_COMPLETED, 0)
-    eventful.onJobInitiated[GLOBAL_KEY] = function(job) pcall(convert, job) end
+    eventful.onJobInitiated[GLOBAL_KEY] = function(job)
+        if job.job_type == df.job_type.DumpItem then
+            pending_jobs[#pending_jobs + 1] = job.id
+            if #pending_jobs == 1 then dfhack.timeout(1, 'frames', convert_pending) end
+        end
+    end
     eventful.onJobCompleted[GLOBAL_KEY] = function(job) pcall(finish, job) end
     local my_gen = hb_gen() + 1
     hb_gen(my_gen)
@@ -457,6 +587,7 @@ print(('wheelbarrow-dumping is %s; %d wheelbarrow%s on the map, %d free, %d loos
     :format(enabled and 'ON' or 'OFF', total, total == 1 and '' or 's', free, loose))
 print(('  %d barrow run%s so far, %d item%s delivered by barrow')
     :format(stats.runs, stats.runs == 1 and '' or 's', stats.items, stats.items == 1 and '' or 's'))
+if stats.last then print('  last run ended: ' .. stats.last) end
 local n = 0
 for id, r in pairs(runs) do
     n = n + 1

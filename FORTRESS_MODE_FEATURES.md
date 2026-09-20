@@ -439,12 +439,16 @@ everywhere, two ways.
 **Dump runs.** The moment DF posts a dump job, before any dwarf claims it, the job is retyped
 into the one job DF pushes a barrow for — a stockpile haul with the dump tile as its
 destination and a loose wheelbarrow attached as its vehicle; no stockpile is involved — and
-up to ten more items marked for dumping within ten tiles are loaded into the same trip. The
-dwarf fetches the barrow, loads everything, pushes it to the dump, and each delivered item
-is forbidden and un-marked exactly as DF's own dump does (in your fort: six sandstone
-boulders, one bard, one trip). Only an unassigned barrow is used, DF claims it for the job
-so nobody shares it, and it parks on the dump tile afterwards where the next run finds it —
-so make a couple of spare barrows and leave them loose. A dump zone over open space (a ledge,
+more items marked for dumping within ten tiles are loaded into the same trip, until it holds
+ten or its weight passes 1000 (four boulders). DF posts one dump job per marked item the
+moment you mark them, so the neighbours' still-unclaimed jobs are taken down and their items
+ride along instead. The dwarf fetches the barrow, loads everything, pushes it to the dump —
+and since DF's haul completion unloads exactly *one* item and stops, the rest are emptied out
+of the barrow onto the dump tile the moment the job ends, forbidden and un-marked exactly as
+DF's own dump does, and the barrow is parked one tile aside (in your fort: ten items a run,
+nine emptied out each time). The barrow that just delivered is the one the next run uses,
+since it is already beside the dump. Only an unassigned barrow is ever used and DF claims it
+for the job, so nobody shares it — make a couple of spare barrows and leave them loose. A dump zone over open space (a ledge,
 a magma pit) is left to vanilla, since a haul sets its load *down* rather than over the edge.
 The retype is Tachytaenius' `wheelbarrow-dump` (0.47) idea; the multi-item load is Loire's
 *Multi-Hauling*'s.
