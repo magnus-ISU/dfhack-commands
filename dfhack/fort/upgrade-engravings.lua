@@ -35,6 +35,15 @@ MASTERFUL ENGRAVINGS ARE NEVER TOUCHED, which is the whole point -- and a tile i
 from the engraving record itself, so a lucky lap is kept even if it lands while the manager is
 not looking.
 
+THE IMAGE COMES BACK TOO. An engraving that shows a particular image -- one you chose from the
+Engrave tool's image menu, or one DF picked and you have come to like -- is re-cut showing the
+SAME image: the chunk/index pair is read off the engraving record when the tile is queued (or
+off the pending image choice, if the wall has not been cut yet), and every lap writes it back
+as the `location_detail` entry DF's own image menu writes, so the engraver carves that image
+and not a fresh invention. An engraving with no chosen image (DF's default, a different
+invention every time) is re-cut without one, as before. So the way to get a masterful engraving
+of a specific image is: designate the wall, pick the image in DF's menu, then paint it here.
+
     upgrade-engravings                  open the painter (also in the dig-building picker)
     upgrade-engravings status           what is queued, and what is left to upgrade
     upgrade-engravings all [n]          queue up to n non-masterwork engraved walls (default 50)
@@ -122,6 +131,47 @@ local function engraving_at(p)
     end
 end
 
+-- WHICH IMAGE A TILE IS TO SHOW: `{chunk, slot}` (an `art_image_chunk` id and the index in
+-- it), or nil for "whatever the engraver invents". Two sources, the same pair in both: the
+-- engraving already on the tile (`art_id`/`art_subid`, -1 when DF invented one on the spot),
+-- or, for a wall still waiting to be cut, the pending `location_detail` entry DF's image menu
+-- wrote for it. Reading it here matters because both are gone by the time the wall is
+-- re-cut: the engraving dies with the wall, and DF consumes the entry as it carves.
+local function detail_at(p)
+    for _, d in ipairs(df.global.plotinfo.waypoints.location_detail) do
+        if d.pos.x == p.x and d.pos.y == p.y and d.pos.z == p.z then return d end
+    end
+end
+
+local function image_of(p, e)
+    e = e or engraving_at(p)
+    if e and e.art_id >= 0 then return {chunk = e.art_id, slot = e.art_subid} end
+    local d = detail_at(p)
+    if d and d.art_specifier == df.job_art_specifier_type.ArtImage then
+        return {chunk = d.art_spec_id1, slot = d.art_spec_id2}
+    end
+end
+
+-- The image is asked for the way DF's menu asks for it: one `location_detailst` on the tile,
+-- read when the engraver arrives (it sits untouched until then, however long the wait). A
+-- entry already there is the player's, made after the tile was queued, and it wins: it is
+-- adopted into the record rather than overwritten.
+local function ask_image(p, rec)
+    local d = detail_at(p)
+    if d then
+        if d.art_specifier == df.job_art_specifier_type.ArtImage then
+            rec.image = {chunk = d.art_spec_id1, slot = d.art_spec_id2}
+        end
+        return
+    end
+    if not rec.image then return end
+    d = df.location_detailst:new()
+    d.art_specifier = df.job_art_specifier_type.ArtImage
+    d.art_spec_id1, d.art_spec_id2 = rec.image.chunk, rec.image.slot
+    d.pos.x, d.pos.y, d.pos.z = p.x, p.y, p.z
+    df.global.plotinfo.waypoints.location_detail:insert('#', d)
+end
+
 local function is_engraved_wall(p)
     local a = attrs(p)
     if not a or a.shape ~= SH.WALL or a.special ~= df.tiletype_special.SMOOTH then return false end
@@ -146,8 +196,9 @@ end
 
 -- ---- state ------------------------------------------------------------------
 --
--- One record per tile: {x, y, z, phase, tries, from}. `from` is the quality it started at,
--- kept only so the report can say what was gained.
+-- One record per tile: {x, y, z, phase, tries, from, was, image}. `from` is the quality it
+-- started at, kept only so the report can say what was gained; `was` the construction to
+-- rebuild; `image` the {chunk, slot} of the picture every lap is to show, or nil.
 
 local function load_state()
     if not dfhack.isSiteLoaded() then return {tiles = {}} end
@@ -248,6 +299,11 @@ local function advance(rec, st)
             -- from anything this script remembers, so a lap that finished while the manager was
             -- not looking still counts.
             if e.quality >= MASTERFUL then return 'done' end
+            -- a first cut with no chosen image got one from DF: keep it, so the laps that
+            -- follow all show the same picture and the wall does not change subject each time
+            if not rec.image and e.art_id >= 0 then
+                rec.image = {chunk = e.art_id, slot = e.art_subid}
+            end
             rec.tries = (rec.tries or 0) + 1
             if rec.tries >= (MAX_TRIES) then
                 return 'give-up', ('still %s after %d tries'):format(
@@ -271,7 +327,11 @@ local function advance(rec, st)
         end
         -- Designated ONCE. DF clears `designation.smooth` the moment it posts the job, so
         -- re-asserting on every cycle would queue a second engraving behind the first.
-        if not rec.asked_engrave then set_smooth(p, 2); rec.asked_engrave = true end
+        if not rec.asked_engrave then
+            ask_image(p, rec)
+            set_smooth(p, 2)
+            rec.asked_engrave = true
+        end
         return 'wait'
     end
     return 'give-up', 'unknown phase ' .. tostring(rec.phase)
@@ -341,7 +401,7 @@ function queue(list)
             -- a bare wall gets one cut first. One phase, both cases, no special casing.
             st.tiles[#st.tiles + 1] = {x = c.x, y = c.y, z = c.z,
                                        phase = 'engrave', tries = 0, from = c.quality,
-                                       was = c.was}
+                                       was = c.was, image = image_of(c)}
             have[key(c)] = true
             added = added + 1
         end

@@ -158,6 +158,25 @@ itself as soon as the replacement wall is handed to `buildingplan`.
 A rewrite of Little Fern Studio's [replace-wall](https://github.com/LittleFernStudio/replace-wall)
 (MIT); see `LICENSE.md`.
 
+### **`fort/upgrade-engravings`**
+Paint engraved walls that should be re-cut until they come out masterful. Reached from the
+`fort/dig-building` picker as **Upgrade engravings**. An engraving's quality is rolled once,
+by whichever engraver took the job, and the game offers no second go; this takes the wall down
+(mining for a natural wall, removal for a constructed one), rebuilds it — a constructed wall
+in exactly what it was built from, a smoothed rock wall from `buildingplan`'s wall filter —
+designates the engraving again and judges the result, round and round until it is masterful
+or ten tries are spent. Every lap costs a block, a removal, a construction and an engraving
+job, so it is a dice roll you pay for. Masterful engravings are never touched, and a bare wall
+is cut once before anything is torn down.
+
+**The image is kept.** An engraving showing a particular picture is re-cut showing the same
+one: the image is read off the engraving (or off the choice you made in DF's image menu on a
+wall not yet cut) when the tile is queued, and asked for again on every lap the way DF's own
+menu asks — so to get a masterful engraving of a specific image, designate the wall, pick the
+image, and paint it here. An engraving with no chosen image is re-cut without one, a different
+invention every time. `fort/upgrade-engravings all [n]` queues the n worst in the fort,
+`here` the wall under the cursor, `status` / `stop` / `clear` what you would expect.
+
 ### **`fort/move-items`**
 Moves things to a spot you pick. DF has no "carry this to there" — it has *dumping*, which is
 the same order with the controls filed off: you mark items, and haulers take them to whichever
