@@ -1,4 +1,4 @@
--- Smooth designations drawn over undug rock, applied as the rock is revealed.
+-- Smooth, engrave and fortification designations DF refused, applied once they are legal.
 --@module = true
 --[[
 fort/planned-smoothing
@@ -10,6 +10,16 @@ appears. This remembers them and lays the designation down the moment each tile
 is revealed and legal, so you can plan the finished room once instead of coming
 back after every wall.
 
+The same for ENGRAVING and CARVING FORTIFICATIONS on rough stone. DF only takes
+either on a wall that has already been smoothed, so an engrave box dragged over
+a freshly dug room designates nothing at all. Dragged here, the rough tiles are
+remembered, designated for SMOOTHING first, and the moment the smoothing is done
+the engrave (or fortification) designation is laid on the finished surface --
+one gesture for what the game makes two, with a wait in between. Undug rock
+under an engrave box is planned the same way: smooth when it is dug, engrave
+when it is smooth. A fortification wants a wall; an engraving takes a wall or a
+floor.
+
     fort/planned-smoothing            status
     fort/planned-smoothing clear      forget every planned tile
     fort/planned-smoothing now        run a designation pass immediately
@@ -17,8 +27,9 @@ back after every wall.
 
 WHAT IT REMEMBERS, AND FOR HOW LONG
 
-  Only tiles DF refused: the hidden ones inside the box you dragged. Everything
-  legal is designated by DF itself in the same gesture and is never touched.
+  Only tiles DF refused: the hidden ones inside a smooth box; the hidden and the
+  rough ones inside an engrave or fortification box. Everything legal is
+  designated by DF itself in the same gesture and is never touched.
 
   The plan lives in memory ONLY -- it is not written to the save and does not
   survive a reload, by design. A remembered tile is a rectangle you dragged
@@ -41,7 +52,13 @@ WHEN A PLANNED TILE IS DESIGNATED
       face is work thrown away -- a dwarf smooths it and a miner cuts it away an
       hour later. The tile waits until mining has actually happened in it.
     * a revealed floor of natural hard stone (stone, mineral, feature, lava
-      stone or ice), not already smoothed -- designate it, and forget it.
+      stone or ice), not already smoothed -- designate it, and forget it. An
+      ENGRAVE or FORTIFY tile is designated for smoothing instead and KEPT: it
+      waits through the smoothing designation and the smoothing job (a tile
+      with a smoothing job on it is never designated again, so no second job is
+      ever queued behind the first), and once the surface reads smooth it is
+      designated for the finish and forgotten. A fortification on a tile that
+      turns out to be a floor is dropped: there is nothing to carve.
     * anything that can never be smoothed -- forget it. Soil, constructions and
       grass never become smoothable however long you wait, and neither does a
       tile whose outstanding job is a staircase, a ramp or a channel: none of
@@ -96,18 +113,20 @@ local BLOCKS_PER_PASS = 96     -- plan blocks looked at in one pass
 -- handful of blocks the viewport covers. A flat list of positions would cost a
 -- block lookup per tile in both.
 --
---   plan[bkey] = {[idx] = true, ...}   bkey = "bx,by,z", idx = (x%16)*16 + y%16
+--   plan[bkey] = {[idx] = kind, ...}   bkey = "bx,by,z", idx = (x%16)*16 + y%16
+--   kind = 'smooth' | 'engrave' | 'fortify' -- what the tile is to end up as
 plan = plan or {}
 plan_tiles = plan_tiles or 0
 
 local function bkey(pos) return (pos.x // 16) .. ',' .. (pos.y // 16) .. ',' .. pos.z end
 local function tidx(pos) return (pos.x % 16) * 16 + (pos.y % 16) end
 
-local function plan_add(pos)
+local function plan_add(pos, kind)
     local k, i = bkey(pos), tidx(pos)
     local b = plan[k]
     if not b then b = {}; plan[k] = b end
-    if not b[i] then b[i] = true; plan_tiles = plan_tiles + 1 end
+    if not b[i] then plan_tiles = plan_tiles + 1 end
+    b[i] = kind or 'smooth'         -- a later box over the same tile says what it is now for
 end
 
 local function plan_drop(k, i)
@@ -201,10 +220,21 @@ local DIG_DESIGNATION = {
 -- Except when what is outstanding is a staircase, a ramp or a channel. None of
 -- those leave a smoothable tile behind, so the plan lets go rather than waiting
 -- on work that can never satisfy it.
-local function verdict(block, bx, by, k, i)
+-- ENGRAVE AND FORTIFY TILES GO ROUND TWICE. The first time the tile is rough: it
+-- is designated for smoothing and kept ('smooth'). Then it waits -- through the
+-- smoothing designation (d.smooth ~= 0), and through the smoothing JOB, which is
+-- invisible on the tile because DF clears the designation the moment it posts
+-- the work; `work_marks` is what says a job is there, and without it the tile
+-- would be designated a second time and a second job queued behind the first.
+-- When the surface finally reads SMOOTH the finish is laid down ('go').
+--   'smooth' -- rough: designate smoothing now, keep the tile
+local function verdict(block, bx, by, k, i, kind)
     local d = block.designation[bx][by]
     if d.hidden then return 'wait' end
-    if d.smooth ~= 0 then return 'drop' end        -- already designated by hand
+    if d.smooth ~= 0 then                          -- something is designated here already
+        if kind == 'smooth' then return 'drop' end -- by hand: DF has it from here
+        return 'wait'                              -- our smoothing, or the player's: wait it out
+    end
 
     -- outstanding mining, as a designation or as the job it has become
     local pending = DIG_DESIGNATION[d.dig]
@@ -219,6 +249,20 @@ local function verdict(block, bx, by, k, i)
         and occ.building ~= df.tile_building_occ.Dynamic then return 'wait' end
     local attrs = df.tiletype.attrs[block.tiletype[bx][by]]
     if not HARD_MATERIALS[attrs.material] then return 'drop' end
+    if kind ~= 'smooth' then
+        local w = work_marks[k]
+        if w and w[i] then return 'wait' end       -- a smoothing/engraving job is on the tile
+        if kind == 'fortify' and attrs.shape ~= df.tiletype_shape.WALL then return 'drop' end
+        if attrs.shape == df.tiletype_shape.FORTIFICATION then return 'drop' end
+        if attrs.special == df.tiletype_special.SMOOTH then
+            if attrs.shape ~= df.tiletype_shape.FLOOR
+                and attrs.shape ~= df.tiletype_shape.WALL then return 'drop' end
+            return 'go'
+        end
+        if attrs.shape ~= df.tiletype_shape.FLOOR
+            and attrs.shape ~= df.tiletype_shape.WALL then return 'drop' end
+        return 'smooth'
+    end
     if attrs.special == df.tiletype_special.SMOOTH then return 'drop' end
     -- A revealed WALL is designated, not held. Waiting for it to become a floor
     -- sounds prudent and is wrong: a wall face is exactly what a room's walls
@@ -304,14 +348,22 @@ local function pass(all)
             if tiles then for i in pairs(tiles) do plan_drop(k, i) end end
         else
             local touched = false
-            for i in pairs(tiles) do
+            for i, kind in pairs(tiles) do
                 local bx, by = i // 16, i % 16
-                local v = verdict(block, bx, by, k, i)
+                local v = verdict(block, bx, by, k, i, kind)
                 if v == 'go' then
-                    block.designation[bx][by].smooth = 1
+                    -- an engraving is smooth=2; a fortification is smooth=1 on a wall
+                    -- that is already smooth, which DF reads as "carve" (quickfort's
+                    -- do_fortification writes the same)
+                    block.designation[bx][by].smooth = kind == 'engrave' and 2 or 1
                     set_tile_priority(block, bx, by, SMOOTH_PRIORITY)
                     touched = true
                     plan_drop(k, i)
+                    done = done + 1
+                elseif v == 'smooth' then
+                    block.designation[bx][by].smooth = 1
+                    set_tile_priority(block, bx, by, SMOOTH_PRIORITY)
+                    touched = true
                     done = done + 1
                 elseif v == 'drop' then
                     plan_drop(k, i)
@@ -360,11 +412,21 @@ local SMOOTH_JOB = {
     [df.job_type.SmoothFloor] = true,
 }
 
+-- Every job that finishes a surface, worker or not: a planned engraving waits on these.
+local WORK_JOB = {
+    [df.job_type.SmoothWall] = true,
+    [df.job_type.SmoothFloor] = true,
+    [df.job_type.DetailWall] = true,
+    [df.job_type.DetailFloor] = true,
+    [df.job_type.CarveFortification] = true,
+}
+
 job_marks = job_marks or {}      -- same shape as `plan`: [bkey] = {[idx] = true}
 dig_marks = dig_marks or {}      -- [bkey] = {[idx] = 'wait'|'drop'}
+work_marks = work_marks or {}    -- [bkey] = {[idx] = true}: a WORK_JOB is on the tile
 
 local function refresh_marks()
-    local marks, digs = {}, {}
+    local marks, digs, work = {}, {}, {}
     local link = df.global.world.jobs.list.next
     while link do
         local job = link.item
@@ -377,6 +439,11 @@ local function refresh_marks()
                 if not b then b = {}; marks[k] = b end
                 b[i] = true
             end
+            if WORK_JOB[job.job_type] then
+                local b = work[k]
+                if not b then b = {}; work[k] = b end
+                b[i] = true
+            end
             local dig = DIG_JOB[job.job_type]
             if dig then
                 local b = digs[k]
@@ -386,7 +453,7 @@ local function refresh_marks()
         end
         link = link.next
     end
-    job_marks, dig_marks = marks, digs
+    job_marks, dig_marks, work_marks = marks, digs, work
 end
 
 -- ---------------------------------------------------------------------------
@@ -418,7 +485,24 @@ local function drag_bounds()
             z1 = math.min(a.z, b.z), z2 = math.max(a.z, b.z)}
 end
 
--- Record the hidden tiles of a box, or drop them for the eraser. Walked block
+-- Did DF refuse this tile, and is it one this tool can ever satisfy? A smooth
+-- box: only the hidden. An engrave or fortification box: the hidden, and the
+-- ROUGH -- natural hard stone not yet smoothed, in a shape the finish can go on.
+-- DF has already taken everything it would by the time this is asked (see the
+-- one-frame delay in Capture), so a tile still reading smooth == 0 is refused.
+local function refused(block, x, y, mode)
+    local des = block.designation[x % 16][y % 16]
+    if des.smooth ~= 0 then return false end
+    if des.hidden then return true end
+    if mode == 'smooth' then return false end
+    local attrs = df.tiletype.attrs[block.tiletype[x % 16][y % 16]]
+    if not HARD_MATERIALS[attrs.material] then return false end
+    if attrs.special == df.tiletype_special.SMOOTH then return false end
+    if mode == 'fortify' then return attrs.shape == df.tiletype_shape.WALL end
+    return attrs.shape == df.tiletype_shape.WALL or attrs.shape == df.tiletype_shape.FLOOR
+end
+
+-- Record the refused tiles of a box, or drop them for the eraser. Walked block
 -- by block: one map lookup per 16x16 instead of one per tile.
 local function register_box(bounds, mode)
     local w = bounds.x2 - bounds.x1 + 1
@@ -436,12 +520,10 @@ local function register_box(bounds, mode)
                             if mode == 'erase' then
                                 plan_remove(pos)
                             else
-                                local des = block.designation[x % 16][y % 16]
                                 -- Only what DF turned down. A tile it accepted
                                 -- is a real designation now and is none of our
-                                -- business; a tile that is merely hidden is
-                                -- exactly what this tool exists for.
-                                if des.hidden and des.smooth == 0 then plan_add(pos) end
+                                -- business.
+                                if refused(block, x, y, mode) then plan_add(pos, mode) end
                             end
                         end
                     end
@@ -454,10 +536,10 @@ end
 -- Register a box the way a player's own drag would. Needed because a drag
 -- completed by `fort/right-click-cancel` finishes with a SYNTHETIC click, which
 -- goes straight to the viewscreen and past this tool's input hook.
-function plan_box(x1, y1, z1, x2, y2, z2)
+function plan_box(x1, y1, z1, x2, y2, z2, mode)
     register_box({x1 = math.min(x1, x2), x2 = math.max(x1, x2),
                   y1 = math.min(y1, y2), y2 = math.max(y1, y2),
-                  z1 = math.min(z1, z2), z2 = math.max(z1, z2)}, 'smooth')
+                  z1 = math.min(z1, z2), z2 = math.max(z1, z2)}, mode or 'smooth')
     return plan_tiles
 end
 
@@ -468,12 +550,13 @@ local function register_tile(pos, mode)
     end
     local block = dfhack.maps.getTileBlock(pos)
     if not block then return end
-    local des = block.designation[pos.x % 16][pos.y % 16]
-    if des.hidden and des.smooth == 0 then plan_add(pos) end
+    if refused(block, pos.x, pos.y, mode) then plan_add(pos, mode) end
 end
 
 local MODE_OF = {
     ['dwarfmode/Designate/SMOOTH'] = 'smooth',
+    ['dwarfmode/Designate/ENGRAVE'] = 'engrave',
+    ['dwarfmode/Designate/FORTIFY'] = 'fortify',
     ['dwarfmode/Designate/ERASE'] = 'erase',
 }
 
@@ -483,9 +566,11 @@ end
 
 Capture = defclass(Capture, overlay.OverlayWidget)
 Capture.ATTRS{
-    desc = 'Remembers smooth designations drawn over undug rock (fort/planned-smoothing).',
+    desc = 'Remembers smooth/engrave/fortify designations DF refused (fort/planned-smoothing).',
     default_enabled = true,
-    viewscreens = {'dwarfmode/Designate/SMOOTH', 'dwarfmode/Designate/ERASE'},
+    viewscreens = {'dwarfmode/Designate/SMOOTH', 'dwarfmode/Designate/ENGRAVE',
+                   'dwarfmode/Designate/FORTIFY', 'dwarfmode/Designate/ERASE'},
+    version = 2,
     overlay_onupdate_max_freq_seconds = 0,
     frame = {w = 0, h = 0},
 }
@@ -580,7 +665,7 @@ OVERLAY_WIDGETS = {capture = Capture, paint = Paint}
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_UNLOADED or sc == SC_WORLD_UNLOADED then
         plan_clear()
-        job_marks, dig_marks = {}, {}
+        job_marks, dig_marks, work_marks = {}, {}, {}
         pass_cursor = nil
     end
 end
@@ -592,14 +677,17 @@ function status()
         local by_z, zs = {}, {}
         for k, tiles in pairs(plan) do
             local z = tonumber(k:match(',(-?%d+)$'))
-            local n = 0
-            for _ in pairs(tiles) do n = n + 1 end
-            if not by_z[z] then zs[#zs + 1] = z; by_z[z] = 0 end
-            by_z[z] = by_z[z] + n
+            if not by_z[z] then zs[#zs + 1] = z; by_z[z] = {smooth = 0, engrave = 0, fortify = 0} end
+            for _, kind in pairs(tiles) do by_z[z][kind] = (by_z[z][kind] or 0) + 1 end
         end
         table.sort(zs, function(a, b) return a > b end)
         for _, z in ipairs(zs) do
-            print(('  z=%d: %d tile%s'):format(z, by_z[z], by_z[z] == 1 and '' or 's'))
+            local c = by_z[z]
+            local parts = {}
+            if c.smooth > 0 then parts[#parts + 1] = c.smooth .. ' smooth' end
+            if c.engrave > 0 then parts[#parts + 1] = c.engrave .. ' engrave' end
+            if c.fortify > 0 then parts[#parts + 1] = c.fortify .. ' fortify' end
+            print(('  z=%d: %s'):format(z, table.concat(parts, ', ')))
         end
     end
     print(('  %d designated so far this session'):format(designated_total))

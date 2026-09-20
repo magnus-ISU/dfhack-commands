@@ -342,12 +342,17 @@ end
 -- player's own clicks on the designation screens -- but a drag completed here
 -- finishes with a SYNTHETIC click, which goes straight to the viewscreen and
 -- past every overlay, so it has to be told by hand.
+local PLAN_MODE = {[MD.SMOOTH] = 'smooth', [MD.ENGRAVE] = 'engrave', [MD.FORTIFY] = 'fortify'}
+
 function RightClickCancel:told_planned_smoothing(tool, a, b)
-    if tool ~= MD.SMOOTH and tool ~= MD.ERASE then return end
+    if not PLAN_MODE[tool] and tool ~= MD.ERASE then return end
     local ok, ps = pcall(reqscript, 'fort/planned-smoothing')
     if not ok or not ps then return end
-    local fn = tool == MD.SMOOTH and ps.plan_box or ps.forget_box
-    if fn then pcall(fn, a.x, a.y, a.z, b.x, b.y, b.z) end
+    if tool == MD.ERASE then
+        if ps.forget_box then pcall(ps.forget_box, a.x, a.y, a.z, b.x, b.y, b.z) end
+    elseif ps.plan_box then
+        pcall(ps.plan_box, a.x, a.y, a.z, b.x, b.y, b.z, PLAN_MODE[tool])
+    end
 end
 
 function RightClickCancel:cancel_at(pos)

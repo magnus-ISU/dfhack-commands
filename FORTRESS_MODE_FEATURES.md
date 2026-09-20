@@ -52,6 +52,14 @@ held forever. The eraser takes plans back the same
 way it takes designations back. Plans live in memory only and do not survive a reload, by
 design: a box you dragged a minute ago is not a standing preference.
 
+**Engrave and carve fortifications on rough stone.** DF takes either only on a wall already
+smoothed, so an engrave box over a freshly dug room designates nothing. Dragged with this on,
+the rough tiles (and any undug ones) are remembered, designated for *smoothing* first, and the
+moment the smoothing is done — the tile waits through the designation and the job, so no
+second job is ever queued behind the first — the engrave or fortification designation is laid
+on the finished surface. One gesture for what the game makes two. A fortification wants a
+wall; an engraving takes a wall or a floor.
+
 `fort/planned-smoothing` reports what is planned, `clear` forgets it, `now` runs a pass
 immediately. Enabled by `magnus-scripts`.
 
