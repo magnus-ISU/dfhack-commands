@@ -25,16 +25,18 @@ does the clicks that never vary and then gets out of the way:
    population than its rival and still be the one DF flags.
 2. **Centres the map on a good spot near that civ.**  Scored, not random: see
    "Choosing the tile" below.
-3. **Clicks the real "Embark" button**, which leaves you at "Click on the map to
-   embark!" with the size selector up.  **The final click is yours.**  The tool
-   never places the fortress; it only guarantees that the map you are now looking
-   at is a sensible one.  It deliberately does not write `location`: a valid
-   rectangle there plus `choosing_embark` makes DF jump straight to its
-   Confirm/Abort box, one step past where this should stop.
+3. **Arms "Embark"** -- by writing `choosing_embark`, the state the button puts
+   the screen in -- which leaves you at "Click on the map to embark!" with the
+   size selector up.  **The final click is yours.**  The tool never places the
+   fortress; it only guarantees that the map you are now looking at is a sensible
+   one.  It deliberately does not write `location`: a valid rectangle there plus
+   `choosing_embark` makes DF jump straight to its Confirm/Abort box, one step
+   past where this should stop.  (It used to click the button by its label, and
+   on some resolutions that click landed on "Show elevation" next to it.)
 
-Steps 0 and 3 are clicks, and each one needs DF to draw a frame before the next
-thing is on screen, so the tool runs as a frame-paced step machine rather than
-straight through.  Two things that machine has to respect, both of which broke
+Step 0 is a click and step 3 needs the zoomed map drawn first, so each waits for
+DF to render a frame before the next thing is there to act on; the tool runs as a
+frame-paced step machine rather than straight through.  Two things that machine has to respect, both of which broke
 earlier versions outright:
 
 - `dfhack.timeout` must use **`frames`**, not `ticks` -- world time is not
@@ -311,11 +313,20 @@ end
 -- from gui/launcher -- which is how anyone actually runs it -- the current
 -- viewscreen is DFHack's own launcher window, and every click was landing there
 -- instead of on the embark screen.
+--
+-- The pixel pair is the CENTRE OF THE CELL AS DF LAYS CELLS OUT: window pixels
+-- over grid cells, which is not a whole number (1080 rows over 67 cells is
+-- 16.12 pixels a cell, and `tile_pixel_y` says 16).  Multiplying by the tile
+-- size instead drifts a pixel per row down the screen, and near the bottom --
+-- where every button on this screen lives -- that is a whole row on some
+-- resolutions: the click lands on the row above the label it was aimed at.
 local function click_at(cx, cy)
     local gps = df.global.gps
     gps.mouse_x, gps.mouse_y = cx, cy
-    gps.precise_mouse_x = cx * gps.tile_pixel_x + gps.tile_pixel_x // 2
-    gps.precise_mouse_y = cy * gps.tile_pixel_y + gps.tile_pixel_y // 2
+    local w = gps.screen_pixel_x > 0 and gps.screen_pixel_x or gps.dimx * gps.tile_pixel_x
+    local h = gps.screen_pixel_y > 0 and gps.screen_pixel_y or gps.dimy * gps.tile_pixel_y
+    gps.precise_mouse_x = ((2 * cx + 1) * w) // (2 * gps.dimx)
+    gps.precise_mouse_y = ((2 * cy + 1) * h) // (2 * gps.dimy)
     gui.simulateInput(dfhack.gui.getDFViewscreen(true), '_MOUSE_L')
 end
 
@@ -570,20 +581,23 @@ local function place(scr, pick, dry, done)
     scr.selected_civ = pick.idx
     go_to(scr, best.x, best.y)
 
-    -- The zoomed-in view has to be drawn once before its button row exists to be
-    -- clicked.  "Embark" is matched only on the row that also says "Show
-    -- elevation" -- that pair is the button bar; the first plain match for
-    -- "Embark" on this screen is the hint prose `Click "Embark" to place your
-    -- fortress`, and clicking that does nothing.
+    -- "Embark" is a FIELD, not a click.  `choosing_embark` is the state the
+    -- button puts the screen in -- "Click on the map to embark!" with the size
+    -- selector up -- and writing it reaches exactly that state.  This used to
+    -- click the button instead, found by its text on the row that also says
+    -- "Show elevation", and on a screen whose resolution laid that row out
+    -- differently the click landed on Show elevation: the map went to the
+    -- elevation view and nothing was armed.  The zoomed-in view still gets one
+    -- rendered frame first, so DF has built the region view the flag applies to.
     every_frame(function(n)
-        if screen_ready(n) and click_text('Embark', 'Show elevation') then
+        if screen_ready(n) then
+            scr.choosing_embark = true
             print('  Click on the map to place the fortress -- that part is yours.')
             done()
             return true
         end
         if n > WAIT_FRAMES then
-            print('  Could not find the Embark button; the map is centred, ' ..
-                  'click Embark yourself.')
+            print('  The map is centred; click Embark yourself.')
             done()
             return true
         end

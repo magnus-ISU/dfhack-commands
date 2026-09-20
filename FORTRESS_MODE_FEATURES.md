@@ -2000,7 +2000,9 @@ Prepare-carefully buttons that give a dwarf the office skills, plus a preference
 
 ### **`embark/fast-dwarves`**
 Opens a new fortress for you: skips the tutorial prompt, commits a dwarven origin civ, centres
-the map on a scored spot near its halls, and clicks Embark. You place the fortress.
+the map on a scored spot near its halls, and arms Embark -- by writing the state the button
+sets, not by clicking it, since the click by label landed on "Show elevation" at some
+resolutions. You place the fortress.
 
 ### **`embark/extra-info`**
 Panel under DF's own, on the final placement step only: the adamantine spire count (or
