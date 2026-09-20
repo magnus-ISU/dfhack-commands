@@ -1332,6 +1332,14 @@ war hammer** (silver is worthless as armour and makes the best blunt weapon in t
 this tool's own jobs are followed, by item-id watermark, so a piece from an order you queued at
 the same forge is never touched.
 
+**The military comes first.** While `fort/military-uniforms` is queueing gear and is still
+short of a metal, that metal is not spent on cravings — a helm nobody asked for must not be
+why a soldier's breastplate waits. Owing an alloy protects what it is smelted from too: steel
+owed means no iron is used either, bronze owed means no copper. It reads the shortfall the
+military service publishes after each of its cycles, not its order list, so a metal the fort
+has run out of entirely is protected as well. `idle-smiths status` lists what is reserved and
+what it may spend.
+
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.

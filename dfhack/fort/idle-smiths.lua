@@ -41,7 +41,9 @@ protects what it is smelted from: steel owed means no iron is spent either (stee
 pig iron); a bronze owed means no copper. The military service publishes what it still owes
 after every one of its cycles, as a shortfall rather than an order list, so a metal it has
 run out of entirely is protected too. With every soldier kitted out, or the toggle off,
-nothing is held back. `idle-smiths status` shows what is currently reserved.
+nothing is held back, and the LAST FIVE BARS of every metal are never spent -- a craving-job
+is the lowest-value thing a forge can do, so it must not be what empties a stockpile.
+`idle-smiths status` shows what is currently reserved.
 
 SOLDIERS UNDER ORDERS ARE LEFT ALONE. A dwarf whose squad is carrying out an order -- or who
 holds an individual one -- is doing that order, however badly they want to craft, so they are
@@ -162,8 +164,16 @@ local function military_reserved()
     return reserved
 end
 
+-- NEVER SPEND THE LAST FEW BARS. Craving-jobs are the lowest-value use the forge has -- the
+-- point is the dwarf's mood, not the trinket -- so they must not be the reason a metal runs
+-- out. Five is a floor, not a reserve to be spent later: a metal with five bars reads as zero
+-- here and is simply never chosen, which also keeps the last of a scarce alloy available for
+-- whatever the player actually wants it for.
+local FLOOR_BARS = 5
+
 ---bar counts per allowed metal; returns counts by name. A metal the military is still
----short of reads as 0 bars here, so nothing below ever picks it.
+---short of reads as 0 bars here, so nothing below ever picks it, and every metal is counted
+---down by FLOOR_BARS so the bottom of the pile is never touched.
 local function metal_supply()
     local idxs = allowed_metal_indexes()
     local by_index, counts = {}, {}
@@ -175,6 +185,9 @@ local function metal_supply()
     end
     for name in pairs(military_reserved()) do
         if counts[name] then counts[name] = 0 end
+    end
+    for name, n in pairs(counts) do
+        counts[name] = math.max(0, n - FLOOR_BARS)
     end
     return counts
 end
@@ -841,6 +854,7 @@ if not args[1] or args[1] == 'status' then
         if (counts[name] or 0) > 0 then usable[#usable + 1] = ('%s %d'):format(name:lower(), counts[name]) end
     end
     print(('  bars this may spend: %s'):format(#usable > 0 and table.concat(usable, ', ') or 'none'))
+    print(('  (the last %d bars of every metal are never spent)'):format(FLOOR_BARS))
 elseif args[1] == 'thresholds' then
     local argparse = require('argparse')
     thresholds = argparse.numberList(args[2], 'thresholds')
