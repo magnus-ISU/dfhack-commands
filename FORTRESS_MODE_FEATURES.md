@@ -979,6 +979,16 @@ since DF rebuilds a dwarf's labors whenever it recomputes one — opening the la
 enough — and a holiday that ends the moment you look at it is no holiday. It survives a save and
 reload, and ends correctly from the other side.
 
+### **`fort/multiple-laborers`**
+Shift+click on the Work Details screen. Click one dwarf's row, shift+click another's, and every
+row between them (both ends included) gets the detail together -- or loses it, if all of them
+already had it. The plain click is still DF's. Vanilla assigns one dwarf per click and nothing
+else.
+
+DF bakes the tick on the right of each row into the row when it builds it and only its own
+click repaints it, so the rows this changed get their tick redrawn from the data, with DF's
+own button art copied off rows it drew.
+
 ### **`fort/choose-labor-icon`**
 Pick a work detail's icon from a grid of the actual icons instead of cycling DF's little
 selector one at a time.
