@@ -21,7 +21,7 @@ load. First run = everything on. Column headers toggle whole columns; `m` = all
 mod columns, `r` = everything ("recommended"). The old `lovely` tier is gone —
 its extras (standing orders, auto-name, autobutcher embark protection, the
 stock-tool batch: autobutcher, autoclothing, autonestbox, burrow, prioritize,
-seedwatch, suspendmanager, timestream, tweak fast-heat/realistic-melting) are
+suspendmanager, timestream, tweak fast-heat/realistic-melting) are
 now individual checkboxes. It does **not** manage `no-pausing` (that stops
 *all* pausing — manual toggle). The timer-driven stock tools
 (autocheese/automilk/autoshear/cleanowned/orders-reevaluate) aren't plain

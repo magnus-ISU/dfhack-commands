@@ -643,8 +643,6 @@ local COLUMNS = {
          enable = cmd('enable', 'burrow'), disable = cmd('disable', 'burrow')},
         {key = 'prioritize', label = 'prioritize', mode = 'fort',
          enable = cmd('enable', 'prioritize'), disable = cmd('disable', 'prioritize')},
-        {key = 'seedwatch', label = 'seedwatch', mode = 'fort',
-         enable = cmd('enable', 'seedwatch'), disable = cmd('disable', 'seedwatch')},
         {key = 'suspendmanager', label = 'suspendmanager', mode = 'fort',
          enable = cmd('enable', 'suspendmanager'), disable = cmd('disable', 'suspendmanager')},
         {key = 'timestream', label = 'timestream', mode = 'fort',
