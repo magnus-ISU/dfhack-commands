@@ -195,7 +195,13 @@ opens with the distance to its closest passing item, and **Melt targets** (Shift
 metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
 as a starting point you can move; off puts quality back to any. **Marked to melt** (Shift-L)
 keeps only what is already designated for melting and selects all of it as it switches on, so
-carrying the melt pile to the smelter is one click. **This z only** (Shift-Z)
+carrying the melt pile to the smelter is one click. **Noble symbols** (Shift-N) opens a list of
+the fort's nobles — each with the positions they hold and how many symbols of office they have
+been given — and keeps only that noble's symbols, selecting all of them, so a noble moving house
+takes their regalia in one click; the list's first row puts it back to any item. Symbols are the
+one artifact-flagged thing the picker will move: DF gives a named object the artifact flag, and
+haulers dump them like anything else (a symbol boot marked by hand was picked up and carried).
+Real artifacts stay out, as before. **This z only** (Shift-Z)
 keeps only items on the destination's z-level, and **Burrow** (Shift-B) cycles through the
 fort's burrows to keep only what stands inside the one named.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items

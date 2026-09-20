@@ -71,7 +71,12 @@ the masterworks and artifacts are the ones you keep -- as a starting point; move
 afterwards if you like. Turning it off puts quality back to "any". `Marked to melt` (Shift-L)
 keeps only items already designated for melting AND selects every row of them as it is switched
 on, so carrying the whole melt pile to the smelter is one click; deselect what you would rather
-leave, and off widens the list again without touching what is picked. `This z only` (Shift-Z)
+leave, and off widens the list again without touching what is picked. `Noble symbols` (Shift-N)
+opens a list of the fort's nobles and keeps only the SYMBOLS OF OFFICE given to the one you
+click, selecting all of them -- a noble moving house takes their regalia in one click; the list's
+first row puts it back to any item. Symbols are the one artifact-flagged thing the picker will
+move: DF marks a named object with the artifact flag, and haulers dump them like anything else.
+Real artifacts stay out. `This z only` (Shift-Z)
 keeps only items on the destination's own z-level, and `Burrow` (Shift-B) cycles through the
 fort's burrows to keep only items standing inside the one named -- the two ways a fort already
 names a pile ("this floor", "the hospital's stock") that are not a kind of item. CLICKING A ROW
@@ -172,11 +177,15 @@ end
 -- Items DF will never haul, whatever you mark. Forbidden is NOT in this list: a forbidden
 -- item is one you set aside, and moving it is a fine thing to ask for -- the picker offers
 -- the trade screen's "hide forbidden" filter instead of deciding for you.
-local function dumpable(it)
+local function dumpable(it, symbols)
     local f = it.flags
     if f.garbage_collect or f.removed or f.encased or f.construction or f.in_building
         or f.spider_web or f.hostile or f.trader or f.on_fire then return false end
-    if f.artifact then return false end                 -- an artifact is not cargo
+    -- an artifact is not cargo -- except a SYMBOL OF OFFICE, which wears the artifact flag
+    -- (that is what makes it a "named object") and is exactly the thing a noble moving house
+    -- wants carried after them. Haulers dump them like anything else (tested: a symbol boot
+    -- marked by hand was picked up and carried)
+    if f.artifact and not (symbols and symbols[it.id]) then return false end
     -- carried or worn: the holder is using it
     if dfhack.items.getGeneralRef(it, df.general_ref_type.UNIT_HOLDER) then return false end
     return true
@@ -438,6 +447,61 @@ local function burrow_options()
     return opts
 end
 
+-- ---- symbols of office ------------------------------------------------------------
+--
+-- A symbol is an ARTIFACT CLAIM on the fort's own entity: `claim_type` Symbol, and
+-- `symbol_claim_id` names the position ASSIGNMENT (position + holder) it was given to. So the
+-- unit of "whose symbols" is the assignment, and a dwarf holding two positions has two sets --
+-- the noble list below folds those into one entry per holder.
+
+-- item id -> assignment id, for every symbol the fort has handed out
+local function symbol_lookup()
+    local site = df.historical_entity.find(df.global.plotinfo.group_id)
+    local out = {}
+    if not site then return out end
+    for _, c in ipairs(site.artifact_claims) do
+        if c.claim_type == df.artifact_claim_type.Symbol and c.symbol_claim_id ~= -1 then
+            local ar = df.artifact_record.find(c.artifact_id)
+            if ar and ar.item then out[ar.item.id] = c.symbol_claim_id end
+        end
+    end
+    return out
+end
+
+-- Every noble holding a position, one entry each: {name, hf, positions, assignments = {id = true},
+-- count = symbols handed out}. Sorted most symbols first, then by name.
+function noble_list()
+    local site = df.historical_entity.find(df.global.plotinfo.group_id)
+    if not site then return {} end
+    local per_assignment = {}
+    for _, aid in pairs(symbol_lookup()) do
+        per_assignment[aid] = (per_assignment[aid] or 0) + 1
+    end
+    local titles = {}
+    for _, p in ipairs(site.positions.own) do titles[p.id] = p.name[0] end
+    local by_hf, out = {}, {}
+    for _, a in ipairs(site.positions.assignments) do
+        if a.histfig ~= -1 then
+            local n = by_hf[a.histfig]
+            if not n then
+                local hf = df.historical_figure.find(a.histfig)
+                n = {hf = a.histfig, positions = {}, assignments = {}, count = 0,
+                     name = hf and dfhack.translation.translateName(hf.name) or '?'}
+                by_hf[a.histfig] = n
+                out[#out + 1] = n
+            end
+            n.positions[#n.positions + 1] = titles[a.position_id] or '?'
+            n.assignments[a.id] = true
+            n.count = n.count + (per_assignment[a.id] or 0)
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.name < b.name
+    end)
+    return out
+end
+
 -- ---- the candidate scan --------------------------------------------------------
 --
 -- ONE PASS over every item in play, and it is not cheap (a fort with 27k items takes about a
@@ -463,9 +527,10 @@ function scan_items(target)
     local groups, order = {}, {}
     local tile_group = {}
     local total = 0
+    local symbols = symbol_lookup()
 
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if dumpable(it) then
+        if dumpable(it, symbols) then
             local x, y, z = dfhack.items.getPosition(it)
             if x and x >= 0 then
                 local pos = xyz2pos(x, y, z)
@@ -504,6 +569,7 @@ function scan_items(target)
                             quality = it:getQuality(), wear = it.wear,
                             forbidden = it.flags.forbid, dump = it.flags.dump,
                             metal = is_metal(it), to_melt = it.flags.melt,
+                            symbol = symbols[it.id],     -- assignment id, if a symbol of office
                             burrow = bnames, burrow_ids = bids,
                         }
                         total = total + 1
@@ -605,9 +671,10 @@ end
 -- mark the chosen items and remember them; returns how many were marked
 local function mark_items(ids)
     local marked = {}
+    local symbols = symbol_lookup()
     for _, id in ipairs(ids) do
         local it = df.item.find(id)
-        if it and dumpable(it) then
+        if it and dumpable(it, symbols) then
             it.flags.dump = true
             -- an item nobody may touch is never hauled, so a forbidden item being MOVED is
             -- unforbidden now rather than at the end
@@ -1085,6 +1152,53 @@ function SpecificScreen:onDismiss()
     if self.on_close then self.on_close() end
 end
 
+-- ---- which noble's symbols --------------------------------------------------------
+--
+-- A modal list of the fort's nobles, most symbols first, with the positions each holds and
+-- how many symbols they have been given. Picking one hands the picker that noble; the first
+-- row clears it.
+
+NobleScreen = defclass(NobleScreen, gui.ZScreenModal)
+NobleScreen.ATTRS{focus_path = 'move-items/noble'}
+
+function NobleScreen:init(info)
+    self.on_pick = info.on_pick
+    local choices = {{text = {{text = '(any item -- no noble)', pen = COLOR_GRAY}}, noble = false}}
+    for _, n in ipairs(noble_list()) do
+        local pen = n.count > 0 and COLOR_WHITE or COLOR_GRAY
+        choices[#choices + 1] = {
+            text = {{text = ('%-32s'):format(n.name:sub(1, 32)), pen = pen},
+                    {text = ('%-28s'):format(table.concat(n.positions, ', '):sub(1, 28)), pen = COLOR_GRAY},
+                    {text = ('%3d symbol(s)'):format(n.count), pen = pen}},
+            noble = n,
+        }
+    end
+    self:addviews{
+        widgets.Window{
+            frame = {w = 84, h = 24},
+            frame_title = 'Whose symbols of office?',
+            resizable = true,
+            subviews = {
+                widgets.Label{frame = {t = 0, l = 0},
+                    text = 'Click a noble to keep only the symbols of office given to them.'},
+                widgets.Label{frame = {t = 1, l = 0}, text = {{text = ('%-32s'):format('noble'), pen = COLOR_GRAY},
+                    {text = ('%-28s'):format('positions'), pen = COLOR_GRAY}, {text = 'symbols', pen = COLOR_GRAY}}},
+                widgets.List{
+                    view_id = 'list',
+                    frame = {t = 3, l = 0, r = 0, b = 2},
+                    choices = choices,
+                    on_submit = function(_, choice)
+                        self:dismiss()
+                        if self.on_pick then self.on_pick(choice.noble) end
+                    end,
+                },
+                widgets.HotkeyLabel{frame = {b = 0, l = 0}, key = 'LEAVESCREEN',
+                    label = 'Back', on_activate = function() self:dismiss() end},
+            },
+        },
+    }
+end
+
 -- ---- the picker -----------------------------------------------------------------
 
 local COL_SPECIFIC = 12      -- width of the [specific] button
@@ -1213,6 +1327,20 @@ function PickerScreen:init(info)
                     initial_option = -1,
                     on_change = function() self:refresh() end,
                 },
+                -- NOBLE SYMBOLS: only the symbols of office given to one noble, and every row
+                -- of them selected as the noble is chosen -- a noble moving house takes their
+                -- regalia in one click. Opens a modal to say which noble; the modal's first row
+                -- clears it. The symbols are named objects, so they wear the artifact flag; this
+                -- is the one case the picker lets an artifact-flagged item through.
+                widgets.HotkeyLabel{
+                    view_id = 'noble',
+                    frame = {t = 3, l = 0, r = 0},
+                    label = 'Noble symbols: none',
+                    key = 'CUSTOM_SHIFT_N',
+                    on_activate = function()
+                        NobleScreen{on_pick = function(noble) self:set_noble(noble) end}:show()
+                    end,
+                },
                 -- the trade screen's own filter sliders, and they are laid out for a 38-wide
                 -- column: given the whole width they draw on top of each other
                 widgets.Panel{
@@ -1258,6 +1386,26 @@ function PickerScreen:onDismiss()
     reopen_mining_menu()
 end
 
+-- Chosen from the noble modal: nil/false clears. Choosing a noble also selects every row that
+-- survives, the way "Marked to melt" does -- the point of asking is to carry the lot.
+function PickerScreen:set_noble(noble)
+    self.noble = noble or nil
+    local btn = self.subviews.noble
+    if self.noble then
+        btn:setLabel(('Noble symbols: %s (%s)'):format(self.noble.name,
+                                                       table.concat(self.noble.positions, ', ')))
+    else
+        btn:setLabel('Noble symbols: none')
+    end
+    self:refresh()
+    if self.noble then
+        for _, g in ipairs(self.groups) do
+            if g.total > 0 then g.sel, g.specific = g.total, nil end
+        end
+        self:refresh()
+    end
+end
+
 -- the sliders call this by name (they are the trade screen's own widgets)
 function PickerScreen:refresh_list()
     self:refresh()
@@ -1270,6 +1418,7 @@ function PickerScreen:filters()
                hide_forbidden = self.subviews.hide_forbidden:getOptionValue(),
                melt = self.subviews.melt_targets:getOptionValue(),
                to_melt = self.subviews.to_melt:getOptionValue(),
+               noble = self.noble and self.noble.assignments or nil,
                only_z = self.subviews.this_z:getOptionValue() and self.target.z or nil,
                burrow = self.subviews.burrow:getOptionValue()}
     if f.burrow == -1 then f.burrow = nil end
@@ -1294,6 +1443,7 @@ local function item_passes(e, g, f)
     if f.hide_forbidden and e.forbidden then return false end
     if f.melt and not e.metal then return false end
     if f.to_melt and not e.to_melt then return false end
+    if f.noble and not (e.symbol and f.noble[e.symbol]) then return false end
     if f.only_z and e.z ~= f.only_z then return false end
     if f.burrow and not (e.burrow_ids and e.burrow_ids[f.burrow]) then return false end
     if f.min_condition < e.wear or f.max_condition > e.wear then return false end
