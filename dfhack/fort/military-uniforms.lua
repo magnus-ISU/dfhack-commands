@@ -153,6 +153,125 @@ local function setof(vec) local s = {}; for _, x in ipairs(vec) do s[x] = true e
 -- table because this file is at Lua's 200-local ceiling
 local CM = {}
 
+-- specs skipped this cycle because the civilization cannot make them, counted per
+-- item_type/subtype so the report can name them rather than just say a number
+ILLEGAL = {}
+
+-- pins dropped this cycle because the item became a symbol of office
+SYMBOLS_RELEASED = 0
+
+-- item_type -> the raws vector its subtypes are named in
+function ITEMDEFS_FOR_FN(it)
+    local R = df.global.world.raws.itemdefs
+    return ({[df.item_type.ARMOR] = R.armor, [df.item_type.HELM] = R.helms,
+             [df.item_type.PANTS] = R.pants, [df.item_type.GLOVES] = R.gloves,
+             [df.item_type.SHOES] = R.shoes, [df.item_type.SHIELD] = R.shields,
+             [df.item_type.WEAPON] = R.weapons})[it]
+end
+ITEMDEFS_FOR = setmetatable({}, {__index = function(_, it) return ITEMDEFS_FOR_FN(it) end})
+
+-- WHAT THE CIVILIZATION HAS A RECIPE FOR, by item type and subtype.
+--
+-- `resolve_sub` already gates the TEMPLATE on this, but nothing gated the ORDERS. A squad
+-- position can carry a spec this script never wrote -- set by hand on the Equip screen, left
+-- behind by an older template, or handed over by DF itself -- and `spec_want` accepted any
+-- subtype whose item type had a Make job. DF's manager does not check the civ's list at the
+-- forge either, so the orders were filled: this fort has 127 HIGH BOOTS and no recipe for a
+-- high boot anywhere in its civilization.
+--
+-- The CIV entity is the authority, not the site government. DF reads the civ's list when it
+-- decides what can be made, and it is the list `add-recipe` and `fort/research-breakthrough`
+-- write to. The two genuinely differ here -- the group allows {shoe, low boot} where the civ
+-- allows {shoe, low boot, sandal} -- so picking the wrong one silently changes what is
+-- orderable.
+--
+-- Picks are the exception that would otherwise read as illegal: a mining pick lives in
+-- `digger_type`, never in `weapon_type`.
+local CIV_LIST = {
+    [df.item_type.ARMOR]  = {'armor_type'},
+    [df.item_type.HELM]   = {'helm_type'},
+    [df.item_type.PANTS]  = {'pants_type'},
+    [df.item_type.GLOVES] = {'gloves_type'},
+    [df.item_type.SHOES]  = {'shoes_type'},
+    [df.item_type.SHIELD] = {'shield_type'},
+    [df.item_type.WEAPON] = {'weapon_type', 'digger_type'},
+}
+
+local legal_cache, legal_civ
+function CM.legal(item_type, subtype)
+    local fields = CIV_LIST[item_type]
+    if not fields then return true end          -- nothing to check it against: do not block
+    if subtype == nil or subtype < 0 then return false end
+    local civ_id = df.global.plotinfo.civ_id
+    if legal_cache == nil or legal_civ ~= civ_id then
+        legal_cache, legal_civ = {}, civ_id
+        local civ = df.historical_entity.find(civ_id)
+        if civ then
+            for it, names in pairs(CIV_LIST) do
+                local set = {}
+                for _, name in ipairs(names) do
+                    for _, st in ipairs(civ.resources[name]) do set[st] = true end
+                end
+                legal_cache[it] = set
+            end
+        end
+    end
+    local set = legal_cache[item_type]
+    if not set then return true end
+    return set[subtype] == true
+end
+
+-- ITEMS THE FORTRESS HAS CLAIMED AS SYMBOLS OF OFFICE -- DF's Artifacts -> Symbols tab.
+--
+-- A symbol is no longer a piece of equipment: DF strips its ownership the moment it claims it
+-- (both of this fort's, a pair of Steelboots, read `owned = false` with no holder), and a
+-- soldier pinned to one waits forever for a boot that will never be fetched.
+--
+-- Claims live on the SITE GOVERNMENT, not the civilization -- this fort's civ entity holds
+-- none at all while the group holds twenty, two of them Symbols -- so both are read and the
+-- civ's are simply usually empty. `claim_type` 0 is Symbol; Heirloom, Treasure and HolyRelic
+-- are deliberately NOT included: those are claims on an artifact's ownership, not a statement
+-- that the item is regalia, and a treasured artifact weapon is still a weapon.
+--
+-- Cached per frame: this is asked once per pinned piece, and the claim list is short.
+local symbols_cache, symbols_frame
+function CM.noble_symbols()
+    local frame = df.global.world.frame_counter
+    if symbols_cache and symbols_frame == frame then return symbols_cache end
+    local out = {}
+    for _, eid in ipairs({df.global.plotinfo.group_id, df.global.plotinfo.civ_id}) do
+        local e = df.historical_entity.find(eid)
+        for _, c in ipairs(e and e.artifact_claims or {}) do
+            if c.claim_type == df.artifact_claim_type.Symbol then
+                local a = df.artifact_record.find(c.artifact_id)
+                if a and a.item then out[a.item.id] = true end
+            end
+        end
+    end
+    symbols_cache, symbols_frame = out, frame
+    return out
+end
+
+-- BARS, NOT PIECES. A breastplate is not one bar: `itemdef.material_size` is the cost in
+-- material units, a bar is worth three of them, and DF will not split a bar across jobs -- a
+-- live "Forge steel breastplate" job asks for `quantity = 450` BAR, which is 3 bars at 150
+-- units each, against `material_size = 9`. So the cost is `ceil(material_size / 3)`:
+--
+--   breastplate 3    mail shirt 2    greaves 2    shield 2    battle axe 2    pick 2
+--   helm 1           gauntlet 1      boots 1      buckler 1   sword/spear/mace/hammer 1
+--
+-- Counting pieces understated a full steel kit by better than half.
+function CM.bars_for(item_type, subtype)
+    local R = df.global.world.raws.itemdefs
+    local vec = ({[df.item_type.ARMOR] = R.armor, [df.item_type.HELM] = R.helms,
+                  [df.item_type.PANTS] = R.pants, [df.item_type.GLOVES] = R.gloves,
+                  [df.item_type.SHOES] = R.shoes, [df.item_type.SHIELD] = R.shields,
+                  [df.item_type.WEAPON] = R.weapons})[item_type]
+    local d = vec and subtype and subtype >= 0 and vec[subtype]
+    local size = d and d.material_size or 3
+    return math.max(1, math.ceil(size / 3))
+end
+
 -- a piece of armour the forge can make in metal: the raw carries [METAL] and an armor level
 function CM.forgeable(d)
     local ok, r = pcall(function()
@@ -1220,6 +1339,14 @@ local function spec_want(spec, race, unit)
     if spec.item >= 0 and spec.item_type < 0 then return nil end    -- hand-picked specific item
     local it = spec.item_type
     if not MAKE_JOB[it] or spec.item_subtype < 0 then return nil end
+    -- NOT ORDERABLE, SO NOT MANAGED AT ALL. A subtype the civilization has no recipe for is
+    -- left entirely alone: no order is queued for it and it is not counted in the shortfall,
+    -- so it never shows up in the materials this still needs. Anything already made and worn
+    -- stays where it is -- the piece is fine, it just cannot be replaced.
+    if not CM.legal(it, spec.item_subtype) then
+        ILLEGAL[it .. '/' .. spec.item_subtype] = (ILLEGAL[it .. '/' .. spec.item_subtype] or 0) + 1
+        return nil
+    end
     local mt, mi = uniform_matpair(spec)
     if not mt or not managed_materials()[mt .. '/' .. mi] then return nil end
     -- EVERY spec now owns exactly ONE item, pair slots included: ensure_pair_specs has
@@ -1658,6 +1785,14 @@ local function pin_still_valid(id, w, unit_id, claimed)
     if not it then return false end
     if it:getType() ~= w.item_type or it:getSubtype() ~= w.subtype then return false end
     if not item_pinnable(it) then return false end
+    -- REGALIA IS NOT EQUIPMENT. Once the fortress claims a piece as a symbol of office DF
+    -- takes its ownership away, so the soldier pinned to it waits on a boot nobody will ever
+    -- bring them. Releasing it here is all that is needed: the slot falls back through the
+    -- normal fill, takes the best free piece instead, and is counted as owed if there is none.
+    if CM.noble_symbols()[id] then
+        SYMBOLS_RELEASED = (SYMBOLS_RELEASED or 0) + 1
+        return false
+    end
     if item_size_race(it) ~= w.size_race then return false end
     -- MATERIAL IS NOT CHECKED HERE. A piece of the wrong material on a soldier -- DF's own
     -- partial-match assignment, or a pin from before -- is left on them rather than stripped;
@@ -1741,7 +1876,41 @@ end
 -- the ones that aren't, and fill the gaps from the pool. Returns the shortfall -- what
 -- nobody could be given, which is exactly what needs forging.
 -- =============================================================================
+
+-- Name what was skipped as illegal. WARN EARLY: a slot silently doing nothing looks exactly
+-- like a slot waiting on bars, and the fix is not more bars -- it is changing the uniform, or
+-- unlocking the recipe. Naming the piece is the difference between the two.
+local function report_symbols(note_fn)
+    if (SYMBOLS_RELEASED or 0) == 0 then return end
+    note_fn('released %d piece(s) the fortress claimed as symbols of office; replacements pinned'
+            .. ' or ordered', SYMBOLS_RELEASED)
+end
+
+local function report_illegal(note_fn)
+    local n = 0
+    for _ in pairs(ILLEGAL) do n = n + 1 end
+    if n == 0 then return end
+    local parts = {}
+    for k, count in pairs(ILLEGAL) do
+        local it, sub = k:match('^(%d+)/(%d+)$')
+        it, sub = tonumber(it), tonumber(sub)
+        local defs = ({[df.item_type.ARMOR] = df.global.world.raws.itemdefs.armor,
+                       [df.item_type.HELM] = df.global.world.raws.itemdefs.helms,
+                       [df.item_type.PANTS] = df.global.world.raws.itemdefs.pants,
+                       [df.item_type.GLOVES] = df.global.world.raws.itemdefs.gloves,
+                       [df.item_type.SHOES] = df.global.world.raws.itemdefs.shoes,
+                       [df.item_type.SHIELD] = df.global.world.raws.itemdefs.shields,
+                       [df.item_type.WEAPON] = df.global.world.raws.itemdefs.weapons})[it]
+        local d = defs and defs[sub]
+        parts[#parts + 1] = ('%d x %s'):format(count, d and d.name or ('subtype ' .. tostring(sub)))
+    end
+    table.sort(parts)
+    note_fn('skipped, your civilization has no recipe for them: %s', table.concat(parts, ', '))
+end
+
 local function assign_gear(soldiers, claimed, pool, jobitems)
+    ILLEGAL = {}                            -- counted afresh: this is a per-cycle picture
+    SYMBOLS_RELEASED = 0
     local shortfall = {}                    -- key -> {want fields..., count}
     local pinned, repinned, released, adopted, repaired, nudged, pruned = 0, 0, 0, 0, 0, 0, 0
 
@@ -2430,15 +2599,72 @@ local function run_cycle()
     -- index, so it reads the same in any world; counted in pieces still short. It is the
     -- SHORTFALL, not the order list: a metal with no bars at all gets no order (the bar
     -- budget drops it), and that is precisely the metal most worth protecting.
-    local short_metals = {}
+    local short_metals, short_bars = {}, {}
     for _, r in pairs(shortfall) do
         if r.mat_type == 0 and r.count > 0 then
             local raw = df.global.world.raws.inorganics.all[r.mat_index]
-            if raw then short_metals[raw.id] = (short_metals[raw.id] or 0) + r.count end
+            if raw then
+                -- PIECES for `short_metals`, which `fort/idle-smiths` reads and whose meaning
+                -- is not ours to change from here; BARS for what the player is told, because
+                -- "need 35 steel" is a question about the stockpile, not the wardrobe.
+                short_metals[raw.id] = (short_metals[raw.id] or 0) + r.count
+                short_bars[raw.id] = (short_bars[raw.id] or 0)
+                    + r.count * CM.bars_for(r.item_type, r.subtype)
+            end
         end
     end
-    if tool_short > 0 then short_metals.STEEL = (short_metals.STEEL or 0) + tool_short end
+    if tool_short > 0 then
+        short_metals.STEEL = (short_metals.STEEL or 0) + tool_short
+        -- a steel pick is material_size 4, so two bars apiece
+        short_bars.STEEL = (short_bars.STEEL or 0) + tool_short * 2
+    end
     state.short_metals = short_metals
+
+    -- ---- what the notification says ------------------------------------------
+    --
+    -- Built HERE rather than recomputed by the panel: `assign_gear` is the only thing that
+    -- knows what is owed, it is expensive, and a notification is asked for its text every
+    -- frame. So the cycle leaves the answer behind and the panel just reads it.
+    --
+    -- `demand` is the total number of gear pieces the squads ask for, which is what the
+    -- DISMISSAL is keyed to. Not the shortfall: that falls as things are forged, so keying on
+    -- it would make a dismissed notice pop back the moment a smith finished something. Demand
+    -- only moves when the squads do -- a new soldier, a changed uniform -- which is exactly
+    -- when you asked to be told again.
+    local demand, upgrade_n, upgrade_names = 0, 0, {}
+    for _, sol in ipairs(soldiers) do
+        for _, e in ipairs(sol.specs) do demand = demand + (e.want.qty or 1) end
+    end
+    local other_short = {}
+    for _, r in pairs(shortfall) do
+        if r.mat_type ~= 0 and r.count > 0 then
+            local ok, info = pcall(dfhack.matinfo.decode, r.mat_type, r.mat_index)
+            local nm = (ok and info and info.material and info.material.state_name.Solid) or 'material'
+            -- a shield or crossbow owed in wood reads as "logs", which is what you go and cut
+            if nm:find('wood') then nm = 'logs' end
+            other_short[nm] = (other_short[nm] or 0) + r.count
+        end
+        -- IN MASTERWORK MODE, a piece that is owed but NOT missing is an upgrade: the soldier
+        -- is already wearing something, it is simply not good enough. `empty` is the subset
+        -- with nothing on the slot at all, so the difference is what is being replaced.
+        if state.masterwork then
+            local up = math.max(0, (r.count or 0) - (r.empty or 0))
+            if up > 0 then
+                upgrade_n = upgrade_n + up
+                local defs = ITEMDEFS_FOR[r.item_type]
+                local d = defs and defs[r.subtype]
+                if d then upgrade_names[#upgrade_names + 1] = d.name end
+            end
+        end
+    end
+    -- THE NAME IS PICKED ONCE, HERE. The panel asks a notification for its text every frame,
+    -- so choosing at render time makes the word in brackets flicker between breastplates and
+    -- helms sixty times a second. Picked per cycle it is still a random sample of what is
+    -- being upgraded, and it holds still long enough to read.
+    state.notice = {demand = demand, metals = short_bars, other = other_short,
+                    upgrade_n = upgrade_n,
+                    upgrade_pick = #upgrade_names > 0
+                                   and upgrade_names[math.random(#upgrade_names)] or nil}
 
     -- recycle surplus gear into bars: for the masterwork upgrade, and when the miner/
     -- woodcutter tools have run the steel out
@@ -2518,6 +2744,8 @@ local function run_cycle()
         local n, pieces = 0, 0
         for _, r in pairs(shortfall) do n = n + 1; pieces = pieces + r.count end
         note('still to forge: %d piece(s) across %d gear key(s)', pieces, n)
+        report_illegal(note)
+        report_symbols(note)
         return
     end
     if split_added > 0 or split_removed > 0 then
@@ -2533,6 +2761,9 @@ local function run_cycle()
             :format(pinned, repinned, released, repaired, nudged, adopted)
               .. (pruned > 0 and (', pruned %d DF-added extra(s)'):format(pruned) or ''))
     end
+    local function say(fmt, ...) print('military-uniforms: ' .. fmt:format(...)) end
+    report_illegal(say)
+    report_symbols(say)
     save_state()        -- persist the updated order-id map + completion flags
 end
 
@@ -3273,6 +3504,117 @@ local function setup_alt_schedules()
     return n, eidx, oidx
 end
 
+-- ---- the notification --------------------------------------------------------
+--
+-- "need 20 steel for squads", or "need 20 steel, 4 copper, 8 logs", or in masterwork mode
+-- "Upgrading 18 items (breastplates) to masterwork".
+--
+-- CLICKING IT DISMISSES IT, and it stays dismissed until the squads ask for MORE than they
+-- were asking when you dismissed it -- a new soldier, a changed uniform, a squad grown. It
+-- deliberately does not come back merely because the shortfall moved: forging progress makes
+-- that number fall, and refilling it with the next order is not news.
+
+-- No new top-level locals below: this file is at Lua's 200-local ceiling and four
+-- more tipped it over. Everything hangs off CM, the same table the forge gate uses.
+CM.NOTIFY_NAME = 'military_gear'
+
+function CM.plural(name, n)
+    if n == 1 then return name end
+    if name:sub(-1) == 's' then return name end
+    return name .. 's'
+end
+
+-- A readable name for an inorganic ID STRING: STEEL -> steel. Deliberately NOT the file's
+-- existing `metal_name`, which takes an index and Capitalises for template names -- this one
+-- reads mid-sentence ("need 20 steel"), and `short_metals` is keyed by id, not index.
+function CM.metal_label(id)
+    for i = 0, #df.global.world.raws.inorganics.all - 1 do
+        local raw = df.global.world.raws.inorganics.all[i]
+        if raw.id == id then
+            local nm = raw.material.state_name.Solid
+            if nm and nm ~= '' then return nm end
+        end
+    end
+    return id:lower():gsub('_', ' ')
+end
+
+function notice_message()
+    if not dfhack.world.isFortressMode() then return nil end
+    local ok = pcall(load_state)
+    if not ok then return nil end
+    local nt = state and state.notice
+    if not nt or not state.queue then return nil end
+    -- dismissed, and the squads have not asked for more since
+    if state.notice_ack ~= nil and (nt.demand or 0) <= state.notice_ack then return nil end
+
+    if (nt.upgrade_n or 0) > 0 then
+        return ('Upgrading %d items (%s) to masterwork'):format(
+            nt.upgrade_n, CM.plural(nt.upgrade_pick or 'piece', 2)), COLOR_LIGHTCYAN
+    end
+
+    -- materials, biggest first, so the thing actually holding you up reads first
+    local parts = {}
+    for id, n in pairs(nt.metals or {}) do
+        -- The NUMBER is bars; the word is just the metal. "need 34 steel" is how a dwarf
+        -- fortress player counts steel, and "34 steel bars" reads like a different unit.
+        parts[#parts + 1] = {n = n, text = ('%d %s'):format(n, CM.metal_label(id))}
+    end
+    for nm, n in pairs(nt.other or {}) do
+        parts[#parts + 1] = {n = n, text = ('%d %s'):format(n, CM.plural(nm, n))}
+    end
+    if #parts == 0 then return nil end
+    table.sort(parts, function(a, b)
+        if a.n ~= b.n then return a.n > b.n end
+        return a.text < b.text
+    end)
+    local out = {}
+    for _, p in ipairs(parts) do out[#out + 1] = p.text end
+    if #out == 1 then return ('need %s for squads'):format(out[1]), COLOR_YELLOW end
+    return ('need %s'):format(table.concat(out, ', ')), COLOR_YELLOW
+end
+
+function notice_dismiss()
+    local ok = pcall(load_state)
+    if not ok or not state then return end
+    state.notice_ack = (state.notice and state.notice.demand) or 0
+    save_state()
+end
+
+function CM.register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[CM.NOTIFY_NAME]
+    if not entry then
+        entry = {name = CM.NOTIFY_NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[CM.NOTIFY_NAME] = entry
+    end
+    entry.desc = 'Notifies while military-uniforms is still forging gear, and what it needs.'
+    -- Resolved LIVE, never pinned: a stored function keeps the panel running whichever copy of
+    -- this file registered it, so an edited script reports the old answer from the panel while
+    -- the command line reports the new one.
+    local function live()
+        local got, m = pcall(reqscript, 'fort/military-uniforms')
+        return (got and m) or nil
+    end
+    entry.dwarf_fn = function()
+        local m = live()
+        return (m and m.notice_message or notice_message)()
+    end
+    entry.on_click = function()
+        local m = live()
+        return (m and m.notice_dismiss or notice_dismiss)()
+    end
+    if n.config and n.config.data and not n.config.data[CM.NOTIFY_NAME] then
+        n.config.data[CM.NOTIFY_NAME] = {enabled = true, version = 1}
+    end
+end
+
+dfhack.onStateChange[CM.NOTIFY_NAME] = function(ev)
+    if ev == SC_WORLD_LOADED or ev == SC_MAP_LOADED then CM.register_notification() end
+end
+CM.register_notification()
+
 -- Loaded as a module (reqscript, a hot reload): if a heartbeat is already ticking, it is
 -- an OLDER copy of this code -- take the tick over now, so a deploy is a deploy and not
 -- the trap described above start_heartbeat. Nothing to take over on a fresh session.
@@ -3291,6 +3633,7 @@ end
 if not dfhack.world.isFortressMode() then qerror('military-uniforms only works in fortress mode') end
 
 local args = {...}
+
 if args[1] == 'civilian' then
     -- ensure both "Civilian - *" uniforms exist + are ordered. (You assign them to squads
     -- yourself -- this tool no longer drafts civilians.)
