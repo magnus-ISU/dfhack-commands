@@ -90,6 +90,10 @@ local LIGHT = 1
 local MAX_LOAD = 10
 local MAX_WEIGHT = 1000
 local RADIUS = 10
+-- a converted job nobody has claimed after this many ticks is given up on (see
+-- reconcile_runs). Dump jobs are claimed within a few ticks of posting when they are
+-- claimed at all.
+local ORPHAN_TICKS = 300
 
 -- rendered frames between pretend sweeps. A pickup is only missed for as long as one
 -- gap, and a dwarf covers a tile or two in that time; per sweep this walks units.active.
@@ -244,6 +248,7 @@ local function convert(job)
     local ji = job.items[0]
     local item = ji and ji.item
     if not item or not item.flags.dump or not item.flags.on_ground then return end
+    if given_up[item.id] then return end                -- its last run went unclaimed
     if same_xyz(item.pos, job.pos) then return end     -- already on the dump tile
     if not can_set_down(job.pos) then return end
     local wb = claimable_wheelbarrow(item.pos)
@@ -263,7 +268,8 @@ local function convert(job)
     -- 0 is "done", -1 (a dump job's resting value, which a stockpile haul never changes)
     -- reads as cancelled and JOB_COMPLETED never fires. Tachytaenius' fix.
     job.completion_timer = 0
-    runs[job.id] = {pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}, wb = wb.id}
+    runs[job.id] = {pos = {x = job.pos.x, y = job.pos.y, z = job.pos.z}, wb = wb.id,
+                    t = df.global.cur_year_tick}
     stats.runs = stats.runs + 1
     stats.items = stats.items + 1 + #extra
     persist()
@@ -342,8 +348,13 @@ end
 -- job is retried a few times, not forever.
 local looked = {}
 local LOOKS = 3
+-- items whose run was dissolved: not made the FIRST item of a run again, so a job DF
+-- will not claim as a haul goes back to being a plain dump instead of looping. They may
+-- still ride along in somebody else's run.
+local given_up = {}
 local function reconcile_runs()
     local live = {}
+    local changed = false
     for _, job in utils.listpairs(df.global.world.jobs.list) do
         live[job.id] = true
         if job.job_type == df.job_type.DumpItem and (looked[job.id] or 0) < LOOKS then
@@ -352,7 +363,31 @@ local function reconcile_runs()
         end
     end
     for id in pairs(looked) do if not live[id] then looked[id] = nil end end
-    local changed = false
+    -- AN ORPHANED RUN IS DISSOLVED. DF hands a dump job to the dwarf who was about to
+    -- take it; a job retyped after that moment can sit in the list unclaimed for good,
+    -- since idle dwarves do not pick stockpile hauls out of the list the way they pick
+    -- dump jobs -- and it holds the barrow and ten items hostage while it waits. So a
+    -- run nobody has claimed after a while is taken down: its items are released, DF
+    -- posts fresh dump jobs for them, and those are converted at the moment of posting,
+    -- when a dwarf is on the way.
+    -- (collected first: removing a job unlinks the list node the walk is standing on)
+    local orphans = {}
+    for _, job in utils.listpairs(df.global.world.jobs.list) do
+        local r = runs[job.id]
+        if r and r.t and not dfhack.job.getWorker(job)
+                and math.abs(df.global.cur_year_tick - r.t) > ORPHAN_TICKS then
+            orphans[#orphans + 1] = job
+        end
+    end
+    for _, job in ipairs(orphans) do
+        for _, ji in ipairs(job.items) do
+            if ji.item and ji.role == df.job_role_type.Hauled then given_up[ji.item.id] = true end
+        end
+        runs[job.id] = nil
+        dfhack.job.removeJob(job)
+        stats.orphaned = (stats.orphaned or 0) + 1
+        changed = true
+    end
     for id, r in pairs(runs) do
         if not live[id] then
             local block = dfhack.maps.getTileBlock(r.pos.x, r.pos.y, r.pos.z)
@@ -588,6 +623,9 @@ print(('wheelbarrow-dumping is %s; %d wheelbarrow%s on the map, %d free, %d loos
 print(('  %d barrow run%s so far, %d item%s delivered by barrow')
     :format(stats.runs, stats.runs == 1 and '' or 's', stats.items, stats.items == 1 and '' or 's'))
 if stats.last then print('  last run ended: ' .. stats.last) end
+if (stats.orphaned or 0) > 0 then
+    print(('  %d run%s dissolved unclaimed (items re-posted)'):format(stats.orphaned, stats.orphaned == 1 and '' or 's'))
+end
 local n = 0
 for id, r in pairs(runs) do
     n = n + 1
