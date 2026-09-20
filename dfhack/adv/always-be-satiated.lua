@@ -66,6 +66,11 @@ WHAT IT WILL NOT CONSUME:
     consumed successfully has its old strikes forgiven (stacks keep one item id, so a
     stack must be able to clear its name). `status` shows both lists;
     `adv/always-be-satiated forget` wipes them for a fresh start.
+  * FROZEN water -- ice. Cold weather freezes the water in your pack and DF's list leaves
+    it out until you heat it at a fire; the item keeps its id and material through both
+    changes, so it is told apart by temperature against the melting point. Ice earns no
+    strikes, and an item seen frozen has any strikes forgiven the moment it is seen liquid
+    again -- so the water you melt over a campfire is drunk, not remembered as refused.
   * ROTTEN food, which is itself a way to end up vomiting.
   * LIQUID_MISC that is not water, not creature blood and not raws-edible -- that item
     type also covers lye and ichor. Plain blood IS drunk (a skin of cheetah blood quenches
@@ -339,6 +344,26 @@ local function may_eat_sapients()
         or ethic_permits(raw.ethic[df.ethic_type.EAT_SAPIENT_KILL])
 end
 
+-- FROZEN. Cold weather freezes the water in your pack (DF renders the item as "ice"), and
+-- DF's eat/drink list simply leaves it out until it is heated at a fire. The item keeps its
+-- id and its WATER material through both changes, so the only thing that distinguishes the
+-- drinkable from the undrinkable is the temperature against the material's melting point
+-- (water: 10000). Before this was checked, frozen water was picked, never listed, and
+-- retired to the refused list after two strikes -- and stayed there after the player had
+-- melted it, so the heated ice was never drunk. Now ice is not a drink; and an item once
+-- seen frozen has its strikes forgiven when it is next seen liquid (see pack_contents).
+local function frozen(it, mi)
+    if not (mi and mi.material) then return false end
+    local ok, t = pcall(function() return it.temperature.whole end)
+    if not ok or not t then return false end
+    -- 60001 is DF's "no melting point": a material that never melts never froze either
+    local mp = mi.material.heat.melting_point
+    return mp > 0 and mp < 60001 and t < mp
+end
+
+-- ids seen frozen in the pack; the thaw is what forgives them
+seen_frozen = seen_frozen or {}
+
 -- 'food', 'drink', or nil for anything we will not put in our mouth
 local function classify(it)
     local ty = it:getType()
@@ -346,6 +371,14 @@ local function classify(it)
     if it.flags.rotten then return nil end          -- rotten food is its own vomit trigger
     if looks_mythical(describe(it)) or has_syndrome(it) then return nil end   -- healing loot
     local mi = dfhack.matinfo.decode(it)
+    if DRINKABLE[ty] then
+        if frozen(it, mi) then                       -- ice: not until it is heated
+            seen_frozen[it.id] = true
+            return nil
+        elseif seen_frozen[it.id] then               -- heated: back on the menu, clean
+            seen_frozen[it.id], refused[it.id], suspects[it.id] = nil, nil, nil
+        end
+    end
     -- illithid brain, elf meat: refused for most eaters -- but a civ whose ethics
     -- permit devouring sapients (kobolds, illithids) gets them as ordinary food
     if sapient_source(mi) and not may_eat_sapients() then return nil end
@@ -717,7 +750,7 @@ end
 if arg == 'forget' then
     local n = 0
     for _ in pairs(refused) do n = n + 1 end
-    refused, suspects = {}, {}
+    refused, suspects, seen_frozen = {}, {}, {}
     print(('always-be-satiated: refused/strike lists cleared -- %d retired item(s) get a fresh chance.')
         :format(n))
     return

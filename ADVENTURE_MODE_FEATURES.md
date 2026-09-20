@@ -23,7 +23,8 @@ Adventure mode reveal only when not in combat. You can easily navigate around
 
 ### **`adv/always-be-satiated`** 
 Automatically eat and drink (non healing potions) when not in
-  combat.
+  combat. Frozen water is ice, not a drink, until you heat it at a fire -- and then it is drunk,
+  not remembered as something DF refused.
 
 ![adv/always-be-satiated demo](demos/adv-always-be-satiated.gif)
 
