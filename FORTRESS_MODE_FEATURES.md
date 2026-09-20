@@ -1424,6 +1424,16 @@ A `fort/dig-shapes` chop box that would go past the allowance is cut back to wha
 at the limit refused outright, with a notice either way — on purpose or by accident, the
 agreement is not broken from there; DF's own Chop tool is the way past it.
 
+### **`fort/autofarm`**
+Turn DFHack's `autofarm` plugin off for individual farm plots. The plugin manages every plot
+in the fort and has no exclusion list, so a plot set aside for a crop you actually want is
+rewritten within the day. An **[autofarm] on/off** button sits on the farm plot sheet, three
+rows above "Leave fallow" (Ctrl-A toggles it too). Off, the plot's crops as they stand are
+remembered and put straight back whenever the plugin rewrites them — within half a second,
+before any planter reads them — and a change you make with the sheet open becomes the new
+choice to keep. The plugin itself is untouched and still manages every other plot.
+`fort/autofarm` lists the plots it is off for; `off` / `on` / `on all` from the console.
+
 ### **`fort/harvest-plants`**
 Designates every ripe shrub standing in a Gather Fruit zone for gathering once a month, instead
 of waiting for the zone to trickle a few tiles out at a time — vegetables and fruitless plants
