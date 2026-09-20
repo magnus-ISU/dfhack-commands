@@ -241,7 +241,13 @@ opens with the distance to its closest passing item, and **Melt targets** (Shift
 metal and caps quality below masterwork — the masterworks and artifacts are the ones you keep —
 as a starting point you can move; off puts quality back to any. **Marked to melt** (Shift-L)
 keeps only what is already designated for melting and selects all of it as it switches on, so
-carrying the melt pile to the smelter is one click. **This z only** (Shift-Z)
+carrying the melt pile to the smelter is one click. **Noble symbols** (Shift-N) opens a list of
+the fort's nobles — each with the positions they hold and how many symbols of office they have
+been given — and keeps only that noble's symbols, selecting all of them, so a noble moving house
+takes their regalia in one click; the list's first row puts it back to any item. Symbols are the
+one artifact-flagged thing the picker will move: DF gives a named object the artifact flag, and
+haulers dump them like anything else (a symbol boot marked by hand was picked up and carried).
+Real artifacts stay out, as before. **This z only** (Shift-Z)
 keeps only items on the destination's z-level, and **Burrow** (Shift-B) cycles through the
 fort's burrows to keep only what stands inside the one named.
 Say how many of each and it marks the **closest** ones; `[specific]` opens the individual items
@@ -1019,6 +1025,16 @@ since DF rebuilds a dwarf's labors whenever it recomputes one — opening the la
 enough — and a holiday that ends the moment you look at it is no holiday. It survives a save and
 reload, and ends correctly from the other side.
 
+### **`fort/multiple-laborers`**
+Shift+click on the Work Details screen. Click one dwarf's row, shift+click another's, and every
+row between them (both ends included) gets the detail together -- or loses it, if all of them
+already had it. The plain click is still DF's. Vanilla assigns one dwarf per click and nothing
+else.
+
+DF bakes the tick on the right of each row into the row when it builds it and only its own
+click repaints it, so the rows this changed get their tick redrawn from the data, with DF's
+own button art copied off rows it drew.
+
 ### **`fort/choose-labor-icon`**
 Pick a work detail's icon from a grid of the actual icons instead of cycling DF's little
 selector one at a time.
@@ -1372,6 +1388,14 @@ war hammer** (silver is worthless as armour and makes the best blunt weapon in t
 this tool's own jobs are followed, by item-id watermark, so a piece from an order you queued at
 the same forge is never touched.
 
+**The military comes first.** While `fort/military-uniforms` is queueing gear and is still
+short of a metal, that metal is not spent on cravings — a helm nobody asked for must not be
+why a soldier's breastplate waits. Owing an alloy protects what it is smelted from too: steel
+owed means no iron is used either, bronze owed means no copper. It reads the shortfall the
+military service publishes after each of its cycles, not its order list, so a metal the fort
+has run out of entirely is protected as well. `idle-smiths status` lists what is reserved and
+what it may spend.
+
 ### **`fort/auto-mandate`**
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.
@@ -1504,7 +1528,7 @@ and how far the value sits from the median for that creature's own caste in DF's
 The window measures itself against what it is showing, so nothing is cut off at either edge,
 and it does not pause the fort. Click any attribute for the list of jobs and skills that
 exercise it — transcribed from the DF wiki, since the game does not expose that mapping at all,
-and the panel says so.
+and the panel says so. The button is on the unit sheet in adventure mode too.
 
 ### **`fort/thought-police`**
 Counts the fort's recent bad thoughts and prints the worst, most common first.
@@ -2022,7 +2046,9 @@ Prepare-carefully buttons that give a dwarf the office skills, plus a preference
 
 ### **`embark/fast-dwarves`**
 Opens a new fortress for you: skips the tutorial prompt, commits a dwarven origin civ, centres
-the map on a scored spot near its halls, and clicks Embark. You place the fortress.
+the map on a scored spot near its halls, and arms Embark -- by writing the state the button
+sets, not by clicking it, since the click by label landed on "Show elevation" at some
+resolutions. You place the fortress.
 
 ### **`embark/extra-info`**
 Panel under DF's own, on the final placement step only: the adamantine spire count (or
@@ -2177,7 +2203,8 @@ Adventure mode reveal only when not in combat. You can easily navigate around
 
 ### **`adv/always-be-satiated`** 
 Automatically eat and drink (non healing potions) when not in
-  combat.
+  combat. Frozen water is ice, not a drink, until you heat it at a fire -- and then it is drunk,
+  not remembered as something DF refused.
 
 ![adv/always-be-satiated demo](demos/adv-always-be-satiated.gif)
 
@@ -2296,7 +2323,9 @@ Middle-drag the travel map to pan it, and search everything your adventurer
   world map, clicking a site types its name in. `site:`/`person:`/`beast:`/
   `region:`/`group:`/`event:` narrows the search. DF has no camera for this map, so the pan
   moves what DF thinks the centre is (`travel_origin`) only between update and render, and
-  moving (or Esc) drops it -- `world-map-features recenter` if one ever sticks. The pan
+  moving (or Esc) drops it -- `world-map-features recenter` if one ever sticks -- and a
+  movement key or a click drops it BEFORE DF sees the key, since a step taken against the
+  panned centre used to start the journey from the place you were looking at. The pan
   stops at the world edges: a centre outside the world crashes DF.
 
 ### **`adv/right-click-move`** 
