@@ -393,14 +393,8 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-pasture'),
          disable = cmd('disable', 'fort/auto-pasture')},
         {key = 'autofarm', label = 'autofarm',
-         enable = function()
-            dfhack.run_command('overlay', 'enable', 'fort/autofarm.button')
-            dfhack.run_command('overlay', 'enable', 'fort/autofarm.guard')
-         end,
-         disable = function()
-            dfhack.run_command('overlay', 'disable', 'fort/autofarm.button')
-            dfhack.run_command('overlay', 'disable', 'fort/autofarm.guard')
-         end},
+         enable = cmd('enable', 'fort/autofarm'),
+         disable = cmd('disable', 'fort/autofarm')},
         {key = 'harvest-plants', label = 'harvest-plants',
          enable = cmd('enable', 'fort/harvest-plants'),
          disable = cmd('disable', 'fort/harvest-plants')},
