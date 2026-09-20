@@ -1967,7 +1967,9 @@ Warns when the fort has none of a material a strange mood might demand — stone
 plant/silk/yarn cloth, metal bars, rough or cut gems, blocks, bones, shells, and raw glass in
 any type you have produced. A mood asks the moment it starts, so a gap found afterwards is a
 berserk dwarf. With stressed dwarves in the fort it also checks remains and bones, which a
-macabre mood wants. The list is taken from DFHack's `strangemood` plugin and cross-checked
+macabre mood wants — except that a fort with bees in a hive is never out of remains for long
+(dead bees are remains), so there "No remains" waits until a macabre mood is actually in
+progress. The list is taken from DFHack's `strangemood` plugin and cross-checked
 against the wiki, not from memory. Forbidden stock counts — a forbidden shell is one you have — but **unbutchered pieces and
 unreachable stock do not**. A corpse nobody has butchered is a pile of body parts, every one of
 them carrying the `bone` bit because there is bone inside it, and what a mood wants is butchery

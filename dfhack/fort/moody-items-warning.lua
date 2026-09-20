@@ -49,6 +49,11 @@ stressed dwarves. So the remains/bones section only appears when at least one ci
 actually stressed, and it is a warning about your ability to feed such a mood, not a
 suggestion to stock up on friends.
 
+REMAINS AND BEES. A hive with a live colony sheds vermin remains as its bees die, so a fort
+keeping bees is never out of remains for long. With bees in the fort, "No remains" waits
+until a macabre mood is actually in progress -- the moment the gap is real -- rather than
+being repeated for every stressed dwarf. Without bees, stress alone still warns.
+
     * a MACABRE mood picks 1-3 of VERMIN REMAINS, stacks of BONES or SKULLS, and swaps
       roughly half its decorations for more remains or bones. All three are counted. A
       corpse is the FELL mood's material -- got by murder -- and is not counted;
@@ -338,15 +343,34 @@ end
 -- ones. Measured: 70,714 stress reports category 0, -100,000 reports 6.
 local STRESSED_AT = 2
 
+-- Returns the stressed citizens and whether a macabre mood is in progress right now
+-- (`unit.mood`, -1 when none) -- one pass over the same units, since both are read together.
 local function stressed_citizens()
-    local out = {}
+    local out, macabre = {}, false
     for _, u in ipairs(df.global.world.units.active) do
         if dfhack.units.isCitizen(u) and dfhack.units.isAlive(u) and not dfhack.units.isBaby(u) then
             local ok, cat = pcall(dfhack.units.getStressCategory, u)
             if ok and cat and cat <= STRESSED_AT then out[#out + 1] = u end
+            if u.mood == df.mood_type.Macabre then macabre = true end
         end
     end
-    return out
+    return out, macabre
+end
+
+-- BEES ARE REMAINS YOU HAVE NOT COLLECTED YET. A hive with a live colony sheds vermin
+-- remains as the bees die, so a fort keeping bees is never really out of remains -- only
+-- between batches. Nagging that fort "No remains" whenever somebody is stressed was noise;
+-- with bees in the fort the remains line waits for a macabre mood to actually be in
+-- progress, when the gap is real and the hives should be gathered. Without bees the old
+-- rule stands: stress alone is warning enough, since there is nothing to fall back on.
+-- The colony is the `item_verminst` a hive holds among its contained items.
+local function hive_with_bees()
+    for _, h in ipairs(df.global.world.buildings.other.HIVE) do
+        for _, ci in ipairs(h.contained_items) do
+            if df.item_verminst:is_instance(ci.item) then return true end
+        end
+    end
+    return false
 end
 
 -- ---- the check ---------------------------------------------------------------
@@ -381,7 +405,8 @@ local function survey()
     end
 
     -- the fell/macabre section, only while somebody is miserable enough to have one
-    local stressed = stressed_citizens()
+    local stressed, macabre = stressed_citizens()
+    local bees = hive_with_bees()
     local grim, grim_missing, grim_low = {}, {}, {}
     if #stressed > 0 then
         -- ALL THREE THINGS A MACABRE MOOD PICKS FROM. The wiki is explicit: "dwarves in
@@ -393,9 +418,11 @@ local function survey()
         -- CORPSES ARE NOT ON THE LIST. A corpse is the FELL mood's material, and a fell
         -- dwarf gets one by murdering somebody -- nothing to stock up on and nothing to warn
         -- about, which is what the note at the top of this file says.
-        for label, n in pairs{remains = count('REMAINS'),
-                              bones   = count('CORPSEPIECE', bone),
-                              skulls  = count('CORPSEPIECE', skull)} do
+        -- remains: with bees in the fort, only once a macabre mood is actually running
+        -- (see hive_with_bees)
+        local wants = {bones = count('CORPSEPIECE', bone), skulls = count('CORPSEPIECE', skull)}
+        if not bees or macabre then wants.remains = count('REMAINS') end
+        for label, n in pairs(wants) do
             grim[#grim + 1] = {label = label, n = n}
             if n == 0 then grim_missing[#grim_missing + 1] = label
             elseif n < MOOD_WANTS then grim_low[#grim_low + 1] = {label = label, n = n} end
@@ -405,7 +432,8 @@ local function survey()
     end
 
     cache = {have = have, missing = missing, low = low, stressed = #stressed,
-             grim = grim, grim_missing = grim_missing, grim_low = grim_low}
+             grim = grim, grim_missing = grim_missing, grim_low = grim_low,
+             bees = bees, macabre = macabre}
     cache_at = now
     return cache
 end
@@ -483,6 +511,10 @@ function show_dialog()   -- module-level: the notification resolves it live, see
         lines[#lines + 1] = ('%d stressed %s -- a macabre mood is possible:'):format(
             s.stressed, s.stressed == 1 and 'dwarf' or 'dwarves')
         for _, h in ipairs(s.grim) do lines[#lines + 1] = row(h) end
+        if s.bees and not s.macabre then
+            lines[#lines + 1] = '  remains          not counted: the hives have bees, and bees'
+            lines[#lines + 1] = '                   become remains -- warned once a macabre mood starts'
+        end
     end
     if #s.missing == 0 and #s.grim_missing == 0 and #(s.low or {}) == 0
         and #(s.grim_low or {}) == 0 then
