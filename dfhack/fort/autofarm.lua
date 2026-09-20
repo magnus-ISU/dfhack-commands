@@ -349,21 +349,24 @@ ButtonOverlay.ATTRS{
     default_enabled = true,
     viewscreens = 'dwarfmode/ViewSheets/BUILDING/FarmPlot',
     frame = {w = 10, h = 1},
-    version = 3,
+    version = 4,
 }
 
 function ButtonOverlay:init()
     self:addviews{
+        -- a token's on_activate answers its KEY only; a mouse click reaches the Label's own
+        -- on_click, so that is where the toggle lives
         widgets.Label{
             frame = {t = 0, l = 0},
+            auto_width = true,
             visible = function() return sheet_plot() ~= nil end,
+            on_click = function() self:toggle() end,
             text = {{
                 text = '[autofarm]',
                 pen = function()
                     local bld = sheet_plot()
                     return (bld and not is_off(bld.id)) and COLOR_LIGHTGREEN or COLOR_WHITE
                 end,
-                on_activate = function() self:toggle() end,
             }},
         },
     }
