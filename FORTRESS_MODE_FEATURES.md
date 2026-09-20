@@ -1482,7 +1482,7 @@ and how far the value sits from the median for that creature's own caste in DF's
 The window measures itself against what it is showing, so nothing is cut off at either edge,
 and it does not pause the fort. Click any attribute for the list of jobs and skills that
 exercise it — transcribed from the DF wiki, since the game does not expose that mapping at all,
-and the panel says so.
+and the panel says so. The button is on the unit sheet in adventure mode too.
 
 ### **`fort/thought-police`**
 Counts the fort's recent bad thoughts and prints the worst, most common first.

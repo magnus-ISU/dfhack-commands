@@ -26,6 +26,8 @@ different set of adjectives for every attribute ("mighty", "clumsy", "a question
 spatial sense") and those strings are not in the raws or exposed anywhere DFHack can
 read them, so inventing them from memory would mean quietly making some of them up.
 
+Works on the unit sheet in both fortress and adventure mode.
+
 Auto-discovered by `overlay rescan` (magnus-scripts runs it); no enable needed.
 ]]
 
@@ -382,7 +384,12 @@ AttributesOverlay.ATTRS{
     -- bottom of internal/unit-info-viewer/skills-progress's own frame
     default_pos = {x = -43, y = -6},
     default_enabled = true,
-    viewscreens = 'dwarfmode/ViewSheets/UNIT/Skills/Other',
+    -- the same sheet, and the same Other Skills tab, in both modes: an adventurer's
+    -- attributes were the ones the button was missing for
+    viewscreens = {
+        'dwarfmode/ViewSheets/UNIT/Skills/Other',
+        'dungeonmode/ViewSheets/UNIT/Skills/Other',
+    },
     frame = {w = 54, h = 1},
 }
 
