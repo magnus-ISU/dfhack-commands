@@ -1445,6 +1445,19 @@ end
 -- LEFT click on the lesser map, which means "travel there": DF works that
 -- destination out from the true centre, so it must not be taken against a
 -- panned view.
+-- the keys that move the traveller on the travel map: the A_MOVE_* / A_CARE_MOVE_*
+-- directions and the travel-specific ones (A_TRAVEL_*; sleeping or flipping maps
+-- recentre harmlessly)
+local function moves_traveller(keys)
+    for k in pairs(keys) do
+        if type(k) == 'string' and (k:match('^A_MOVE_') or k:match('^A_CARE_MOVE_')
+                or k:match('^A_TRAVEL_')) then
+            return true
+        end
+    end
+    return false
+end
+
 function WorldMapFeatures:onInput(keys)
     if not running then return false end
     if pan and keys.LEAVESCREEN then
@@ -1458,6 +1471,18 @@ function WorldMapFeatures:onInput(keys)
         return true
     end
     if keys._MOUSE_L and self:click_site() then return true end
+    -- A MOVEMENT KEY WHILE PANNED IS A TELEPORT unless the true origin goes back
+    -- first. The pan lives in `travel_origin`, which is also where DF begins a
+    -- journey from: a step taken against the panned value starts the journey
+    -- from the place you were LOOKING at, not the place you were standing --
+    -- measured in play as an instant hop of however far the map had been
+    -- dragged. The apply/unapply window was meant to keep input out, but a
+    -- keypress is fed between the update that applied the pan and the render
+    -- that takes it back, so the key saw the panned value. So every key that
+    -- moves the traveller (and any click DF gets to act on, on either map)
+    -- drops the pan before DF sees it; the view snaps back to you, which is
+    -- what moving does anyway.
+    if pan and (keys._MOUSE_L or moves_traveller(keys)) then recenter() end
     return WorldMapFeatures.super.onInput(self, keys)
 end
 

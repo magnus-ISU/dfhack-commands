@@ -142,7 +142,9 @@ Middle-drag the travel map to pan it, and search everything your adventurer
   world map, clicking a site types its name in. `site:`/`person:`/`beast:`/
   `region:`/`group:`/`event:` narrows the search. DF has no camera for this map, so the pan
   moves what DF thinks the centre is (`travel_origin`) only between update and render, and
-  moving (or Esc) drops it -- `world-map-features recenter` if one ever sticks. The pan
+  moving (or Esc) drops it -- `world-map-features recenter` if one ever sticks -- and a
+  movement key or a click drops it BEFORE DF sees the key, since a step taken against the
+  panned centre used to start the journey from the place you were looking at. The pan
   stops at the world edges: a centre outside the world crashes DF.
 
 ### **`adv/right-click-move`** 
