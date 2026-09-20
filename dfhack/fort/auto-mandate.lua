@@ -7,7 +7,12 @@ cheapest / most renewable material the item can be made from:
 
     * craft / jewelry items (amulet, ring, ...) -> copper (else any metal, else wood)
     * furniture & wooden goods                  -> wood
-    * metal gear (weapons, greaves, mail shirts) -> copper
+    * metal gear (weapons, greaves, mail shirts) -> copper, else the cheapest metal the forge
+                                                   can LEGALLY make it from: a metal needs the
+                                                   ITEMS_WEAPON / _ARMOR / _AMMO / _DIGGER flag
+                                                   for the kind of thing, so nickel, brass,
+                                                   zinc, lead and the precious metals are never
+                                                   picked for a mace or a helm
     * GARMENTS (trousers, socks, robes)         -> a cloth or leather category, never metal:
                                                    one item_type covers both the armoury and
                                                    the wardrobe and only the subtype says which
@@ -169,7 +174,19 @@ end
 -- Cheapest first, because this tool spends materials on a noble's whim: value ascending, ties
 -- broken by whichever there is more of. Sorting by quantity alone happily forges silver
 -- trinkets while the copper sits there.
-local function metal_stocks()
+--
+-- ITEMS_HARD is the floor, not the whole test. The forge will not make a mace out of nickel
+-- however many bars there are: a metal has to carry the ITEMS_ flag for the KIND of thing
+-- being made -- ITEMS_WEAPON for weapons and trap components, ITEMS_WEAPON_RANGED for bows
+-- and crossbows, ITEMS_DIGGER for picks, ITEMS_AMMO for bolts, ITEMS_ARMOR for anything worn,
+-- ITEMS_ANVIL for anvils -- and in vanilla only copper, bronze, bismuth bronze, iron, steel
+-- and adamantine carry the weapon and armour ones (silver: weapons and ammo, not armour).
+-- Nickel, zinc, brass, lead, tin and every precious metal are ITEMS_HARD only: crafts,
+-- furniture, coins, cages. So the list is asked for by flag, and a mandate for maces sees
+-- only the metals a mace can be forged from. Queuing a nickel mace is worse than queuing
+-- nothing: the order sits in the forge untakeable until the mandate runs out.
+local function metal_stocks(flag)
+    flag = flag or 'ITEMS_HARD'
     local by, out = {}, {}
     for _, it in ipairs(df.global.world.items.other.BAR) do
         local key = it.mat_type .. ':' .. it.mat_index
@@ -178,7 +195,7 @@ local function metal_stocks()
             pcall(function()
                 local mi = dfhack.matinfo.decode(it.mat_type, it.mat_index)
                 local mat = mi and mi.material
-                if mat and mat.flags.IS_METAL and mat.flags.ITEMS_HARD then
+                if mat and mat.flags.IS_METAL and mat.flags.ITEMS_HARD and mat.flags[flag] then
                     usable = true
                     value = mat.material_value or 0
                 end
@@ -200,11 +217,16 @@ local function metal_stocks()
 end
 
 -- the best metal for `amount` items: copper if there is enough, else the most plentiful metal
--- that has enough, else the most plentiful metal there is (better a short order than none)
-function pick_metal(amount)   -- module-level: checkable from the command line
+-- that has enough, else the most plentiful metal there is (better a short order than none).
+-- `flag` names the ITEMS_ flag the item needs of its metal (see metal_stocks); copper has
+-- them all in vanilla, but a mod may say otherwise, so it is checked like any other.
+function pick_metal(amount, flag)   -- module-level: checkable from the command line
+    flag = flag or 'ITEMS_HARD'
     local cu = dfhack.matinfo.find('COPPER')
-    if cu and bars_of(cu.type, cu.index) >= amount then return cu.type, cu.index, 'copper' end
-    local stocks = metal_stocks()
+    if cu and cu.material.flags[flag] and bars_of(cu.type, cu.index) >= amount then
+        return cu.type, cu.index, 'copper'
+    end
+    local stocks = metal_stocks(flag)
     for _, m in ipairs(stocks) do
         if m.n >= amount then
             local info = dfhack.matinfo.decode(m.mat_type, m.mat_index)
@@ -372,6 +394,38 @@ local function metal_capable(m)
     return ok and metal == true
 end
 
+-- THE ITEMS_ FLAG A METAL MUST CARRY to be made into this mandate's item -- DF's own rule for
+-- what the forge accepts, read off the item type and, for weapons, the subtype: a pick is a
+-- weapon whose melee skill is mining and takes ITEMS_DIGGER; a crossbow has a ranged skill and
+-- takes ITEMS_WEAPON_RANGED; every other weapon, and a trap component, ITEMS_WEAPON. Worn
+-- things take ITEMS_ARMOR, ammunition ITEMS_AMMO, anvils ITEMS_ANVIL, and everything else
+-- (crafts, coins, cages, furniture) only ITEMS_HARD.
+local WORN = {
+    [df.item_type.ARMOR] = true, [df.item_type.HELM] = true, [df.item_type.PANTS] = true,
+    [df.item_type.GLOVES] = true, [df.item_type.SHOES] = true, [df.item_type.SHIELD] = true,
+}
+local function metal_flag_for(m)
+    local t = m.item_type
+    if t == df.item_type.WEAPON then
+        local def = subtype_def(m)
+        if def then
+            local ok, digger, ranged = pcall(function()
+                local melee = def.melee_skill or def.skill
+                local range = def.range_skill or def.skill_ranged
+                return melee == df.job_skill.MINING, range ~= nil and range >= 0
+            end)
+            if ok and digger then return 'ITEMS_DIGGER' end
+            if ok and ranged then return 'ITEMS_WEAPON_RANGED' end
+        end
+        return 'ITEMS_WEAPON'
+    elseif t == df.item_type.TRAPCOMP then return 'ITEMS_WEAPON'
+    elseif t == df.item_type.AMMO then return 'ITEMS_AMMO'
+    elseif t == df.item_type.ANVIL then return 'ITEMS_ANVIL'
+    elseif WORN[t] then return 'ITEMS_ARMOR'
+    end
+    return 'ITEMS_HARD'
+end
+
 -- what a garment may be made of, from its own raws: SOFT means it can be woven, LEATHER means
 -- it can be cut from a hide. Trousers are both; a sock is only SOFT.
 local function garment_categories(def)
@@ -439,19 +493,29 @@ function choose_material(o, policy, m, amount)
     -- a mandate that demands a specific material: honour it (no substitution -- the noble
     -- asked for that, and a substitute does not satisfy the mandate however much of it we have)
     if m.mat_type and m.mat_type >= 0 then
+        local mi = dfhack.matinfo.decode(m.mat_type, m.mat_index)
+        -- a metal the forge cannot make this into (a nickel mace) is an order that can never
+        -- be worked; better skipped and reported than queued to sit until the deadline
+        local mat = mi and mi.material
+        if mat and mat.flags.IS_METAL then
+            local flag = metal_flag_for(m)
+            if not mat.flags[flag] then
+                return nil, ('%s cannot be made into this (no %s)'):format(mi:toString(), flag)
+            end
+        end
         o.mat_type = m.mat_type
         o.mat_index = m.mat_index
-        local mi = dfhack.matinfo.decode(m.mat_type, m.mat_index)
         return mi and mi:toString() or 'specified material'
     end
+    local flag = metal_flag_for(m)
     if policy == G then
         if metal_capable(m) then
-            local mt, mi, name = pick_metal(amount)
+            local mt, mi, name = pick_metal(amount, flag)
             if mt then
                 o.mat_type, o.mat_index = mt, mi
                 return name
             end
-            return nil   -- metal gear and no metal: cannot fulfil
+            return nil, 'no metal that can be made into it'   -- metal gear and no metal
         end
         -- A GARMENT. Leaving the material open is NOT enough -- the forge can take an
         -- unpinned MakePants and hand back copper trousers, which is how six of them got
@@ -480,23 +544,23 @@ function choose_material(o, policy, m, amount)
             o.material_category.wood = true
             return 'wood'
         end
-        local mt, mi, name = pick_metal(amount)
+        local mt, mi, name = pick_metal(amount, flag)
         if mt then                                  -- no wood: metal will do for furniture
             o.mat_type, o.mat_index = mt, mi
             return name .. ' (not enough wood)'
         end
         return 'any material'   -- nothing to pin to: leave unconstrained (stone/bone/...)
     elseif policy == C then
-        local mt, mi, name = pick_metal(amount)
+        local mt, mi, name = pick_metal(amount, flag)
         if mt then
             o.mat_type, o.mat_index = mt, mi
             return name
         end
-        return nil   -- no metal at all: cannot fulfil
+        return nil, 'no metal that can be made into it'   -- cannot fulfil
     elseif policy == CW then
         -- copper first, then any metal with enough bars, then wood: the metal one is worth far
         -- more to the noble who mandated it, but must never make the mandate impossible
-        local mt, mi, name = pick_metal(amount)
+        local mt, mi, name = pick_metal(amount, flag)
         if mt and not name:find('only %d') then
             o.mat_type, o.mat_index = mt, mi
             return name
@@ -632,7 +696,7 @@ local function scan_and_queue()
                     o.frequency = 0
                     o.status.validated = true
                     o.status.active = true
-                    local matdesc = choose_material(o, map.mat, m, m.amount_remaining)
+                    local matdesc, why = choose_material(o, map.mat, m, m.amount_remaining)
                     if matdesc then
                         local mo = df.global.world.manager_orders
                         o.id = mo.manager_order_next_id
@@ -644,7 +708,7 @@ local function scan_and_queue()
                         announce_order(m, desc)
                     else
                         o:delete()
-                        table.insert(skipped, label .. ' (no material available)')
+                        table.insert(skipped, label .. ' (' .. (why or 'no material available') .. ')')
                     end
                 end
             end

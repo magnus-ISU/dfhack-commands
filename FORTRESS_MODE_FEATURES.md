@@ -1366,6 +1366,15 @@ what it may spend.
 Fills Make mandates with cheap materials (even minting coins) and prioritizes the work.
 Each order it queues is announced — who mandated it, and what was ordered.
 
+**Only metals the forge will accept.** A metal has to carry the `ITEMS_` flag for the kind of
+thing being made — `ITEMS_WEAPON` for weapons and trap components, `ITEMS_WEAPON_RANGED` for
+crossbows, `ITEMS_DIGGER` for picks, `ITEMS_AMMO` for bolts, `ITEMS_ARMOR` for anything worn,
+`ITEMS_ANVIL` for anvils — and in vanilla only copper, bronze, bismuth bronze, iron, steel and
+adamantine carry the weapon and armour ones. Nickel, zinc, brass, lead, tin and the precious
+metals are `ITEMS_HARD` only, good for crafts, coins, cages and furniture, so a mace mandate is
+never answered with a nickel-mace order that sits in the forge untakeable until the deadline.
+A mandate that itself names an illegal metal is skipped and reported rather than queued.
+
 **Siege equipment** is queued too: catapult parts, ballista parts, a ballista arrow head and a
 ballista arrow (DF's `SIEGEAMMO`). Parts and arrows are left **unconstrained** rather than given
 the wood policy — that one falls back to metal when the fort is short of logs, which here would
