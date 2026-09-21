@@ -507,17 +507,16 @@ end
 -- every creature, so the orders target the material CLASS via the condition's flags2 (yarn /
 -- hair_wool) rather than one specific material the way the pig-tail chain does.
 
--- raw hair/wool on hand to SPIN? Sheared wool already comes off as THREAD (that's yarn thread,
--- woven directly), so the spin step is for raw fibre that is NOT yet thread or a finished good.
-local FIBRE_FINISHED = {   -- item types that are woven/finished (so NOT raw spinnable fibre)
-    [df.item_type.THREAD] = true, [df.item_type.CLOTH] = true, [df.item_type.ARMOR] = true,
-    [df.item_type.GLOVES] = true, [df.item_type.SHOES] = true, [df.item_type.PANTS] = true,
-    [df.item_type.HELM] = true, [df.item_type.QUIVER] = true, [df.item_type.BAG] = true,
-    [df.item_type.CHAIN] = true, [df.item_type.CORPSEPIECE] = true, [df.item_type.CORPSE] = true,
-}
+-- raw hair/wool on hand to SPIN? Sheared wool and butchered hair are CORPSEPIECE items of a
+-- YARN-flagged material ("stray alpaca wool [7]"), and that is what the spin job takes.
+--
+-- This used to walk every item IN PLAY (52,000 on a mature fort) decoding each one's
+-- material, and it EXCLUDED corpse pieces as "finished" -- so it spent half a second per
+-- notification refresh, a 6% stall on the whole game, and always answered no. Profiled by
+-- wrapping every notify callback; fixed to the one vector the answer lives in.
 local function hair_wool_present()
-    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if not FIBRE_FINISHED[it:getType()] and usable_stock(it) then
+    for _, it in ipairs(df.global.world.items.other.CORPSEPIECE) do
+        if usable_stock(it) then
             local m = dfhack.matinfo.decode(it)
             if m and m.material and m.material.flags[df.material_flags.YARN] then return true end
         end
@@ -738,23 +737,49 @@ local FU_MAGMA_ALT = {
     [df.furnace_type.Kiln]         = df.furnace_type.MagmaKiln,
 }
 
+-- PER-SCAN MEMO. A scan asks the same fort-wide questions many times over -- "is a Loom
+-- built" for every textile check, "is there a boulder of X" per ore, what is marked for
+-- melting -- and each used to be answered by walking all 1,852 buildings or all 52,000 items
+-- in play again. Profiled by sampling one scan: those walks were 70% of a 450 ms scan that
+-- the notify panel ran every eight seconds. Now each question is answered once per scan
+-- from an index built on first use and dropped when the scan ends (get_scan clears this).
+local per_scan = {}
+local function memo(key, build)
+    local v = per_scan[key]
+    if v == nil then v = build(); per_scan[key] = v end
+    return v
+end
+
+-- every built workshop subtype, furnace subtype and custom workshop code, as one lookup
+local function built_shops()
+    return memo('shops', function()
+        local ws, fu, def = {}, {}, {}
+        for _, b in ipairs(df.global.world.buildings.all) do
+            local t = b:getType()
+            if t == df.building_type.Workshop then
+                local st = b:getSubtype()
+                ws[st] = true
+                if st == df.workshop_type.Custom then
+                    local d = df.building_def.find(b:getCustomType())
+                    if d then def[d.code] = true end
+                end
+            elseif t == df.building_type.Furnace then
+                fu[b:getSubtype()] = true
+            end
+        end
+        return {ws = ws, fu = fu, def = def}
+    end)
+end
+
 -- is a workshop/furnace satisfying `req` built? (req may be nil -> "no requirement")
 local function ws_exists(req)
     if not req then return true end
-    for _, b in ipairs(df.global.world.buildings.all) do
-        local t = b:getType()
-        local st = b:getSubtype()
-        if req.ws and t == df.building_type.Workshop
-            and (st == req.ws or st == WS_MAGMA_ALT[req.ws]) then return true end
-        -- ws2: a second workshop that satisfies the same requirement (quern OR millstone)
-        if req.ws2 and t == df.building_type.Workshop and st == req.ws2 then return true end
-        if req.fu and t == df.building_type.Furnace
-            and (st == req.fu or st == FU_MAGMA_ALT[req.fu]) then return true end
-        if req.def and t == df.building_type.Workshop and b:getSubtype() == df.workshop_type.Custom then
-            local d = df.building_def.find(b:getCustomType())
-            if d and d.code == req.def then return true end
-        end
-    end
+    local s = built_shops()
+    if req.ws and (s.ws[req.ws] or s.ws[WS_MAGMA_ALT[req.ws]]) then return true end
+    -- ws2: a second workshop that satisfies the same requirement (quern OR millstone)
+    if req.ws2 and s.ws[req.ws2] then return true end
+    if req.fu and (s.fu[req.fu] or s.fu[FU_MAGMA_ALT[req.fu]]) then return true end
+    if req.def and s.def[req.def] then return true end
     return false
 end
 
@@ -916,13 +941,16 @@ local function hospital_has_order(spec)
 end
 
 -- current stock of a reaction supply we can't keep-stock with a manager condition (soap,
--- plaster): count finished items in Lua by item_type + material id. Cheap enough at scan time.
+-- plaster): count finished items by material id in the item type's OWN vector (BAR is a
+-- couple of hundred, POWDER_MISC a few hundred). This walked items.all -- 54,000 with a
+-- virtual getType() each -- per supply per scan.
 local function reaction_stock(spec)
     if not spec.count then return 0 end
-    local want_type = df.item_type[spec.count.item_type]
+    local vec = df.global.world.items.other[spec.count.item_type]
+    if not vec then return 0 end
     local n = 0
-    for _, it in ipairs(df.global.world.items.all) do
-        if it:getType() == want_type and not it.flags.garbage_collect then
+    for _, it in ipairs(vec) do
+        if not it.flags.garbage_collect then
             local m = dfhack.matinfo.decode(it)
             if m and m.material and m.material.id == spec.count.mat_id then
                 n = n + it:getStackSize()
@@ -1068,7 +1096,9 @@ local function get_scan()
         cache.frame = fc
         return cache.result
     end
+    per_scan = {}
     cache.frame, cache.t, cache.result = fc, now, scan()
+    per_scan = {}
     return cache.result
 end
 
@@ -1355,27 +1385,33 @@ local function missing_shops(keys)
     return out
 end
 
+-- the inorganic indices with at least one boulder on hand, once per scan (the BOULDER
+-- vector, not IN_PLAY: 8,500 here against 52,000, and read once instead of per question)
+local function boulder_mats()
+    return memo('boulders', function()
+        local set = {}
+        for _, it in ipairs(df.global.world.items.other.BOULDER) do
+            if it.mat_type == 0 then set[it.mat_index] = true end
+        end
+        return set
+    end)
+end
+
 -- is there a BOULDER of inorganic `idx` on hand?
 local function boulder_present(idx)
-    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if it:getType() == df.item_type.BOULDER and it:getMaterial() == 0 and it:getMaterialIndex() == idx then return true end
-    end
-    return false
+    return boulder_mats()[idx] == true
 end
 
 -- distinct metal ores present as boulders -> {idx = ore inorganic, metal = primary output metal idx}
 local function present_metal_ores()
-    local seen, out = {}, {}
-    for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
-        if it:getType() == df.item_type.BOULDER and it:getMaterial() == 0 then
-            local mi = it:getMaterialIndex()
-            if mi >= 0 and not seen[mi] then
-                seen[mi] = true
-                local raw = df.inorganic_raw.find(mi)
-                if raw and #raw.metal_ore.mat_index > 0 then
-                    out[#out + 1] = {idx = mi, metal = raw.metal_ore.mat_index[0], name = raw.id}
-                end
-            end
+    local mats = {}
+    for mi in pairs(boulder_mats()) do if mi >= 0 then mats[#mats + 1] = mi end end
+    table.sort(mats)
+    local out = {}
+    for _, mi in ipairs(mats) do
+        local raw = df.inorganic_raw.find(mi)
+        if raw and #raw.metal_ore.mat_index > 0 then
+            out[#out + 1] = {idx = mi, metal = raw.metal_ore.mat_index[0], name = raw.id}
         end
     end
     return out
@@ -1450,7 +1486,11 @@ local function fibre_weave_todo(mt, mi)
     return not cur.batch or not cur.single or not has_thread_ceiling(cur.single)
 end
 
+-- DF keeps the melt-marked items in their own vector; the walk over everything in play is
+-- the fallback for a build without it
 local function melt_count()
+    local ok, vec = pcall(function() return df.global.world.items.other.ANY_MELT_DESIGNATED end)
+    if ok and vec then return #vec end
     local n = 0
     for _, it in ipairs(df.global.world.items.other.IN_PLAY) do if it.flags.melt then n = n + 1 end end
     return n
@@ -2051,8 +2091,11 @@ STANDING = {
         -- Gate on the raw inputs, not the intermediates: the whole chain starts at wood, and
         -- sand only has to exist at all (the collect-sand order keeps it topped up).
         if #df.global.world.items.other.WOOD <= GLASS_WOOD_MIN then return {} end
+        -- ANY_GLASSABLE is DF's own list of what a glass furnace can take (a few hundred);
+        -- this used to pcall isSandBearing on all 52,000 items in play
         local sand = 0
-        for _, it in ipairs(df.global.world.items.other.IN_PLAY) do
+        local okv, glassable = pcall(function() return df.global.world.items.other.ANY_GLASSABLE end)
+        for _, it in ipairs(okv and glassable or df.global.world.items.other.IN_PLAY) do
             local ok, sb = pcall(function() return it:isSandBearing() end)
             if ok and sb then sand = sand + 1; break end
         end

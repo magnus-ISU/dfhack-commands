@@ -114,3 +114,47 @@ The three fixes remove the only *continuous, heavy* collection walks that ran du
 unpaused play: two full item/building/order scans that were effectively running every second, and
 a whole-buildings walk running ~6×/second. All three preserve identical behavior (same
 notifications, same coffin auto-tombing) with far less redundant work.
+
+## 2026-09-21 — live profile of the notify panel, per callback
+
+The July audit was static. This time DF was running (145 citizens, 54k items) and the
+frame profiler (`dfhack.internal.resetPerfCounters()` + `script-manager.print_timers()`)
+put `gui/notify.panel` at **10–20% of wall time**. The panel is one line in that report,
+so every registered `dwarf_fn` was wrapped in a timer at runtime (swap `entry.dwarf_fn`
+for a closure that calls the original and accumulates `dfhack.getTickCount()` deltas by
+name) and the game left to run:
+
+| callback | per call | share of wall |
+|---|---|---|
+| `planner_orders` | 456 ms | 6.0% |
+| `moody_items` | 114 ms | 1.5% |
+| `raids` (stock) | 15 ms | 0.2% |
+| the other 23 | ≤ 4 ms | ~0.1% |
+
+The panel polls every callback every ~7.6 s, and `planner-orders` cached for 5 s, so it
+rescanned on every poll: a half-second stall every eight seconds. A sampling profiler over
+one scan (`debug.sethook` on an instruction count, tallying `debug.getinfo(2, 'Sl')`
+lines) put 70% of it on five full-vector walks, each with a virtual call per item:
+
+- `hair_wool_present` — all 52k IN_PLAY with a `matinfo.decode` each, **and wrong**: the raw
+  wool to spin is the `CORPSEPIECE` "stray alpaca wool [7]" it excluded as finished. Now the
+  1.5k CORPSEPIECE vector, and correct.
+- `boulder_present` / `present_metal_ores` — IN_PLAY per question, several questions per
+  scan. Now one BOULDER-vector index built once per scan (`memo`, cleared in `get_scan`).
+- `ws_exists` — all 1,852 buildings per requirement, a dozen requirements per scan. Now one
+  built-shops index per scan.
+- the sand probe — `pcall(isSandBearing)` on all 52k; now `items.other.ANY_GLASSABLE` (649).
+- `melt_count` — IN_PLAY flag walk; now `#items.other.ANY_MELT_DESIGNATED`.
+- `reaction_stock` — `items.all` with `getType()` each, per supply; now the type's own vector.
+
+`moody-items-warning`'s survey counted every category exactly, so it walked 8,555 boulders
+to learn a number the notification only compares with 3: the notification survey now stops
+at `MOOD_WANTS` per category and the click-through dialog does the exact count. Its
+`usable()` ran eight `pcall`'d closures per item (65% of the survey); the flag names are
+resolved once now, the same fix `auto-needs` needed.
+
+After, over 90 s: notify.panel **2.4%**, all callbacks together 0.8% (stock `raids` is the
+top one at 18 ms), DFHack as a whole 19% → **7.4%** of wall time.
+
+Method worth keeping: the frame profiler names the panel; wrapping the callbacks names the
+script; `debug.sethook` sampling names the line.

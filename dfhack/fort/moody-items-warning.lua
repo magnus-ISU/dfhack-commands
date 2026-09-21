@@ -93,10 +93,25 @@ end
 --
 -- The rest of the list stays: dumped, rotting, on fire, somebody else's, a trader's or
 -- already an artifact are all things you genuinely cannot spend.
+--
+-- The flag names are resolved ONCE against a real item and then read plainly: a pcall'd
+-- closure per flag per item was eight closures on each of 8,500 boulders, and sampling a
+-- survey put 65% of its time on those two lines.
+local USABLE_FLAGS = {'dump', 'garbage_collect', 'hostile', 'trader', 'rotten', 'artifact',
+                      'owned', 'on_fire'}
+local usable_flags = nil
 local function usable(item)
-    return not (flag(item, 'dump') or flag(item, 'garbage_collect')
-        or flag(item, 'hostile') or flag(item, 'trader') or flag(item, 'rotten')
-        or flag(item, 'artifact') or flag(item, 'owned') or flag(item, 'on_fire'))
+    if not usable_flags then
+        usable_flags = {}
+        for _, n in ipairs(USABLE_FLAGS) do
+            if pcall(function() return item.flags[n] end) then usable_flags[#usable_flags + 1] = n end
+        end
+    end
+    local f = item.flags
+    for _, n in ipairs(usable_flags) do
+        if f[n] then return false end
+    end
+    return true
 end
 
 local function matflag(item, name)
@@ -255,13 +270,19 @@ local function vec(name)
     return ok and v or nil
 end
 
-local function count(vec_name, test)
+-- `cap`: stop counting there. The notification only needs to know whether a category is
+-- below MOOD_WANTS, so its survey stops at MOOD_WANTS and never walks 8,500 boulders to
+-- learn the exact figure; the dialog, opened by a click, asks for the full count.
+local function count(vec_name, test, cap)
     local items = vec(vec_name)
     if not items then return 0 end
     local n = 0
     for _, item in ipairs(items) do
         -- reachability last: it is the only test that can touch the map
-        if usable(item) and (not test or test(item)) and reachable(item) then n = n + 1 end
+        if usable(item) and (not test or test(item)) and reachable(item) then
+            n = n + 1
+            if cap and n >= cap then return n end
+        end
     end
     return n
 end
@@ -375,9 +396,14 @@ end
 
 -- ---- the check ---------------------------------------------------------------
 
-local function survey()
+-- `full`: exact counts for the dialog (uncached). Without it, counts stop at MOOD_WANTS --
+-- enough to tell missing from low from fine, which is all the notification says -- and the
+-- result is cached. Measured on a 145-dwarf fort: the full survey was 114 ms, called from
+-- the notify panel every ten seconds, 1.5% of the whole game's time.
+local function survey(full)
     local now = dfhack.getTickCount()
-    if cache and now - cache_at < CACHE_MS then return cache end
+    if not full and cache and now - cache_at < CACHE_MS then return cache end
+    local cap = not full and MOOD_WANTS or nil
 
     set_fort_origin()
 
@@ -393,13 +419,13 @@ local function survey()
     for _, c in ipairs(CATEGORIES) do
         -- a gated category is only surveyed when this fort could be asked for it at all
         if not c.gate or c.gate() then
-            note(c.label, count(c.vec, c.test))
+            note(c.label, count(c.vec, c.test, cap))
         end
     end
 
     local made = produced_glass()
     for _, g in ipairs(GLASS) do
-        local n = count('ROUGH', glass_of(g.mat))
+        local n = count('ROUGH', glass_of(g.mat), cap)
         if n > 0 then remember_glass(g.mat) end     -- seen it: expect it from now on
         if made[g.mat] or n > 0 then note(g.label, n) end
     end
@@ -420,8 +446,8 @@ local function survey()
         -- about, which is what the note at the top of this file says.
         -- remains: with bees in the fort, only once a macabre mood is actually running
         -- (see hive_with_bees)
-        local wants = {bones = count('CORPSEPIECE', bone), skulls = count('CORPSEPIECE', skull)}
-        if not bees or macabre then wants.remains = count('REMAINS') end
+        local wants = {bones = count('CORPSEPIECE', bone, cap), skulls = count('CORPSEPIECE', skull, cap)}
+        if not bees or macabre then wants.remains = count('REMAINS', nil, cap) end
         for label, n in pairs(wants) do
             grim[#grim + 1] = {label = label, n = n}
             if n == 0 then grim_missing[#grim_missing + 1] = label
@@ -431,10 +457,11 @@ local function survey()
         table.sort(grim_missing)
     end
 
-    cache = {have = have, missing = missing, low = low, stressed = #stressed,
-             grim = grim, grim_missing = grim_missing, grim_low = grim_low,
-             bees = bees, macabre = macabre}
-    cache_at = now
+    local result = {have = have, missing = missing, low = low, stressed = #stressed,
+                    grim = grim, grim_missing = grim_missing, grim_low = grim_low,
+                    bees = bees, macabre = macabre}
+    if full then return result end
+    cache, cache_at = result, now
     return cache
 end
 
@@ -493,7 +520,7 @@ function message()   -- module-level: the notification resolves it live, see reg
 end
 
 function show_dialog()   -- module-level: the notification resolves it live, see register()
-    local s = survey()
+    local s = survey(true)     -- exact counts: this is the click, spend the 100 ms here
     -- the count alone does not say whether it is enough, so the row says which it is
     local function row(h)
         local mark = ''
