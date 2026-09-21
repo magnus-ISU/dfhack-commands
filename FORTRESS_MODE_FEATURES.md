@@ -1613,17 +1613,29 @@ so on), and the seven bands are plain thresholds on the number, measured on a 14
 | Unhappy | +25,000 .. +50,000 |
 | Miserable | above +50,000 |
 
-**What each thought cost**, to the left of its line: `+1,234` in red for stress it added, `-380`
-in green for stress it took away, a dim `0` for one that did nothing (the "didn't feel anything
-after seeing a crundle's dead body" kind — and yes, those really are zero). **DF does not store
-this number** — the record's `severity` reads 0 or −1 on most bad thoughts and only the running
-total survives — so it is **measured**: `enable fort/stress-display` starts a sampler that reads
-every citizen's stress every five frames, and when one moves, the thought records that appeared
-since the last look get the difference (split evenly when several land in one tick, as three
-corpses seen at once do). A change with no new record behind it is drift — DF's slow settling —
-and is kept to one side, never pinned on a thought. A thought from before the sampler was watching
-has no number and shows nothing, and the overlay shows the stress number whether or not the sampler
-is on. Measured values are saved with the fort.
+**What each thought has cost so far**, to the left of its line: `+1,234` in red for stress it
+added, `-380` in green for stress it took away, a dim `0` for one that did nothing (the "didn't
+feel anything after seeing a crundle's dead body" kind — and yes, those really are zero). **DF does
+not store this number** — the record's `severity` reads 0 or −1 on most bad thoughts and only the
+running total survives — so it is **measured**, and measured the way DF actually charges, which
+turned out not to be the obvious way: **an emotion is billed while it is felt, not when it lands.**
+Each record carries a live `strength` that starts high and drops to 0 as the dwarf gets over it,
+and every hundred-odd ticks DF moves the stress by an amount set by what is live. Watched on this
+fort: a dwarf with only "disgusted by miasma" live took **+250 a period, sample after sample**,
+until it faded; one with only "delighted by a performance" live got −20 a period; a thought at
+strength 0 costs nothing more, ever. (The first version of this tool priced thoughts at the moment
+they appeared, and found 82% of them at zero with all the real movement in the unexplained pile —
+which is how the mechanism was found.)
+
+So `enable fort/stress-display` starts a sampler that reads every citizen's stress every five
+frames and, when it moves, gives the change to the records live at that moment. One live record:
+the number is exact. Several: the change is split between the ones pulling in its direction — a
+rise to the unpleasant emotions, a drop to the pleasant ones — by relative strength over the
+emotion's divider (DF's own harshness scale: horror 1, annoyance 8, pleasant ones negative), and
+every share so priced carries a `~` as an estimate. A change with nothing live behind it is drift,
+kept to one side; after the rewrite that pile is empty. A thought already spent when the sampler
+started shows nothing: its cost was paid before anyone was counting. The overlay shows the stress
+number whether or not the sampler is on, and measured values are saved with the fort.
 
 How the rows are matched: DF keeps the rendered list itself (`view_sheets.raw_thought_str`, one
 string per entry, newest first — the emotion records with a thought, sorted by year and tick

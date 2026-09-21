@@ -27,19 +27,26 @@ So this does two things on `Thoughts > Recent thoughts`:
      (DF's own words, from the tooltips on the seven counters: "This creature is ecstatic
      right now" and so on. The thresholds are measured on a 145-citizen fort.)
 
-  2. WHAT EACH THOUGHT COST, to the left of its line: "+1,234" in red for stress it added,
-     "-380" in green for stress it took away, "0" dim for a thought that did nothing (the
-     "didn't feel anything" kind). The number is MEASURED, not read: a service samples every
-     citizen's stress a few times a second, and when it moves, the thought records that
-     appeared since the last look get the difference (split evenly when several landed at
-     once -- three corpses seen in one tick share one number). A change with no new record
-     behind it is drift -- DF's slow settling, or a thought that came and went between two
-     looks -- and is kept separately, not pinned on anything. A thought from before the
-     service was watching has no number and shows nothing.
+  2. WHAT EACH THOUGHT HAS COST SO FAR, to the left of its line: "+1,234" in red for stress
+     it added, "-380" in green for stress it took away, "0" dim for one that did nothing (the
+     "didn't feel anything" kind really is nothing). The number is MEASURED, not read, and it
+     is measured the way DF actually charges: AN EMOTION IS BILLED WHILE IT IS FELT, NOT WHEN
+     IT LANDS. Each record carries a live `strength` that starts high and drops to 0 as the
+     dwarf gets over it, and every hundred-odd ticks DF moves the stress by an amount set by
+     what is live -- watched here: a dwarf with only "disgusted by miasma" live takes +250 a
+     period, sample after sample, until it fades; one with only "delighted by a performance"
+     live gets -20 a period. A thought whose strength has reached 0 costs nothing more, ever.
 
-     `enable fort/stress-display` starts the sampler; it is what fills the column in. The
-     overlay itself shows the stress number whether or not the service is on. Measured
-     values are saved with the fort, so a reload keeps them.
+     So the service samples every citizen's stress a few times a second and, when it moves,
+     gives the change to the records that are live at that moment. One live record: the
+     number is exact. Several live: the change is split between them by their relative
+     strength over their emotion's divider (DF's own harshness scale -- horror 1, annoyance
+     8, pleasant ones negative), and every share so priced is marked with a "~" as an
+     estimate. Only the live emotions pulling the same way as the change are candidates: a
+     rise goes to the unpleasant ones, a drop to the pleasant ones, so a sadness felt
+     alongside a masterwork never gets a share of the relief. A change with nothing live behind it is drift and is kept to one side. A
+     thought that was already spent when the service started watching shows nothing: its
+     cost was paid before anyone was counting.
 
     enable fort/stress-display     start measuring (saved with the fort)
     disable fort/stress-display    stop; what was measured stays
@@ -86,7 +93,8 @@ local BANDS = {
 }
 
 enabled = enabled or false
--- unit id -> {stress = last seen, keys = {key = true}, deltas = {key = n}, drift = n}
+-- unit id -> {stress = last seen, keys = {key = true}, deltas = {key = {v = n, est = bool}},
+--              drift = n}
 watch = watch or {}
 stats = stats or {priced = 0, drift_events = 0}
 
@@ -121,7 +129,7 @@ local function persist()
     local rows = {}
     for id, w in pairs(watch) do
         local deltas = {}
-        for k, v in pairs(w.deltas) do deltas[#deltas + 1] = {k = k, v = v} end
+        for k, d in pairs(w.deltas) do deltas[#deltas + 1] = {k = k, v = d.v, est = d.est or nil} end
         rows[#rows + 1] = {id = id, drift = w.drift, deltas = deltas}
     end
     pcall(dfhack.persistent.saveSiteData, GLOBAL_KEY,
@@ -134,7 +142,7 @@ local function load_persisted()
     if not data then return false end
     for _, row in ipairs(data.units or {}) do
         local deltas = {}
-        for _, d in ipairs(row.deltas or {}) do deltas[d.k] = d.v end
+        for _, d in ipairs(row.deltas or {}) do deltas[d.k] = {v = d.v, est = d.est == true} end
         watch[row.id] = {deltas = deltas, drift = row.drift or 0}
     end
     stats = data.stats or {priced = 0, drift_events = 0}
@@ -160,26 +168,41 @@ local function adopt(unit, pers)
     return w
 end
 
--- the stress moved: whatever records are new since the last look get the difference
+-- the stress moved: the records LIVE right now (strength above 0) are what DF is billing.
+-- One of them takes the whole change; several share it by relative strength over the
+-- emotion's divider, and each such share is marked an estimate. Nothing live: drift.
 local function attribute(w, pers)
     local delta = pers.stress - w.stress
-    local now = record_keys(pers)
-    local fresh = {}
-    for k in pairs(now) do
-        if not w.keys[k] then fresh[#fresh + 1] = k end
-    end
-    if #fresh > 0 then
-        local each = delta / #fresh
-        for _, k in ipairs(fresh) do
-            w.deltas[k] = (w.deltas[k] or 0) + each
-            stats.priced = stats.priced + 1
+    -- only the live emotions pulling in the change's direction are candidates: a rise is
+    -- the bad ones' doing (positive divider), a drop the good ones' (negative divider).
+    -- A sadness felt alongside a masterwork does not get a share of the relief.
+    local live, total = {}, 0
+    for _, e in ipairs(pers.emotions) do
+        if e.year ~= -1 and (e.strength > 0 or e.relative_strength > 0) then
+            local div = df.emotion_type.attrs[e.type].divider
+            if div ~= 0 and (div > 0) == (delta > 0) then
+                local wt = math.max(e.relative_strength, e.strength, 1) / math.abs(div)
+                live[#live + 1] = {key = record_key(e), wt = wt}
+                total = total + wt
+            end
         end
-    else
+    end
+    if #live == 0 then
         w.drift = w.drift + delta
         stats.drift_events = stats.drift_events + 1
+    else
+        local est = #live > 1
+        for _, r in ipairs(live) do
+            local share = est and (total > 0 and delta * r.wt / total or delta / #live) or delta
+            local d = w.deltas[r.key] or {v = 0, est = false}
+            d.v = d.v + share
+            d.est = d.est or est
+            w.deltas[r.key] = d
+        end
+        stats.priced = stats.priced + 1
     end
     w.stress = pers.stress
-    w.keys = now
+    w.keys = record_keys(pers)
 end
 
 -- no stress change, but the record set is looked at anyway: a new record is priced at 0 (it
@@ -188,7 +211,7 @@ end
 local function refresh(w, pers)
     local now = record_keys(pers)
     for k in pairs(now) do
-        if not w.keys[k] and w.deltas[k] == nil then w.deltas[k] = 0 end
+        if not w.keys[k] and w.deltas[k] == nil then w.deltas[k] = {v = 0, est = false} end
     end
     for k in pairs(w.deltas) do
         if not now[k] then w.deltas[k] = nil end
@@ -449,9 +472,10 @@ function StressDisplayOverlay:onRenderFrame(dc, rect)
     local w = watch[unit.id]
     if not w then return end
     for _, r in ipairs(self.rows) do
-        local v = w.deltas[r.key]
-        if v ~= nil then
-            local s = v > 0 and ('+' .. thousands(v)) or thousands(v)
+        local d = w.deltas[r.key]
+        if d ~= nil then
+            local v = d.v
+            local s = (v > 0 and ('+' .. thousands(v)) or thousands(v)) .. (d.est and '~' or '')
             local pen = v > 0 and COLOR_LIGHTRED or (v < 0 and COLOR_LIGHTGREEN or COLOR_DARKGREY)
             dfhack.screen.paintString({fg = pen}, h.x - 2 - #s, r.y, s)
         end
@@ -482,7 +506,7 @@ for _, w in pairs(watch) do
     units = units + 1
     for _ in pairs(w.deltas) do priced = priced + 1 end
 end
-print(('stress-display is %s; %d unit%s watched, %d thought%s priced, %d change%s with no thought behind them')
+print(('stress-display is %s; %d unit%s watched, %d thought%s priced, %d change%s with nothing live behind them')
     :format(enabled and 'ON' or 'OFF', units, units == 1 and '' or 's', priced, priced == 1 and '' or 's',
             stats.drift_events, stats.drift_events == 1 and '' or 's'))
 local u = sheet_unit()
@@ -493,9 +517,10 @@ if u and personality(u) then
     local w = watch[u.id]
     if w then
         for _, r in ipairs(displayed_records(pers)) do
-            local v = w.deltas[record_key(r.e)]
-            print(('    %8s  %s / %s'):format(v and thousands(v) or '?', df.emotion_type[r.e.type],
-                df.unit_thought_type[r.e.thought]))
+            local d = w.deltas[record_key(r.e)]
+            print(('    %8s  %s / %s%s'):format(d and (thousands(d.v) .. (d.est and '~' or '')) or '?',
+                df.emotion_type[r.e.type], df.unit_thought_type[r.e.thought],
+                r.e.strength > 0 and (' [live, strength %d]'):format(r.e.strength) or ''))
         end
         print(('    drift (no thought behind it): %s'):format(thousands(w.drift)))
     end
