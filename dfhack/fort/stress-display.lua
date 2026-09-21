@@ -73,8 +73,10 @@ local GLOBAL_KEY = 'stress-display'
 -- costing anything (a sample is one integer read per citizen).
 local BEAT_FRAMES = 5
 -- every so often the record sets are refreshed for everybody, so a thought that cost nothing
--- is noticed (and priced at 0) instead of being blamed later for somebody else's change
-local REFRESH_BEATS = 20
+-- is noticed (and priced at 0). Measured: the refresh is the whole cost of this service -- the
+-- stress reads are nothing -- so it runs twice a minute and skips any unit whose records
+-- have not changed (an integer signature, no strings built)
+local REFRESH_BEATS = 100
 -- the citizen list is rebuilt this often; isCitizen is not free and the list barely moves
 local ROSTER_BEATS = 200
 -- saved this many beats after the last change, not on every one
@@ -121,6 +123,16 @@ local function record_keys(pers)
     return keys
 end
 
+-- a cheap fingerprint of the record set: integer reads only, no strings. Two sets with the
+-- same count and the same sum of ticks are the same set for this purpose.
+local function record_sig(pers)
+    local n, sum = 0, 0
+    for _, e in ipairs(pers.emotions) do
+        if e.year ~= -1 then n = n + 1; sum = sum + e.year_tick + e.year * 403200 end
+    end
+    return n * 1e12 + sum
+end
+
 -- ---------------------------------------------------------------------------
 -- the sampler
 -- ---------------------------------------------------------------------------
@@ -164,6 +176,7 @@ local function adopt(unit, pers)
     local w = watch[unit.id] or {deltas = {}, drift = 0}
     w.stress = pers.stress
     w.keys = record_keys(pers)
+    w.sig = record_sig(pers)
     watch[unit.id] = w
     return w
 end
@@ -203,12 +216,16 @@ local function attribute(w, pers)
     end
     w.stress = pers.stress
     w.keys = record_keys(pers)
+    w.sig = record_sig(pers)
 end
 
 -- no stress change, but the record set is looked at anyway: a new record is priced at 0 (it
 -- did nothing) and one that DF has dropped takes its number with it, so the store stays the
 -- size of the sheet
 local function refresh(w, pers)
+    local sig = record_sig(pers)
+    if sig == w.sig then return end
+    w.sig = sig
     local now = record_keys(pers)
     for k in pairs(now) do
         if not w.keys[k] and w.deltas[k] == nil then w.deltas[k] = {v = 0, est = false} end
