@@ -221,6 +221,16 @@ local COLUMNS = {
          enable = cmd('enable', 'fort/auto-elf-chop'), disable = cmd('disable', 'fort/auto-elf-chop')},
         {key = 'auto-needs', label = 'auto-needs',
          enable = cmd('enable', 'fort/auto-needs'), disable = cmd('disable', 'fort/auto-needs')},
+        -- the overlay draws the stress number by itself; the service is what prices the thoughts
+        {key = 'stress-display', label = 'stress-display',
+         enable = function()
+            dfhack.run_command('enable', 'fort/stress-display')
+            dfhack.run_command('overlay', 'enable', 'fort/stress-display.thoughts')
+         end,
+         disable = function()
+            dfhack.run_command('disable', 'fort/stress-display')
+            dfhack.run_command('overlay', 'disable', 'fort/stress-display.thoughts')
+         end},
         -- takes its state as a plain argument rather than through DFHack's
         -- enable API, so this is `fort/channel-safely enable`, not
         -- `enable fort/channel-safely`

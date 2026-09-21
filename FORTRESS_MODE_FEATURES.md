@@ -1591,6 +1591,52 @@ thought that hurt. There is deliberately no "stress caused" column — DF does n
 `severity` field that looks like it sits at 0 on most unpleasant thoughts, witnessing a death
 included, so anything computed from it reports a contented paradise.
 
+### **`fort/stress-display`**
+Shows a dwarf's stress on their Thoughts tab, and what each thought did to it.
+
+The Thoughts tab lists what a dwarf has felt and never says what any of it cost. The seven
+counters at the top of the screen sort the fort from ecstatic to miserable, and the number behind
+that sorting — the dwarf's **stress**, higher is worse — is shown nowhere. So on `Thoughts >
+Recent thoughts` this draws two things.
+
+**The stress number**, on the tab line four cells right of "Memories": `Stress 62,494  Miserable`.
+The word is DF's own for that counter (its tooltips say "This creature is ecstatic right now" and
+so on), and the seven bands are plain thresholds on the number, measured on a 145-citizen fort:
+
+| counter | stress |
+|---|---|
+| Ecstatic | below −50,000 |
+| Happy | −50,000 .. −25,000 |
+| Pleased | −25,000 .. −10,000 |
+| Content | −10,000 .. +10,000 |
+| Displeased | +10,000 .. +25,000 |
+| Unhappy | +25,000 .. +50,000 |
+| Miserable | above +50,000 |
+
+**What each thought cost**, to the left of its line: `+1,234` in red for stress it added, `-380`
+in green for stress it took away, a dim `0` for one that did nothing (the "didn't feel anything
+after seeing a crundle's dead body" kind — and yes, those really are zero). **DF does not store
+this number** — the record's `severity` reads 0 or −1 on most bad thoughts and only the running
+total survives — so it is **measured**: `enable fort/stress-display` starts a sampler that reads
+every citizen's stress every five frames, and when one moves, the thought records that appeared
+since the last look get the difference (split evenly when several land in one tick, as three
+corpses seen at once do). A change with no new record behind it is drift — DF's slow settling —
+and is kept to one side, never pinned on a thought. A thought from before the sampler was watching
+has no number and shows nothing, and the overlay shows the stress number whether or not the sampler
+is on. Measured values are saved with the fort.
+
+How the rows are matched: DF keeps the rendered list itself (`view_sheets.raw_thought_str`, one
+string per entry, newest first — the emotion records with a thought, sorted by year and tick
+descending, ties in record order, checked against a 42-entry sheet) and `scroll_position_thoughts`
+counts wrapped *lines*, not entries. The screen rows are read back and matched to the entries by
+text, so the wrap width never has to be known; the tab header is found by reading a band of the
+screen for "Recent thoughts", never assumed from a position. Two things that bit on the way: DF
+leaves a double space where a colour code was and renders it single, and an empty screen cell
+reads back as byte 0, not a space.
+
+`fort/stress-display` prints the status and, with a unit sheet open, that dwarf's list with the
+measured number per thought. `magnus-scripts` has a row for it.
+
 ### **`fort/creature-description`**
 Shows a creature's full description (great for forgotten beasts) with a categorized kill
 list — each megabeast type by name, the cursed called out ahead of everything sentient
