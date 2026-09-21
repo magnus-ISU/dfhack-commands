@@ -326,19 +326,18 @@ structure question — where a request is stored, whether it can be written dire
 clicked — can only be answered during that visit, so the build is gated on the calendar rather
 than on effort.
 
-### **`fort/auto-needs` — three more needs**
-Extend the existing tool past the two needs it answers (WANDER → fishing, abstract thinking /
-self-examination → a scholar's post at the public library): **eat the highest-value food**,
-**pray when the stress is coming from prayer**, and **acquire something** when that is the need
-doing the damage.
+### **`fort/auto-needs` — two more needs**
+Extend the existing tool past the needs it answers (WANDER → fishing, abstract thinking /
+self-examination → a scholar's post at the public library, creative → a statue, acquire → a
+trinket): **eat the highest-value food** and **pray when the stress is coming from prayer**.
 
-**Difficulty: Moderate for prayer, Moderate for food, uncertain for acquire** — one research
-question each, because needs are *derived* and cannot be written directly (editing `pers.needs` is
-cosmetic; the fix has to be the real-world act that drains them). Prayer has an obvious lever (a
-temple location the dwarf is steered toward) and an obvious hazard (a burrow that strands them —
-see `mood-burrow`). Food overlaps `good-soup`: you cannot pick what a dwarf eats, only what is
-available and unforbidden when they go looking. "Acquire an object" is the one with no known
-lever at all — whether ownership assignment satisfies it needs proving before it is promised.
+**Difficulty: Moderate for prayer, Moderate for food** — one research question each, because
+needs are *derived* and cannot be written directly (editing `pers.needs` is cosmetic; the fix
+has to be the real-world act that drains them). Prayer has an obvious lever (a temple location
+the dwarf is steered toward) and an obvious hazard (a burrow that strands them — see
+`mood-burrow`). Food overlaps `good-soup`: you cannot pick what a dwarf eats, only what is
+available and unforbidden when they go looking. (Acquire turned out to have a lever after all —
+a haul job on an unowned trinket, which the dwarf claims on pickup — and shipped.)
 
 ### **`fort/quickfort` — complex multi-z-level blueprints**
 Take the replacement quickfort front end past flat, single-level blueprints to the ones people

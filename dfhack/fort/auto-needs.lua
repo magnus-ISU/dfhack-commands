@@ -10,7 +10,7 @@ there is. Some of those needs have a LABOR that answers them, and this hands tha
 out to the dwarves who need it -- then takes it back once they have had their fill, so
 the fort's job assignments are not quietly rewritten forever by a mood that has passed.
 
-TODAY IT KNOWS ONE LABOR, ONE POST AND ONE JOB:
+TODAY IT KNOWS ONE LABOR, ONE POST AND TWO JOBS:
 
   WANDER -> FISHING. "Wander" is satisfied by being outside the fortress, and fishing is
   the reliable way a dwarf takes themselves out there and stays a while. Given the labor,
@@ -28,6 +28,15 @@ TODAY IT KNOWS ONE LABOR, ONE POST AND ONE JOB:
   skill: masonry, stonecrafting and glassmaking are all moodable, and a strange mood claims
   the highest, so an armorer handed a statue can quietly end up making furniture instead of
   an artifact suit. See NOTHING CREATIVE below.
+
+  ACQUIRE SOMETHING -> A TRINKET TO CARRY. A dwarf with this need who picks up an unowned
+  trinket for a haul job KEEPS it, and the need flips to positive the moment it is in hand. So
+  an idle dwarf past -750 (this rule's own bar -- it costs the fort an item) is handed a
+  stockpile haul on the cheapest unowned earring, ring, amulet, bracelet or crown they can
+  walk to, even one still sitting inside a workshop. A burrowed dwarf is only offered one
+  inside their burrow, and named as confined when there is none. A NOTIFICATION
+  ("auto_needs_trinkets" in gui/notify) names the dwarves past the bar with no trinket to
+  give, and warns when the spare stock is nearly gone. See ACQUIRE SOMETHING below.
 
   THINK ABSTRACTLY / SELF-EXAMINATION -> A SCHOLAR'S POST AT THE PUBLIC LIBRARY. Both of
   those needs are drained by the same act -- reading or writing something -- and the
@@ -92,12 +101,15 @@ THE PUBLIC LIBRARY
 
 THE THRESHOLD
 
-  ONE BAR, SHARED BY EVERY RULE HERE AND EVERY RULE ADDED LATER: -750. A need's
-  `focus_level` goes negative as it goes unmet, and -750 is far enough down to catch a dwarf
-  before the need starts distracting them or handing them bad thoughts, without tripping on
-  the ordinary shortfall half the fort carries at any moment. The loan is handed back at
-  zero, so there is a gap between the two bars and nobody flickers in and out on a point of
-  focus.
+  ONE BAR, SHARED BY EVERY RULE HERE: -500. A need's `focus_level` goes negative as it goes
+  unmet, and -500 is far enough down to catch a dwarf before the need starts distracting
+  them or handing them bad thoughts, without tripping on the ordinary shortfall half the
+  fort carries at any moment. The loan is handed back at zero, so there is a gap between
+  the two bars and nobody flickers in and out on a point of focus.
+
+  THE ONE EXCEPTION IS ACQUIRE SOMETHING, AT -750: the other rules cost the fort a few hours
+  of a dwarf's time, that one costs it an item, and the ordinary shortfall is not worth an
+  earring each.
 
   Stress is not part of the test. An earlier version demanded it as well, which meant
   waiting for the damage to show before answering the need that was causing it.
@@ -672,9 +684,11 @@ end
 -- one `move-items` uses to decide what it can offer, and comparing two groups is a integer
 -- compare rather than a pathfind.
 local function boulder_group(it)
-    local p = dfhack.items.getPosition(it)
-    if not p then return nil end                      -- inside something, or off-map
-    local g = dfhack.maps.getWalkableGroup(xyz2pos(p.x, p.y, p.z))
+    -- getPosition returns THREE NUMBERS, not a coord; indexing the first one threw, and the
+    -- pcall around the pass hid it -- the creative half made nothing for a season
+    local x, y, z = dfhack.items.getPosition(it)
+    if not x then return nil end                      -- inside something, or off-map
+    local g = dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))
     if not g or g == 0 then return nil end
     return g
 end
@@ -883,9 +897,250 @@ function scan_creative(dry)
     return made, skipped, nil, offers
 end
 
+-- ---- ACQUIRE SOMETHING -> A TRINKET TO CARRY -------------------------------
+--
+-- "Has been unable to acquire something lately" is answered by OWNING a new thing, and the way
+-- a dwarf comes to own one is to PICK IT UP: a dwarf with this need who lifts an unowned trinket
+-- for a haul job keeps it -- it goes straight into their inventory as worn, `owned` is set, and
+-- the need flips from the floor to positive on the spot. Measured here twice: -107432 -> +392
+-- and -200000 -> +376, both the instant the earring was in hand. So each pass, every idle
+-- citizen past the bar is handed a stockpile haul (`StoreItemInStockpile`, the dwarf named as
+-- worker, destination a floor tile beside where they stand) on the cheapest unowned trinket
+-- they can walk to. They walk over, pick it up, claim it, and the job ends there -- the item
+-- never reaches the destination tile, which is only there so the job is a valid haul.
+--
+-- DF does not do this by itself. Trinkets pile up INSIDE workshops (a workshop's products sit in
+-- its `contained_items`, not on the floor) waiting for a hauler who never comes, and on this
+-- fort 120 citizens sat between -100000 and -200000 on the need with a craftsdwarf's shop full
+-- of earrings twenty tiles away. The trinket leaves the fort's stock for good -- but that is
+-- exactly what DF does when a dwarf claims one, so this is vanilla's own outcome, hurried.
+--
+-- THIS RULE HAS ITS OWN BAR, -750, DEEPER THAN THE SHARED ONE. Acquiring costs the fort an item,
+-- where the other rules cost it a few hours; the ordinary shortfall half the fort carries is
+-- not worth an earring each. Measured: the citizens past -750 here were all past -100000.
+--
+-- BURROWS ARE THE ONE THING THAT STOPS IT. A dwarf assigned to a burrow silently drops any job
+-- whose item lies outside it -- no cancel message, the job just vanishes in a few hundred ticks
+-- and they never move. That was the whole story behind the dwarf this was written for. So a
+-- burrowed dwarf is only offered a trinket INSIDE one of their burrows, and when there is none
+-- they are NAMED in the report as confined rather than silently passed over.
+local ACQUIRE_NEED = df.need_type.AcquireObject
+local ACQUIRE_UNMET = -750
+-- what a dwarf will claim and wear. Earrings are the proven case (they go on as a piercing);
+-- rings, amulets, bracelets and crowns are the rest of what DF lets a dwarf put on.
+local TRINKET_VECTORS = {'EARRING', 'RING', 'AMULET', 'BRACELET', 'CROWN'}
+-- fewer spare trinkets than this after a pass and the notification says so, while there is
+-- still time to make some before the next dwarf hits the bar
+local TRINKET_LOW = 3
+
+-- what the notification shows: rebuilt by every acquire pass, read many times a second
+last_acquire = last_acquire or {short = {}, confined = {}, spare = nil}
+
+-- a trinket nobody owns, nobody is carrying or hauling, that can actually be lifted. The item
+-- may sit inside a workshop (most do) -- a haul job fetches it from there like any other.
+local function trinket_free(it)
+    return item_is_free(it) and not it.flags.in_inventory
+end
+
+-- every free trinket on the map with its walkable group, cheapest first. A few hundred items
+-- across five small vectors; well inside a pass.
+local function free_trinkets()
+    local out = {}
+    for _, vec in ipairs(TRINKET_VECTORS) do
+        for _, it in ipairs(df.global.world.items.other[vec]) do
+            if trinket_free(it) then
+                local x, y, z = dfhack.items.getPosition(it)
+                if x then
+                    local g = dfhack.maps.getWalkableGroup(xyz2pos(x, y, z))
+                    if g and g ~= 0 then
+                        out[#out + 1] = {item = it, pos = xyz2pos(x, y, z), group = g,
+                                         value = dfhack.items.getValue(it)}
+                    end
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.value ~= b.value then return a.value < b.value end
+        return a.item.id < b.item.id
+    end)
+    return out
+end
+
+-- inside one of the unit's burrows, or the unit has none
+local function within_burrows(unit, pos)
+    if #unit.burrows == 0 then return true end
+    for _, bid in ipairs(unit.burrows) do
+        local b = df.burrow.find(bid)
+        if b and dfhack.burrows.isAssignedTile(b, pos) then return true end
+    end
+    return false
+end
+
+-- a floor tile beside the dwarf to name as the haul's destination -- never reached, but the
+-- job has to be a haul to somewhere. Their own tile as the fallback.
+local function beside(unit)
+    local p = unit.pos
+    for _, d in ipairs({{1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,1},{1,-1},{-1,-1}}) do
+        local q = xyz2pos(p.x + d[1], p.y + d[2], p.z)
+        local tt = dfhack.maps.getTileType(q)
+        if tt and df.tiletype.attrs[tt].shape == df.tiletype_shape.FLOOR
+                and not dfhack.buildings.findAtTile(q) and dfhack.maps.canWalkBetween(p, q) then
+            return q
+        end
+    end
+    return xyz2pos(p.x, p.y, p.z)
+end
+
+-- the same job DF posts to haul a finished good to a stockpile, with the dwarf already on it
+local function acquire_job(unit, it)
+    local job = dfhack.job.createLinked()
+    job.job_type = df.job_type.StoreItemInStockpile
+    job.item_subtype = df.unit_labor.HAUL_ITEM
+    job.pos = beside(unit)
+    job.completion_timer = 0
+    if not dfhack.job.attachJobItem(job, it, df.job_role_type.Hauled, -1, -1) then
+        dfhack.job.removeJob(job)
+        return false
+    end
+    if not dfhack.job.addWorker(job, unit) then
+        dfhack.job.removeJob(job)
+        return false
+    end
+    return true
+end
+
+-- One acquire pass: the neediest idle citizen first, each handed the cheapest trinket they can
+-- reach. Returns who was served, who went short (nothing they could reach), who is confined
+-- (burrowed, with no trinket inside), and how many spare trinkets are left after.
+function scan_acquire(dry)
+    local served, short, confined = {}, {}, {}
+    local want = {}
+    for _, unit in ipairs(citizens()) do
+        local focus = need_focus(unit, ACQUIRE_NEED)
+        if focus ~= nil and focus <= ACQUIRE_UNMET then
+            want[#want + 1] = {unit = unit, focus = focus}
+        end
+    end
+    table.sort(want, function(a, b)
+        if a.focus ~= b.focus then return a.focus < b.focus end
+        return a.unit.id < b.unit.id
+    end)
+    local pool = free_trinkets()
+    for _, cand in ipairs(want) do
+        local unit = cand.unit
+        if dfhack.units.isJobAvailable(unit) then
+            local mine = dfhack.maps.getWalkableGroup(xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z))
+            local pick, reachable = nil, false
+            for i, t in ipairs(pool) do
+                if t.group == mine then
+                    reachable = true
+                    if within_burrows(unit, t.pos) then pick = i break end
+                end
+            end
+            if pick then
+                local t = table.remove(pool, pick)
+                if dry or acquire_job(unit, t.item) then
+                    served[#served + 1] = {unit = unit, focus = cand.focus, item = t.item}
+                else
+                    table.insert(pool, pick, t)     -- the job did not take; keep the trinket
+                end
+            elseif reachable and #unit.burrows > 0 then
+                confined[#confined + 1] = {unit = unit, focus = cand.focus}
+            else
+                short[#short + 1] = {unit = unit, focus = cand.focus}
+            end
+        end
+    end
+    local names = function(list)
+        local out = {}
+        for _, e in ipairs(list) do out[#out + 1] = dfhack.units.getReadableName(e.unit) end
+        return out
+    end
+    last_acquire = {short = names(short), confined = names(confined), spare = #pool,
+                    tick = df.global.cur_year_tick}
+    return served, short, confined, #pool
+end
+
+-- ---- the "make more trinkets" notification ------------------------------------
+--
+-- The warning that is worth having comes BEFORE the dwarf is at the bar with nothing to hand
+-- them, so it fires on two things: citizens past the bar this pass with no trinket to give
+-- (named -- a count is not something you can act on), and the spare stock running low even
+-- when everybody was served. It reads the last pass's result, so it is a day stale at most.
+local NOTIFY_NAME = 'auto_needs_trinkets'
+
+function trinket_message()
+    if not dfhack.world.isFortressMode() or not isEnabled() then return nil end
+    local a = last_acquire
+    if not a or a.spare == nil then return nil end
+    local lines = {}
+    if #a.short > 0 then
+        lines[#lines + 1] = ('%s want%s to acquire something and there is no spare trinket: '
+            .. 'make earrings, rings or amulets'):format(table.concat(a.short, ', '),
+            #a.short == 1 and 's' or '')
+    elseif a.spare < TRINKET_LOW then
+        lines[#lines + 1] = ('only %d spare trinket%s left for dwarves to acquire: '
+            .. 'make earrings, rings or amulets'):format(a.spare, a.spare == 1 and '' or 's')
+    end
+    if #a.confined > 0 then
+        lines[#lines + 1] = ('%s want%s to acquire something but %s burrowed away from '
+            .. 'every trinket'):format(table.concat(a.confined, ', '),
+            #a.confined == 1 and 's' or '', #a.confined == 1 and 'is' or 'are')
+    end
+    if #lines == 0 then return nil end
+    return table.concat(lines, '; ')
+end
+
+-- click: step through the dwarves named, on the map
+local acquire_cursor = 0
+function trinket_click()
+    local a = last_acquire
+    local all = {}
+    for _, n in ipairs(a.short or {}) do all[#all + 1] = n end
+    for _, n in ipairs(a.confined or {}) do all[#all + 1] = n end
+    if #all == 0 then return end
+    acquire_cursor = acquire_cursor % #all + 1
+    local name = all[acquire_cursor]
+    for _, unit in ipairs(citizens()) do
+        if dfhack.units.getReadableName(unit) == name then
+            dfhack.gui.revealInDwarfmodeMap(xyz2pos(unit.pos.x, unit.pos.y, unit.pos.z), true, true)
+            return
+        end
+    end
+end
+
+-- the panel keeps the function it was handed, so it is handed a resolver: the message comes
+-- from whatever fort/auto-needs is on disk at the moment it is asked, and a hot-reloaded
+-- script takes effect without re-registering
+local function register_notification()
+    local ok, n = pcall(reqscript, 'internal/notify/notifications')
+    if not ok or not n then return end
+    local entry = n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME]
+    if not entry then
+        entry = {name = NOTIFY_NAME, version = 1, default = true}
+        table.insert(n.NOTIFICATIONS_BY_IDX, entry)
+        n.NOTIFICATIONS_BY_NAME[NOTIFY_NAME] = entry
+    end
+    entry.desc = 'Warns when citizens want to acquire something and the fort has no spare '
+        .. 'trinket to hand them (fort/auto-needs).'
+    entry.dwarf_fn = function()
+        local okm, m = pcall(reqscript, 'fort/auto-needs')
+        return ((okm and m and m.trinket_message) or trinket_message)()
+    end
+    entry.on_click = function()
+        local okm, m = pcall(reqscript, 'fort/auto-needs')
+        return ((okm and m and m.trinket_click) or trinket_click)()
+    end
+    if n.config and n.config.data and not n.config.data[NOTIFY_NAME] then
+        n.config.data[NOTIFY_NAME] = {enabled = true, version = 1}
+    end
+end
+
 local function one_pass()
     if isEnabled() then pcall(scan) end
     if isEnabled() then pcall(scan_creative) end
+    if isEnabled() then pcall(scan_acquire) end
     if library_marked() then pcall(scan_library) end
 end
 
@@ -929,6 +1184,8 @@ end
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
+        last_acquire = {short = {}, confined = {}, spare = nil}
+        register_notification()
         if dfhack.world.isFortressMode() and service_wanted() then start_heartbeat() end
     elseif sc == SC_MAP_UNLOADED then
         stop_heartbeat(); state = nil
@@ -978,6 +1235,8 @@ end
 OVERLAY_WIDGETS = {library = PublicLibraryOverlay}
 
 -- ---- entry point ------------------------------------------------------------
+
+register_notification()
 
 if dfhack_flags and dfhack_flags.module then return end
 
@@ -1078,4 +1337,34 @@ else
         print(('  %d passed over: every option would change what a strange mood claims'
             .. ' from them.'):format(blocked))
     end
+end
+
+-- ---- the acquire half -------------------------------------------------------
+
+print()
+local served, short, confined, spare = scan_acquire(dry or not once)
+print(('Acquire something (bar %d): %d spare trinket%s on the map.'):format(
+    ACQUIRE_UNMET, spare, spare == 1 and '' or 's'))
+if #served > 0 then
+    print(('%s%d sent to pick up a trinket to keep:'):format(tag, #served))
+    for _, e in ipairs(served) do
+        print(('    %s (focus %d) -- %s'):format(dfhack.units.getReadableName(e.unit), e.focus,
+            dfhack.items.getDescription(e.item, 0)))
+    end
+end
+if #short > 0 then
+    print(('  %d past the bar with NO trinket they can reach -- make earrings, rings or amulets:')
+        :format(#short))
+    for _, e in ipairs(short) do
+        print(('    %s (focus %d)'):format(dfhack.units.getReadableName(e.unit), e.focus))
+    end
+end
+if #confined > 0 then
+    print(('  %d past the bar but burrowed away from every trinket:'):format(#confined))
+    for _, e in ipairs(confined) do
+        print(('    %s (focus %d)'):format(dfhack.units.getReadableName(e.unit), e.focus))
+    end
+end
+if #served == 0 and #short == 0 and #confined == 0 then
+    print('  nobody idle is short enough on acquiring something.')
 end

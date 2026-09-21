@@ -1339,6 +1339,46 @@ the top by ordinary work. On a 113-dwarf fort that difference blocks 27 dwarf/sk
 one-level rule would have allowed, nearly all of them the same shape — top moodable skill at 1,
 the craft skill at 0.
 
+**Acquire something → a trinket to carry.** A dwarf with this need who picks up an unowned
+trinket for a haul job **keeps it** — it goes straight on as worn, `owned` is set, and the need
+flips from the floor to positive the instant it is in hand (measured: −107432 → +392 and
+−200000 → +376). So each pass every idle citizen past the bar is handed a stockpile haul, with
+them named as the worker, on the cheapest unowned earring, ring, amulet, bracelet or crown they
+can walk to — including one still sitting inside a workshop, which is where nearly all of them
+are. They walk over, pick it up, claim it, and the job ends there; the destination tile (a floor
+tile beside where they stood) is never reached and only exists so the job is a valid haul.
+
+DF does not do this by itself. A workshop's products sit in its `contained_items`, not on the
+floor, waiting for a hauler who never comes, and on this fort **120 citizens** sat between
+−100000 and −200000 on the need with a craftsdwarf's shop full of earrings twenty tiles away. One
+pass sent 53 of them off; 18 had flipped positive within 1500 ticks and the rest were on their
+way. The trinket leaves stock for good — but that is exactly what DF does when a dwarf claims
+one, so this is vanilla's own outcome, hurried.
+
+**This rule has its own bar, −750, deeper than the shared one.** The other rules cost the fort
+a few hours of a dwarf's time; this one costs it an item, and the ordinary shortfall is not worth
+an earring each. It is a recurring cost: a dwarf with a strong version of the need (level 5) fell
+from +376 back to −1005 in 36 game days, a weak one (level 2) to −454 — so a strong-need dwarf
+wants a fresh trinket about monthly. Keep the craftsdwarves making them.
+
+**Burrows are the one thing that stops it — silently.** A dwarf assigned to a burrow drops any
+job whose item lies outside it with no cancel message: the job vanishes from the list within a
+few hundred ticks and they never move. That was the whole story behind the dwarf this was written
+for, who "would not do any stockpile jobs" while standing next to the earrings. A burrowed dwarf is
+only offered a trinket inside one of their burrows, and when there is none they are **named** in
+the report and the notification as confined rather than passed over.
+
+**The `auto_needs_trinkets` notification** (in DFHack's `gui/notify` panel, alongside the pack's
+other lines) is the warning that arrives while there is still time to act: it names every citizen
+past the bar with no trinket to give them — a count is not something you can act on — and says
+so when the spare stock is under three even though everyone was served. It reads the last pass, so
+it is a day stale at most; clicking it steps through the named dwarves on the map. It is silent
+while `fort/auto-needs` is disabled.
+
+While adding this, the creative half turned out to have been dead for a season: `getPosition`
+returns three numbers, not a coordinate, and the pass's `pcall` was swallowing the throw on every
+daily run. Fixed.
+
 **The bar is flat: −500, the same for every dwarf, for every need tracked.** It sat at −750,
 which is where an unmet need stops being background noise for a dwarf with slack to spare — and
 that let this fort's angriest citizen be passed over pass after pass with abstract thinking at
