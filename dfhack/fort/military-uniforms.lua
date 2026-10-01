@@ -697,12 +697,24 @@ local function hyena_race()
     return nil
 end
 
+local dwarf_cache
+local function dwarf_race()
+    if dwarf_cache ~= nil then return dwarf_cache or nil end
+    local all = df.global.world.raws.creatures.all
+    for i = 0, #all - 1 do
+        if all[i].creature_id == 'DWARF' then dwarf_cache = i; return i end
+    end
+    dwarf_cache = false
+    return nil
+end
+
 -- the size race to MAKE armor for a wearer of `race`: hyena-man for dwarves, else the
 -- wearer's own race. Sizeless gear is always civ size. This is the req/order key size.
 local function key_race(item_type, race)
     if SIZELESS[item_type] then return civ_race() end
+    local d = dwarf_race()
     local h = hyena_race()
-    if h and race == civ_race() then return h end   -- dwarf -> hyena-man
+    if d and h and race == d then return h end   -- dwarf -> hyena-man
     return race
 end
 
@@ -712,8 +724,9 @@ local function item_size_race(it)
     if SIZELESS[it:getType()] then return civ_race() end
     local ok, r = pcall(function() return it.maker_race end)
     local m = (ok and r and r >= 0) and r or civ_race()
+    local d = dwarf_race()
     local h = hyena_race()
-    if h and (m == civ_race() or m == h) then return h end   -- dwarf/hyena-sized -> hyena key
+    if d and h and (m == d or m == h) then return h end   -- dwarf/hyena-sized -> hyena key
     return m
 end
 
@@ -3259,7 +3272,7 @@ register_gear_notify()
 dfhack.onStateChange[GLOBAL_KEY] = function(sc)
     if sc == SC_MAP_LOADED then
         state = nil
-        managed_cache, hyena_cache, cloak_sub_cache = nil, nil, nil   -- per-world caches
+        managed_cache, hyena_cache, dwarf_cache, cloak_sub_cache = nil, nil, nil, nil   -- per-world caches
         matval_cache = {}
         register_civ_squad_notify()
         register_gear_notify()
