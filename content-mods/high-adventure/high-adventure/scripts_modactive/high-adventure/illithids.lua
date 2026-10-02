@@ -666,11 +666,11 @@ end
 
 -- Same armorlevel test, but against a real item rather than a uniform spec. Robes, cloaks
 -- and caps are armorlevel 0 and stay on: illithids are robed, just never armoured. Shields
--- have no armorlevel at all and are rejected outright.
+-- and weapons are left untouched.
 local function item_is_armor(item)
     if not item then return false end
     local ity = item:getType()
-    if ity == df.item_type.SHIELD then return true end
+    if ity == df.item_type.SHIELD then return false end
     ARMOR_DEFS = ARMOR_DEFS or {
         [df.item_type.ARMOR] = df.global.world.raws.itemdefs.armor,
         [df.item_type.HELM] = df.global.world.raws.itemdefs.helms,
