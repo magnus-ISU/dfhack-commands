@@ -92,7 +92,9 @@ function workdetails_phase(ctx)
                     if wd then updated = updated + 1
                     else
                         wd = df.work_detail:new()
-                        wd.name = common.fromu(rec.name)
+                        local detail_name, exact = common.fromu_checked(rec.name, 'foreign work detail')
+                        wd.name = detail_name
+                        if not exact then common.add_skip(ctx, 'work-detail-name-foreignized', rec.name) end
                         li.work_details:insert('#', wd)
                         byname[rec.name] = wd
                         created = created + 1

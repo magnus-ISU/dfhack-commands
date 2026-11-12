@@ -164,7 +164,7 @@ local function spike3()
     item.general_refs:insert('#', ref)
     item.flags.artifact = true
     -- DF strings are cp437 -- must round-trip through df2utf for JSON storage
-    local rendered = dfhack.df2utf(dfhack.translation.translateName(ar.name))
+    local rendered = common.u(dfhack.translation.translateName(ar.name))
     m.artifact = {id = ar.id, item_id = item.id, rendered = rendered}
     save_marker(m)
     print(('spike3: artifact %d "%s" on item %d'):format(ar.id, rendered, item.id))
@@ -289,7 +289,7 @@ local function verify()
         local ar = df.artifact_record.find(m.artifact.id)
         check(ar ~= nil, 'artifact record survives')
         if ar then
-            check(dfhack.df2utf(dfhack.translation.translateName(ar.name)) == m.artifact.rendered,
+            check(common.u(dfhack.translation.translateName(ar.name)) == m.artifact.rendered,
                   'artifact name renders identically')
             check(ar.item ~= nil and ar.item.id == m.artifact.item_id, 'artifact item link')
         end

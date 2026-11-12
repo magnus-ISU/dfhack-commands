@@ -3,6 +3,17 @@
 
 local common = reqscript('internal/planeswalkers/common')
 
+-- Compatibility guard: DFHack can retain an already-loaded reqscript module
+-- while individual Lua files are replaced. Older cached copies of common.lua
+-- may not expose this helper even when the on-disk version does. Keep the
+-- magma cutoff predicate local as a fallback so a save cannot abort during
+-- histfig serialization solely because of module load order/cache state.
+local above_source_magma = type(common.above_source_magma) == 'function'
+    and common.above_source_magma
+    or function(ctx, z)
+        return ctx.source_magma_top == nil or z > ctx.source_magma_top
+    end
+
 -- ---- shared helpers --------------------------------------------------------
 
 local function name_out(name)
@@ -22,8 +33,10 @@ end
 
 local function name_in(dst, rec, ctx)
     if not rec then return end
-    dst.first_name = common.fromu(rec.first or '')
-    dst.nickname = common.fromu(rec.nick or '')
+    local first, first_ok = common.fromu_checked(rec.first or '', 'foreign name')
+    local nick, nick_ok = common.fromu_checked(rec.nick or '', 'foreign name')
+    dst.first_name = first
+    dst.nickname = nick
     dst.language = rec.lang or 0
     dst.has_name = rec.has and true or false
     local nwords = #df.global.world.raws.language.words
@@ -34,12 +47,17 @@ local function name_in(dst, rec, ctx)
         dst.words[i] = w
         dst.parts_of_speech[i] = rec.pos[i + 1] or 0
     end
-    if rec.has and (not ok
-        or common.u(dfhack.translation.translateName(dst)) ~= rec.rendered) then
+    if (rec.has and (not ok
+        or common.u(dfhack.translation.translateName(dst)) ~= rec.rendered))
+        or not first_ok or not nick_ok then
         -- language tables differ; keep the literal rendering as the first name
         for i = 0, 6 do dst.words[i] = -1 end
-        dst.first_name = common.fromu(rec.rendered)
-        if ctx then common.add_skip(ctx, 'name-literalized', rec.rendered) end
+        -- A source-language word index is not meaningful in the destination
+        -- world. Literal UTF-8 -> DF-codepage conversion can also turn unusual
+        -- glyphs into mojibake, so use a stable readable foreign-name fallback.
+        dst.first_name = common.fromu('foreign name')
+        dst.nickname = ''
+        if ctx then common.add_skip(ctx, 'name-foreignized', rec.rendered) end
     end
 end
 
@@ -104,6 +122,7 @@ local function save_hf(ctx, hf, stub)
     local rtok, ctok = race_tokens(hf.race, hf.caste)
     local rec = {
         id = hf.id,
+        source_civ = ctx.source_civ_id ~= nil and hf.civ_id == ctx.source_civ_id or nil,
         name = name_out(hf.name),
         race = rtok, caste = ctok,
         sex = hf.sex,
@@ -174,11 +193,14 @@ local function adventurer_bits(u)
 end
 
 local function save_unit(ctx, u)
+    if not above_source_magma(ctx, u.pos.z) then return nil end
     local rtok, ctok, generated = race_tokens(u.race, u.caste)
     if not rtok then return nil end
     local rec = {
         id = u.id,
         hf = u.hist_figure_id >= 0 and u.hist_figure_id or nil,
+        source_civ = (ctx.source_civ_id ~= nil and u.civ_id == ctx.source_civ_id)
+            or (classify(u) == 'citizen') or nil,
         race = rtok, caste = ctok, generated = generated or nil,
         gsize = generated and reqscript('internal/planeswalkers/match')
             .adult_size(df.global.world.raws.creatures.all[u.race], u.caste) or nil,
@@ -335,7 +357,9 @@ function save_phases(ctx)
             local in_set = {}
             local units = df.global.world.units.active
             for _, u in ipairs(units) do
-                if u.hist_figure_id >= 0 then in_set[u.hist_figure_id] = true end
+                if u.hist_figure_id >= 0 and above_source_magma(ctx, u.pos.z) then
+                    in_set[u.hist_figure_id] = true
+                end
             end
             -- one hop: link targets outside the set become stubs
             local stubs = {}
@@ -380,6 +404,7 @@ function save_phases(ctx)
                 local u = vec[job.cursor]
                 job.cursor = job.cursor + 1
                 if not dfhack.units.isDead(u)
+                    and above_source_magma(ctx, u.pos.z)
                     and (not ctx.select or ctx.select.units[u.id]) then
                     local ok, rec = pcall(save_unit, ctx, u)
                     if ok and rec then table.insert(job.out.list, rec)
@@ -422,7 +447,7 @@ local function mint_hf(ctx, rec)
     else
         hf.died_year = -1; hf.died_seconds = -1
     end
-    hf.civ_id = -1
+    hf.civ_id = rec.source_civ and df.global.plotinfo.civ_id or -1
     hf.population_id = -1
     hf.breed_id = -1
     hf.cultural_identity = -1
@@ -567,20 +592,77 @@ local function write_body(u, rec)
     return carried_prefs
 end
 
-local function safe_spawn_pos(ctx, rec)
-    if ctx.party then return ctx.spawn_anchor end   -- see the units load phase
-    local a = ctx.anchor
-    local x = rec.x + a.off_x
-    local y = rec.y + a.off_y
-    local z = math.max(1, math.min(df.global.world.map.z_count - 2, rec.z + a.off_z))
+local function unit_pos_key(x, y, z)
+    return ('%d:%d:%d'):format(x, y, z)
+end
+
+local function walkable_unoccupied(ctx, x, y, z)
+    local map = df.global.world.map
+    if x < 0 or y < 0 or x >= map.x_count or y >= map.y_count
+        or z < 1 or z >= map.z_count - 1 then return false end
+    if not ctx.party and not common.above_transfer_cutoff(ctx, z) then return false end
+    if ctx.unit_occupied[unit_pos_key(x, y, z)] then return false end
     local tt = dfhack.maps.getTileType(x, y, z)
-    if tt and df.tiletype.attrs[tt].shape ~= df.tiletype_shape.WALL then
-        return xyz2pos(x, y, z)
+    if not tt then return false end
+    local shape = df.tiletype.attrs[tt].shape
+    if not df.tiletype_shape.attrs[shape].walkable then return false end
+    local below = dfhack.maps.getTileType(x, y, z - 1)
+    if not below then return false end
+    local below_shape = df.tiletype.attrs[below].shape
+    if below_shape == df.tiletype_shape.EMPTY then return false end
+    local bd = select(1, dfhack.maps.getTileFlags(xyz2pos(x, y, z - 1)))
+    if bd and bd.flow_size > 0 then return false end
+    local d = select(1, dfhack.maps.getTileFlags(xyz2pos(x, y, z)))
+    return not d or d.flow_size == 0
+end
+
+local function find_unit_pos(ctx, origin, radius)
+    if not origin then return nil end
+    local zlist = {origin.z}
+    for dz = 1, 3 do
+        zlist[#zlist + 1] = origin.z + dz
+        zlist[#zlist + 1] = origin.z - dz
     end
-    return ctx.spawn_anchor  -- fallback: beside an existing citizen
+    for _, z in ipairs(zlist) do
+        for r = 0, radius or 12 do
+            for dx = -r, r do
+                local dy = r - math.abs(dx)
+                for _, sy in ipairs(dy == 0 and {1} or {1, -1}) do
+                    local x, y = origin.x + dx, origin.y + dy * sy
+                    if walkable_unoccupied(ctx, x, y, z) then
+                        return xyz2pos(x, y, z)
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function safe_spawn_pos(ctx, rec)
+    local origin
+    if ctx.party then
+        origin = ctx.spawn_anchor
+    else
+        local a = ctx.anchor
+        origin = xyz2pos(rec.x + a.off_x, rec.y + a.off_y, rec.z + a.off_z)
+    end
+    if origin and walkable_unoccupied(ctx, origin.x, origin.y, origin.z) then
+        return origin
+    end
+    return find_unit_pos(ctx, origin or ctx.spawn_anchor, 16)
 end
 
 local function spawn_unit(ctx, rec)
+    local target_z = rec.z + ((ctx.anchor and ctx.anchor.off_z) or 0)
+    if not common.above_transfer_cutoff(ctx, target_z) then
+        common.add_skip(ctx, 'unit-below-magma-cutoff', rec.race)
+        return nil
+    end
+    if target_z < 1 or target_z >= df.global.world.map.z_count - 1 then
+        common.add_skip(ctx, 'unit-clipped-at-z-edge', rec.race)
+        return nil
+    end
     local r, c = resolve_race(ctx, rec.race, rec.caste)
     if not r and rec.generated then
         -- procedural race: substitute the closest generated creature here
@@ -608,6 +690,7 @@ local function spawn_unit(ctx, rec)
     u.flags1.inactive = false
     df.global.world.units.active:insert('#', u)
     dfhack.units.teleport(u, xyz2pos(pos.x, pos.y, pos.z))
+    ctx.unit_occupied[unit_pos_key(pos.x, pos.y, pos.z)] = true
     u.birth_year = dest_birth_year(rec.age)
     if rec.class == 'citizen' or rec.class == 'pet' then
         dfhack.units.makeown(u)
@@ -644,6 +727,7 @@ local function spawn_unit(ctx, rec)
     local hf = u.hist_figure_id >= 0 and df.historical_figure.find(u.hist_figure_id)
     if hf then
         name_in(hf.name, rec.name, ctx)
+        if rec.source_civ then hf.civ_id = df.global.plotinfo.civ_id end
         hf.born_year = u.birth_year
         hf.sex = rec.sex or hf.sex
     end
@@ -678,13 +762,25 @@ function load_phases(ctx)
         init = function(job)
             job.units = common.read_json(ctx.dir .. '/units.json') or {list = {}}
             job.cursor = 1
+            ctx.units_expected = #job.units.list
+            ctx.units_restored = 0
             ctx.unit_map, ctx.hf_map = {}, {}
+            ctx.unit_occupied = {}
+            for _, existing in ipairs(df.global.world.units.active) do
+                ctx.unit_occupied[unit_pos_key(existing.pos.x, existing.pos.y,
+                                                existing.pos.z)] = true
+            end
             df.global.pause_state = true
             -- A PARTY ARRIVES WHERE THE FORT IS, not where it left. Its saved coordinates
             -- belong to another world's map and mean nothing here, so everyone lands beside
             -- a citizen picked at random -- a different one each load, so a party is not
             -- forever stacked on whoever happens to be first in the list.
-            local citizens = dfhack.units.getCitizens(true)
+            local citizens = {}
+            for _, citizen in ipairs(dfhack.units.getCitizens(true)) do
+                if common.above_transfer_cutoff(ctx, citizen.pos.z) then
+                    table.insert(citizens, citizen)
+                end
+            end
             local anchor = citizens[1]
             if #citizens > 0 then anchor = citizens[math.random(#citizens)] end
             ctx.spawn_anchor = anchor and xyz2pos(anchor.pos.x, anchor.pos.y, anchor.pos.z)
@@ -697,6 +793,7 @@ function load_phases(ctx)
                 job.cursor = job.cursor + 1
                 local ok, u, hf = pcall(spawn_unit, ctx, rec)
                 if ok and u then
+                    ctx.units_restored = ctx.units_restored + 1
                     ctx.unit_map[rec.id] = u
                     if rec.hf and hf then ctx.hf_map[rec.hf] = hf end
                     if rec.class ~= 'citizen' and rec.class ~= 'pet' then
@@ -706,7 +803,7 @@ function load_phases(ctx)
                     common.add_skip(ctx, 'unit-load-error', tostring(u))
                 end
                 -- spawning is heavy; keep batches small
-                if dfhack.getTickCount() >= deadline then return false end
+                if job.cursor % 8 == 0 and dfhack.getTickCount() >= deadline then return false end
             end
             return true
         end,

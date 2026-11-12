@@ -94,7 +94,9 @@ function load_phases(ctx)
                         local b = df.burrow:new()
                         b.id = next_burrow_id()
                         bump_next_id(b.id)
-                        b.name = common.fromu(rec.name or '')
+                        local burrow_name, exact = common.fromu_checked(rec.name or '', 'foreign burrow')
+                        b.name = burrow_name
+                        if not exact then common.add_skip(ctx, 'burrow-name-foreignized', rec.name) end
                         b.tile, b.fg_color, b.bg_color = rec.tile or 43, rec.fg or 11, rec.bg or 3
                         b.symbol_index = rec.symbol or 0
                         if rec.rgb then b.texture_r, b.texture_g, b.texture_b = rec.rgb[1], rec.rgb[2], rec.rgb[3] end
@@ -141,6 +143,7 @@ function load_phases(ctx)
                 ::continue::
                 if dfhack.getTickCount() >= deadline then return false end
             end
+            ctx.burrows_restored = job.made
             print(('planeswalkers: %d burrow(s) restored covering %d tile(s)'):format(job.made, job.tiles))
             return true
         end,

@@ -17,6 +17,7 @@ artifact on its pedestal.
 
 local gui = require('gui')
 local widgets = require('gui.widgets')
+local dialogs = require('gui.dialogs')
 
 local common = reqscript('internal/planeswalkers/common')
 
@@ -234,4 +235,156 @@ function SaveScreen:init() self:addviews{SaveWindow{on_save = self.on_save}} end
 
 function show(on_save)
     return SaveScreen{on_save = on_save}:show()
+end
+
+
+-- ---------------------------------------------------------------------------
+-- snapshot browser: inspect a completed snapshot before starting a destructive load
+-- ---------------------------------------------------------------------------
+SnapshotWindow = defclass(SnapshotWindow, widgets.Window)
+SnapshotWindow.ATTRS{
+    frame_title = 'Planeswalkers - Snapshot Browser',
+    frame = {w = 82, h = 34},
+    resizable = true,
+    on_load = DEFAULT_NIL,
+}
+
+function SnapshotWindow:init()
+    self.snapshots = common.list_snapshots()
+    table.sort(self.snapshots, function(a, b)
+        return (a.manifest.created or '') > (b.manifest.created or '')
+    end)
+    self.selected = nil
+    self:addviews{
+        widgets.EditField{
+            view_id = 'search', frame = {t = 0, l = 0, w = 42},
+            label_text = 'Search: ',
+            on_change = function() self:refresh_list() end,
+        },
+        widgets.List{
+            view_id = 'snapshots', frame = {t = 2, l = 0, w = 43, b = 4},
+            choices = {},
+            on_select = function(_, choice) self:select_snapshot(choice) end,
+            on_submit = function(_, choice) self:load_snapshot(choice) end,
+        },
+        widgets.Label{view_id = 'details', frame = {t = 0, l = 45, r = 0, h = 23}, text =
+            'Select a snapshot to inspect its origin, dimensions, contents, and format.'},
+        widgets.HotkeyLabel{frame = {b = 1, l = 0}, key = 'CUSTOM_SHIFT_L', label = 'load selected',
+            on_activate = function() self:load_snapshot() end},
+        widgets.HotkeyLabel{frame = {b = 1, l = 23}, key = 'CUSTOM_SHIFT_D', label = 'delete selected',
+            on_activate = function() self:delete_snapshot() end},
+        widgets.HotkeyLabel{frame = {b = 1, l = 48}, key = 'LEAVESCREEN', label = 'close',
+            on_activate = function() self.parent_view:dismiss() end},
+    }
+    self:refresh_list()
+    if #self.snapshots > 0 then
+        self:select_snapshot({id = 1})
+    end
+end
+
+function SnapshotWindow:refresh_list()
+    local filter = (self.subviews.search.text or ''):lower()
+    local choices = {}
+    for i, snap in ipairs(self.snapshots) do
+        local m = snap.manifest or {}
+        local d = m.dims or {}
+        local haystack = table.concat({snap.name, m.world or '', m.fort_display or m.fort or '',
+            m.civilization and m.civilization.name or ''}, ' '):lower()
+        if filter == '' or haystack:find(filter, 1, true) then
+            choices[#choices + 1] = {
+                text = ('%s  [%dx%d]  %s'):format(snap.name, d.bx or 0, d.by or 0,
+                    m.world or 'unknown world'),
+                id = i,
+            }
+        end
+    end
+    if #choices == 0 then choices[1] = {text = '(no matching complete snapshots)', id = -1} end
+    self.subviews.snapshots:setChoices(choices)
+    if self.selected then
+        local found = false
+        for _, choice in ipairs(choices) do
+            if choice.id == self.selected then found = true break end
+        end
+        if not found then
+            self.selected = nil
+            self.subviews.details:setText('Select a snapshot to inspect its origin, dimensions, contents, and format.')
+        end
+    end
+end
+
+function SnapshotWindow:select_snapshot(choice)
+    local idx = choice and choice.id or nil
+    if not idx or idx < 1 then self.selected = nil; return end
+    self.selected = idx
+    local snap = self.snapshots[idx]
+    local m = snap.manifest or {}
+    local d, c = m.dims or {}, m.counts or {}
+    local lines = {
+        snap.name,
+        '',
+        'Origin world: ' .. tostring(m.world or 'unknown'),
+        'Origin fortress: ' .. tostring(m.fort_display or m.fort or 'unknown'),
+        'Civilization: ' .. tostring(m.civilization and m.civilization.name or 'unknown'),
+        'Created: ' .. tostring(m.created or 'unknown'),
+        'DF version: ' .. tostring(m.df_version or 'unknown'),
+        'Snapshot format: v' .. tostring(m.format_version or '?'),
+        ('Dimensions: %s x %s blocks; %s z-levels'):format(d.bx or '?', d.by or '?', d.bz or '?'),
+        '', 'CONTENTS',
+        ('Terrain blocks: %s'):format(c.terrain_blocks or 'recorded in binary data'),
+        ('Magma blocks: %s'):format(c.magma_blocks or 0),
+        ('Buildings: %s'):format(c.buildings or 0),
+        ('Units: %s'):format(c.units or 0),
+        ('Items: %s'):format(c.items or 0),
+        ('Corpses: %s'):format(c.corpses or 0),
+        ('Plants: %s'):format(c.plants or 0),
+        ('Artifacts: %s'):format(c.artifacts or 0),
+        '',
+        (m.complete and m.complete.terrain and 'Integrity marker: complete' or 'Integrity marker: INCOMPLETE'),
+        'Restore replaces the corresponding destination footprint.',
+    }
+    self.subviews.details:setText(table.concat(lines, '\n'))
+end
+
+function SnapshotWindow:delete_snapshot()
+    if not self.selected then return end
+    local snap = self.snapshots[self.selected]
+    if not snap then return end
+    dialogs.showYesNoPrompt('Delete snapshot?',
+        ('Permanently delete "%s" and any pending/replacement data?'):format(snap.name),
+        COLOR_LIGHTRED,
+        function()
+            local base = common.snap_dir(snap.name)
+            for _, path in ipairs({base, base .. '.pending', base .. '.replaced', base .. '.publish_failed'}) do
+                local ok, err = common.remove_tree(path)
+                if not ok then
+                    dfhack.printerr(('planeswalkers: could not delete %s: %s'):format(path, tostring(err)))
+                    return
+                end
+            end
+            self.snapshots = common.list_snapshots()
+            table.sort(self.snapshots, function(a, b)
+                return (a.manifest.created or '') > (b.manifest.created or '')
+            end)
+            self.selected = nil
+            self:refresh_list()
+            self.subviews.details:setText('Snapshot deleted. Select another snapshot to inspect it.')
+        end)
+end
+
+function SnapshotWindow:load_snapshot(choice)
+    if choice then self:select_snapshot(choice) end
+    if not self.selected then return end
+    local snap = self.snapshots[self.selected]
+    self.parent_view:dismiss()
+    self.on_load(snap.name)
+end
+
+SnapshotScreen = defclass(SnapshotScreen, gui.ZScreenModal)
+SnapshotScreen.ATTRS{focus_path = 'planeswalkers/snapshots', on_load = DEFAULT_NIL}
+function SnapshotScreen:init()
+    self:addviews{SnapshotWindow{on_load = self.on_load}}
+end
+
+function show_browser(on_load)
+    return SnapshotScreen{on_load = on_load}:show()
 end

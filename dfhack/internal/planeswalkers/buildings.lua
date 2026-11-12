@@ -2,6 +2,14 @@
 --@module = true
 
 local common = reqscript('internal/planeswalkers/common')
+
+-- Match units.lua: tolerate a stale cached common.lua module after a
+-- hot-replacement of scripts, while preserving the normal shared helper.
+local above_source_magma = type(common.above_source_magma) == 'function'
+    and common.above_source_magma
+    or function(ctx, z)
+        return ctx.source_magma_top == nil or z > ctx.source_magma_top
+    end
 local stockpiles = require('plugins.stockpiles')
 
 local STOCKPILES_DIR = dfhack.getConfigPath() .. '/stockpiles'
@@ -40,6 +48,7 @@ local function save_one(ctx, bld)
     if bld.site_id >= 0 and bld.site_id ~= df.global.plotinfo.site_id then
         return nil
     end
+    if not above_source_magma(ctx, bld.z) then return nil end
     -- a fort saved at its original footprint leaves behind what was built
     -- outside it
     if not common.in_footprint(ctx, bld.x1, bld.y1)
@@ -309,6 +318,10 @@ local function load_one(ctx, rec)
         return
     end
     local z = rec.z + a.off_z
+    if not common.above_transfer_cutoff(ctx, z) then
+        common.add_skip(ctx, 'building-below-magma-cutoff', rec.type)
+        return
+    end
     if z < 1 or z >= df.global.world.map.z_count - 1 then
         common.add_skip(ctx, 'building-clipped-at-z-edge', rec.type)
         return
@@ -338,7 +351,11 @@ local function load_one(ctx, rec)
             common.add_skip(ctx, 'building-place-failed', rec.type .. ': ' .. tostring(err))
             return
         end
-        if rec.name then bld.name = common.fromu(rec.name) end
+        if rec.name then
+            local name, exact = common.fromu_checked(rec.name, 'foreign building')
+            bld.name = name
+            if not exact then common.add_skip(ctx, 'building-name-foreignized', rec.name) end
+        end
         if btype == df.building_type.Stockpile then
             if rec.caps then
                 bld.storage.max_barrels = rec.caps.barrels
@@ -388,7 +405,11 @@ local function load_one(ctx, rec)
             return
         end
         complete_build(bld, {})
-        if rec.name then bld.name = common.fromu(rec.name) end
+        if rec.name then
+            local name, exact = common.fromu_checked(rec.name, 'foreign building')
+            bld.name = name
+            if not exact then common.add_skip(ctx, 'building-name-foreignized', rec.name) end
+        end
         if rec.crops and btype == df.building_type.FarmPlot then
             for season = 0, 3 do
                 local pid = -1
@@ -437,7 +458,11 @@ local function load_one(ctx, rec)
     end
     complete_build(bld, items, ctx)
     ensure_components(ctx, bld, rec.components)
-    if rec.name then bld.name = common.fromu(rec.name) end
+    if rec.name then
+        local name, exact = common.fromu_checked(rec.name, 'foreign building')
+        bld.name = name
+        if not exact then common.add_skip(ctx, 'building-name-foreignized', rec.name) end
+    end
     if rec.door_flags and btype == df.building_type.Door then
         bld.door_flags.whole = rec.door_flags
     end
@@ -459,8 +484,8 @@ end
 
 -- the destination embark comes with furniture of its own -- the wagon above
 -- all; with --force, a whole previous fort. Remove every building that
--- predates the restore: stored items (the embark supplies) drop to the
--- ground, construction components (the wagon's logs) are deleted outright.
+-- predates the restore. Wagon contents are retained for a later relocation
+-- phase, after the incoming terrain and buildings have been restored.
 function clear_phase(ctx)
     return {
         name = 'clear old buildings',
@@ -477,19 +502,44 @@ function clear_phase(ctx)
             while job.cursor <= #job.old do
                 local bld = job.old[job.cursor]
                 job.cursor = job.cursor + 1
+                local is_wagon = false
+                pcall(function() is_wagon = bld:getType() == df.building_type.Wagon end)
                 local ok, err = pcall(function()
+                    -- Keep destination structures below the transfer boundary.
+                    if not common.above_transfer_cutoff(ctx, bld.z) then return end
                     local pos = xyz2pos(bld.centerx, bld.centery, bld.z)
                     if df.building_actual:is_instance(bld) then
+                        local is_wagon = bld:getType() == df.building_type.Wagon
                         for i = #bld.contained_items - 1, 0, -1 do
                             local ci = bld.contained_items[i]
                             -- one stuck item must not strand the rest
-                            pcall(function()
-                                if ci.use_mode == 2 then
+                            local item_ok, item_err = pcall(function()
+                                if is_wagon then
+                                    ctx.embark_supplies = ctx.embark_supplies or {}
+                                    ctx.embark_supply_ids = ctx.embark_supply_ids or {}
+                                    if ci.item and not ctx.embark_supply_ids[ci.item.id] then
+                                        ctx.embark_supply_ids[ci.item.id] = true
+                                        table.insert(ctx.embark_supplies, ci.item)
+                                    end
+                                    -- Even wagon construction components (the
+                                    -- starting logs) must survive deconstruction.
+                                    local moved = dfhack.items.moveToGround(ci.item, pos)
+                                    if moved == false then
+                                        error(('could not extract wagon item %d'):format(ci.item.id))
+                                    end
+                                elseif ci.use_mode == 2 then
                                     dfhack.items.remove(ci.item)
                                 else
-                                    dfhack.items.moveToGround(ci.item, pos)
+                                    local moved = dfhack.items.moveToGround(ci.item, pos)
+                                    if moved == false then
+                                        error(('could not extract building item %d'):format(ci.item.id))
+                                    end
                                 end
                             end)
+                            if not item_ok and is_wagon then
+                                common.add_skip(ctx, 'wagon-supply-preserve-failed',
+                                                tostring(item_err))
+                            end
                         end
                         -- deconstruct() only QUEUES a dwarf job for a built
                         -- building; zeroing the stage takes DFHack's
@@ -499,6 +549,9 @@ function clear_phase(ctx)
                     dfhack.buildings.deconstruct(bld)
                 end)
                 if not ok then
+                    if is_wagon then
+                        qerror('planeswalkers: could not safely extract the embark wagon contents; restore stopped before terrain replacement: ' .. tostring(err))
+                    end
                     common.add_skip(ctx, 'old-building-not-cleared', tostring(err))
                 end
                 if dfhack.getTickCount() >= deadline then return false end
@@ -515,6 +568,8 @@ function load_phases(ctx)
         init = function(job)
             job.blds = common.read_json(ctx.dir .. '/buildings.json') or {list = {}}
             job.bld_cursor = 1
+            ctx.buildings_expected = #job.blds.list
+            ctx.buildings_restored = 0
             ctx.bld_map = {}
         end,
         total = function(job) return #job.blds.list end,
@@ -527,8 +582,10 @@ function load_phases(ctx)
                 if not ok then
                     common.add_skip(ctx, 'building-load-error',
                                     (rec.type or '?') .. ': ' .. tostring(err))
+                elseif ctx.bld_map[rec.id] then
+                    ctx.buildings_restored = ctx.buildings_restored + 1
                 end
-                if dfhack.getTickCount() >= deadline then return false end
+                if job.bld_cursor % 8 == 0 and dfhack.getTickCount() >= deadline then return false end
             end
             return true
         end,

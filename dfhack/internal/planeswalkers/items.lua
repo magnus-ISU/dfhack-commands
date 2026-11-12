@@ -3,10 +3,11 @@
 
 local common = reqscript('internal/planeswalkers/common')
 
--- item types whose identity is a dead unit's body -- not restorable cross-world
-local SKIP_TYPES = {
-    [df.item_type.CORPSE] = 'corpses-not-restored',
-    [df.item_type.CORPSEPIECE] = 'corpse-pieces-not-restored',
+-- Corpses are not safely reconstructible as their original unit-linked body
+-- objects across worlds. Preserve them as race-aware REMAINS where possible.
+local CORPSE_TYPES = {
+    [df.item_type.CORPSE] = 'CORPSE',
+    [df.item_type.CORPSEPIECE] = 'CORPSEPIECE',
 }
 
 local function subtype_token(item)
@@ -39,9 +40,10 @@ end
 
 local function save_one(ctx, item)
     local itype = item:getType()
-    local skip = SKIP_TYPES[itype]
-    if skip then
-        common.add_skip(ctx, skip)
+    local corpse_kind = CORPSE_TYPES[itype]
+    local stored_type = corpse_kind and 'REMAINS' or df.item_type[itype]
+    if corpse_kind and not df.item_type.REMAINS then
+        common.add_skip(ctx, 'corpse-remains-type-unavailable', corpse_kind)
         return nil
     end
     if item.flags.construction then return nil end
@@ -64,11 +66,22 @@ local function save_one(ctx, item)
     local o = ctx.origin
     local rec = {
         id = item.id,
-        t = df.item_type[itype],
+        t = stored_type,
+        corpse_original = corpse_kind,
         st = subtype_token(item),
         mat = mi and mi:getToken() or nil,
         x = px - o.x, y = py - o.y, z = item.pos.z,
     }
+    if corpse_kind then
+        -- Retain the original corpse linkage and a readable description even
+        -- though the destination currently receives a REMAINS approximation.
+        local oku, unit_id = pcall(function() return item.unit_id end)
+        if oku and type(unit_id) == 'number' and unit_id >= 0 then rec.corpse_unit_id = unit_id end
+        local okbp, body_part = pcall(function() return item.body_part_id end)
+        if okbp and type(body_part) == 'number' and body_part >= 0 then rec.corpse_body_part = body_part end
+        local okd, description = pcall(dfhack.items.getReadableDescription, item)
+        if okd and description then rec.corpse_description = description end
+    end
     local stack = item:getStackSize()
     if stack and stack > 1 then rec.n = stack end
     local q = item:getQuality()
@@ -183,6 +196,28 @@ function save_phases(ctx)
                 if dfhack.getTickCount() >= deadline then return false end
             end
             common.write_json(ctx.dir .. '/items.json', job.items)
+            -- Keep a dedicated, forward-compatible corpse ledger. The ordinary
+            -- item records already preserve position, material, race/caste and
+            -- original corpse type; this file makes those records discoverable
+            -- for a future DFHack-native corpse constructor without changing
+            -- the current remains fallback.
+            local corpse_ledger = {v = 1, list = {}}
+            for _, rec in ipairs(job.items.list) do
+                if rec.corpse_original then
+                    corpse_ledger.list[#corpse_ledger.list + 1] = {
+                        id = rec.id, original_type = rec.corpse_original,
+                        race = rec.race, caste = rec.caste,
+                        source_unit_id = rec.corpse_unit_id,
+                        body_part_id = rec.corpse_body_part,
+                        description = rec.corpse_description,
+                        mat = rec.mat, x = rec.x, y = rec.y, z = rec.z,
+                        flags = rec.fl, stack = rec.n,
+                    }
+                end
+            end
+            common.write_json(ctx.dir .. '/corpses.json', corpse_ledger)
+            ctx.manifest.counts.corpses = #corpse_ledger.list
+            ctx.manifest.complete.corpses = true
             ctx.captured_items = {}
             for _, rec in ipairs(job.items.list) do ctx.captured_items[rec.id] = true end
             ctx.manifest.counts.items = #job.items.list
@@ -352,19 +387,52 @@ local function create_one(ctx, rec, is_retry)
             return nil
         end
     end
+    local caste_material = false
+    pcall(function() caste_material = dfhack.items.isCasteMaterial(itype) end)
+
     local mt, mx = 0, -1
+    local minfo
     if rec.mat then
-        local minfo = match.resolve_mat_token(ctx, rec.mat)
-        if minfo then mt, mx = minfo.type, minfo.index
-        else
+        minfo = match.resolve_mat_token(ctx, rec.mat)
+        if minfo then
+            mt, mx = minfo.type, minfo.index
+        elseif not caste_material then
             common.add_skip(ctx, 'item-mat-missing', rec.mat)
             return nil
         end
     end
+
+    -- Caste-material item types (REMAINS, FISH, FISH_RAW, EGG, etc.) do not
+    -- take a material type/index in createItem(). They take a creature raw
+    -- index and caste index. Passing a tissue material pair here can create
+    -- an item whose derived material disagrees with its saved race/caste.
+    local create_mt, create_mx = mt, mx
+    local resolved_race, resolved_caste
+    if caste_material then
+        local material_race
+        if minfo then
+            pcall(function()
+                if minfo.creature then material_race = minfo.creature.creature_id end
+            end)
+        end
+        if material_race then
+            resolved_race, resolved_caste = resolve_race(ctx, material_race, rec.caste)
+        end
+        if not resolved_race and rec.race then
+            resolved_race, resolved_caste = resolve_race(ctx, rec.race, rec.caste)
+        end
+        if not resolved_race then
+            common.add_skip(ctx, 'item-race-missing-in-world', rec.race or rec.mat or rec.t)
+            return nil
+        end
+        create_mt, create_mx = resolved_race, resolved_caste or 0
+    end
+
     -- no_floor=false: items created "in limbo" can never be moved to ground,
     -- containers, buildings, or inventories -- create at the creator's feet
     -- and move into place immediately after
-    local items = dfhack.items.createItem(creator_unit(), itype, isub, mt, mx, false)
+    local items = dfhack.items.createItem(creator_unit(), itype, isub,
+                                          create_mt, create_mx, false)
     local item = items and items[1]
     if type(item) == 'table' then item = item[1] end
     if not item and itype == df.item_type.SEEDS
@@ -387,7 +455,7 @@ local function create_one(ctx, rec, is_retry)
             end
         end
     end
-    if not item and ctx.type_ok_mat and ctx.type_ok_mat[itype] then
+    if not item and not caste_material and ctx.type_ok_mat and ctx.type_ok_mat[itype] then
         -- createItem refuses some valid materials (e.g. surface-plant seeds):
         -- create with a known-good material for the type, then overwrite
         local fb = ctx.type_ok_mat[itype]
@@ -408,9 +476,59 @@ local function create_one(ctx, rec, is_retry)
         return nil
     end
     common.unproject(item)
-    ctx.type_ok_mat = ctx.type_ok_mat or {}
-    if not ctx.type_ok_mat[itype] then ctx.type_ok_mat[itype] = {mt, mx} end
-    if rec.race then
+    -- Keep destination-world expectations. Material substitutions are allowed
+    -- by match.resolve_mat_token(), so the audit must compare against the
+    -- resolved token rather than the origin world's token in rec.mat.
+    if rec.mat or caste_material then
+        ctx.item_expected_material = ctx.item_expected_material or {}
+        local expected = {
+            type = minfo and minfo.type or nil,
+            index = minfo and minfo.index or nil,
+            token = nil,
+            caste_material = caste_material,
+            race = resolved_race,
+            caste = resolved_caste,
+            source_record_id = rec.id,
+            snapshot_type = rec.t,
+            snapshot_subtype = rec.st,
+            source_material = rec.mat,
+        }
+        if minfo then
+            local okt, token = pcall(function() return minfo:getToken() end)
+            if okt then expected.token = token end
+        end
+        -- A substituted creature may not have the same tissue (e.g. shell,
+        -- bone, or cartilage) as the origin creature. In that case the
+        -- destination race/caste is the achievable equivalent; do not compare
+        -- its derived tissue against the unrelated fallback material chosen by
+        -- resolve_mat_token(). Exact material matches remain fully audited.
+        if caste_material and (expected.token ~= rec.mat or rec.corpse_original) then
+            -- CORPSE/CORPSEPIECE records are restored as REMAINS. REMAINS
+            -- derives its displayed tissue from the destination creature/caste
+            -- (often BONE), and cannot reliably preserve the source corpse
+            -- piece's tissue (for example POND_TURTLE:SHELL). For these
+            -- approximations, race/caste is the meaningful identity to audit;
+            -- requiring the source tissue makes every such restore abort.
+            expected.type, expected.index = nil, nil
+        end
+        ctx.item_expected_material[item.id] = expected
+    end
+    ctx.items_restored = (ctx.items_restored or 0) + 1
+    if rec.corpse_original then
+        ctx.corpses_approximated = (ctx.corpses_approximated or 0) + 1
+        common.add_skip(ctx, 'corpse-approximated-as-remains', rec.corpse_original)
+    end
+    if not caste_material then
+        ctx.type_ok_mat = ctx.type_ok_mat or {}
+        if not ctx.type_ok_mat[itype] then ctx.type_ok_mat[itype] = {mt, mx} end
+    end
+    if caste_material then
+        -- Reassert the same creature/caste used to construct the item.
+        pcall(function()
+            item.race = resolved_race
+            item.caste = resolved_caste or 0
+        end)
+    elseif rec.race then
         local r, c = resolve_race(ctx, rec.race, rec.caste)
         if r then
             pcall(function() item.race = r end)
@@ -442,6 +560,243 @@ local function create_one(ctx, rec, is_retry)
     end
     restore_improvements(ctx, rec, item)
     return item
+end
+
+-- Capture material state without changing the item. These snapshots make it
+-- possible to distinguish a bad constructor from a placement/registration
+-- side effect, while leaving the existing verification behavior untouched.
+local function safe_item_state(item)
+    local state = {id = item and item.id or -1}
+    local ok_type, item_type = pcall(function() return item:getType() end)
+    if ok_type then
+        state.item_type_id = tonumber(item_type) or tostring(item_type)
+        local ok_name, enum_name = pcall(function() return df.item_type[item_type] end)
+        state.item_type = tostring((ok_name and enum_name) or item_type)
+    else
+        state.item_type = 'unknown'
+    end
+    local ok_sub, subtype = pcall(function() return item:getSubtype() end)
+    if ok_sub then state.subtype_id = tonumber(subtype) or tostring(subtype) end
+    local ok_fields, mat_type, mat_index = pcall(function()
+        return item.mat_type, item.mat_index
+    end)
+    state.fields_available = ok_fields and mat_type ~= nil and mat_index ~= nil
+    if state.fields_available then
+        state.mat_type = tonumber(mat_type) or tostring(mat_type)
+        state.mat_index = tonumber(mat_index) or tostring(mat_index)
+    elseif not ok_fields then
+        state.fields_error = tostring(mat_type)
+    end
+    local ok_decode, mi = pcall(dfhack.matinfo.decode, item)
+    if ok_decode and mi then
+        local ok_pair, mt, mx = pcall(function() return mi.type, mi.index end)
+        if ok_pair then
+            state.decoded_type, state.decoded_index = tonumber(mt) or tostring(mt), tonumber(mx) or tostring(mx)
+        end
+        local ok_token, token = pcall(function() return mi:getToken() end)
+        if ok_token then state.decoded_token = token end
+    elseif not ok_decode then
+        state.decode_error = tostring(mi)
+    end
+    local ok_race, race = pcall(function() return item.race end)
+    local ok_caste, caste = pcall(function() return item.caste end)
+    if ok_race then state.race = tonumber(race) or tostring(race) end
+    if ok_caste then state.caste = tonumber(caste) or tostring(caste) end
+    local ok_pos, x, y, z = pcall(function() return item.pos.x, item.pos.y, item.pos.z end)
+    if ok_pos then
+        state.x, state.y, state.z = tonumber(x) or tostring(x), tonumber(y) or tostring(y), tonumber(z) or tostring(z)
+    end
+    local ok_stack, stack = pcall(function() return item:getStackSize() end)
+    if ok_stack then state.stack = tonumber(stack) or tostring(stack) end
+    local ok_desc, desc = pcall(dfhack.items.getReadableDescription, item)
+    if ok_desc and desc then
+        local ok_utf, utf_desc = pcall(common.u, desc)
+        if ok_utf then state.description = utf_desc end
+    end
+    return state
+end
+
+local function item_audit_reasons(expected, actual)
+    local reasons, info = {}, {}
+    if expected.caste_material then
+        if actual.race ~= expected.race then reasons[#reasons + 1] = 'creature_mismatch' end
+        if actual.caste ~= expected.caste then reasons[#reasons + 1] = 'caste_mismatch' end
+        if expected.type ~= nil then
+            if actual.decoded_type == nil then
+                info[#info + 1] = 'decoded_material_unavailable'
+            elseif actual.decoded_type ~= expected.type or actual.decoded_index ~= expected.index then
+                reasons[#reasons + 1] = 'decoded_material_mismatch'
+            end
+        end
+    else
+        if actual.fields_available then
+            if actual.mat_type ~= expected.type or actual.mat_index ~= expected.index then
+                reasons[#reasons + 1] = 'material_fields_mismatch'
+            end
+        else
+            info[#info + 1] = 'generic_material_fields_unavailable'
+        end
+        if actual.decoded_type == nil then
+            info[#info + 1] = 'decoded_material_unavailable'
+        elseif actual.decoded_type ~= expected.type or actual.decoded_index ~= expected.index then
+            reasons[#reasons + 1] = 'decoded_material_mismatch'
+        end
+    end
+    return reasons, info
+end
+
+local function record_item_material_audit(ctx, item, stage_name)
+    local expected = ctx.item_expected_material and ctx.item_expected_material[item.id]
+    if not expected then return end
+    local audit = ctx.item_audit or {stages = {}}
+    ctx.item_audit = audit
+    audit.stages = audit.stages or {}
+    local stage = audit.stages[stage_name] or {
+        checked = 0, mismatched = 0, by_type = {}, by_reason = {}, examples = {},
+        info = {},
+    }
+    audit.stages[stage_name] = stage
+    local actual = safe_item_state(item)
+    local reasons, info = item_audit_reasons(expected, actual)
+    local type_name = actual.item_type or tostring(expected.snapshot_type or 'unknown')
+    local type_group = stage.by_type[type_name] or {checked = 0, mismatched = 0, by_reason = {}, examples = {}}
+    stage.by_type[type_name] = type_group
+    stage.checked = stage.checked + 1
+    type_group.checked = type_group.checked + 1
+    for _, reason in ipairs(info) do stage.info[reason] = (stage.info[reason] or 0) + 1 end
+    if #reasons > 0 then
+        stage.mismatched = stage.mismatched + 1
+        type_group.mismatched = type_group.mismatched + 1
+    end
+    local sample = {
+        id = actual.id, source_record_id = expected.source_record_id,
+        item_type = type_name, subtype_id = actual.subtype_id,
+        description = actual.description, stage = stage_name,
+        expected = {token = expected.token, type = expected.type, index = expected.index,
+                    caste_material = expected.caste_material, race = expected.race,
+                    caste = expected.caste, source_material = expected.source_material,
+                    snapshot_type = expected.snapshot_type, snapshot_subtype = expected.snapshot_subtype},
+        actual = actual, reasons = reasons, info = info,
+    }
+    if #reasons > 0 then
+        for _, reason in ipairs(reasons) do
+            stage.by_reason[reason] = stage.by_reason[reason] or {n = 0, examples = {}}
+            local bucket = stage.by_reason[reason]
+            bucket.n = bucket.n + 1
+            if #bucket.examples < 10 then bucket.examples[#bucket.examples + 1] = sample end
+            type_group.by_reason[reason] = (type_group.by_reason[reason] or 0) + 1
+        end
+        if #stage.examples < 60 then stage.examples[#stage.examples + 1] = sample end
+        if #type_group.examples < 8 then type_group.examples[#type_group.examples + 1] = sample end
+    end
+end
+
+local function safe_record_item_material_audit(ctx, item, stage_name)
+    local ok, err = pcall(record_item_material_audit, ctx, item, stage_name)
+    if not ok then
+        ctx.item_audit_capture_errors = (ctx.item_audit_capture_errors or 0) + 1
+        ctx.item_audit_capture_error = tostring(err)
+    end
+end
+
+local function verify_item_material(ctx, item)
+    local expected = ctx.item_expected_material and ctx.item_expected_material[item.id]
+    if not expected then return true end
+
+    local function decoded_material()
+        local ok, mi = pcall(dfhack.matinfo.decode, item)
+        if not ok or not mi then return nil end
+        local okv, mt, mx = pcall(function() return mi.type, mi.index end)
+        if not okv then return nil end
+        local okt, token = pcall(function() return mi:getToken() end)
+        return {type = mt, index = mx, token = okt and token or nil}
+    end
+
+    local actual = decoded_material()
+    if expected.caste_material then
+        -- These item types are defined by a creature/caste pair, not by the
+        -- generic mat_type/mat_index fields. Verify that identity first.
+        local okr, race = pcall(function() return item.race end)
+        local okc, caste = pcall(function() return item.caste end)
+        local race_matches = okr and race == expected.race
+        local caste_matches = okc and caste == expected.caste
+        if not race_matches or not caste_matches then
+            local okset = pcall(function()
+                item.race = expected.race
+                item.caste = expected.caste
+            end)
+            if okset then
+                okr, race = pcall(function() return item.race end)
+                okc, caste = pcall(function() return item.caste end)
+                race_matches = okr and race == expected.race
+                caste_matches = okc and caste == expected.caste
+                actual = decoded_material()
+            end
+        end
+        if not race_matches or not caste_matches then
+            common.add_skip(ctx, 'item-material-verify-failed',
+                ('item %d expected creature/caste %s/%s, got %s/%s'):format(
+                    item.id, tostring(expected.race), tostring(expected.caste),
+                    tostring(race), tostring(caste)))
+            return false
+        end
+    else
+        -- For ordinary material-bearing items, the DF material code pair is
+        -- authoritative. Token strings can be normalized differently by DF,
+        -- so compare the numeric pair instead of the origin token text.
+        local ok_fields, mat_type, mat_index = pcall(function()
+            return item.mat_type, item.mat_index
+        end)
+        local fields_available = ok_fields and mat_type ~= nil and mat_index ~= nil
+        local fields_match = not fields_available
+            or (mat_type == expected.type and mat_index == expected.index)
+        local decoded_match = not actual or (actual.type == expected.type
+            and actual.index == expected.index)
+
+        if not fields_match or not decoded_match then
+            local okset = false
+            if fields_available then
+                okset = pcall(function()
+                    item.mat_type = expected.type
+                    item.mat_index = expected.index
+                end)
+            end
+            if okset then
+                ok_fields, mat_type, mat_index = pcall(function()
+                    return item.mat_type, item.mat_index
+                end)
+                fields_available = ok_fields and mat_type ~= nil and mat_index ~= nil
+                fields_match = not fields_available
+                    or (mat_type == expected.type and mat_index == expected.index)
+                actual = decoded_material()
+                decoded_match = not actual or (actual.type == expected.type
+                    and actual.index == expected.index)
+            end
+        end
+
+        if not fields_match or not decoded_match then
+            common.add_skip(ctx, 'item-material-verify-failed',
+                ('item %d expected %s [%s:%s], got %s [%s:%s]'):format(
+                    item.id, expected.token or '?', tostring(expected.type),
+                    tostring(expected.index), actual and (actual.token or '?') or 'unresolved',
+                    tostring(actual and actual.type), tostring(actual and actual.index)))
+            return false
+        end
+    end
+
+    -- Caste-material items may also expose a decodable tissue material. Check
+    -- it only when a destination equivalent was resolved; race/caste remains
+    -- the primary constructor contract for these item types.
+    if expected.caste_material and expected.type ~= nil and actual
+        and (actual.type ~= expected.type or actual.index ~= expected.index) then
+        common.add_skip(ctx, 'item-material-verify-failed',
+            ('item %d expected %s [%s:%s], got %s [%s:%s]'):format(
+                item.id, expected.token or '?', tostring(expected.type),
+                tostring(expected.index), actual.token or '?', tostring(actual.type),
+                tostring(actual.index)))
+        return false
+    end
+    return true
 end
 
 local function place_one(ctx, rec, item)
@@ -503,10 +858,17 @@ function load_phases(ctx)
                 local ok, item, why = pcall(create_one, ctx, rec, job.retrying)
                 if ok and item then
                     ctx.item_map[rec.id] = item
+                    safe_record_item_material_audit(ctx, item, 'after_creation')
                     local okp, err = pcall(place_one, ctx, rec, item)
                     if not okp then
                         common.add_skip(ctx, 'item-place-error', tostring(err))
                     end
+                    safe_record_item_material_audit(ctx, item, 'after_placement_before_repin')
+                    -- Existing behavior retained for this diagnostic revision.
+                    -- The report captures the item before this re-pin can mask
+                    -- a constructor or placement mismatch.
+                    verify_item_material(ctx, item)
+                    safe_record_item_material_audit(ctx, item, 'after_placement_repin')
                     if rec.owner then
                         local owner = ctx.unit_map and ctx.unit_map[rec.owner]
                         if owner then
@@ -541,6 +903,39 @@ function load_phases(ctx)
             -- contain every restored item
             local upd = df.global.plotinfo.equipment.update
             for k in pairs(upd) do pcall(function() upd[k] = true end) end
+            -- Final audit after every restored item is registered. This catches
+            -- a material being changed by later placement/registration work,
+            -- rather than only checking immediately after createItem().
+            local final_checked, final_failed = 0, 0
+            -- item_expected_material is keyed by the newly allocated destination
+            -- item ID. item_map is keyed by the origin snapshot ID, so using the
+            -- expected-material key to index item_map silently skipped almost
+            -- every item whose destination ID differed from its origin ID.
+            -- Walk the restored destination objects instead.
+            local audited_ids = {}
+            for _, item in pairs(ctx.item_map) do
+                if item and not audited_ids[item.id]
+                    and ctx.item_expected_material and ctx.item_expected_material[item.id] then
+                    audited_ids[item.id] = true
+                    safe_record_item_material_audit(ctx, item, 'after_registry_update_before_final_check')
+                    if not verify_item_material(ctx, item) then
+                        final_failed = final_failed + 1
+                    end
+                    safe_record_item_material_audit(ctx, item, 'after_final_check')
+                    final_checked = final_checked + 1
+                end
+            end
+            ctx.item_audit = ctx.item_audit or {stages = {}}
+            ctx.item_audit.final_checked = final_checked
+            ctx.item_audit.final_unresolved = final_failed
+            ctx.item_audit.capture_errors = ctx.item_audit_capture_errors or 0
+            ctx.item_audit.capture_error = ctx.item_audit_capture_error
+            print(('planeswalkers: item material audit: %d restored item(s) checked, %d unresolved')
+                :format(final_checked, final_failed))
+            if final_failed > 0 then
+                qerror(('planeswalkers: item material audit found %d unresolved item(s); restore stopped rather than leaving known incorrect item materials')
+                    :format(final_failed))
+            end
             local held = 0
             for _, u in ipairs(df.global.world.units.active) do held = held + #u.inventory end
             print(('planeswalkers: items: %d attached to units (%d held now across the map), %d ownerships restored')
@@ -557,6 +952,7 @@ function load_phases(ctx)
         pos = function(job) return job.cursor end,
         step = function(job, deadline)
             local nwords = #df.global.world.raws.language.words
+            local attached = 0
             local function attach_one(rec)
                 local item = ctx.item_map[rec.item]
                 if item then
@@ -578,8 +974,8 @@ function load_phases(ctx)
                         ~= rec.rendered then
                         -- language tables differ: fall back to the literal name
                         for i = 0, 6 do ar.name.words[i] = -1 end
-                        ar.name.first_name = common.fromu(rec.rendered)
-                        common.add_skip(ctx, 'artifact-name-literalized', rec.rendered)
+                        ar.name.first_name = common.fromu('foreign artifact')
+                        common.add_skip(ctx, 'artifact-name-foreignized', rec.rendered)
                     end
                     -- whereabouts: new() zero-inits these, which would point
                     -- at site 0 / hf 0 -- mark all unknown, then place the
@@ -605,6 +1001,7 @@ function load_phases(ctx)
                     -- the Objects->Artifacts listing (absent in old snapshots
                     -- -> assume true; explicit false = kill-named object)
                     item.flags.artifact_mood = rec.mood ~= false
+                    attached = attached + 1
                 else
                     common.add_skip(ctx, 'artifact-item-missing', rec.rendered)
                 end
@@ -619,6 +1016,7 @@ function load_phases(ctx)
                 end
                 if dfhack.getTickCount() >= deadline then return false end
             end
+            ctx.artifacts_restored = attached
             return true
         end,
     }}
