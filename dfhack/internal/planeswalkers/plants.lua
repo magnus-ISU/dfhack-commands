@@ -66,7 +66,10 @@ local function tree_out(ctx, p, t)
                     local block = dfhack.maps.getTileBlock(x, y, z)
                     if block then
                         local tt = block.tiletype[x % 16][y % 16]
-                        if df.tiletype.attrs[tt].material == df.tiletype_material.TREE then
+                        local material = df.tiletype.attrs[tt].material
+                        if material == df.tiletype_material.TREE
+                            or material == df.tiletype_material.MUSHROOM
+                            or material == df.tiletype_material.ROOT then
                             tiles[#tiles + 1] = string.pack('<i2i2i2I2', x - p.pos.x, y - p.pos.y,
                                 z - p.pos.z, ctx.legend_tt:intern(df.tiletype[tt]))
                         end
@@ -146,7 +149,12 @@ function save_phases(ctx)
             job.out = {v = 2, list = {}}
             job.cursor = 0
             job.trees = 0
-            job.tf = io.open(ctx.dir .. TREES, 'wb')
+            local err
+            ctx.plants_f, err = io.open(ctx.dir .. TREES, 'wb')
+            if not ctx.plants_f then
+                qerror(('planeswalkers: cannot create trees.bin: %s'):format(tostring(err)))
+            end
+            job.tf = ctx.plants_f
             job.toff = 0
         end,
         total = function(job) return #df.global.world.plants.all end,
@@ -168,6 +176,14 @@ function save_phases(ctx)
                                 grow = p.grow_counter, hp = p.hitpoints,
                                 dead = p.damage_flags.dead or nil,
                             }
+                            -- The plant's anchor tile can itself be a trunk
+                            -- tile. plant create requires a floor, so remember
+                            -- the exact terrain tile to restore if creation
+                            -- fails after we temporarily expose a floor there.
+                            local base = dfhack.maps.getTileBlock(p.pos.x, p.pos.y, p.pos.z)
+                            if base then
+                                rec.base_tt = df.tiletype[base.tiletype[p.pos.x % 16][p.pos.y % 16]]
+                            end
                             if tree and job.tf then
                                 local blob = tree_out(ctx, p, p.tree_info)
                                 rec.ti = job.toff
@@ -182,7 +198,7 @@ function save_phases(ctx)
                 end
                 if dfhack.getTickCount() >= deadline then return false end
             end
-            if job.tf then job.tf:close() job.tf = nil end
+            if job.tf then job.tf:close() job.tf = nil; ctx.plants_f = nil end
             common.write_json(ctx.dir .. FILE, job.out)
             ctx.manifest.counts.plants = #job.out.list
             print(('planeswalkers: %d plant(s) saved (%d trees with their layout)'):format(#job.out.list, job.trees))
@@ -206,7 +222,14 @@ function load_phases(ctx)
             job.data = common.read_json(ctx.dir .. FILE) or {list = {}}
             job.cursor = 1
             job.made, job.grown, job.rebuilt = 0, 0, 0
+            ctx.plants_expected = #job.data.list
+            ctx.plants_restored = 0
+            ctx.trees_expected = 0
+            for _, rec in ipairs(job.data.list) do
+                if rec.tree then ctx.trees_expected = ctx.trees_expected + 1 end
+            end
             job.to_grow = {}
+            job.grow_attempted = {}
             if dfhack.filesystem.exists(ctx.dir .. TREES) then
                 job.tf = io.open(ctx.dir .. TREES, 'rb')
             end
@@ -223,6 +246,15 @@ function load_phases(ctx)
                 if z >= 1 and z < map.z_count - 1 and not rec.dead then
                     local before = #df.global.world.plants.all
                     local pos = ('%d,%d,%d'):format(x, y, z)
+                    local base_block = dfhack.maps.getTileBlock(x, y, z)
+                    local base_tt = rec.base_tt and df.tiletype[rec.base_tt]
+                    -- A tree's anchor is normally occupied by its trunk, not a
+                    -- floor. Temporarily expose a valid planting tile; the
+                    -- serialized tree layout is painted back immediately after
+                    -- the plant object and its tree_info have been recreated.
+                    if rec.tree and base_block then
+                        base_block.tiletype[x % 16][y % 16] = df.tiletype.SoilFloor1
+                    end
                     local out = run_quiet('plant', 'create', rec.id, pos, '-c')
                     if #df.global.world.plants.all > before then
                         job.made = job.made + 1
@@ -249,22 +281,45 @@ function load_phases(ctx)
                         end)
                         if rec.tree and not rebuilt then table.insert(job.to_grow, pos) end
                     else
+                        -- Keep the already-restored static tree geometry intact
+                        -- if the plant plugin rejects this raw or location.
+                        if rec.tree and base_block and base_tt then
+                            base_block.tiletype[x % 16][y % 16] = base_tt
+                            dfhack.maps.enableBlockUpdates(base_block, true, true)
+                        end
                         common.add_skip(ctx, 'plant-not-placed', rec.id .. ' ' .. (out:match('[^\n]+') or ''))
                     end
                 end
-                if dfhack.getTickCount() >= deadline then return false end
+                if job.cursor % 8 == 0 and dfhack.getTickCount() >= deadline then return false end
             end
             -- grow the saplings that were trees, one command each (the plugin
             -- takes a position), against the deadline
             while #job.to_grow > 0 do
                 local pos = table.remove(job.to_grow)
                 run_quiet('plant', 'grow', pos)
-                job.grown = job.grown + 1
-                if dfhack.getTickCount() >= deadline then return false end
+                job.grow_attempted[#job.grow_attempted + 1] = pos
+                if #job.grow_attempted % 8 == 0 and dfhack.getTickCount() >= deadline then return false end
             end
-            if job.tf then job.tf:close() job.tf = nil end
-            ctx.plants_report = ('%d plant(s) placed, %d tree(s) rebuilt with their layout, %d regrown from saplings')
-                :format(job.made, job.rebuilt, job.grown)
+            if #job.grow_attempted > 0 then
+                local tree_positions = {}
+                for _, plant in ipairs(df.global.world.plants.all) do
+                    if plant.tree_info then
+                        tree_positions[('%d,%d,%d'):format(plant.pos.x, plant.pos.y, plant.pos.z)] = true
+                    end
+                end
+                for _, pos in ipairs(job.grow_attempted) do
+                    if tree_positions[pos] then
+                        job.grown = job.grown + 1
+                    else
+                        common.add_skip(ctx, 'tree-regrow-failed', pos)
+                    end
+                end
+            end
+            if job.tf then job.tf:close() job.tf = nil; ctx.plants_f = nil end
+            ctx.plants_restored = job.made
+            ctx.trees_restored = job.rebuilt + job.grown
+            ctx.plants_report = ('%d/%d plant(s) placed, %d/%d tree(s) restored with full layout or regrown from saplings')
+                :format(job.made, #job.data.list, ctx.trees_restored, ctx.trees_expected)
             print('planeswalkers: ' .. ctx.plants_report)
             return true
         end,

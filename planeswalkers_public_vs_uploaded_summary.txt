@@ -1,0 +1,305 @@
+PLANESWALKERS: UPLOADED ZIP VS PUBLIC GITHUB VERSION
+Comparison date: 2026-11-08
+
+FILES COMPARED
+--------------
+Uploaded archive:
+  planeswalkers_better_ui.zip
+
+Public reference:
+  https://github.com/magnus-ISU/dfhack-commands
+  Public source paths:
+    dfhack/fort/planeswalkers.lua
+    dfhack/internal/planeswalkers/*.lua
+
+Scope:
+  The uploaded archive contains 139 ZIP entries, including 15 Planeswalkers
+  Lua modules and a wider collection of DFHack scripts. This comparison
+  focuses on the Planeswalkers files, not the unrelated scripts in the pack.
+
+IMPORTANT CAVEAT
+----------------
+This is a source-level comparison of the uploaded archive against the public
+repository's master branch as retrieved on 2026-11-08. It is not an in-game
+test, and it does not establish that every feature in either implementation
+works correctly. The public README describes capabilities in broad terms;
+where implementation details matter, this summary gives priority to the
+public Lua source that was inspected.
+
+EXECUTIVE SUMMARY
+-----------------
+The uploaded ZIP is substantially more than a UI refresh. It has a newer,
+more heavily modified Planeswalkers implementation, with a different terrain
+placement strategy, more extensive terrain/liquid safety work, persistent
+operation diagnostics, expanded snapshot-management commands, and additional
+material/item validation.
+
+The public version already contains the central concept and a broad set of
+fort-transplant features. The two versions share much of the overall purpose
+and many data-transfer systems, but they are not behaviorally equivalent.
+They should not be mixed file-by-file without checking their shared data
+structures, phase ordering, and snapshot format.
+
+1. CORE FUNCTIONALITY PRESENT IN BOTH
+-------------------------------------
+Both implementations support the main fortress-transplant workflow:
+  - Save a fortress snapshot and load it into another generated world.
+  - Transfer terrain, constructions, buildings, items, plants, units,
+    historical figures, squads, burrows, and manager orders.
+  - Store portable identities as material/raw tokens rather than relying
+    exclusively on world-local numeric indices.
+  - Run save/load work as chunked phases while the game is paused.
+  - Preserve adamantine spires and associated hidden contents.
+  - Support selective party snapshots (travellers and their gear).
+  - Retain a restored fortress's original footprint when saving from a
+    larger destination embark.
+  - Preserve destination-world-specific history and underworld content
+    rather than transplanting the entire origin world.
+
+The public README and source already describe a fairly ambitious feature set.
+The uploaded version should therefore be understood as a divergent/newer
+implementation, not as the first version to add these systems.
+
+2. MAJOR TERRAIN AND PLACEMENT DIFFERENCES
+------------------------------------------
+A. Vertical alignment
+
+PUBLIC VERSION:
+  - Same-size embarks are anchored at the underworld.
+  - The whole column is transferred with the underworld geometry included.
+  - Surface displacement against surrounding world tiles is accepted.
+  - Differently sized embarks fall back to surface alignment while preserving
+    destination deep structure.
+
+UPLOADED ZIP:
+  - Surface alignment is preferred where possible.
+  - The imported volume is shifted vertically as needed to fit above the
+    destination's local underworld ceiling.
+  - The destination's global magma sea is not used as the vertical limit.
+  - The origin magma sea is restored as a static basin inside the footprint,
+    while destination global magma/underworld registrations remain native.
+
+This is a fundamental behavioral difference. The uploaded version prioritizes
+surface continuity and safe separation from the destination underworld;
+the public version prioritizes underworld alignment on same-size embarks.
+
+B. Boundary and liquid safety
+
+The uploaded version explicitly includes phases for:
+  - Surface buffer smoothing.
+  - Surface-liquid transition containment.
+  - An underworld-safe boundary bulkhead.
+  - Final terrain-integrity validation.
+  - Protection of destination underworld terrain below local ceiling limits.
+  - Static origin magma restoration and validation.
+
+Its documentation describes a two-tile bulkhead, surface build-up rather than
+excavation, and liquid-flow containment around the imported footprint.
+
+The public terrain implementation inspected has hell-ceiling guards and
+surface/underworld placement logic, but it does not contain the same explicit
+sequence of surface-buffer, liquid-transition, underworld-bulkhead, and
+integrity-validation phases found in the uploaded terrain.lua.
+
+C. Magma handling
+
+The uploaded version has explicit handling for complete origin magma-sea
+blocks, local magma pools/channels, static liquid behavior, and validation
+that the restored magma remains contained. It also records and preserves
+temperature grids in its newer snapshot format.
+
+The public version's documented model transfers the magma sea/hell geometry
+for same-size embarks and preserves destination demons/underworld content.
+That is a different model from the uploaded version's static origin magma
+basin inside the footprint with destination global registrations left native.
+
+D. Terrain restoration pipeline
+
+The uploaded terrain.lua is much more extensive and has a distinct phase
+sequence, including:
+  - Terrain shape restoration.
+  - Sky clearing above coverage.
+  - Material/vein restoration.
+  - Liquid-boundary and waterfall safety.
+  - Grass/moss restoration.
+  - Construction restoration.
+  - Map cleanup.
+  - Earlier setup/validation phases for spires, magma, buffer, and bulkhead.
+
+The uploaded version intentionally does not use the old geolayer remap/repair
+phase names. It assigns soil layers during initial material restoration and
+has a final integrity check instead of relying on a later broad repair pass.
+
+The public terrain.lua inspected contains its own geology remapping helpers
+and an older, shorter terrain pipeline. Do not assume its material handling
+is interchangeable with the uploaded implementation.
+
+3. MATERIALS, VEINS, AND ITEM VALIDATION
+----------------------------------------
+UPLOADED ZIP:
+  - Uses snapshot format version 5.
+  - Includes a more extensive material/vein restoration implementation.
+  - Resolves geology per tile rather than relying on a single geology index
+    for an entire map block.
+  - Handles STONE, LAVA_STONE, and MINERAL material categories distinctly.
+  - Has explicit mineral-event assignment handling and material validation.
+  - Includes item material audit logic that checks restored items and records
+    mismatches with expected/actual material information.
+  - Has additional safeguards for item subtypes and item material fields.
+  - The item audit can stop a restore when it detects unresolved mismatches.
+
+PUBLIC VERSION:
+  - The public common.lua inspected declares FORMAT_VERSION = 1.
+  - Its terrain.lua uses the older geological remap / soil-layer helper path.
+  - Its items.lua has item creation, material token matching, race/caste
+    handling, improvements, containment, and artifact restoration, but does
+    not contain the uploaded version's multi-stage final material audit.
+
+4. SNAPSHOT FORMAT AND DATA COMPATIBILITY
+-----------------------------------------
+UPLOADED ZIP:
+  - FORMAT_VERSION = 5.
+  - Format v5 includes terrain, magma, and temperature grids.
+  - Its help text explicitly describes compatibility with some older formats:
+    v4 without source heat data, v2 without source magma/heat data, and v3
+    requiring a new save because lower terrain was omitted.
+
+PUBLIC VERSION:
+  - FORMAT_VERSION = 1 in the public common.lua inspected.
+  - Its tile record and snapshot header are a simpler/older format.
+
+Do not load, overwrite, or share snapshots between these builds without
+checking format compatibility. The format version difference is a strong
+indication that their snapshot data layouts are not directly interchangeable.
+
+5. DIAGNOSTICS AND OPERATION REPORTING
+--------------------------------------
+UPLOADED ZIP:
+  - Adds a persistent last-operation report at:
+      dfhack-config/scripts/data/planeswalkers/last-operation.json
+  - Records save/load operation state, timestamps, elapsed time, phase
+    history, phase timings, counts, metadata, and skips.
+  - Can record success, failure, cancellation, and interruption.
+  - Adds a report command and a compact-report command.
+  - Includes an in-game report UI with a quick summary and advanced details.
+  - Item audit diagnostics group failures and retain representative examples.
+
+PUBLIC VERSION:
+  - The public common.lua inspected has the chunked job driver and console
+    progress/error output.
+  - It does not contain the persistent last-operation report implementation,
+    report file path, phase-history persistence, or report UI found in the
+    uploaded ZIP.
+
+This is one of the most useful practical additions in the uploaded version:
+it gives us a durable record to diagnose failed operations rather than
+depending on transient console output.
+
+6. USER INTERFACE AND SNAPSHOT MANAGEMENT
+------------------------------------------
+UPLOADED ZIP adds or expands:
+  - Framed progress panel with phase and progress display.
+  - Snapshot browser.
+  - Placement preview.
+  - Snapshot metadata comparison.
+  - Restore report UI.
+  - save <name> --overwrite.
+  - delete-list and delete-list --preserve.
+  - compact-report.
+  - Explicit help/info command and expanded command documentation.
+
+The public source inspected has a simpler chunked overlay pump and a
+command-line-oriented list/load/delete workflow. It does not expose the same
+snapshot browser, preview, metadata comparison, persistent report UI, or
+delete-list workflow in the inspected fort/planeswalkers.lua.
+
+Both implementations have party-snapshot functionality, but the uploaded
+version has a dedicated gui.lua save interface for choosing between a full
+fortress snapshot and a party snapshot.
+
+7. OTHER RESTORE-SAFETY DIFFERENCES IN THE UPLOADED ZIP
+-------------------------------------------------------
+The uploaded version documents and implements additional safeguards around:
+  - Removing destination feature/mineral-event assignments from replaced tiles.
+  - Allocating missing destination map blocks before restoration.
+  - Relocating embark units to supported, unoccupied tiles.
+  - Distributing wagon supplies onto supported ground.
+  - Keeping destination underworld inhabitants and registrations native.
+  - Checking the completed bulkhead and static magma before reporting success.
+  - Reporting unresolved records rather than silently treating the restore
+    as complete.
+
+These are important changes because they affect whether a restore can safely
+finish, not just how the UI looks.
+
+8. WHAT THE PUBLIC VERSION HAS THAT SHOULD NOT BE LOST
+-----------------------------------------------------
+The public version remains a useful reference for systems that are shared or
+more mature there. In particular, its source contains detailed handling for:
+  - Unit and historical-figure relationships.
+  - Kill tallies represented by species rather than source-world race indices.
+  - Party snapshots and carried equipment.
+  - Item improvements, artifact records, image recreation, and ownership.
+  - Container/building/unit item relationships.
+  - Spire contents and destination spire disarming.
+  - Manager orders, squads, burrows, plants, and buildings.
+
+The uploaded version also contains many of these systems. The point is not
+that the public version has all these features exclusively; rather, these
+public implementations are useful comparison references and should be
+preserved when reconciling the two codebases.
+
+9. CURRENT ISSUES TO KEEP IN VIEW
+---------------------------------
+The uploaded ZIP has more safeguards and diagnostics, but those additions
+do not prove that every subsystem is correct or fast.
+
+Known issues from the current testing discussion:
+  - The test save report showed terrain serialization taking 125.781 seconds
+    out of a 130.907-second save (about 96.1%).
+  - The underworld-safe boundary bulkhead and other phases freeze for several seconds.
+
+The uploaded implementation is therefore more feature-rich in these areas,
+but it is not yet validated as fully correct or performant.
+
+10. PRACTICAL CONCLUSION
+------------------------
+Treat the uploaded ZIP as the current development branch and the public Git
+repository as a reference/baseline.
+
+Do not replace the uploaded files wholesale with the public files:
+  - That would discard the v5 snapshot format and its terrain/temperature
+    handling.
+  - It would discard the uploaded placement and underworld-safety strategy.
+  - It would remove the explicit boundary/liquid/integrity phases.
+  - It would remove persistent operation reporting and advanced diagnostics.
+  - It would remove the expanded GUI and snapshot-management workflows.
+  - It would also remove the current item/material validation work.
+
+For future fixes, compare individual subsystems against the public code where
+useful, but retain the uploaded architecture unless a specific defect is
+identified. The immediate engineering priorities remain:
+  1. Diagnose and fix terrain material flickering at the point where tiletype,
+     geology, and mineral-event assignments are established.
+  2. Profile and optimize terrain save serialization.
+  3. Profile the underworld-safe bulkhead phase and avoid redundant scans.
+  4. Ensure every load outcome (success, failure, cancellation, interruption)
+     persists a complete operation report.
+  5. Use the item audit diagnostics to identify the exact cause of the 233
+     mismatches before changing item creation again.
+
+SOURCES
+-------
+Uploaded archive:
+  planeswalkers_better_ui.zip
+  (inspected locally; Planeswalkers modules include fort/planeswalkers.lua,
+   internal/planeswalkers/common.lua, terrain.lua, items.lua, gui.lua, etc.)
+
+Public repository:
+  https://github.com/magnus-ISU/dfhack-commands
+
+Public source files inspected:
+  https://raw.githubusercontent.com/magnus-ISU/dfhack-commands/master/dfhack/fort/planeswalkers.lua
+  https://raw.githubusercontent.com/magnus-ISU/dfhack-commands/master/dfhack/internal/planeswalkers/common.lua
+  https://raw.githubusercontent.com/magnus-ISU/dfhack-commands/master/dfhack/internal/planeswalkers/terrain.lua
+  https://raw.githubusercontent.com/magnus-ISU/dfhack-commands/master/dfhack/internal/planeswalkers/items.lua
